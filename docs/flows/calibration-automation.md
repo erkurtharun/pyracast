@@ -34,7 +34,7 @@ sequenceDiagram
         API-->>UI: "401, 403, 404 or 400"
     end
     API->>Auto: "set_calibration_automation"
-    Auto->>DB: "BEGIN, lock tenant and recheck admin, lock region, plant"
+    Auto->>DB: "BEGIN, lock the acting person when enabling, lock tenant and recheck admin, lock region, plant"
     alt "enable without current approved configuration"
         API-->>UI: "400 configuration_unavailable or configuration_changed"
     else "lock wait over 5 s"
@@ -48,8 +48,10 @@ sequenceDiagram
     API-->>UI: "200 status, panel remounts, run list reloads"
     loop "each dispatcher cycle, phase calibration"
         Disp->>Auto: "prepare_due_calibrations(now), at most 100 plants"
-        Auto->>DB: "per plant one transaction, lock tenant, region, plant, user, membership"
-        alt "enabler no longer an active admin"
+        Auto->>DB: "per plant one transaction, read the enabler, lock that person, tenant, region, plant, membership"
+        alt "another enabler once the plant is locked"
+            Auto->>DB: "nothing decided, the plant stays due"
+        else "enabler no longer an active admin"
             Auto->>DB: "PlantEvent skipped authorization_revoked unless already paused"
         else "authorized"
             Auto->>DB: "prepare_calibration"
@@ -59,7 +61,7 @@ sequenceDiagram
         Disp->>DB: "pending_calibration_ids, oldest 100"
         Disp->>W: "calibrate_plant(run id)"
     end
-    W->>DB: "claim under locks, build and fit without locks, publish under fresh tenant, region, plant, run locks"
+    W->>DB: "claim under locks, build and fit without locks, publish under fresh enabler, tenant, region, plant, run locks"
     W->>Auto: "attempt_promotion in a savepoint of the transaction that ends the run"
     alt "a guard fails or the promotion raises"
         Auto->>DB: "PlantEvent calibration_automatic_skipped with reason"
@@ -79,7 +81,7 @@ sequenceDiagram
 | `plants_calibrationrun` | R/W | Latest run of the current configuration and open runs on enable; `status`, `factor`, `result`, `assessment`, `dataset_manifest`, window and holdout dates for the guards; `prepare_calibration` inserts pending runs |
 | `plants_calibrationactivation` | R/W | Latest activation per configuration and the run's `comparison_activation` (incumbent checks); automatic promotion appends a row with null `actor` |
 | `plants_plantevent` | R/W | Writes `calibration_automation_enabled/disabled` (`cause`: `toggle`, `manual_activation`, `reset`, `configuration_revised`, `workspace_disabled`), `calibration_automatic_skipped` (reason, origin, `enabled_by_id`), `calibration_automatically_activated` and, from `prepare_calibration`, `calibration_scheduled`; GET reads the newest skip or automatic activation and the newest disable event |
-| `accounts_membership`, `auth_user`, `accounts_tenant`, `regions_region` | R | Enabler authorization (user and membership locked `FOR UPDATE` in every promotion and in the scan), lock order, soft-deletion checks |
+| `accounts_membership`, `auth_user`, `accounts_tenant`, `regions_region` | R | Enabler authorization (the person locked `FOR NO KEY UPDATE`, active accounts only, before the tenant; the membership `FOR UPDATE OF` itself under the tenant), lock order, soft-deletion checks |
 | `plants_plantconfiguration`, `connections_sitebinding`, `connections_provideraccount` | R | `configuration_is_current` and `binding_is_current` |
 | Production, EPIAS snapshot and connection (`metering_epiasconnection`) and incident tables | R | Read by `prepare_calibration` and `activation_blocker` (see `calibration-run`) |
 
@@ -87,7 +89,7 @@ sequenceDiagram
 
 - GET: `RoutePolicy` (`api/permissions.py`) admits any active member, including viewers (403 `membership_required` otherwise); `ScopedView.plant_queryset` scopes region to tenant and plant to region, both non-deleted (404).
 - PATCH: session authentication enforces CSRF, then `RoutePolicy` admits only active workspace administrators of the URL tenant (a platform superuser without that membership is refused). `set_calibration_automation` repeats the check with `tenant_membership(role=ADMIN, lock=True)` after locking the tenant row. The UI disables the checkbox for viewers (`useCanManageWorkspace`), a convenience only.
-- Promotion and daily preparation are authorized by the stored enabler, not by the caller: `_authorized` requires that user to be active and an `admin` member of the plant's tenant, with row locks on the user and membership in every promotion (worker and enabling PATCH) and in the scan, so a concurrent deactivation or demotion is seen. The GET status evaluates the same rule without locks.
+- Promotion and daily preparation are authorized by the stored enabler, not by the caller: `_authorized` requires that user to be active and an `admin` member of the plant's tenant, with row locks on the person and the membership in the due check, enabling, the run's claim, publication and failure and the requested preparation, so a concurrent deactivation or demotion is seen; disabling locks no person. The GET status evaluates the same rule without locks.
 - `disable_workspace_automation` requires an active platform superuser (`require_platform_admin`); it is reached only through `reassign_workspace_admin`, whose console page requires `has_platform_admin_session` (staff, superuser and verified MFA).
 
 ## Failure paths
@@ -112,7 +114,7 @@ sequenceDiagram
 
 ## Rules and invariants
 
-- Lock order everywhere: tenant, region, plant, then (worker) calibration run and provider account, then user and membership. `disable_workspace_automation` locks the tenant, all its regions and the enabled plants (those of trashed locations included) in primary-key order.
+- Lock order everywhere: the plant's enabling person (read without a lock, then locked `FOR NO KEY UPDATE`, active accounts only), tenant, region, plant, then (worker) calibration run and provider account, and the membership under the tenant (`FOR UPDATE OF` the membership). When the plant has another enabler once it is locked, the round decides nothing: the due check and the requested preparation leave the plant as due as it is for the next dispatcher cycle, and a run transition completes its state and leaves the promotion to the preparation it requests. `disable_workspace_automation` locks the tenant, all its regions and the enabled plants (those of trashed locations included) in primary-key order.
 - `set_automation_state` is a no-op without an event when the state and enabler are unchanged. An enabling PATCH still tries promotion when the latest ready run is not the active one and no run is open, so a failing guard appends another skip event each time; enabling does not re-evaluate the run that is already active.
 - Enabling stores the acting administrator; only that user can keep authorizing. Reassignment, reset and configuration revision clear the flag, enabler and slot and record a disable event with its `cause` (the panel shows it); deactivating the enabler leaves automation on but paused.
 - The due slot is the start of the next local day in the region timezone; only a plant with a slot at or before `now` is due. Missed days collapse into one check; concurrent dispatchers advance a slot once because each plant is rechecked after locking. Plants of a trashed location are skipped but keep their flags.
@@ -124,7 +126,7 @@ sequenceDiagram
 ## Tests
 
 - `tests/test_calibration_automation.py`: enable before a fit and disable without reset (HTTP), reset and revision, thresholds and malformed results, holdout freshness and new-holdout guard, stale incumbent and `configuration_changed`, revoked enabler (inactive, demoted, removed), reassignment and returning administrator, endpoint tenant scoping, two-thread daily scan, scan recheck after disable, trash and purge, terminal failures.
-- `tests/test_calibration_activation_policy.py` (blocker codes as skip reasons, one `authorization_revoked` per pause, re-enabling does not re-evaluate the active run, status beside the selection); `tests/test_calibration_requests.py` (failed promotion retried, stops after three); `tests/test_calibration_lifecycle.py` (configuration revision disables with its cause); `tests/test_calibration_invariants.py` (`plant_automation_chk`, one writer); `tests/test_dispatch_isolation.py` (a failing due check backs off one plant, others published, `items_failed:1`).
+- `tests/test_lock_order.py` (the person before the workspace in every automation transaction); `tests/test_calibration_activation_policy.py` (blocker codes as skip reasons, one `authorization_revoked` per pause, re-enabling does not re-evaluate the active run, status beside the selection); `tests/test_calibration_requests.py` (failed promotion retried, stops after three); `tests/test_calibration_lifecycle.py` (configuration revision disables with its cause); `tests/test_calibration_invariants.py` (`plant_automation_chk`, one writer); `tests/test_dispatch_isolation.py` (a failing due check backs off one plant, others published, `items_failed:1`).
 - `tests/test_route_policy.py`, `tests/test_workspace_authorization.py` (roles on PATCH, operation refusals); `tests/test_workspaces.py`, `tests/test_admin_tenants.py` (reassignment rules and console page); `tests/test_reassignment_impact.py` (the page's list of plants that stop); `tests/test_calibration_identity_recovery.py`, `tests/test_calibration_source_validation.py`, `tests/test_production_diagnostics.py` (promotion inputs); `tests/test_calibration_runtime.py` (phase sends pending runs), `tests/test_dispatch_resilience.py` (phase isolation).
 - Playwright `web/tests/calibrations.spec.ts` (toggle before a fit, reload after activate and reset, stale response) and `workspace-roles.spec.ts` (viewer without write controls), against `mockApi`.
 - Gaps: no HTTP test of the 400 answer of this endpoint; no browser test of a failed PATCH, a failed poll or the paused notice; no real-backend browser test.
