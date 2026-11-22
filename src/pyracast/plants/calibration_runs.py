@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 
 from django.contrib.auth.models import User
 from django.db import models
+from django.utils import timezone
 
 from pyracast.background.lease import release, take
 from pyracast.irradiance import local_day_bounds
@@ -100,6 +101,7 @@ def create_run(
         reference_snapshot_ids=inputs.reference_snapshot_ids,
         incident_revision_ids=inputs.incident_revision_ids,
         input_sha256=inputs.input_sha256,
+        available_at=timezone.now(),
     )
     record_plant_event(
         plant_id=plant.pk,
@@ -124,11 +126,14 @@ def start_run(run: CalibrationRun, now: datetime, lease: timedelta) -> uuid.UUID
     return token
 
 
-def requeue_run(run: CalibrationRun, reason: str) -> None:
+def requeue_run(run: CalibrationRun, reason: str, now: datetime) -> None:
     run.status = CalibrationStatus.PENDING
     run.last_error = reason
+    run.available_at = now
     release(run)
-    run.save(update_fields=("status", "last_error", "lease_token", "lease_expires_at"))
+    run.save(
+        update_fields=("status", "last_error", "available_at", "lease_token", "lease_expires_at")
+    )
 
 
 def finish_run(run: CalibrationRun, status: str, now: datetime, reason: str = "") -> None:
