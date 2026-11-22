@@ -82,6 +82,7 @@ export default defineConfig([
             ...next.configs["core-web-vitals"].rules,
             ...typeAware,
             "jsx-a11y-x/no-autofocus": ["error", { ignoreNonDOM: true }],
+            "no-eval": "error",
         },
     },
     {
@@ -93,6 +94,11 @@ export default defineConfig([
                 process: "readonly",
                 URL: "readonly",
             },
+        },
+        rules: {
+            "no-eval": "error",
+            "no-implied-eval": "error",
+            "no-new-func": "error",
         },
     },
     restrict(

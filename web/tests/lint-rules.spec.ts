@@ -73,6 +73,41 @@ test("accessibility rules hold in every component", async () => {
     }
 });
 
+test("code generated from strings is refused in every source kind", async () => {
+    const typed = [
+        "export function probe(source: string) {",
+        "    eval(source);",
+        "    setTimeout(source, 1);",
+        "    return new Function(source);",
+        "}",
+        "",
+    ].join("\n");
+    for (const file of [
+        "src/lib/routes.ts",
+        "src/ui/ui.tsx",
+        "tests/support/test.ts",
+    ]) {
+        expect(await rules(file, typed), file).toEqual([
+            "@typescript-eslint/no-implied-eval",
+            "@typescript-eslint/no-implied-eval",
+            "no-eval",
+        ]);
+    }
+    expect(
+        await rules(
+            "testing/run-coverage.mjs",
+            [
+                "export function probe(source) {",
+                "    eval(source);",
+                '    globalThis.setTimeout("probe()", 1);',
+                "    return new Function(source);",
+                "}",
+                "",
+            ].join("\n"),
+        ),
+    ).toEqual(["no-eval", "no-implied-eval", "no-new-func"]);
+});
+
 test("configuration scripts are linted as JavaScript modules", async () => {
     expect(
         await rules(
