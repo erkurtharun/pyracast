@@ -360,6 +360,8 @@ class CalibrationRun(models.Model):
     dataset_sha256 = models.CharField(max_length=64, default="")
     lease_token = models.UUIDField(null=True)
     lease_expires_at = models.DateTimeField(null=True)
+    # Since when a pending run waits: its creation, or its latest requeue. Null: its creation.
+    available_at = models.DateTimeField(null=True)
     attempts = models.PositiveIntegerField(default=0)
     last_error = models.CharField(max_length=200, choices=CalibrationError, blank=True, default="")
 

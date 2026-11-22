@@ -233,6 +233,20 @@ def test_prepared_and_requested_runs_keep_their_input_fingerprints(
     assert (prepared.input_sha256, requested.input_sha256) == (PREPARED_SHA256, REQUESTED_SHA256)
 
 
+def test_a_requested_and_a_prepared_run_wait_from_their_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    add_days(system, plant, 1, 7)
+    prepared = CalibrationRun.objects.get()
+    CalibrationRun.objects.filter(pk=prepared.pk).update(status="insufficient", completed_at=NOW)
+
+    requested = request_run(system, plant)
+
+    assert (prepared.available_at, requested.available_at) == (NOW, NOW)
+    assert (prepared.created_at, requested.created_at) == (NOW, NOW)
+
+
 def test_requested_and_prepared_runs_pin_the_same_inputs_for_one_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

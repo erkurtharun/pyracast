@@ -398,7 +398,8 @@ def main(arguments: list[str] | None = None) -> int:
     bucket = config["backup_bucket"]
     if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]", bucket):
         raise ValueError("Invalid backup bucket.")
-    daily = config.get("daily_backups") is True
+    # Read outside host_contract.load(), so a bad unrelated setting never stops hourly backups.
+    daily = config.get("daily_backups", False)
     with tempfile.TemporaryDirectory(prefix="pyracast-backup-") as temporary:
         try:
             name = create_backup(
@@ -407,7 +408,7 @@ def main(arguments: list[str] | None = None) -> int:
                 options.kind,
                 Path(temporary),
                 options.lock_fd,
-                daily=daily,
+                daily=daily is True,
             )
         except ReleaseLockNotHeldError:
             print(
@@ -416,6 +417,28 @@ def main(arguments: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return REFUSED_EXIT_STATUS
+        if not isinstance(daily, bool):
+            report("pyracast_backup_setting_invalid", "ERROR", setting="daily_backups")
+            # Only an hourly run reads the daily tier; failing a pre-release backup would stop
+            # a release inside maintenance over a setting it does not use.
+            if options.kind != "hourly":
+                print(
+                    f"WARNING: the daily_backups setting of {options.host_config} is neither "
+                    "true nor false; the pre-release backup does not use it.",
+                    file=sys.stderr,
+                )
+                return 0
+            outcome = (
+                "this run took no backup, and no daily copy is made until it is fixed"
+                if name is None
+                else "the hourly backup was kept, but no daily copy was made"
+            )
+            print(
+                f"The daily_backups setting of {options.host_config} is neither true nor false; "
+                f"{outcome}.",
+                file=sys.stderr,
+            )
+            return 1
         if name is None:
             return SKIPPED_EXIT_STATUS
     return 0
