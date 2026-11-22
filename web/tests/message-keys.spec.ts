@@ -27,16 +27,6 @@ test("every message key is read by a screen or names a code the server or a scre
     expect(unusedKeys(web, messages.en)).toEqual([]);
 });
 
-test("the flag the server adds when it shows an earlier forecast labels its key", () => {
-    expect(
-        unusedKeys(web, {
-            Forecast: {
-                qualityFlags: { forecast_fallback: "earlier forecast shown" },
-            },
-        }),
-    ).toEqual([]);
-});
-
 test("a value of a shared enumeration labels a key only where its producer names the member", () => {
     expect(
         unusedKeys(web, {

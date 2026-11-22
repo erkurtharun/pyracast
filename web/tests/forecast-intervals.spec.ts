@@ -24,6 +24,7 @@ async function openForecast(
         flagged?: boolean;
         mixed?: boolean;
         language?: "en" | "tr";
+        qualityFlags?: string[];
     } = {},
 ) {
     const { electrical = true, scenario, missing, flagged, mixed } = options;
@@ -85,6 +86,7 @@ async function openForecast(
                 complete: !missing,
                 energy_mwh: missing ? null : 4,
                 partial_energy_mwh: missing ? 0 : 4,
+                quality_flags: options.qualityFlags ?? [],
                 intervals: rows,
                 ...(mixed
                     ? {
@@ -178,6 +180,49 @@ test("Turkish mixed sources stay readable on mobile without empty quality column
         fullPage: true,
     });
 });
+
+const sourceFlags = [
+    "forecast_fallback",
+    "mixed_estimated_actuals_and_forecast",
+    "mixed_estimated_actual_vintages",
+    "assumed_tracker_geometry",
+    "geometry_not_modeled",
+];
+const sourceFlagLabels = {
+    en: {
+        panel: "Source & quality",
+        labels: [
+            "saved forecast, historical estimates pending",
+            "estimates for completed intervals, forecast for the rest",
+            "combined estimate updates",
+            "assumed tracking geometry",
+            "plant geometry not modeled",
+        ],
+    },
+    tr: {
+        panel: "Kaynak ve kalite",
+        labels: [
+            "Kayıtlı tahmin, geçmiş veri bekleniyor",
+            "Tamamlanan aralıklarda uydu/model tahmini, kalanında öngörü",
+            "Birleştirilmiş gerçekleşen tahmini güncellemeleri",
+            "Varsayılan takip sistemi geometrisi",
+            "Santral geometrisi modellenmedi",
+        ],
+    },
+} as const;
+
+for (const language of ["en", "tr"] as const) {
+    test(`the source and quality panel names the source and geometry flags in ${language === "en" ? "English" : "Turkish"}`, async ({
+        page,
+    }) => {
+        const { panel, labels } = sourceFlagLabels[language];
+        await openForecast(page, { language, qualityFlags: sourceFlags });
+        await page.getByText(panel, { exact: true }).click();
+        await expect(page.locator("details.provenance .tag")).toHaveText([
+            ...labels,
+        ]);
+    });
+}
 
 for (const electrical of [true, false]) {
     test(`${electrical ? "generation" : "irradiance"} discloses estimated and forecast interval sources in mixed views and CSV`, async ({

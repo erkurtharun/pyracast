@@ -108,6 +108,11 @@
             "unvalidated_reference_transfer": "Referans aktarımı doğrulanmamış",
             "outage_configuration_changed": "Kesinti yapılandırması değişti",
             "unknown_outage_impact": "Kesinti etkisi bilinmiyor",
+            "forecast_fallback": "Kayıtlı tahmin, geçmiş veri bekleniyor",
+            "mixed_estimated_actuals_and_forecast": "Tamamlanan aralıklarda uydu/model tahmini, kalanında öngörü",
+            "mixed_estimated_actual_vintages": "Birleştirilmiş gerçekleşen tahmini güncellemeleri",
+            "assumed_tracker_geometry": "Varsayılan takip sistemi geometrisi",
+            "geometry_not_modeled": "Santral geometrisi modellenmedi",
             "unknown": "Diğer kalite notu ({value})"
         },
         "stale_reason": {

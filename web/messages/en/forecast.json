@@ -108,6 +108,11 @@
             "unvalidated_reference_transfer": "unvalidated reference transfer",
             "outage_configuration_changed": "outage configuration changed",
             "unknown_outage_impact": "unknown outage impact",
+            "forecast_fallback": "saved forecast, historical estimates pending",
+            "mixed_estimated_actuals_and_forecast": "estimates for completed intervals, forecast for the rest",
+            "mixed_estimated_actual_vintages": "combined estimate updates",
+            "assumed_tracker_geometry": "assumed tracking geometry",
+            "geometry_not_modeled": "plant geometry not modeled",
             "unknown": "{value}"
         },
         "stale_reason": {
