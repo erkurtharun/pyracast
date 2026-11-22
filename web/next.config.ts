@@ -27,6 +27,17 @@ const config = (phase: string): NextConfig => ({
                 source: "/app/icons/:file([^/]+\\.png)",
                 headers: [{ key: "Cache-Control", value: "no-cache" }],
             },
+            {
+                source: "/app/sw.js",
+                headers: [
+                    { key: "Content-Type", value: "text/javascript" },
+                    { key: "Cache-Control", value: "no-store" },
+                    {
+                        key: "Content-Security-Policy",
+                        value: "default-src 'none'; connect-src 'self'",
+                    },
+                ],
+            },
         ]);
     },
     rewrites() {
