@@ -217,6 +217,7 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
     del valid["forecasts_collectionjob", released.pk]
     stored_account = row_values(ProviderAccount.objects.filter(pk=system.account.pk))
     stored_binding = row_values(SiteBinding.objects.filter(pk=system.binding.pk))
+    del valid["notifications_notificationdelivery", delivery.pk]
     assert set(audit()) == {f"forecasts_collectionjob: {LEASE_RULES['forecasts_collectionjob']}"}
 
     forward()
@@ -246,6 +247,7 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
     assert row_values(SiteBinding.objects.filter(pk=system.binding.pk), stored_binding) == (
         stored_binding
     )
+    assert (delivery.forecast_kind, delivery.prepared_at) == ("unavailable", NOW)
     assert violations("connections_provideraccount", PROVIDER_ACCOUNT_RULE) == 0
     assert violations("connections_sitebinding", SITE_BINDING_RULE) == 0
     assert ProductionObservation.objects.get(pk=correction.pk).supersedes_id == original.pk

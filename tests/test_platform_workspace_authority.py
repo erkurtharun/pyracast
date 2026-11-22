@@ -21,6 +21,7 @@ from pyracast.accounts.models import (
 from pyracast.accounts.operations import remove_workspace_member
 from pyracast.plants.models import Plant, PlantSubmission
 from pyracast.plants.operations import create_plant, revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.sites import submit_site
 from pyracast.regions.models import Region, RegionLocationChangeRequest
 from pyracast.regions.operations import request_location_change, submit_region
@@ -62,12 +63,11 @@ def test_platform_authority_runs_workspace_operations_without_membership() -> No
     site = submit_site(
         platform,
         tenant_id,
+        PlantParameters(name="Console site", dc_capacity_mw=5),
         platform=True,
-        name="Console site",
         latitude=41,
         longitude=29,
         timezone="Europe/Istanbul",
-        dc_capacity_mw=5,
     )
     assert site.tenant_id == tenant_id
     assert PlantSubmission.objects.get(plant__region=site).submitted_by == platform
@@ -82,16 +82,19 @@ def test_platform_authority_runs_workspace_operations_without_membership() -> No
         timezone="UTC",
     )
     plant = create_plant(
-        platform, tenant_id, region.pk, platform=True, name="Bare plant", dc_capacity_mw=2
+        platform,
+        tenant_id,
+        region.pk,
+        PlantParameters(name="Bare plant", dc_capacity_mw=2),
+        platform=True,
     )
     revise_plant(
         platform,
         tenant_id,
         region.pk,
         plant.pk,
+        PlantParameters(name="Renamed plant", dc_capacity_mw=3),
         platform=True,
-        name="Renamed plant",
-        dc_capacity_mw=3,
     )
     assert PlantSubmission.objects.get(plant=plant).dc_capacity_mw == 3
     assert Plant.objects.get(pk=plant.pk).name == "Renamed plant"
@@ -131,7 +134,9 @@ def test_platform_authority_refuses_everyone_who_is_not_a_platform_administrator
     tenant_id, region_id = system.tenant.pk, system.region.pk
     viewer = viewer_of(system)
     invitation = invite_workspace_member(system.member, tenant_id, "guest@example.com")
-    plant = create_plant(system.member, tenant_id, region_id, name="Plant", dc_capacity_mw=1)
+    plant = create_plant(
+        system.member, tenant_id, region_id, PlantParameters(name="Plant", dc_capacity_mw=1)
+    )
     actor = refused_actor(system, identity)
     operations: list[Callable[[], Any]] = [
         lambda: invite_workspace_member(actor, tenant_id, "other@example.com", platform=True),
@@ -141,12 +146,11 @@ def test_platform_authority_refuses_everyone_who_is_not_a_platform_administrator
         lambda: submit_site(
             actor,
             tenant_id,
+            PlantParameters(name="Refused site", dc_capacity_mw=1),
             platform=True,
-            name="Refused site",
             latitude=41,
             longitude=29,
             timezone="UTC",
-            dc_capacity_mw=1,
         ),
         lambda: submit_region(
             actor,
@@ -158,7 +162,12 @@ def test_platform_authority_refuses_everyone_who_is_not_a_platform_administrator
             timezone="UTC",
         ),
         lambda: revise_plant(
-            actor, tenant_id, region_id, plant.pk, platform=True, name="Refused", dc_capacity_mw=9
+            actor,
+            tenant_id,
+            region_id,
+            plant.pk,
+            PlantParameters(name="Refused", dc_capacity_mw=9),
+            platform=True,
         ),
         lambda: request_location_change(
             actor,
@@ -186,7 +195,10 @@ def test_platform_authority_refuses_everyone_who_is_not_a_platform_administrator
 def test_tenant_api_treats_a_platform_administrator_without_membership_as_an_outsider() -> None:
     system = make_system()
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="Plant", dc_capacity_mw=1
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="Plant", dc_capacity_mw=1),
     )
     viewer = viewer_of(system)
     invitation = invite_workspace_member(system.member, system.tenant.pk, "guest@example.com")

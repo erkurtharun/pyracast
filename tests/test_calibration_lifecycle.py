@@ -11,6 +11,7 @@ from pyracast.plants.automation import set_calibration_automation
 from pyracast.plants.management.commands import calibrate_plant
 from pyracast.plants.models import CalibrationRun, Plant, PlantEvent
 from pyracast.plants.operations import request_calibration, revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.preparation import prepare_calibration
 from tests.support.calibration_preparation import add_days
 from tests.support.concurrency import behind_open_transaction
@@ -91,7 +92,7 @@ def test_a_configuration_revision_supersedes_open_runs_and_disables_automation_w
     set_calibration_automation(*scope, enabled=True)
     run = request_run(system, plant)
 
-    revise_plant(*scope, name="Changed", dc_capacity_mw=140)
+    revise_plant(*scope, PlantParameters(name="Changed", dc_capacity_mw=140))
 
     run.refresh_from_db()
     assert (run.status, run.completed_at, run.lease_token) == ("superseded", NOW, None)
@@ -230,6 +231,20 @@ def test_prepared_and_requested_runs_keep_their_input_fingerprints(
     requested = request_run(system, plant)
 
     assert (prepared.input_sha256, requested.input_sha256) == (PREPARED_SHA256, REQUESTED_SHA256)
+
+
+def test_a_requested_and_a_prepared_run_wait_from_their_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    add_days(system, plant, 1, 7)
+    prepared = CalibrationRun.objects.get()
+    CalibrationRun.objects.filter(pk=prepared.pk).update(status="insufficient", completed_at=NOW)
+
+    requested = request_run(system, plant)
+
+    assert (prepared.available_at, requested.available_at) == (NOW, NOW)
+    assert (prepared.created_at, requested.created_at) == (NOW, NOW)
 
 
 def test_requested_and_prepared_runs_pin_the_same_inputs_for_one_window(

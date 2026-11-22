@@ -291,8 +291,6 @@ def parse_historical_upload(
             "historical_rooftop_pv" if products.pop() == "pv_power_rooftop" else "rooftop_pv_power",
             declared_period,
         )
-    except RecursionError as exc:
-        raise ValidationError(_("The JSON export is nested too deeply.")) from exc
     except (
         ValueError,
         TypeError,

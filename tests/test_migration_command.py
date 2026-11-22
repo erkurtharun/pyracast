@@ -102,6 +102,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0007_reminder_recipient_rows",
             "0008_review_and_role_mail",
             "0009_purge_warning_mail",
+            "0010_delivery_preparation_metadata",
         ),
         "plants": (
             "0002_plant_event_action_and_calibration_error_checks",
@@ -109,6 +110,8 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0004_schema_naming_convention",
             "0005_calibration_preparation_due_at",
             "0006_submission_updated_at",
+            "0007_plant_parameters_revision",
+            "0008_calibration_run_available_at",
         ),
         "regions": (
             "0002_audit_event_details",
@@ -119,6 +122,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0007_audit_region_resubmitted",
             "0008_region_purge_warning_sent_at",
             "0009_audit_connection_validation_failed",
+            "0010_region_created_audit_and_purge_findings",
         ),
     }
     expected = {app: names | set(forward.get(app, ())) for app, names in baseline.items()}

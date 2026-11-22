@@ -1,5 +1,5 @@
 import signal
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -16,6 +16,7 @@ from pyracast.background.failures import PhaseOutcome
 from pyracast.forecasts import runtime
 from pyracast.forecasts.models import CollectionJob, ForecastResult, RequestAttempt
 from pyracast.orchestration.kinds import COLLECTION
+from pyracast.retention import SWEEP_BATCH, Retention
 from pyracast.shutdown import ShutdownRequest
 from tests.support.domain import make_system
 from tests.support.kinds import stub_actors
@@ -108,10 +109,9 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     moment = datetime(2026, 11, 19, 3, 0, tzinfo=UTC)
     monkeypatch.setattr(command, "timezone", SimpleNamespace(now=lambda: moment))
     monkeypatch.setattr(command, "purge_expired", purge)
-    monkeypatch.setattr(command, "sweep_accounts", sweep)
     monkeypatch.setattr(command, "warn_before_purge", MagicMock())
-    purge_mail = MagicMock()
-    monkeypatch.setattr(command, "purge_finished_mail", purge_mail)
+    sweep.return_value = 0
+    monkeypatch.setattr(command, "RETENTION", (Retention("rows", timedelta(days=7), sweep),))
     monkeypatch.setattr(command, "make_broker", lambda: broker)
     monkeypatch.setattr(command, "dispatch_collections", send)
     revalidation_actor, send_revalidations = MagicMock(), MagicMock(return_value=0)
@@ -134,8 +134,7 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     call_command("dispatch")
     purge.assert_called_once_with(moment)
-    sweep.assert_called_once_with(moment)
-    purge_mail.assert_called_once_with(moment)
+    sweep.assert_called_once_with(moment - timedelta(days=7), SWEEP_BATCH)
     send.assert_called_once_with(actor)
     send_revalidations.assert_called_once_with(revalidation_actor)
     send_calibrations.assert_called_once_with(calibration_actor)
@@ -233,9 +232,8 @@ def test_commands_handle_termination_and_restore_previous_handlers(
         instance.stop.assert_called_once()
     else:
         monkeypatch.setattr(command, "purge_expired", terminate)
-        monkeypatch.setattr(command, "sweep_accounts", MagicMock())
         monkeypatch.setattr(command, "warn_before_purge", MagicMock())
-        monkeypatch.setattr(command, "purge_finished_mail", MagicMock())
+        monkeypatch.setattr(command, "RETENTION", ())
         for operation in (
             "dispatch_collections",
             "dispatch_calibrations",
@@ -319,11 +317,10 @@ def test_dispatch_repeats_after_poll_timeout_until_stop_requested(
     broker = MagicMock()
     monkeypatch.setattr(command, "make_broker", lambda: broker)
     stub_actors(monkeypatch)
+    monkeypatch.setattr(command, "RETENTION", ())
     for operation in (
         "purge_expired",
-        "sweep_accounts",
         "warn_before_purge",
-        "purge_finished_mail",
         "publish_outbound_mail",
         "dispatch_collections",
         "dispatch_calibrations",

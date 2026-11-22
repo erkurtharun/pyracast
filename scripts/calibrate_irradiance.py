@@ -64,7 +64,7 @@ def _publish(output: Path, result: CalibrationResult, capacity_kw: float) -> Non
     """Writes every file beside the output first, so an interrupted run leaves no mix."""
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=f".{output.name}-", dir=output.parent))
+    staging = Path(tempfile.mkdtemp(prefix=".calibration-", dir=output.parent))
     try:
         _write(staging, result, capacity_kw)
         for name in OUTPUTS:

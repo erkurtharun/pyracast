@@ -65,7 +65,11 @@ def stores(row: models.Model, **values: object) -> bool:
 def test_an_upgrade_from_the_earlier_leaves_admits_both_vocabularies_and_no_other_value() -> None:
     system = make_system()
     invite_workspace_member(system.member, system.tenant.pk, "guest@example.com")
-    event = AuditEvent.objects.filter(region=system.region).earliest("pk")
+    event = (
+        AuditEvent.objects.filter(region=system.region)
+        .exclude(action=AuditAction.REGION_CREATED)
+        .earliest("pk")
+    )
     mail = OutboundMail.objects.get()
     migrate(*EARLIER_LEAVES)
     try:

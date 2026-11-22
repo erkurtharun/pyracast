@@ -6,6 +6,7 @@ import pytest
 from pyracast.forecasts.models import CollectionJob
 from pyracast.plants.models import Plant, active_plant
 from pyracast.plants.operations import create_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import Region, active_region
 from pyracast.regions.operations import submit_region
 from tests.support.domain import NOW
@@ -42,7 +43,7 @@ def test_active_rows_exclude_trashed_regions_and_everything_under_them(
         timezone="Europe/Istanbul",
     )
     kept_plant = create_plant(
-        system.member, system.tenant.pk, kept.pk, name="Kept", dc_capacity_mw=5
+        system.member, system.tenant.pk, kept.pk, PlantParameters(name="Kept", dc_capacity_mw=5)
     )
     Region.objects.filter(pk=system.region.pk).update(deleted_at=NOW)
 

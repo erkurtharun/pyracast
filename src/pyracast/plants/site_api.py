@@ -17,7 +17,8 @@ from pyracast.regions.models import Region, RegionStatus
 
 
 class SiteInput(RegionInput, PlantInput):
-    pass
+    def location(self) -> dict[str, Any]:
+        return {name: self.validated_data[name] for name in ("latitude", "longitude", "timezone")}
 
 
 class SiteOutput(serializers.Serializer[Site]):
@@ -62,5 +63,7 @@ class SitesView(GenericAPIView[Region]):
     def post(self, request: Request, tenant_id: int) -> Response:
         data = SiteInput(data=request.data)
         data.is_valid(raise_exception=True)
-        region = submit_site(cast(User, request.user), tenant_id, **data.validated_data)
+        region = submit_site(
+            cast(User, request.user), tenant_id, data.parameters(), **data.location()
+        )
         return Response(SiteOutput(sites([region])[0]).data, status=201)

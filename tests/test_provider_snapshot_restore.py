@@ -43,6 +43,7 @@ from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.preparation import prepare_delivery
 from pyracast.plants.models import ForecastIssuance
 from pyracast.plants.operations import create_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, System
 from tests.support.invariants import archived_rows, rewritten_archive_rows
@@ -1171,7 +1172,10 @@ def test_restored_actuals_request_calibration_preparation_after_commit(
 ) -> None:
     system = restore_system(monkeypatch)
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="Plant", dc_capacity_mw=1
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="Plant", dc_capacity_mw=1),
     )
     before = collections_before_reset(system)
     observed: list[int] = []
@@ -1334,6 +1338,7 @@ def test_command_reports_forecasts_alone_without_a_day_report(
 @pytest.fixture
 def detached_console_handler(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(logging.getLogger("pyracast"), "handlers", [])
+    monkeypatch.setattr(logging.getLogger(), "handlers", [])
 
 
 def test_command_prints_a_fixed_sentence_per_refusal_and_no_export_value_or_path(

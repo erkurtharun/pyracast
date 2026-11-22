@@ -19,11 +19,11 @@ def test_dispatch_reconnects_after_its_postgresql_session_is_terminated(
     monkeypatch.setattr(command, "make_broker", lambda: broker)
     stub_actors(monkeypatch)
     monkeypatch.setattr(command, "dispatch_revalidations", MagicMock(return_value=0))
+    monkeypatch.setattr(command, "RETENTION", ())
     for operation in (
         "dispatch_collections",
         "dispatch_epias",
         "purge_expired",
-        "purge_finished_mail",
     ):
         monkeypatch.setattr(command, operation, MagicMock())
     sessions: list[int] = []

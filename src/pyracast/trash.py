@@ -357,31 +357,36 @@ def _purge_expired_region(region_id: int, moment: datetime, budget: _Budget) -> 
         )
         if region is None:
             return None
+        plants = list(Plant.objects.select_for_update().filter(region=region).order_by("pk"))
         if region.purge_started_at is None:
             region.purge_started_at = moment
-            region.save(update_fields=("purge_started_at",))
-        plants = list(Plant.objects.select_for_update().filter(region=region).order_by("pk"))
-        record = _purge_record(region, plants)
+            region.purge_plant_ids = [plant.pk for plant in plants]
+            region.purge_bindings = _bindings(region)
+            region.save(update_fields=("purge_started_at", "purge_plant_ids", "purge_bindings"))
+        record = _purge_record(region)
         try:
             _purge_region(region, plants, budget)
         except _BudgetSpentError:
             return None
         transaction.on_commit(lambda: logger.info(record))
-        return len(plants)
+        return len(cast(list[int], region.purge_plant_ids))
 
 
-def _purge_record(region: Region, plants: list[Plant]) -> str:
+def _bindings(region: Region) -> list[str]:
     """Names what the purge removes for the operator's runbook, never a name, place or key."""
-    bindings = SiteBinding.objects.filter(region=region).order_by("pk")
-    sites = ",".join(
+    return [
         f"{provider}:{account}:{site}"
-        for provider, account, site in bindings.values_list(
-            "provider_account__provider", "provider_account_id", "site_id"
-        )
-    )
+        for provider, account, site in SiteBinding.objects.filter(region=region)
+        .order_by("pk")
+        .values_list("provider_account__provider", "provider_account_id", "site_id")
+    ]
+
+
+def _purge_record(region: Region) -> str:
     deleted_at = cast(datetime, region.deleted_at).isoformat()
+    plant_ids = ",".join(str(plant_id) for plant_id in cast(list[int], region.purge_plant_ids))
+    bindings = ",".join(cast(list[str], region.purge_bindings))
     return (
         f"trash_purged kind=region region_id={region.pk} tenant_id={region.tenant_id} "
-        f"deleted_at={deleted_at} plant_ids=[{','.join(str(plant.pk) for plant in plants)}] "
-        f"bindings=[{sites}]"
+        f"deleted_at={deleted_at} plant_ids=[{plant_ids}] bindings=[{bindings}]"
     )

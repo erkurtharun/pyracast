@@ -32,6 +32,7 @@ from pyracast.forecasts.trust import PROBLEM_MESSAGES, reference_problems
 from pyracast.irradiance import local_day_bounds
 from pyracast.irradiance.solcast_export import load_json_file
 from pyracast.plants.operations import create_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import AuditEvent, Region
 from tests.support.domain import NOW
 from tests.support.historical_reference_import import (
@@ -401,7 +402,10 @@ def test_calibration_is_prepared_once_after_whole_archive_commits(
     system = system_for_import(monkeypatch)
     system.binding.refresh_from_db()
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="Plant", dc_capacity_mw=1
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="Plant", dc_capacity_mw=1),
     )
     path = power_file(tmp_path)
     observed: list[int] = []

@@ -56,6 +56,7 @@ def terraform_host_config() -> tuple[set[str], dict[str, bool]]:
     conditional = {
         key: value == "true" for key, value in re.findall(r"([a-z_]+) = (true|false)", written[2])
     }
+    assert set(re.findall(r"([a-z_]+)\s*=", written[2])) == set(conditional)
     return always, conditional
 
 
@@ -91,15 +92,18 @@ def test_a_host_configuration_written_before_the_daily_tier_passes_the_contract(
     assert config.origin_pull_ca == ""
 
 
+# The image helper reads container image configurations, not the host's.
+IMAGE_HELPER = ROOT / "deploy" / "ci_images.py"
+
+
 def host_reads() -> tuple[set[str], set[str]]:
     indexed: set[str] = set()
     defaulted: set[str] = set()
     for path in [*(ROOT / "deploy").glob("*.py"), ROOT / "deploy" / "install-release.sh"]:
         source = path.read_text(encoding="utf-8")
-        if "host_config" not in source and "config_path" not in source:
-            continue
         indexed |= set(re.findall(r"\bconfig\[[\"']([a-z_]+)[\"']\]", source))
-        defaulted |= set(re.findall(r"\bconfig\.get\([\"']([a-z_]+)[\"']", source))
+        if path != IMAGE_HELPER:
+            defaulted |= set(re.findall(r"\bconfig\.get\([\"']([a-z_]+)[\"']", source))
     return indexed, defaulted
 
 
