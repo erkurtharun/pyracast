@@ -1,4 +1,4 @@
-import { logoColours } from "@/styles/tokens";
+import { brand } from "@/styles/tokens";
 
 type Surface = "light" | "dark";
 
@@ -43,7 +43,7 @@ export function Brand({
     surface: Surface;
     height?: number;
 }) {
-    const ink = surface === "light" ? logoColours.dark : logoColours.light;
+    const ink = surface === "light" ? brand.forest : brand.cream;
     return (
         <svg
             className="brand"
@@ -54,7 +54,7 @@ export function Brand({
             aria-label="Pyracast"
         >
             <g transform="translate(6 5) scale(.77)">
-                <path fill={logoColours.sun} d="M0 48a48 48 0 0 1 96 0Z" />
+                <path fill={brand.amber} d="M0 48a48 48 0 0 1 96 0Z" />
                 <path fill={ink} d="M0 53H99L86 72H21V112H0Z" />
             </g>
             <g transform="translate(106 72) scale(.05 -.05)" fill={ink}>

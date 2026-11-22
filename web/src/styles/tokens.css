@@ -4,10 +4,7 @@
     --teal: #176b56;
     --teal-dark: #104d3f;
     --teal-soft: #eaf3ed;
-    --cream: #f6f7f3;
     --line: #dfe6df;
-    --amber: #a56a12;
-    --forest: #143c32;
     --surface: #fafbf8;
     --white: #fff;
     --radius: 16px;
@@ -20,15 +17,6 @@
         sans-serif;
     color-scheme: light;
 
-    --amber-218: #ebd5a4;
-    --amber-300: #d2c293;
-    --amber-329-a0: #e8bd6e00;
-    --amber-329-a20: #e8bd6e33;
-    --amber-51: #fff6e5;
-    --amber-576: #a17537;
-    --amber-633: #946827;
-    --amber-69: #f7f1e4;
-    --amber-714: #805d12;
     --blue-575: #3874a1;
     --green-139: #d3e4d8;
     --green-143: #d0e5d9;
@@ -50,9 +38,6 @@
     --green-706: #395d47;
     --green-722: #28664e;
     --green-794: #1c4d3a;
-    --green-796: #20483c;
-    --green-833: #163f32;
-    --green-835: #193b30;
     --neutral-0-a14: #ffffff24;
     --neutral-0-a16: #ffffff29;
     --neutral-0-a5: #ffffff0d;
@@ -67,8 +52,6 @@
     --neutral-43: #f1f7f4;
     --neutral-445: #85968e;
     --neutral-45: #f0f7f2;
-    --neutral-47: #f7f6ef;
-    --neutral-49: #f4f7ee;
     --neutral-49-a: #eef7f1;
     --neutral-51: #f2f2f2;
     --neutral-53: #f0f3f1;
@@ -79,14 +62,12 @@
     --neutral-600: #666666;
     --neutral-61: #edf2ef;
     --neutral-624: #58685b;
-    --neutral-73: #e8f1e8;
     --neutral-878: #1f1f1f;
     --olive-100: #e8ecdf;
     --olive-161: #d8dfcd;
     --olive-163: #d8dccf;
     --olive-163-a: #d9decd;
     --olive-178: #d4dac9;
-    --olive-61: #f5f6e9;
     --olive-80: #edf0e5;
     --olive-94: #e9ede1;
     --red-165: #edc5bd;

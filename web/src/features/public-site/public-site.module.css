@@ -1,6 +1,6 @@
 .site {
-    --paper: var(--neutral-47);
-    --ink: var(--green-835);
+    --paper: var(--cream-35);
+    --ink: var(--forest);
     --muted: var(--neutral-624);
     --green: var(--green-722);
     --rule: var(--olive-163);
@@ -49,7 +49,7 @@
     color: inherit;
 }
 .site a:focus-visible {
-    outline: 3px solid var(--amber-633);
+    outline: 3px solid var(--amber-690);
     outline-offset: 5px;
     border-radius: 3px;
 }
@@ -283,7 +283,7 @@
     border-top: 2px solid var(--green);
 }
 .actualLine {
-    border-top: 2px dashed var(--amber-576);
+    border-top: 2px dashed var(--amber-600);
 }
 .forecastCaption {
     border-top: 1px solid var(--olive-178);

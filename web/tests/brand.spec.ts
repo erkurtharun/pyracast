@@ -63,6 +63,25 @@ test("the workspace sidebar names the logo for dark surfaces once", async ({
     expect(await accessibilityViolations(page)).toEqual([]);
 });
 
+test("the logo's surfaces take the brand palette", async ({ page }) => {
+    await mockApi(page);
+    await page.goto("/app/");
+    await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
+    await expect(page.locator("body")).toHaveCSS(
+        "background-color",
+        "rgb(249, 248, 243)",
+    );
+    await expect(page.getByRole("complementary")).toHaveCSS(
+        "background-color",
+        "rgb(9, 56, 58)",
+    );
+    await page.goto("/");
+    await expect(page.getByRole("banner").locator("..")).toHaveCSS(
+        "background-color",
+        "rgb(249, 248, 243)",
+    );
+});
+
 for (const path of ["/", "/tr/"]) {
     test(`the public site ${path} links home through the logo for light surfaces`, async ({
         page,

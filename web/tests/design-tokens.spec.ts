@@ -1,6 +1,8 @@
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { ESLint } from "eslint";
 import { expect, test } from "@playwright/test";
+import { brand, brandProperties } from "../src/styles/tokens";
 
 const web = path.resolve();
 const eslint = new ESLint({ cwd: web });
@@ -107,4 +109,80 @@ test("scripts take colours from the tokens module", async () => {
             'export const brand = "#a17537";\n',
         ),
     ).toEqual([]);
+});
+
+const kitArtwork = "src/app/icon.svg";
+
+function hsl(hex: string) {
+    const [r, g, b] = [1, 3, 5].map(
+        (start) => Number.parseInt(hex.slice(start, start + 2), 16) / 255,
+    ) as [number, number, number];
+    const high = Math.max(r, g, b);
+    const low = Math.min(r, g, b);
+    const chroma = high - low;
+    const sector =
+        high === r
+            ? ((g - b) / chroma + 6) % 6
+            : high === g
+              ? (b - r) / chroma + 2
+              : (r - g) / chroma + 4;
+    return { hue: chroma === 0 ? 0 : sector * 60, lightness: (high + low) / 2 };
+}
+
+async function sourceFiles() {
+    const entries = await readdir(path.join(web, "src"), {
+        recursive: true,
+        withFileTypes: true,
+    });
+    return entries
+        .filter((entry) => entry.isFile())
+        .map((entry) =>
+            path
+                .relative(web, path.join(entry.parentPath, entry.name))
+                .replaceAll(path.sep, "/"),
+        );
+}
+
+test("the brand families are written once, in the tokens module", async () => {
+    const stylesheet = await readFile(
+        path.join(web, "src/styles/tokens.css"),
+        "utf8",
+    );
+    expect(stylesheet.match(/--(?:forest|amber|cream)[\w-]*(?=:)/g)).toBeNull();
+    const values = Object.values(brandProperties).map((value) =>
+        value.slice(0, 7),
+    );
+    const written: string[] = [];
+    for (const file of await sourceFiles()) {
+        if (file === "src/styles/tokens.ts" || file === kitArtwork) continue;
+        const text = (
+            await readFile(path.join(web, file), "utf8")
+        ).toLowerCase();
+        for (const value of values)
+            if (text.includes(value)) written.push(`${file} ${value}`);
+    }
+    expect(written).toEqual([]);
+});
+
+test("every brand shade takes its kit colour's hue and is named by its lightness", () => {
+    for (const [name, value] of Object.entries(brandProperties)) {
+        const [, family, number, alpha] =
+            /^--(forest|amber|cream)(?:-(\d+))?(?:-a(\d+))?$/.exec(name)!;
+        const kit = brand[family as keyof typeof brand];
+        if (number === undefined) {
+            expect(value, name).toBe(kit);
+            continue;
+        }
+        const shade = hsl(value);
+        expect(Math.abs(shade.hue - hsl(kit).hue), name).toBeLessThan(2);
+        expect(Math.round(1000 * (1 - shade.lightness)), name).toBe(
+            Number(number),
+        );
+        if (alpha === undefined) expect(value, name).toHaveLength(7);
+        else
+            expect(
+                Math.round((Number.parseInt(value.slice(7), 16) / 255) * 100),
+                name,
+            ).toBe(Number(alpha));
+    }
 });

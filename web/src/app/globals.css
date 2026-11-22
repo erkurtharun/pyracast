@@ -3,7 +3,7 @@
 }
 body {
     margin: 0;
-    background: var(--cream);
+    background: var(--cream-35);
     color: var(--ink);
     font-size: 15px;
     line-height: 1.6;
@@ -67,7 +67,7 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 .table-scroll:focus-visible {
-    outline: 3px solid var(--amber);
+    outline: 3px solid var(--amber-690);
     outline-offset: 3px;
 }
 .shell {
@@ -81,9 +81,12 @@ textarea:focus-visible,
     flex-direction: column;
     padding: var(--space-8) var(--space-5) var(--space-5-5);
     background: var(--forest);
-    color: var(--neutral-49);
+    color: var(--cream);
     border-right: 1px solid var(--neutral-0-a5);
     z-index: 20;
+}
+.sidebar :focus-visible {
+    outline-color: var(--amber);
 }
 .brand {
     display: block;
@@ -106,8 +109,8 @@ textarea:focus-visible,
     padding: var(--space-2-5) var(--space-3);
     border: 1px solid var(--neutral-0-a16);
     border-radius: 10px;
-    color: var(--neutral-49);
-    background: var(--green-796);
+    color: var(--cream);
+    background: var(--forest-822);
     font-size: 13px;
 }
 .sidebar nav {
@@ -136,8 +139,8 @@ textarea:focus-visible,
     color: var(--white);
 }
 .sidebar nav button.active {
-    background: var(--neutral-73);
-    color: var(--green-833);
+    background: var(--cream);
+    color: var(--forest);
     font-weight: 650;
 }
 .sidebar nav button span {
@@ -150,14 +153,14 @@ textarea:focus-visible,
 }
 .sidebar .language-control {
     margin-top: var(--space-5);
-    color: var(--neutral-49);
+    color: var(--cream);
 }
 .sidebar .language-control .text-button {
     color: inherit;
 }
 .sidebar .language-select select {
-    color: var(--neutral-49);
-    background: var(--green-796);
+    color: var(--cream);
+    background: var(--forest-822);
     border-color: var(--neutral-0-a16);
 }
 .language-select {
@@ -538,10 +541,10 @@ main#main {
 }
 .region-card .attention {
     padding: var(--space-1-5) var(--space-2-5);
-    border: 1px solid var(--amber-218);
+    border: 1px solid var(--amber-231);
     border-radius: var(--radius);
-    background: var(--amber-51);
-    color: var(--amber-714);
+    background: var(--amber-61);
+    color: var(--amber-755);
 }
 .region-card-bottom {
     display: flex;
@@ -584,9 +587,9 @@ main#main {
     color: var(--muted);
 }
 .tag-warning {
-    background: var(--amber-51);
-    border-color: var(--amber-218);
-    color: var(--amber-714);
+    background: var(--amber-61);
+    border-color: var(--amber-231);
+    color: var(--amber-755);
 }
 .tag-danger {
     background: var(--red-35);
@@ -605,7 +608,7 @@ main#main {
     margin-bottom: var(--space-5);
     border-radius: 16px;
     background: var(--amber-69);
-    color: var(--amber);
+    color: var(--amber-690);
     font-size: 24px;
 }
 .empty h3 {
@@ -1488,7 +1491,7 @@ pre,
     display: grid;
     place-items: center;
     padding: var(--space-8) var(--space-5);
-    background: var(--cream);
+    background: var(--cream-35);
 }
 .auth-layout {
     display: grid;
@@ -1511,7 +1514,7 @@ pre,
     padding: var(--space-14);
     overflow: hidden;
     background: var(--forest);
-    color: var(--olive-61);
+    color: var(--cream);
 }
 .auth-story::before {
     content: "";
@@ -1602,7 +1605,7 @@ pre,
     margin-bottom: var(--space-8);
     border: 1px solid var(--line);
     border-radius: 12px;
-    background: var(--cream);
+    background: var(--cream-35);
 }
 .auth-public-links {
     display: flex;
