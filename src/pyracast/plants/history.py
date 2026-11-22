@@ -93,8 +93,7 @@ def automatic_outlook(
         as_of=None,
         source="auto",
     )
-    if "outage_scenario" not in result:
-        _evaluate_outage_scenario(result, target_date, resolution_minutes, timezone.now())
+    _evaluate_outage_scenario(result, target_date, resolution_minutes, timezone.now())
     return result
 
 
