@@ -63,12 +63,16 @@ services:
     volumes: !override [smoke-rabbitmq:/var/lib/rabbitmq]
   api:
     logging: *local-logs
+    environment:
+      PYRACAST_FIXTURE_PROVIDER: "1"
   web:
     logging: *local-logs
   maintenance:
     logging: *local-logs
   worker:
     logging: *local-logs
+    environment:
+      PYRACAST_FIXTURE_PROVIDER: "1"
   notifications:
     logging: *local-logs
   dispatcher:

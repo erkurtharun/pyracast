@@ -39,6 +39,9 @@
           <li><a href="{% url 'admin:workspace_tenants' %}"{% if workspace_section == "tenants" or workspace_section == "tenant" %} aria-current="page"{% endif %}>
             <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true" focusable="false"><circle cx="7" cy="6" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M1.5 17v-2a5.5 5.5 0 0 1 11 0v2M14 3a3 3 0 0 1 0 6M15 11a4 4 0 0 1 3.5 4v2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
             {% translate "Workspaces" %}</a></li>
+          <li><a href="{% url 'admin:workspace_provider_accounts' %}"{% if workspace_section == "provider_accounts" %} aria-current="page"{% endif %}>
+            <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true" focusable="false"><circle cx="6.5" cy="10" r="3.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 10h8M15 10v3M18 10v2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            {% translate "Provider accounts" %}</a></li>
           <li><a href="{% url 'admin:workspace_operations' %}"{% if workspace_section == "operations" %} aria-current="page"{% endif %}>
             <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true" focusable="false"><path d="M2 10h4l2-5 4 10 2-5h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
             {% translate "Operations" %}</a></li>
@@ -68,6 +71,7 @@
               <li><a href="{% url 'admin:index' %}"{% if workspace_section == "overview" %} aria-current="page"{% endif %}>{% translate "Overview" %}</a></li>
               <li><a href="{% url 'admin:workspace_plants' %}"{% if workspace_section == "plants" %} aria-current="page"{% endif %}>{% translate "Plants" %}</a></li>
               <li><a href="{% url 'admin:workspace_tenants' %}"{% if workspace_section == "tenants" or workspace_section == "tenant" %} aria-current="page"{% endif %}>{% translate "Workspaces" %}</a></li>
+              <li><a href="{% url 'admin:workspace_provider_accounts' %}"{% if workspace_section == "provider_accounts" %} aria-current="page"{% endif %}>{% translate "Provider accounts" %}</a></li>
               <li><a href="{% url 'admin:workspace_operations' %}"{% if workspace_section == "operations" %} aria-current="page"{% endif %}>{% translate "Operations" %}</a></li>
               <li><a href="{% url 'admin:workspace_settings' %}"{% if workspace_section == "settings" %} aria-current="page"{% endif %}>{% translate "Settings" %}</a></li>
             </ul>

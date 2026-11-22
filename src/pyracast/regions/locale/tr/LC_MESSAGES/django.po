@@ -11,13 +11,6 @@ msgstr ""
 msgid "%(provider)s · %(identity)s · key revision %(revision)s"
 msgstr "%(provider)s · %(identity)s · anahtar revizyonu %(revision)s"
 
-msgid ""
-". Clear this delay only after confirming recovery with the provider. The "
-"daily request budget is preserved."
-msgstr ""
-". Bu beklemeyi yalnız sağlayıcıdan düzelmeyi doğruladıktan sonra kaldırın. "
-"Günlük istek bütçesi korunur."
-
 msgid "A calibration is already pending."
 msgstr "Bekleyen bir kalibrasyon zaten var."
 
@@ -30,6 +23,9 @@ msgstr "En fazla 200 karakterlik bir santral adı girin."
 msgid "A reason of at most 1000 characters is required."
 msgstr "Gerekçe en fazla 1000 karakter olmalıdır."
 
+msgid "A region name of at most 200 characters is required."
+msgstr "En fazla 200 karakterlik bir konum adı girin."
+
 msgid "A replacement affects every plant using the selected account."
 msgstr "Değişiklik, seçili hesabı kullanan tüm santralleri etkiler."
 
@@ -38,11 +34,6 @@ msgstr "Saat dilimi içeren bir ISO 8601 zamanı girin."
 
 msgid "AC generation"
 msgstr "AC üretimi"
-
-msgid "API key replaced. Validate the connection to resume collection."
-msgstr ""
-"API anahtarı değiştirildi. Veri toplamanın sürmesi için bağlantıyı "
-"doğrulayın."
 
 msgid "Acceptance unknown"
 msgstr "Kabul durumu bilinmiyor"
@@ -235,12 +226,6 @@ msgstr "Tamamlanmış 30 veya 60 dakikalık üretim kayıtları gereklidir."
 msgid "Configuration revision"
 msgstr "Yapılandırma revizyonu"
 
-msgid "Confirm replacement of the selected account's key"
-msgstr "Seçili hesabın anahtar değişikliğini onayla"
-
-msgid "Confirm replacing the shared account key."
-msgstr "Paylaşılan hesap anahtarının değiştirilmesini onaylayın."
-
 msgid "Conflicting or overlapping observation."
 msgstr ""
 "Üretim kaydı mevcut bir kayıtla çelişiyor veya zaman aralığı çakışıyor."
@@ -368,13 +353,6 @@ msgstr "Yeni hesap için bir API anahtarı girin."
 msgid "Enter the plant's 16-character EIC to confirm its identity."
 msgstr "Santralin kimliğini doğrulamak için 16 karakterli EIC kodunu girin."
 
-msgid ""
-"Entering a key above replaces the selected account's key for every plant "
-"that shares it. Leave the key blank to keep the current one."
-msgstr ""
-"Yukarıya bir anahtar girmeniz, seçili hesabın anahtarını hesabı paylaşan tüm"
-" santraller için değiştirir. Mevcut anahtarı korumak için boş bırakın."
-
 msgid "Epias provider failure"
 msgstr "EPİAŞ sağlayıcı hatası"
 
@@ -480,9 +458,6 @@ msgstr "Geçersiz kaynak türü"
 
 msgid "Inverter AC capacity"
 msgstr "İnvertör AC kapasitesi"
-
-msgid "Key replacement for an existing account"
-msgstr "Mevcut hesap için anahtar değişikliği"
 
 msgid "Language"
 msgstr "Dil"
@@ -823,15 +798,6 @@ msgstr "İstek kabul edilemeyecek kadar büyük."
 msgid "A production batch must stay within 31 local days."
 msgstr "Bir üretim grubu en fazla 31 yerel günü kapsayabilir."
 
-msgid ""
-"Saving a changed setup creates a new pending revision that must be validated"
-" and approved again. Saving the same setup changes nothing; a new API key "
-"must be validated again."
-msgstr ""
-"Değiştirilmiş bir kurulumu kaydetmek, yeniden doğrulanması ve onaylanması "
-"gereken yeni bir bekleyen revizyon oluşturur. Aynı kurulumu kaydetmek hiçbir "
-"şeyi değiştirmez; yeni bir API anahtarının yeniden doğrulanması gerekir."
-
 msgid "Saving creates a pending revision that must be validated and approved."
 msgstr ""
 "Kaydetme işlemi, doğrulanması ve onaylanması gereken bekleyen bir revizyon "
@@ -888,13 +854,6 @@ msgstr "Sağlayıcı istek sınırına ulaşıldı"
 
 msgid "Provider unexpected failure"
 msgstr "Beklenmeyen sağlayıcı hatası"
-
-msgid ""
-"Provider wait cleared. Queued collection can resume within the remaining "
-"quota."
-msgstr ""
-"Sağlayıcı beklemesi kaldırıldı. Sıradaki veri toplama işleri kalan kota "
-"içinde devam edebilir."
 
 msgid "Pyracast operations"
 msgstr "Pyracast işlemleri"
@@ -1458,12 +1417,6 @@ msgstr "Hava durumu verisi alımı kesintiye uğradı"
 msgid "Workspace"
 msgstr "Çalışma alanı"
 
-msgid ""
-"Write only. Required for a new account; leave blank to keep an existing key."
-msgstr ""
-"Yalnız yazılabilir. Yeni hesap için zorunlu; mevcut anahtarı korumak için "
-"boş bırakın."
-
 msgid "as_of must be aware and no later than now."
 msgstr "Veri kesim zamanı saat dilimi içermeli ve şu anı aşmamalıdır."
 
@@ -1675,9 +1628,6 @@ msgstr "JSON veya CSV dosyasını kaydetmeden önce kontrol edin."
 msgid "Checking…"
 msgstr "Kontrol ediliyor…"
 
-msgid "Choose an upload action."
-msgstr "Önizleme veya kaydetme işlemini seçin."
-
 msgid "Choose one file at a time."
 msgstr "Tek seferde bir dosya seçin."
 
@@ -1732,9 +1682,6 @@ msgstr "Dosya önizlemesi"
 
 msgid "Historical Solcast file"
 msgstr "Geçmiş Solcast verileri"
-
-msgid "Historical data saved. Repeated uploads reuse the existing import."
-msgstr "Geçmiş veriler kaydedildi. Aynı dosya tekrar kayıt oluşturmaz."
 
 msgid "Historical input cannot contain future or incomplete intervals."
 msgstr "Gelecekteki veya henüz tamamlanmamış zaman aralıkları yüklenemez."
@@ -1934,10 +1881,6 @@ msgstr "Dosyadaki %(field)s bilgisi kayıtlarla uyuşmuyor."
 msgid "The JSON export is nested too deeply."
 msgstr "JSON dosyasının iç içe yapısı desteklenen sınırı aşıyor."
 
-msgid "A current authorized and validated Solcast binding is required."
-msgstr ""
-"Güncel, yetkilendirilmiş ve doğrulanmış bir Solcast bağlantısı gerekli."
-
 msgid "Historical upload must contain between 1 byte and 7 MiB."
 msgstr "Dosya boş olmamalı ve 7 MiB boyutunu aşmamalıdır."
 
@@ -1946,11 +1889,6 @@ msgstr "JSON veya CSV, en fazla 7 MiB. Dosya seçildiğinde yükleme başlamaz."
 
 msgid "Select a file no larger than 7 MiB."
 msgstr "En fazla 7 MiB boyutunda bir dosya seçin."
-
-msgid "The existing import has a different source declaration."
-msgstr ""
-"Bu dosya daha önce farklı kaynak bilgileriyle yüklenmiş. Önceki kaydı "
-"kontrol edin."
 
 msgid ""
 "Check and import an authorized historical JSON or CSV export for this plant."
@@ -2700,6 +2638,22 @@ msgstr "Bu santral EPİAŞ'a bağlı değil."
 msgid "This plant is already connected to this EPİAŞ plant. Nothing changed."
 msgstr "Bu santral zaten bu EPİAŞ santraline bağlı. Hiçbir şey değişmedi."
 
+msgid "Fixture accounts are available only in development."
+msgstr "Deneme hesapları yalnızca geliştirme ortamında kullanılabilir."
+
+msgid "This account already exists. Select the existing account."
+msgstr "Bu hesap zaten var. Mevcut hesabı seçin."
+
+msgid "The account changed. Reload this page."
+msgstr "Hesap değişti. Bu sayfayı yeniden yükleyin."
+
+msgid ""
+"This API key is already stored on the account %(account)s. Use that account "
+"instead."
+msgstr ""
+"Bu API anahtarı zaten %(account)s hesabında kayıtlı. Bunun yerine o hesabı "
+"kullanın."
+
 msgid "The account changed. Reload before confirming recovery."
 msgstr "Hesap değişti. Kurtarmayı onaylamadan önce sayfayı yeniden yükleyin."
 
@@ -2707,9 +2661,6 @@ msgid "The provider delay changed. Reload before confirming recovery."
 msgstr ""
 "Sağlayıcı beklemesi değişti. Kurtarmayı onaylamadan önce sayfayı yeniden "
 "yükleyin."
-
-msgid "This account already exists. Select the existing account."
-msgstr "Bu hesap zaten var. Mevcut hesabı seçin."
 
 msgid "This provider binding is no longer current."
 msgstr "Bu sağlayıcı bağlantısı artık güncel değil. Sayfayı yeniden yükleyin."
@@ -2721,6 +2672,280 @@ msgstr ""
 "Bu bağlantı şu anda doğrulanıyor. Sonucu görmek için sayfayı bir dakika "
 "sonra yeniden yükleyin."
 
+msgid "Enter an API key without spaces, up to 1024 characters."
+msgstr "Boşluk içermeyen, en fazla 1024 karakterlik bir API anahtarı girin."
+
+msgid "A bounded capacity-only equivalence authorization is required."
+msgstr ""
+"Yalnızca kapasite farkını onaylayan, sınırlı uzunlukta bir yetkilendirme "
+"gereklidir."
+
+msgid "The plant has no approved connection to normalize onto."
+msgstr "Santralin ölçeklenecek onaylı bir bağlantısı yok."
+
+msgid "Reference power must be nonnegative numeric kW or missing."
+msgstr ""
+"Referans güç negatif olmayan bir kW değeri olmalı ya da boş bırakılmalıdır."
+
+msgid "Scaled reference power must be finite."
+msgstr "Ölçeklenen referans güç sonlu olmalıdır."
+
+msgid "The file is not valid JSON."
+msgstr "Dosya geçerli bir JSON değil."
+
+msgid "The file contains a NUL character."
+msgstr "Dosya bir NUL karakteri içeriyor."
+
+msgid ""
+"Interval power reaches %(power)s kW, above the reference capacity of "
+"%(capacity)s kW; check that the file is in kW."
+msgstr ""
+"Aralık gücü %(power)s kW değerine ulaşıyor ve %(capacity)s kW referans "
+"kapasitesini aşıyor; dosyanın kW cinsinden olduğunu kontrol edin."
+
+msgid "This file was already imported on %(date)s by %(actor)s."
+msgstr "Bu dosya %(date)s tarihinde %(actor)s tarafından zaten içe aktarıldı."
+
+msgid "Intervals before the provider archive starts on 2007-01-01."
+msgstr "Aralıklar, sağlayıcı arşivinin başladığı 2007-01-01 tarihinden önce."
+
+msgid ""
+"Every interval stays below 1% of the reference capacity; check the file's "
+"unit."
+msgstr ""
+"Tüm aralıklar referans kapasitenin %1'inin altında kalıyor; dosyanın "
+"birimini kontrol edin."
+
+msgid "The plant is not approved with this reference connection."
+msgstr "Santral bu referans bağlantısıyla onaylı değil."
+
+msgid "The target is not the plant's current approved connection."
+msgstr "Hedef, santralin güncel onaylı bağlantısı değil."
+
+msgid "The source and the target are the same connection."
+msgstr "Kaynak ve hedef aynı bağlantı."
+
+msgid "The provider account is not a Solcast account."
+msgstr "Sağlayıcı hesabı bir Solcast hesabı değil."
+
+msgid "The provider account has no recorded service authorization."
+msgstr "Sağlayıcı hesabının kayıtlı bir hizmet yetkilendirmesi yok."
+
+msgid "The reference connection has not been validated."
+msgstr "Referans bağlantısı doğrulanmadı."
+
+msgid "The target connection has not been validated."
+msgstr "Hedef bağlantı doğrulanmadı."
+
+msgid "The source connection was never validated."
+msgstr "Kaynak bağlantı hiç doğrulanmadı."
+
+msgid "The source connection is not healthy."
+msgstr "Kaynak bağlantı sağlıklı değil."
+
+msgid "The reference capacity and power basis are not verified."
+msgstr "Referans kapasitesi ve güç esası doğrulanmadı."
+
+msgid "The provider site settings have not been checked."
+msgstr "Sağlayıcıdaki saha ayarları kontrol edilmedi."
+
+msgid ""
+"The reference connection uses a DC power basis; an AC basis is required."
+msgstr "Referans bağlantısı DC güç esasını kullanıyor; AC esası gereklidir."
+
+msgid "The target connection must use an AC power basis."
+msgstr "Hedef bağlantı AC güç esasını kullanmalıdır."
+
+msgid "The connections differ in more than their capacity: %(field)s."
+msgstr "Bağlantılar kapasite dışında da farklı: %(field)s."
+
+msgid "Both capacities must be finite and positive."
+msgstr "Her iki kapasite de sonlu ve pozitif olmalıdır."
+
+msgid "The capacities are equal; there is nothing to rescale."
+msgstr "Kapasiteler eşit; ölçeklenecek bir şey yok."
+
+msgid "Both connections must declare their DC capacity."
+msgstr "Her iki bağlantı da DC kapasitesini bildirmelidir."
+
+msgid "The DC to AC ratio differs between the connections."
+msgstr "DC/AC oranı bağlantılar arasında farklı."
+
+msgid "Write only. An existing account's key is replaced on its page."
+msgstr ""
+"Yalnızca yazılır. Mevcut bir hesabın anahtarı kendi sayfasında değiştirilir."
+
+msgid ""
+"The plant or its connection changed while saving, so nothing was saved. "
+"Reload this page."
+msgstr ""
+"Kaydederken santral ya da bağlantısı değiştiği için hiçbir şey kaydedilmedi."
+" Bu sayfayı yeniden yükleyin."
+
+msgid "Power stays within the reference capacity"
+msgstr "Güç referans kapasitesinin içinde kalıyor"
+
+msgid "Power is plausible for the reference capacity"
+msgstr "Güç referans kapasitesine göre makul"
+
+msgid "The file was not imported before"
+msgstr "Dosya daha önce içe aktarılmadı"
+
+msgid "Historical data saved."
+msgstr "Geçmiş veriler kaydedildi."
+
+msgid "This file was already imported."
+msgstr "Bu dosya zaten içe aktarıldı."
+
+msgid "Provider accounts"
+msgstr "Sağlayıcı hesapları"
+
+msgid "New Solcast API key"
+msgstr "Yeni Solcast API anahtarı"
+
+msgid "Write only. It is never shown again."
+msgstr "Yalnızca yazılır. Bir daha gösterilmez."
+
+msgid "Replace the key for every plant that uses this account"
+msgstr "Bu hesabı kullanan tüm santraller için anahtarı değiştir"
+
+msgid ""
+"API key replaced. The account's plants are revalidated automatically within "
+"the daily request budget."
+msgstr ""
+"API anahtarı değiştirildi. Hesabın santralleri günlük istek bütçesi içinde "
+"otomatik olarak yeniden doğrulanır."
+
+msgid "Manage the provider account"
+msgstr "Sağlayıcı hesabını yönet"
+
+msgid ""
+"Saving a changed setup creates a new pending revision that must be validated"
+" and approved again. Saving the same setup changes nothing."
+msgstr ""
+"Değiştirilmiş bir kurulumu kaydetmek, yeniden doğrulanması ve onaylanması "
+"gereken yeni bir bekleyen revizyon oluşturur. Aynı kurulumu kaydetmek hiçbir"
+" şeyi değiştirmez."
+
+msgid "This plant cannot take imported history yet"
+msgstr "Bu santral henüz içe aktarılan geçmiş verileri alamaz"
+
+msgid "passed"
+msgstr "geçti"
+
+msgid "failed"
+msgstr "başarısız"
+
+msgid "Key revision"
+msgstr "Anahtar revizyonu"
+
+msgid "Requests today (UTC)"
+msgstr "Bugünkü istekler (UTC)"
+
+msgid "Left today"
+msgstr "Bugün kalan"
+
+msgid "Still needed by forecasts and revalidations today"
+msgstr "Bugün tahminlerin ve yeniden doğrulamaların hâlâ ihtiyaç duyduğu"
+
+msgid "Account state"
+msgstr "Hesap durumu"
+
+msgid ""
+"The provider rejected the current key. Replace the key to resume collection."
+msgstr ""
+"Sağlayıcı mevcut anahtarı reddetti. Veri toplamaya devam etmek için anahtarı"
+" değiştirin."
+
+msgid ""
+"Another account already holds this key, or it could not be read. Replace "
+"this key with the account's own key."
+msgstr ""
+"Bu anahtar başka bir hesapta zaten kayıtlı ya da okunamadı. Bu anahtarı "
+"hesabın kendi anahtarıyla değiştirin."
+
+msgid "Next attempt:"
+msgstr "Sonraki deneme:"
+
+msgid "Plants using this account"
+msgstr "Bu hesabı kullanan santraller"
+
+msgid "Validated with the current key"
+msgstr "Mevcut anahtarla doğrulandı"
+
+msgid "Health"
+msgstr "Sağlık"
+
+msgid "Yes"
+msgstr "Evet"
+
+msgid "No"
+msgstr "Hayır"
+
+msgid "No plant uses this account."
+msgstr "Bu hesabı kullanan santral yok."
+
+msgid "Purpose"
+msgstr "Amaç"
+
+msgid "Outcome"
+msgstr "Sonuç"
+
+msgid "Requests"
+msgstr "İstekler"
+
+msgid "No request today."
+msgstr "Bugün istek yok."
+
+msgid "Replace this key"
+msgstr "Bu anahtarı değiştir"
+
+msgid ""
+"The new key replaces the current one for every plant that uses this account."
+" The plants are then revalidated automatically within the daily request "
+"budget."
+msgstr ""
+"Yeni anahtar, bu hesabı kullanan tüm santraller için mevcut anahtarın yerini"
+" alır. Santraller ardından günlük istek bütçesi içinde otomatik olarak "
+"yeniden doğrulanır."
+
+msgid "Replace API key"
+msgstr "API anahtarını değiştir"
+
+msgid "Clear the provider delay"
+msgstr "Sağlayıcı beklemesini kaldır"
+
+msgid ""
+"Clear this delay only after confirming recovery with the provider. The daily"
+" request budget is preserved."
+msgstr ""
+"Bu beklemeyi yalnızca sağlayıcıyla kurtarmayı doğruladıktan sonra kaldırın. "
+"Günlük istek bütçesi korunur."
+
+msgid "Account history"
+msgstr "Hesap geçmişi"
+
+msgid "key revision"
+msgstr "anahtar revizyonu"
+
+msgid "No recorded change."
+msgstr "Kayıtlı değişiklik yok."
+
+msgid ""
+"Each account's key and daily request budget are shared by every plant that "
+"uses it. Budgets count requests per UTC day."
+msgstr ""
+"Her hesabın anahtarı ve günlük istek bütçesi, onu kullanan tüm santrallerce "
+"paylaşılır. Bütçeler istekleri UTC gününe göre sayar."
+
+msgid "Requests today"
+msgstr "Bugünkü istekler"
+
+msgid "Disabled"
+msgstr "Devre dışı"
+
+msgid "Key rejected"
+msgstr "Anahtar reddedildi"
 msgid "The session changed in another tab. The page now shows the current session."
 msgstr "Oturum başka bir sekmede değişti. Sayfa artık geçerli oturumu gösteriyor."
 
@@ -3012,6 +3237,20 @@ msgstr "Geçersiz kalibrasyon verisi"
 msgid "Ready"
 msgstr "Hazır"
 
+msgid ""
+"No provider account yet. An account is added with the first plant that uses "
+"it."
+msgstr ""
+"Henüz sağlayıcı hesabı yok. Bir hesap, onu kullanan ilk santralle eklenir."
+
+msgid ""
+"%(counter)s approved plant waits for revalidation with the current key."
+msgid_plural ""
+"%(counter)s approved plants wait for revalidation with the current key."
+msgstr[0] ""
+"%(counter)s onaylı santral mevcut anahtarla yeniden doğrulanmayı bekliyor."
+msgstr[1] ""
+"%(counter)s onaylı santral mevcut anahtarla yeniden doğrulanmayı bekliyor."
 msgid "Insufficient"
 msgstr "Yetersiz"
 

@@ -2,12 +2,12 @@ import pytest
 from django.urls import reverse
 
 from pyracast.connections.models import BindingHealth, SiteBinding
-from pyracast.connections.operations import rotate_secret
 from pyracast.plants.approval import ReviewDecision, decide_review
 from pyracast.platform_admin.read_models import overview_context, plant_list_context
 from pyracast.regions.operations import request_location_change, submit_region
 from tests.support.api import verified_admin
 from tests.support.domain import make_system
+from tests.support.providers import replace_key
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -51,7 +51,7 @@ def test_the_plant_list_filters_plants_with_a_pending_location_change() -> None:
 
 def test_the_activity_feed_names_provider_account_events() -> None:
     system = make_system()
-    rotate_secret(system.admin, system.account.pk, "test-only-replacement-key")
+    replace_key(system.admin, system.account.pk, "test-only-replacement-key")
 
     activity = overview_context()["recent_activity"]
 

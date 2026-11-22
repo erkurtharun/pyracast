@@ -1,11 +1,11 @@
 import pytest
 from django.test import Client
 
-from pyracast.connections.operations import rotate_secret
 from pyracast.plants.models import PlantConfiguration, PlantEvent, PlantSubmission
 from pyracast.plants.operations import EDIT_BLOCK_MESSAGES, PlantEditBlock
 from pyracast.regions.models import Region
 from tests.support.plant_operations import make_plant
+from tests.support.providers import replace_key
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -22,7 +22,7 @@ def test_a_plant_without_a_current_approved_binding_refuses_edits_with_the_reaso
     if change == "approval_revoked":
         Region.objects.filter(pk=system.region.pk).update(status="suspended")
     else:
-        rotate_secret(system.admin, system.account.pk, "test-only-rotated-key")
+        replace_key(system.admin, system.account.pk, "test-only-rotated-key")
 
     client = Client()
     client.force_login(system.member)

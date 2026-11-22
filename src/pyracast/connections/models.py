@@ -31,6 +31,9 @@ class ProviderAccount(models.Model):
     provider = models.CharField(max_length=30, choices=Provider)
     external_account_id = models.CharField(max_length=200)
     encrypted_api_key = models.CharField(max_length=2048, blank=True, default="")
+    # Empty for an account without a key and for one whose key another account already holds.
+    api_key_fingerprint = models.CharField(max_length=64, null=True, editable=False)
+    revalidation_due_at = models.DateTimeField(null=True)
     daily_quota = models.PositiveIntegerField(default=MAX_DAILY_QUOTA)
     enabled = models.BooleanField(default=True)
     credential_revision = models.PositiveIntegerField(default=1)
@@ -46,6 +49,9 @@ class ProviderAccount(models.Model):
                 canonical_account_identity("provider"),
                 canonical_account_identity("external_account_id"),
                 name="%(class)s_provider_external_account_id_uniq",
+            ),
+            models.UniqueConstraint(
+                fields=("api_key_fingerprint",), name="%(class)s_api_key_fingerprint_uniq"
             ),
             models.CheckConstraint(
                 condition=models.Q(provider=Provider.FIXTURE, encrypted_api_key="")

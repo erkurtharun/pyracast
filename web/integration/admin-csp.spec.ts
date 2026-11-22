@@ -144,8 +144,7 @@ test("an MFA administrator reviews plants and operations on desktop and mobile u
             (element) => (element as HTMLInputElement).willValidate,
         ),
     ).toBe(false);
-    await expect(apiKey).toBeEnabled();
-    await apiKey.clear();
+    await expect(apiKey).toBeDisabled();
     await page
         .locator("summary")
         .filter({ hasText: "Replace connection" })
@@ -199,6 +198,13 @@ test("an MFA administrator reviews plants and operations on desktop and mobile u
         page.getByRole("button", { name: /retry|resend/i }),
     ).toHaveCount(0);
     await checkPage(page, testInfo, "admin-operations-desktop");
+    await page
+        .getByRole("link", { name: "Provider accounts", exact: true })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Provider accounts", level: 1 }),
+    ).toBeVisible();
+    await checkPage(page, testInfo, "admin-provider-accounts-desktop");
     await page.getByRole("link", { name: "Settings", exact: true }).click();
     await expect(
         page.getByRole("heading", { name: "Settings", exact: true }),
