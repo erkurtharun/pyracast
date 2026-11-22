@@ -75,7 +75,7 @@ test("the app manifest and icons are served as files with their own type and rev
         ["/app/icon-512.png", "image/png"],
         ["/app/icon-512-maskable.png", "image/png"],
         ["/app/apple-touch-icon.png", "image/png"],
-    ]) {
+    ] as const) {
         const response = await request.get(file);
         expect(response.status(), file).toBe(200);
         const headers = response.headers();
