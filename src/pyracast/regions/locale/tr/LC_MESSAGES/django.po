@@ -23,12 +23,6 @@ msgstr "En fazla 200 karakterlik bir santral adı girin."
 msgid "A reason of at most 1000 characters is required."
 msgstr "Gerekçe en fazla 1000 karakter olmalıdır."
 
-msgid "A region name of at most 200 characters is required."
-msgstr "En fazla 200 karakterlik bir konum adı girin."
-
-msgid "A replacement affects every plant using the selected account."
-msgstr "Değişiklik, seçili hesabı kullanan tüm santralleri etkiler."
-
 msgid "A timezone-aware ISO 8601 timestamp is required."
 msgstr "Saat dilimi içeren bir ISO 8601 zamanı girin."
 
