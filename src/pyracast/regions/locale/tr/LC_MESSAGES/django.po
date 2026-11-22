@@ -3312,4 +3312,4 @@ msgid "Forecast check"
 msgstr "Tahmin kontrolü"
 
 msgid "Provider wait cleared. Queued collection can resume within the remaining quota."
-msgstr "Sağlayıcı beklemesi kaldırıldı. Sıradaki toplama kalan kota içinde sürebilir."
+msgstr "Sağlayıcı beklemesi kaldırıldı. Sıradaki veri toplama kalan kota içinde devam edebilir."
