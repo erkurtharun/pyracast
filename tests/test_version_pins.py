@@ -232,24 +232,66 @@ def test_development_postgresql_runs_the_major_version_production_runs() -> None
     assert f'"/var/lib/postgresql/{major}/docker"' in start_postgres
 
 
-def apk_commands(path: str) -> list[list[str]]:
-    instructions = (ROOT / path).read_text(encoding="utf-8").replace("\\\n", " ").splitlines()
-    return [
-        list(shlex.shlex(instruction.removeprefix("RUN "), posix=True, punctuation_chars=True))
-        for instruction in instructions
-        if instruction.startswith("RUN ") and "apk" in instruction
-    ]
+def apk_commands(dockerfile: str) -> list[list[str]]:
+    commands = []
+    for instruction in dockerfile.replace("\\\n", " ").splitlines():
+        run = re.fullmatch(r"\s*RUN\s+(.*)", instruction, re.I)
+        if run:
+            command = list(shlex.shlex(run[1], posix=True, punctuation_chars=True))
+            if command[:1] == ["apk"]:
+                commands.append(command)
+    return commands
+
+
+def uncached_pinned_install(command: list[str]) -> bool:
+    packages = command[3:]
+    return (
+        command[:3] == ["apk", "add", "--no-cache"]
+        and bool(packages)
+        and all(re.fullmatch(r"[a-z0-9][\w.+-]*>=\d[\w.]*-r\d+", package) for package in packages)
+    )
+
+
+@pytest.mark.parametrize(
+    ("dockerfile", "commands"),
+    [
+        ("RUN apk add --no-cache 'a>=1-r0'", [["apk", "add", "--no-cache", "a>=1-r0"]]),
+        ("run apk add b", [["apk", "add", "b"]]),
+        ("RUN\tapk add b", [["apk", "add", "b"]]),
+        ("  RUN apk \\\n  add b", [["apk", "add", "b"]]),
+        ("RUN make apkindex", []),
+        ("RUN echo apk", []),
+        ("# RUN apk add b", []),
+    ],
+)
+def test_apk_commands_are_run_instructions_whose_command_is_apk(
+    dockerfile: str, commands: list[list[str]]
+) -> None:
+    assert apk_commands(dockerfile) == commands
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "apk add 'a>=1-r0'",
+        "apk add --no-cache",
+        "apk add --no-cache a",
+        "apk add --no-cache --allow-untrusted 'a>=1-r0'",
+        "apk add --no-cache 'a>=1-r0' --repository=https://example.com",
+        "apk add --no-cache 'a>=1-r0' && apk upgrade",
+        "apk upgrade --no-cache 'a>=1-r0'",
+    ],
+)
+def test_an_install_outside_the_supported_form_is_refused(command: str) -> None:
+    assert not uncached_pinned_install(*apk_commands(f"RUN {command}"))
 
 
 def test_the_postgresql_image_adds_packages_uncached_at_a_quoted_minimum_version() -> None:
-    for command in apk_commands("deploy/postgres/Dockerfile"):
-        packages = [token for token in command[2:] if not token.startswith("-")]
-        assert command[:2] == ["apk", "add"], command
-        assert "--no-cache" in command, command
-        assert packages, command
-        assert all(
-            re.fullmatch(r"[a-z0-9][\w.+-]*>=\d[\w.]*-r\d+", package) for package in packages
-        ), command
+    commands = apk_commands((ROOT / "deploy/postgres/Dockerfile").read_text(encoding="utf-8"))
+
+    assert commands
+    for command in commands:
+        assert uncached_pinned_install(command), command
 
 
 def test_ci_clusters_run_the_production_postgresql_image() -> None:
