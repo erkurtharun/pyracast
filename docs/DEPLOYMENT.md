@@ -631,6 +631,26 @@ fixtures do not establish provider access or inbox delivery.
   pruning in production. Monitor registry/backup/log retention and adjust
   deliberately to control cost.
 
+### App worker
+
+A browser that opened the app keeps the service worker served at `/app/sw.js`
+(`web/public/app/sw.js`) and fetches that address again at every navigation under `/app/`, so
+every release serves it: an answer other than the script leaves the installed worker in place
+for good. The release a failed one falls back to serves it as well, since every release from
+the installable app on does. The address answers `text/javascript` with `no-store` and its own
+policy; the container smoke pins those headers, the manifest and the icons.
+
+- **Withdrawal:** a release that copies `web/testing/sw-withdraw.js` over
+  `web/public/app/sw.js` and removes the registering module (`web/src/lib/worker-registration.tsx`
+  and its mount in `web/src/app/app/layout.tsx`). Each browser installs it at its next navigation
+  or update check; it unregisters itself and reloads no window. `npm run test:production` in
+  `web/` proves this path against a production build.
+- **Rollback:** a revert of the faulty change through CI and Release, never an older image and
+  never a revert of the worker as a whole.
+- **Watch:** CSP reports for `worker-src` and the status of `/app/sw.js` and the manifest. A
+  `worker-src` report from the application's own registration, or the worker's notice reported
+  while `/health/ready/` is green, starts a withdrawal or a rollback.
+
 ### Alert events
 
 The host scripts write these events to the `pyracast-operations` log; `deploy/operations_events.py`
