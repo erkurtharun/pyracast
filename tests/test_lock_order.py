@@ -8,11 +8,12 @@ from typing import Any
 import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
-from django.db import connection
+from django.db import connection, transaction
 
 from pyracast.accounts.invitations import accept_workspace_invitation, invitation_digest
-from pyracast.accounts.models import Membership, WorkspaceInvitation
+from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
 from pyracast.accounts.operations import remove_workspace_member
+from pyracast.accounts.retention import reclaim_signup
 from pyracast.erasure import erase_account
 from pyracast.metering.operations import disconnect_epias
 from pyracast.plants import training
@@ -31,6 +32,9 @@ WORKSPACE = frozenset({"accounts_tenant", "regions_region", "plants_plant"})
 ROW_LOCK = re.compile(
     r"\bFOR (?:NO KEY UPDATE|UPDATE|SHARE|KEY SHARE)(?: OF (?P<of>.+?))?(?: NOWAIT| SKIP LOCKED)?$"
 )
+# An UPDATE or DELETE locks the person rows it writes.
+PERSON_WRITE = re.compile(r'^(?:UPDATE|DELETE FROM) "auth_user"\s')
+PERSON_ID = re.compile(r'"auth_user"\."id" (?:= %s|IN \((?:%s, )*%s\))')
 
 
 def locked_tables(sql: str) -> set[str]:
@@ -43,28 +47,58 @@ def locked_tables(sql: str) -> set[str]:
     return set(re.findall(r'\b(?:FROM|JOIN) "(\w+)"', sql[: match.start()]))
 
 
+def person_ids(sql: str, params: Any) -> frozenset[object] | None:
+    """The person ids a statement names by placeholder, or None when it names none."""
+    match = PERSON_ID.search(sql)
+    if match is None or not params:
+        return None
+    start = sql[: match.start()].count("%s")
+    return frozenset(params[start : start + match[0].count("%s")])
+
+
 @dataclass
 class LockOrder:
     locked: set[str] = field(default_factory=set)
-    # The statements that lock a person after their transaction locked a workspace row.
+    # The statements that, after their transaction locked a workspace row, lock a person or
+    # write a person row the transaction had not locked.
     late: list[str] = field(default_factory=list)
+
+
+@dataclass
+class _Transaction:
+    outer: object = None
+    workspace: bool = False
+    # The person ids locked so far; None once a lock named no ids and so may hold any person.
+    persons: frozenset[object] | None = frozenset()
+
+    def holds(self, ids: frozenset[object] | None) -> bool:
+        if self.persons is None:
+            return True
+        return bool(self.persons) if ids is None else ids <= self.persons
 
 
 @contextmanager
 def lock_order() -> Iterator[LockOrder]:
     order = LockOrder()
-    state: dict[str, Any] = {"outer": None, "workspace": False}
+    state = _Transaction()
 
-    def inspect(execute: Callable[..., Any], sql: str, *args: Any) -> Any:
+    def inspect(execute: Callable[..., Any], sql: str, params: Any, *args: Any) -> Any:
+        nonlocal state
         outer = connection.atomic_blocks[0] if connection.atomic_blocks else None
-        if outer is None or outer is not state["outer"]:
-            state.update(outer=outer, workspace=False)
+        if outer is None or outer is not state.outer:
+            state = _Transaction(outer=outer)
         tables = locked_tables(sql)
         order.locked |= tables
-        if PERSON in tables and state["workspace"] and outer is not None:
+        ids = person_ids(sql, params)
+        locks_person = PERSON in tables or (
+            PERSON_WRITE.match(sql) is not None and not state.holds(ids)
+        )
+        if locks_person and state.workspace and outer is not None:
             order.late.append(sql)
-        state["workspace"] = state["workspace"] or bool(tables & WORKSPACE)
-        return execute(sql, *args)
+        if PERSON in tables:
+            state.persons = None if ids is None or state.persons is None else state.persons | ids
+        state.workspace = state.workspace or bool(tables & WORKSPACE)
+        return execute(sql, params, *args)
 
     with connection.execute_wrapper(inspect):
         yield order
@@ -159,6 +193,21 @@ def failure(monkeypatch: pytest.MonkeyPatch, system: System, plant: Plant) -> Ca
     return lambda: training.run_calibration(run.pk, NOW)
 
 
+def reclamation(
+    monkeypatch: pytest.MonkeyPatch, system: System, plant: Plant
+) -> Callable[[], object]:
+    applicant = User.objects.create_user(username="applicant", email="applicant@example.com")
+    User.objects.filter(pk=applicant.pk).update(date_joined=NOW - timedelta(days=8))
+    EmailAddress.objects.create(user=applicant, email=applicant.email, primary=True)
+    tenant = Tenant.objects.create(name="Applicant workspace")
+    Membership.objects.create(tenant=tenant, user=applicant, role=WorkspaceRole.ADMIN)
+
+    def reclaim() -> None:
+        assert reclaim_signup(applicant.pk, NOW)
+
+    return reclaim
+
+
 def requested_preparation(
     monkeypatch: pytest.MonkeyPatch, system: System, plant: Plant
 ) -> Callable[[], object]:
@@ -182,6 +231,7 @@ def requested_preparation(
         publication,
         failure,
         requested_preparation,
+        reclamation,
     ],
     ids=lambda operation: operation.__name__,
 )
@@ -198,3 +248,20 @@ def test_a_transaction_locks_a_person_before_any_workspace_row(
     assert PERSON in order.locked
     assert order.locked & WORKSPACE
     assert order.late == []
+
+
+@pytest.mark.parametrize("person_locked_first", [False, True])
+def test_a_person_row_written_after_a_workspace_lock_is_late_unless_locked_before(
+    person_locked_first: bool,
+) -> None:
+    person = User.objects.create(username="person")
+    tenant = Tenant.objects.create(name="Workspace")
+
+    with lock_order() as order, transaction.atomic():
+        if person_locked_first:
+            list(User.objects.select_for_update().filter(pk=person.pk))
+        list(Tenant.objects.select_for_update().filter(pk=tenant.pk))
+        User.objects.filter(pk=person.pk).update(first_name="Renamed")
+
+    writes = [sql for sql in order.late if sql.startswith('UPDATE "auth_user"')]
+    assert len(writes) == (0 if person_locked_first else 1)
