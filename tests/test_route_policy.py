@@ -303,6 +303,7 @@ def test_operations_document_the_refusals_their_policy_allows() -> None:
         {"application/json": {"schema": {"$ref": f"#/components/schemas/{name}"}}}
         for name in ("IncidentConflict", "PlantConflict")
     ]
+    outage_create = "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/"
     location = {"application/json": {"schema": {"$ref": "#/components/schemas/LocationRefusal"}}}
     located = {
         ("/api/tenants/{tenant_id}/sites/", "post"),
@@ -349,7 +350,9 @@ def test_operations_document_the_refusals_their_policy_allows() -> None:
                 assert "415" in responses
             for status, response in responses.items():
                 if status.startswith(("4", "5")) or status == "default":
-                    if status == "409":
+                    if status == "409" and (route, method) == (outage_create, "post"):
+                        assert response["content"] == error
+                    elif status == "409":
                         assert response["content"] in conflicts
                     elif status == "400" and (route, method) in located:
                         assert response["content"] == location
