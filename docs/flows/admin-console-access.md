@@ -1,17 +1,19 @@
-# Platform console access: MFA gate, SPA hand-off, shared shell and logout
+# Platform console access: MFA gate, SPA hand-off, confirmation, shared shell and logout
 
-A platform administrator reaches `/admin/` either through the SPA hand-off (`can_admin` in the session projection) or by opening a console URL directly. Django admits the request only for an active staff superuser whose session holds TOTP or recovery-code evidence for a live authenticator; everyone else is bounced to the SPA. The outcome is a server-rendered console page inside one shared shell, or a redirect to `/app/`.
+A platform administrator reaches `/admin/` either through the SPA hand-off (`can_admin` in the session projection) or by opening a console URL directly. Django admits the request only for an active staff superuser whose session holds TOTP or recovery-code evidence for a live authenticator; everyone else is bounced to the SPA. Every write needs a further, recent confirmation with an authenticator code. The outcome is a server-rendered console page inside one shared shell, or a redirect to `/app/`.
 
 ## Entry points
 
-- `/admin/login/` (any method) - `pyracast.admin.PlatformAdminSite.login`. Actor: anyone. Not wrapped by `admin_view`, and the override drops the `never_cache` of Django's `login`. Permitted admin goes to `admin:index`, all others to `/app/?next=/admin/`; body and `next` are ignored, but a POST still needs a CSRF token (`CsrfViewMiddleware`).
-- Every other console route (workspace pages, stock model admins, `jsi18n/`, `autocomplete/`, the catch-all) is wrapped by `AdminSite.admin_view`, which calls `PlatformAdminSite.has_permission` (Django's active and staff, plus superuser and `pyracast.accounts.security.has_verified_mfa`).
-- `POST /admin/logout/` - `PlatformAdminSite.workspace_logout` (`logout()` then `/app/`); replaces Django's logout in `get_urls`.
-- `GET|POST /admin/password_change/` - `RedirectView` to `/app/?account=security`; there is no admin password form.
-- `POST /admin/language/` - `PlatformAdminSite.language` (shell switcher, writes the account preference).
-- `web/src/components/dashboard.tsx` `DashboardView` (`enterAdministration`, `window.location.replace("/admin/")`) and the sidebar `Administration` link when `can_admin`.
-- Shell: `src/pyracast/regions/templates/admin/workspace/base.html` (extended by the workspace pages, the historical import page and the plant setup page), `admin-workspace.css`, `admin-workspace.js`.
-- Operator: `pyracast provision_admin_mfa` creates the TOTP factor without which no admin can sign in (`platform-admin-bootstrap`).
+- `GET|POST /admin/login/` - `pyracast.platform_admin.site.PlatformAdminSite.login` (`never_cache`, outside the gate). Actor: anyone. The return address `next` is kept only when `navigation.console_path` accepts it (same origin, under `/admin/`, no unsafe segments), else `/admin/`. A permitted administrator goes to it; an anonymous visitor to `/app/?next=<it>`; a signed-in account without console access to `/app/`, with an `authorization_denied` line (`platform_admin_required`, view `admin/login/`).
+- Every other console route (workspace pages, record browser, `jsi18n/`) is built by `PlatformAdminSite.admin_view`: Django's gate (`has_permission` = `authorization.has_platform_admin_session`), then `confirmed` for unsafe methods, then `failures.contained`.
+- `GET /admin/` - `PlatformAdminSite.landing`: follows once a console path a provider sign-in stored in the session (`CONSOLE_RETURN`, checked again with `console_path`), else renders the overview.
+- `GET|POST /admin/confirm/` - `pyracast.platform_admin.access.confirm`: asks for an authenticator or recovery code and returns to `next` (console paths only).
+- `POST /admin/logout/` - `access.logout` (`auth.logout`, then `/app/`); outside the gate.
+- `POST /admin/language/` - `access.language` (shell switcher; stores the account preference, returns to `next`).
+- `GET /admin/password_change/` - `RedirectView` to `/app/account/`.
+- SPA: `web/src/features/session/entry.tsx` `Entry` (at `/app/`, for `can_admin` it does `window.location.replace` to the checked `next` or `/admin/`) and the `Administration` link in `web/src/features/workspace/workspace-shell.tsx`.
+- Shell: `src/pyracast/regions/templates/admin/workspace/base.html`, `admin-workspace.css`, `admin-workspace.js`.
+- Operator: `pyracast bootstrap_admin` creates the administrator and its TOTP factor (`platform-admin-bootstrap`).
 
 ## Sequence
 
@@ -22,24 +24,29 @@ sequenceDiagram
     participant D as Django
     participant DB as PostgreSQL
     U->>D: "GET /admin/plants/"
-    D->>DB: "advisory lock, django_session, auth_user, usersessions upsert, mfa_authenticator"
+    D->>DB: "session advisory lock, django_session, auth_user, mfa_authenticator"
     alt active staff superuser, MFA record names a live authenticator
         D-->>U: "200 console page on base.html"
     else anonymous, customer, staff only or no MFA evidence
         D-->>U: "302 /admin/login/?next=/admin/plants/"
-        U->>D: "GET /admin/login/"
-        D-->>U: "302 /app/?next=/admin/"
+        U->>D: "GET /admin/login/?next=/admin/plants/"
+        D-->>U: "302 /app/?next=/admin/plants/"
         U->>S: "open /app/, sign in with password and TOTP"
         S->>D: "POST /api/auth/browser/v1/auth/login, then auth/2fa/authenticate"
         D->>DB: "store mfa authentication record in django_session"
         S->>D: "GET /api/session/"
         D-->>S: "can_admin true"
-        opt no workspace=customer, account=security, social_callback or invitation token
-            S-->>U: "location.replace /admin/"
+        opt no social_callback or stored invitation token
+            S-->>U: "location.replace /admin/plants/"
         end
     end
+    U->>D: "POST /admin/settings/ without a recent confirmation"
+    D-->>U: "403 confirmation page, nothing stored"
+    U->>D: "POST /admin/confirm/ with a code"
+    D->>DB: "lock account rows, check code, record reauthentication, rotate session key"
+    D-->>U: "302 back to the console page"
     U->>D: "POST /admin/logout/ with CSRF token"
-    D->>DB: "logout() flushes the django_session row"
+    D->>DB: "logout() deletes the django_session and device rows"
     D-->>U: "302 /app/"
 ```
 
@@ -47,44 +54,45 @@ sequenceDiagram
 
 | Table | R/W | What |
 | --- | --- | --- |
-| `django_session` | R/W | Session and allauth `account_authentication_methods` records (MFA evidence). `SessionLifetime` refreshes `last_activity_at` at most once a minute; `logout()` deletes the row. |
-| `auth_user` | R | `is_active`, `is_staff`, `is_superuser` read live per request. The language switch locks the row (`select_for_update`). |
-| `usersessions_usersession` | R/W | allauth `UserSessionsMiddleware` upserts ip, user agent and `last_seen_at` on every authenticated request; console logout leaves the row in place. |
-| `mfa_authenticator` | R | Evidence counts only while its authenticator id still exists for the same user. |
-| `accounts_userlanguagepreference` | R/W | `RequestLanguage` middleware reads the preference on every authenticated request; `POST /admin/language/` upserts it. |
+| `django_session` | R/W | Session and allauth `account_authentication_methods` records (MFA evidence and its `reauthenticated` marks); a confirmation rotates the key; `logout()` deletes the row. |
+| `usersessions_usersession` | R/W | Device record (ip, user agent, `last_seen_at`), rotated by a confirmation; logout deletes the session's row. |
+| `auth_user`, `account_emailaddress`, `socialaccount_socialaccount` | R | Role flags are read live per request. A confirmation and the language switch lock the account (`lock_account`). |
+| `mfa_authenticator` | R/W | Evidence counts only while its authenticator id still exists for the same user; a spent recovery code is marked used. |
+| `accounts_userlanguagepreference` | R/W | `POST /admin/language/` upserts it. |
 
 ## Authorization
 
-- Console gate: `has_permission` runs on every `admin_view` request, shell endpoints included, and again inside `each_context`. Role flags and the authenticator row are read live, so demotion or factor removal applies on the next click.
-- MFA evidence: `has_verified_mfa` needs an active user and a session record (bound to this user id) with method `mfa`, type `totp` or `recovery_codes`, whose id names a current authenticator of this user. It exists only after a completed MFA login or MFA reauthentication.
-- Login side: `AuthenticationBackend` and `SocialAccountAdapter` refuse staff or superusers without TOTP; `MFAAdapter.can_delete_authenticator`, `ManageTOTPView` and `PrivilegedAuthenticatorEnrollment` block removing or self-enrolling an admin factor.
-- SPA: `SessionUserOutput.get_can_admin` only steers navigation. `pyracast.api.views.PlatformAdmin` repeats the rule for `/api/platform/` without `is_staff`; operations re-check only `require_admin` (active superuser, no MFA).
-- CSRF: `CsrfViewMiddleware` (and `csrf_protect` inside `admin_view`) rejects a POST without token with 403 before the gate runs, `/admin/login/` included.
+- Console gate: `has_platform_admin_session` runs on every `admin_view` request, `confirm/` included. Role flags and the authenticator row are read live, so demotion or factor removal applies on the next click.
+- MFA evidence (`security.has_mfa_evidence`): an active user and a session record bound to this user with method `mfa`, type `totp` or `recovery_codes`, whose id names a current authenticator of the user.
+- Confirmation: every console request that is not GET, HEAD or OPTIONS, language switch included, needs `has_mfa_evidence(recent=True)`: a reauthentication by an enrolled authenticator within `ACCOUNT_REAUTHENTICATION_TIMEOUT` (300 s); a sign-in never counts. A change of the administrator's credential state ends confirmations given before it. Only sign-out and `confirm/` are exempt. The code is checked under the account's locks (`processes.confirmation`).
+- Console writes of business data take no account locks: one that passed its check before a credential change committed completes, and the next request is refused.
+- Login side: `AuthenticationBackend` and `SocialAccountAdapter` refuse staff or superusers without TOTP.
+- SPA: `SessionUserOutput.get_can_admin` uses the same predicate and only steers navigation; domain operations the console calls re-check `require_platform_admin` (active staff superuser, no MFA). `/admin/login/` and `get_can_admin` must keep equal rules, or `/admin/` and `/app/` would redirect to each other.
+- CSRF: `CsrfViewMiddleware` rejects a POST without token with 403 before the gate runs, `/admin/login/` and `/admin/logout/` included.
 
 ## Failure paths
 
 | Condition | Result |
 | --- | --- |
-| Anonymous, customer, staff without superuser, superuser without MFA evidence, inactive | 302 `/admin/login/?next=...` then 302 `/app/?next=/admin/`; POST bodies discarded |
-| Same, but the target is `/admin/logout/` | 302 `admin:index`; session is not cleared |
-| Logout or language via GET | 405 for a permitted admin; anyone else gets the gate redirect (first row) |
-| POST without CSRF token | 403 |
-| Language outside `en`, `tr` | 400 empty body |
-| Language `next` missing, not same-host or wrong scheme | Falls back to `/admin/` |
-| Idle over 30 min, age over 12 h or session markers missing | `SessionLifetime` calls `logout()`, request is anonymous (first row) |
-| Same session holds the advisory lock over 5 s | 429 JSON `session_busy`, `Retry-After: 1`, also on HTML pages |
-| Admin signs in with a stored invitation token | `AcceptInvitation` screen, no hand-off |
+| Anonymous, customer, staff without superuser, superuser without MFA evidence, inactive | 302 `/admin/login/?next=<path>`, then 302 `/app/?next=<path>` (anonymous) or `/app/` (signed in without access); POST bodies discarded |
+| Unsafe method on any gated route without recent confirmation | 403 confirmation page (HTML, also for scripts), nothing stored |
+| `confirm/` with a wrong code | 400, the form again; a valid code answers 302 to `next`; other methods 405 |
+| Logout or language via GET | 405 (logout for any identity; language after the gate) |
+| Language outside `en`, `tr` | 400 |
+| Idle over 30 min, age over 12 h or session markers missing | `SessionLifetime` records `session_expired` and calls `logout()`; the request is anonymous (first row) |
+| Same session holds the advisory lock over 5 s | 503 HTML page with `Retry-After: 1`; a write is never replayed |
+| Retryable database conflict or timeout on an unsafe request | Redirect to the referring console page with a retry notice (503 JSON when `Accept: application/json`); other database errors stay 500 |
+| Admin signs in with a stored invitation token or a provider return | Invitation screen or account page, no hand-off |
 
 ## Rules and invariants
 
-- The console has no login form. `?next=` is emitted but no frontend code reads it; the post-login hop works only through `can_admin`. The hand-off opt-out (`workspace=customer`, `account=security`) lives in the URL for one page load; nothing persists it.
-- MFA proof lives and dies with the session (30 min idle, 12 h absolute). There is no separate admin timeout or step-up. Every `logout()` emits the `logout` security log event.
-- `SessionRequestSerialization` takes a PostgreSQL advisory lock per well-formed session cookie, so console requests of one session run one at a time.
-- 18 stock model admins stay mounted behind the same gate on Django templates, not the shell; `RegionAdmin` and `RegionLocationChangeRequestAdmin` keep state-changing changelist actions (approve, reject, suspend). `password_change/done/` also survives.
-- `login` and `get_can_admin` must keep equal rules; if they diverged, `/admin/` and `/app/` would redirect to each other (no loop guard).
+- The console has no login form. `?next=` is validated twice (`console_path` server side, `consoleDestination` in `entry.tsx`).
+- MFA proof lives and dies with the session (30 min idle, 12 h absolute).
+- `SessionRequestSerialization` takes a PostgreSQL advisory lock per well-formed session cookie, so requests of one session run one at a time.
+- The stock model routes stay behind the same gate on Django templates (`admin-record-browser`).
 
 ## Tests
 
-- `tests/test_admin_workspace.py`: `test_workspace_requires_live_verified_platform_administrator`, `test_workspace_logout_returns_to_shared_sign_in_and_requires_csrf`; `tests/test_account_security.py`: `test_admin_has_no_independent_password_entry_point`, `test_mfa_evidence_is_bound_to_current_user_and_live_authenticator`. `tests/test_admin_mfa_bootstrap.py`: CSP, login and password_change redirects, `/api/platform/` rejection. `tests/test_session.py` (`can_admin` tracks live role and MFA), `tests/test_session_serialization.py` (real TOTP login opens `/admin/`), `tests/test_language.py`, `tests/test_admin_language_controls.py`.
-- Playwright: `web/tests/auth-registration.spec.ts`, `web/tests/responsive.spec.ts`, `web/integration/admin-csp.spec.ts` (live credentials: real login, navigation, setup-form script, language, mobile-menu sign-out).
-- Gaps: logout by a non-permitted user, `password_change/done/`, `social_callback` and invitation exemptions of `enterAdministration`, console behaviour after session expiry, `/admin/login/` caching headers.
+- `tests/test_console_navigation.py`, `tests/test_provider_console_return.py`, `tests/test_console_step_up.py` (stale evidence refused for every route and unsafe method, confirmation, language needs confirmation and sign-out does not), `tests/test_console_failures.py`, `tests/test_admin_workspace.py`.
+- Playwright: `web/tests/auth-registration.spec.ts`, `web/integration/admin-csp.spec.ts` (live credentials).
+- Gaps: browser coverage of the `social_callback` and invitation exemptions of `Entry`, and of console behaviour after session expiry.
