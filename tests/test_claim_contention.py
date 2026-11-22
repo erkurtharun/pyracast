@@ -1,3 +1,4 @@
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -12,6 +13,7 @@ from pyracast.accounts.models import OutboundMail, Tenant
 from pyracast.background.claims import claim_unless_contended
 from pyracast.connections import operations
 from pyracast.connections.models import ProviderAccount
+from pyracast.forecasts import revalidation
 from pyracast.forecasts import runtime as collection_runtime
 from pyracast.forecasts.jobs.ready import pending_job_ids
 from pyracast.forecasts.models import CollectionJob, ForecastSnapshot, RequestAttempt
@@ -35,7 +37,7 @@ from pyracast.plants.models import CalibrationRun
 from pyracast.plants.training import pending_calibration_ids
 from pyracast.regions.models import Region
 from tests.support.concurrency import row_locked_elsewhere, short_lock_timeout
-from tests.support.domain import NOW, FakeAdapter, make_system, provider_key
+from tests.support.domain import NOW, FakeAdapter, System, make_system, provider_key
 from tests.support.metering import connected
 from tests.support.notifications import SLOT, ready
 from tests.support.plant_operations import make_plant, request_run
@@ -150,19 +152,24 @@ def test_a_metering_delivery_behind_a_held_region_lock_ends_without_claiming(
     assert job.pk in pending_epias_ids(NOW)
 
 
-def test_a_revalidation_delivery_behind_a_held_account_lock_keeps_its_dispatch_lease(
-    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
-) -> None:
-    system = make_system(approved=True)
+def replaced_key_lease(system: System) -> datetime:
     operations.replace_api_key(
         system.admin, system.account.pk, provider_key("NEW"), expected_revision=1
     )
-    adapters: list[object] = []
-    monkeypatch.setattr("pyracast.providers.adapter_for", adapters.append)
     lease = ProviderAccount.objects.values_list("revalidation_due_at", flat=True).get(
         pk=system.account.pk
     )
     assert lease is not None
+    return lease
+
+
+def test_a_revalidation_delivery_behind_a_held_account_lock_keeps_its_dispatch_lease(
+    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    system = make_system(approved=True)
+    lease = replaced_key_lease(system)
+    adapters: list[object] = []
+    monkeypatch.setattr("pyracast.providers.adapter_for", adapters.append)
 
     with row_locked_elsewhere(ProviderAccount, system.account.pk), short_lock_timeout():
         deliver_revalidation(system.account.pk, lease.isoformat())
@@ -172,6 +179,23 @@ def test_a_revalidation_delivery_behind_a_held_account_lock_keeps_its_dispatch_l
     assert len(contended_lines(pyracast_logs, REVALIDATION.actor, system.account.pk)) == 1
     assert f"account_id={system.account.pk} outcome=contended" in pyracast_logs.text
     assert claim_due_revalidations(lease) == [system.account.pk]
+
+
+def test_a_revalidation_claim_that_failed_for_another_database_reason_still_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = make_system(approved=True)
+    lease = replaced_key_lease(system)
+    error = database_error(psycopg.errors.QueryCanceled())
+
+    def canceled(*args: object) -> ProviderAccount | None:
+        raise error
+
+    monkeypatch.setattr(revalidation, "_take_lease", canceled)
+
+    with pytest.raises(OperationalError) as raised:
+        deliver_revalidation(system.account.pk, lease.isoformat())
+    assert raised.value is error
 
 
 @pytest.mark.parametrize(
