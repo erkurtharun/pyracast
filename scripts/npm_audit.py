@@ -89,14 +89,21 @@ def load_exceptions(text: str) -> list[AuditException]:
     entries = json.loads(text)
     if not isinstance(entries, list):
         raise ValueError("Audit exceptions must be a list.")
+    seen: set[Advisory] = set()
     for entry in entries:
         if (
             not isinstance(entry, dict)
             or set(entry) != EXCEPTION_KEYS
             or not all(isinstance(value, str) for value in entry.values())
+            or not entry["advisory"].strip()
+            or not entry["package"].strip()
+            or date.fromisoformat(entry["expires"]).isoformat() != entry["expires"]
         ):
             raise ValueError(f"Malformed audit exception: {entry!r}")
-        date.fromisoformat(entry["expires"])
+        advisory = Advisory(entry["package"], entry["advisory"])
+        if advisory in seen:
+            raise ValueError(f"Duplicate audit exception: {advisory}")
+        seen.add(advisory)
     exceptions: list[AuditException] = entries
     return exceptions
 

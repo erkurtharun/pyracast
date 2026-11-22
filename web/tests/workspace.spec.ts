@@ -430,16 +430,14 @@ test("open regional and plant forecasts refresh after new data arrives", async (
 }) => {
     await page.clock.install();
     await mockApi(page);
-    let revised = false;
+    let reason = "forecast_unavailable";
     await page.route("**/api/**/forecast/**", async (route) => {
         await route.fulfill({
             json: {
                 timezone: region.timezone,
                 freshness: "missing",
                 result: null,
-                unavailable_reason: revised
-                    ? "estimated_actuals_unavailable"
-                    : "forecast_unavailable",
+                unavailable_reason: reason,
             },
         });
     });
@@ -456,14 +454,16 @@ test("open regional and plant forecasts refresh after new data arrives", async (
     await expect(
         page.getByRole("heading", { name: "No forecast for this day yet" }),
     ).toBeVisible();
-    revised = true;
+    reason = "estimated_actuals_unavailable";
     await page.clock.fastForward(30_000);
     await expect(
         page.getByRole("heading", {
             name: "No estimated actuals for this day",
         }),
     ).toBeVisible();
-    revised = false;
+    // The Generation view mounts with its cached answer and revalidates it; the tick below
+    // must come after that read has been applied, or the poll finds it still in flight.
+    reason = "configuration_unavailable";
     const generation = page.getByRole("button", {
         name: "Generation",
         exact: true,
@@ -471,9 +471,9 @@ test("open regional and plant forecasts refresh after new data arrives", async (
     await generation.click();
     await expect(generation).toHaveAttribute("aria-current", "page");
     await expect(
-        page.getByRole("heading", { name: "No forecast for this day yet" }),
+        page.getByRole("heading", { name: "No configuration for this day" }),
     ).toBeVisible();
-    revised = true;
+    reason = "estimated_actuals_unavailable";
     await page.clock.fastForward(30_000);
     await expect(
         page.getByRole("heading", {
@@ -678,7 +678,9 @@ test("Back while section changes load leaves the restored section in charge of i
     await settings.requested;
     await page.goBack();
     await expect(page).toHaveURL(/\/production\/$/);
-    await expect(page.getByLabel("Workspace")).toHaveValue("1");
+    await expect(
+        page.getByRole("combobox", { name: "Workspace", exact: true }),
+    ).toHaveValue("1");
     await expect(page.getByRole("main")).not.toBeEmpty();
     await production.release();
     await settings.release();

@@ -34,6 +34,7 @@ from pyracast.accounts.models import (
 )
 from pyracast.accounts.operations import reassign_workspace_admin, remove_workspace_member
 from pyracast.accounts.processes import lock_account
+from pyracast.errors import DomainError, ErrorCode
 from pyracast.notifications import recipients
 from pyracast.notifications.models import ReminderRecipientTie, ReminderSchedule
 from pyracast.notifications.recipients import recipient_key
@@ -378,6 +379,30 @@ def test_a_refused_removal_does_not_wait_for_the_members_account(
                 remove_workspace_member(actor, tenant.pk, viewer.pk, platform=platform)
 
     assert Membership.objects.filter(tenant=tenant, user=viewer).exists()
+
+
+@pytest.mark.parametrize("held", ["account", "workspace"])
+@pytest.mark.parametrize("platform", [False, True], ids=["self", "console"])
+def test_removing_the_administrator_is_refused_before_the_removal_takes_any_lock(
+    workspace: tuple[Tenant, User, User], held: str, platform: bool
+) -> None:
+    # A workspace-first writer that holds the workspace may lock the administrator's account
+    # next; a removal holding that account while it waits for the workspace would close a cycle.
+    tenant, administrator, _viewer = workspace
+    actor = User.objects.create_superuser(username="platform") if platform else administrator
+    row: tuple[type[Any], int] = (
+        (User, administrator.pk) if held == "account" else (Tenant, tenant.pk)
+    )
+
+    with (
+        row_locked_elsewhere(*row),
+        short_lock_timeout(),
+        pytest.raises(DomainError) as refused,
+    ):
+        remove_workspace_member(actor, tenant.pk, administrator.pk, platform=platform)
+
+    assert refused.value.code == ErrorCode.WORKSPACE_ADMIN_NOT_REMOVABLE
+    assert administrators(tenant) == [administrator.pk]
 
 
 def test_a_member_who_joins_while_being_removed_verifies_no_address_until_the_removal_ends(

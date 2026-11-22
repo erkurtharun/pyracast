@@ -39,7 +39,6 @@ IMAGES: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "Go": ("golang", ("deploy/gateway/Dockerfile",)),
     "Node.js": ("node", ("web/Dockerfile",)),
-    "PostgreSQL in development": ("postgres", ("scripts/start_postgres.py",)),
     "PostgreSQL in production and CI": ("postgres", ("deploy/postgres/Dockerfile",)),
     "Python": ("python", ("Dockerfile", ".github/workflows/ci.yml", "deploy/scan-images.sh")),
     "RabbitMQ": (
@@ -149,16 +148,10 @@ PINS: dict[str, list[Text | ActionInput]] = {
     ],
     "PostgreSQL in production and CI": [
         Text("deploy/postgres/Dockerfile", r"FROM postgres:(\d+\.\d+)-"),
-        Text("scripts/start_postgres.py", r'^THROWAWAY_ARCHIVE_VERSION = "(\d+\.\d+)"$'),
+        Text("scripts/start_postgres.py", r'^ARCHIVE_VERSION = "(\d+\.\d+)"$'),
         Text("docs/DEPLOYMENT.md", r"PostgreSQL (\d+\.\d+) on Alpine"),
         Text("docs/STACK.md", r"PostgreSQL (\d+\.\d+) \(production image and CI tests\)"),
         Text("docs/ARCHITECTURE.md", r"CI tests run production's (\d+\.\d+)"),
-    ],
-    "PostgreSQL in development": [
-        Text("scripts/start_postgres.py", r'"postgres:(\d+\.\d+)@'),
-        Text("scripts/start_postgres.py", r'^ARCHIVE_VERSION = "(\d+\.\d+)"$'),
-        Text("docs/ARCHITECTURE.md", r"PostgreSQL (\d+\.\d+) is the verified"),
-        Text("docs/STACK.md", r"and (\d+\.\d+) \(development cluster\)"),
     ],
     "RabbitMQ": [
         Text("deploy/rabbitmq/Dockerfile", rf"^FROM rabbitmq:{VERSION}@"),
@@ -224,32 +217,90 @@ def test_the_local_node_floor_admits_the_pinned_node_of_the_same_major() -> None
     assert floor[0] == pinned_node[0]
 
 
-def test_development_postgresql_runs_the_major_version_production_runs() -> None:
+def test_development_postgresql_keeps_the_data_location_of_the_production_major() -> None:
     major = single("PostgreSQL in production and CI").split(".")[0]
     start_postgres = (ROOT / "scripts/start_postgres.py").read_text(encoding="utf-8")
 
-    assert single("PostgreSQL in development").split(".")[0] == major
     assert f'"/var/lib/postgresql/{major}/docker"' in start_postgres
 
 
-def apk_commands(path: str) -> list[list[str]]:
-    instructions = (ROOT / path).read_text(encoding="utf-8").replace("\\\n", " ").splitlines()
-    return [
-        list(shlex.shlex(instruction.removeprefix("RUN "), posix=True, punctuation_chars=True))
-        for instruction in instructions
-        if instruction.startswith("RUN ") and "apk" in instruction
-    ]
+SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|"})
+
+
+def apk_commands(dockerfile: str) -> list[list[str]]:
+    commands = []
+    for instruction in dockerfile.replace("\\\n", " ").splitlines():
+        run = re.fullmatch(r"\s*RUN\s+(?:--\S+\s+)*(.*)", instruction, re.I)
+        if run is None:
+            continue
+        command: list[str] = []
+        for token in [*shlex.shlex(run[1], posix=True, punctuation_chars=True), ";"]:
+            if token not in SHELL_SEPARATORS:
+                command.append(token)
+                continue
+            if command[:1] == ["apk"]:
+                commands.append(command)
+            command = []
+    return commands
+
+
+def uncached_pinned_install(command: list[str]) -> bool:
+    packages = command[3:]
+    return (
+        command[:3] == ["apk", "add", "--no-cache"]
+        and bool(packages)
+        and all(re.fullmatch(r"[a-z0-9][\w.+-]*>=\d[\w.]*-r\d+", package) for package in packages)
+    )
+
+
+@pytest.mark.parametrize(
+    ("dockerfile", "commands"),
+    [
+        ("RUN apk add --no-cache 'a>=1-r0'", [["apk", "add", "--no-cache", "a>=1-r0"]]),
+        ("run apk add b", [["apk", "add", "b"]]),
+        ("RUN\tapk add b", [["apk", "add", "b"]]),
+        ("  RUN apk \\\n  add b", [["apk", "add", "b"]]),
+        ("RUN make apkindex", []),
+        ("RUN true && apk add b", [["apk", "add", "b"]]),
+        ("RUN --mount=type=cache,target=/var/cache/apk apk add b", [["apk", "add", "b"]]),
+        ("RUN apk add b; apk add c | tee log || true", [["apk", "add", "b"], ["apk", "add", "c"]]),
+        ("RUN echo apk", []),
+        ("# RUN apk add b", []),
+    ],
+)
+def test_apk_commands_are_run_instructions_whose_command_is_apk(
+    dockerfile: str, commands: list[list[str]]
+) -> None:
+    assert apk_commands(dockerfile) == commands
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "apk add 'a>=1-r0'",
+        "apk add --no-cache",
+        "apk add --no-cache a",
+        "apk add --no-cache --allow-untrusted 'a>=1-r0'",
+        "apk add --no-cache 'a>=1-r0' --repository=https://example.com",
+        "apk add --no-cache 'a>=1-r0' && apk upgrade",
+        "apk upgrade --no-cache 'a>=1-r0'",
+        "true && apk add b",
+        "--mount=type=cache,target=/var/cache/apk apk add b",
+    ],
+)
+def test_an_install_outside_the_supported_form_is_refused(command: str) -> None:
+    commands = apk_commands(f"RUN {command}")
+
+    assert commands
+    assert not all(uncached_pinned_install(found) for found in commands)
 
 
 def test_the_postgresql_image_adds_packages_uncached_at_a_quoted_minimum_version() -> None:
-    for command in apk_commands("deploy/postgres/Dockerfile"):
-        packages = [token for token in command[2:] if not token.startswith("-")]
-        assert command[:2] == ["apk", "add"], command
-        assert "--no-cache" in command, command
-        assert packages, command
-        assert all(
-            re.fullmatch(r"[a-z0-9][\w.+-]*>=\d[\w.]*-r\d+", package) for package in packages
-        ), command
+    commands = apk_commands((ROOT / "deploy/postgres/Dockerfile").read_text(encoding="utf-8"))
+
+    assert commands
+    for command in commands:
+        assert uncached_pinned_install(command), command
 
 
 def test_ci_clusters_run_the_production_postgresql_image() -> None:
@@ -261,23 +312,18 @@ def test_ci_clusters_run_the_production_postgresql_image() -> None:
     assert start_postgres.PRODUCTION_DOCKERFILE == ROOT / "deploy/postgres/Dockerfile"
 
 
-def test_the_one_remaining_postgresql_difference_is_the_shared_development_cluster() -> None:
-    # Running work shares the development cluster; it moves to production's minor deliberately.
+def test_no_image_source_names_another_postgresql_minor() -> None:
     production = single("PostgreSQL in production and CI")
-    development = single("PostgreSQL in development")
-    development_locations = {location.path for location in PINS["PostgreSQL in development"]}
 
     assert {
-        found.relative_to(ROOT).as_posix()
-        for path in (*IMAGE_SOURCES, "docs/ARCHITECTURE.md", "docs/STACK.md")
+        (found.relative_to(ROOT).as_posix(), version)
+        for path in IMAGE_SOURCES
         for found in ROOT.glob(path)
-        if re.search(
-            rf"postgres(?:ql)?:? ?{re.escape(development)}\b",
-            found.read_text(encoding="utf-8"),
-            re.I,
+        for version in re.findall(
+            r"postgres(?:ql)?:? ?(\d+\.\d+)\b", found.read_text(encoding="utf-8"), re.I
         )
-    } <= development_locations
-    assert release(development)[0] == release(production)[0]
+        if version != production
+    } == set()
 
 
 def test_the_build_backend_range_admits_the_pinned_uv() -> None:

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
-import AxeBuilder from "@axe-core/playwright";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
+import { accessibilityViolations } from "../tests/support/accessibility";
 
 test("a customer manages one plant site through the real API", async ({
     page,
@@ -90,11 +90,9 @@ test("a customer manages one plant site through the real API", async ({
         path: testInfo.outputPath("region-desktop.png"),
         fullPage: true,
     });
-    const regionA11y = await new AxeBuilder({ page })
-        .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
-        .analyze();
+    const regionA11y = await accessibilityViolations(page);
     expect(
-        regionA11y.violations.filter(
+        regionA11y.filter(
             (item) => item.impact === "critical" || item.impact === "serious",
         ),
     ).toEqual([]);
@@ -482,10 +480,8 @@ test("a customer manages one plant site through the real API", async ({
     await page
         .locator(".production-workspace")
         .screenshot({ path: testInfo.outputPath("production-mobile.png") });
-    const productionA11y = await new AxeBuilder({ page })
-        .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
-        .analyze();
-    expect(productionA11y.violations).toEqual([]);
+    const productionA11y = await accessibilityViolations(page);
+    expect(productionA11y).toEqual([]);
     await page.setViewportSize({ width: 1440, height: 1100 });
     await page.reload();
     await page.getByRole("button", { name: "Production", exact: true }).click();
@@ -562,11 +558,9 @@ test("a customer manages one plant site through the real API", async ({
             () => document.documentElement.scrollWidth <= window.innerWidth,
         ),
     ).toBe(true);
-    const mobileA11y = await new AxeBuilder({ page })
-        .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
-        .analyze();
+    const mobileA11y = await accessibilityViolations(page);
     expect(
-        mobileA11y.violations.filter(
+        mobileA11y.filter(
             (item) => item.impact === "critical" || item.impact === "serious",
         ),
     ).toEqual([]);

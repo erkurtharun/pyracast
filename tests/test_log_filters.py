@@ -88,6 +88,11 @@ def test_an_anchor_matches_only_at_the_start_or_end_of_the_whole_value() -> None
         ('jsonPayload.count=~"3"', 3),
         ("jsonPayload.count=nan", 3),
         ("jsonPayload.count=1_0", 10),
+        ("jsonPayload.name=projects/p/logs/x", "projects/p/logs/x"),
+        ("jsonPayload.name=a:b", "a:b"),
+        ('jsonPayload.message=~"a{,1001}"', "a"),
+        ('jsonPayload.message=~"[[:digit:]]"', "first line 1"),
+        ('jsonPayload.message=~"[[:alpha:][:digit:]]+"', "first line 1"),
     ],
 )
 def test_a_term_the_documentation_does_not_settle_is_refused(term: str, value: object) -> None:
@@ -104,8 +109,6 @@ def test_a_term_the_documentation_does_not_settle_is_refused(term: str, value: o
         'jsonPayload.message=~"^\\d"',
         'jsonPayload.message="first\\tline"',
         'jsonPayload.message:"\\x41"',
-        'jsonPayload.message=~"[[:digit:]]"',
-        'jsonPayload.message=~"[[:alpha:][:digit:]]+"',
         'jsonPayload.message=~"a{1001}"',
         'jsonPayload.message=~"a{2,1001}"',
         'jsonPayload.message=~"a{1001,}"',

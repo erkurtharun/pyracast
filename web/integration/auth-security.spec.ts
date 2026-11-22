@@ -87,13 +87,8 @@ test("verified email and a recovery code protect a real browser session", async 
     const setupKey = page.locator(".mfa-secret-code");
     await expect(setupKey).toBeVisible();
     const setupSecret = await setupKey.innerText();
-    await expect
-        .poll(() => Date.now() % 30_000, {
-            timeout: 31_000,
-            intervals: [100, 250, 500],
-        })
-        .toBeLessThan(25_000);
-    const code = totp(setupSecret);
+    // The server's authenticator clock is pinned to this instant, so the code cannot cross a step.
+    const code = totp(setupSecret, Number(process.env.BROWSER_TOTP_NOW) * 1000);
     await page.getByLabel("Authenticator code", { exact: true }).fill(code);
     await page.getByRole("button", { name: "Activate authenticator" }).click();
     await expect(setupKey).not.toBeVisible();
@@ -111,6 +106,10 @@ test("verified email and a recovery code protect a real browser session", async 
     const fourthRecoveryCode = await page
         .locator("main li code")
         .nth(3)
+        .innerText();
+    const fifthRecoveryCode = await page
+        .locator("main li code")
+        .nth(4)
         .innerText();
     await page.getByRole("button", { name: "Sign out" }).click();
     await page.getByLabel("Email", { exact: true }).fill(email);
@@ -233,7 +232,7 @@ test("verified email and a recovery code protect a real browser session", async 
         .click();
     await emailChange
         .getByLabel("Authenticator or recovery code")
-        .fill(totp(setupSecret));
+        .fill(fifthRecoveryCode);
     await emailChange
         .getByRole("button", { name: "Confirm authenticator" })
         .click();

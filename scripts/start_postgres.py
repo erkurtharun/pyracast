@@ -18,17 +18,10 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from uuid import uuid4
 
-# The development cluster that running work shares keeps its minor until it is upgraded on
-# purpose; throwaway clusters (CI) run production's minor and, on Linux, its base image.
-ARCHIVE_VERSION = "18.6"
-ARCHIVE_URL = "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260609"
-ARCHIVE_SHA256 = "e2246ba91d22345bc3d017586c09ede52d9df180b1eeb480f050445f1cad84e2"
-POSTGRES_IMAGE = (
-    "postgres:18.6@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42"
-)
-THROWAWAY_ARCHIVE_VERSION = "18.7"
-THROWAWAY_ARCHIVE_URL = "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260725"
-THROWAWAY_ARCHIVE_SHA256 = "74f3740a2e7844118857f297c2067d226f8f2b0652de96022ce54bb27cd60a79"
+# Every cluster runs production's minor: on Windows this archive, on Linux production's base image.
+ARCHIVE_VERSION = "18.7"
+ARCHIVE_URL = "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260725"
+ARCHIVE_SHA256 = "74f3740a2e7844118857f297c2067d226f8f2b0652de96022ce54bb27cd60a79"
 PRODUCTION_DOCKERFILE = Path(__file__).resolve().parents[1] / "deploy" / "postgres" / "Dockerfile"
 CONTAINER = "pyracast-postgres"
 EPHEMERAL_CONTAINER = "pyracast-postgres-ephemeral"
@@ -140,20 +133,17 @@ def accepts_connections(port: str) -> bool:
         return probe.connect_ex(("127.0.0.1", int(port))) == 0
 
 
-def install_binaries(root: Path, *, throwaway: bool = False) -> Path:
+def install_binaries(root: Path) -> Path:
     binary = root / "pgsql" / "bin"
     if (binary / "pg_ctl.exe").is_file():
         return binary
     root.mkdir(parents=True, exist_ok=True)
-    digest = THROWAWAY_ARCHIVE_SHA256 if throwaway else ARCHIVE_SHA256
     local_archive = os.environ.get("PYRACAST_POSTGRES_ARCHIVE")
     archive = Path(local_archive) if local_archive else root / "postgres.zip"
-    if not local_archive and throwaway:
-        urllib.request.urlretrieve(THROWAWAY_ARCHIVE_URL, archive)
-    elif not local_archive:
+    if not local_archive:
         urllib.request.urlretrieve(ARCHIVE_URL, archive)
     with archive.open("rb") as stream:
-        if hashlib.file_digest(stream, "sha256").hexdigest() != digest:
+        if hashlib.file_digest(stream, "sha256").hexdigest() != ARCHIVE_SHA256:
             raise RuntimeError("PostgreSQL archive checksum mismatch")
     with zipfile.ZipFile(archive) as source:
         for item in source.namelist():
@@ -162,6 +152,19 @@ def install_binaries(root: Path, *, throwaway: bool = False) -> Path:
     if not local_archive:
         archive.unlink()
     return binary
+
+
+def require_archive_version(binary: Path, env: dict[str, str]) -> None:
+    reported = execute(
+        [str(binary / "pg_ctl.exe"), "--version"], env=env, check=True, capture_output=True
+    ).stdout
+    found = re.search(r"\(PostgreSQL\) (\d+\.\d+)\b", reported)
+    if found is None or found[1] != ARCHIVE_VERSION:
+        raise RuntimeError(
+            f"The PostgreSQL binaries in {binary.parent} are not {ARCHIVE_VERSION}; nothing was "
+            f"changed. Stop the cluster, remove {binary.parent} (the data directory stays) and "
+            "rerun."
+        )
 
 
 def start_server(command: list[str], env: dict[str, str]) -> None:
@@ -202,16 +205,17 @@ def database_exists(binary: Path, port: str, env: dict[str, str]) -> bool:
     return found.strip() == "1"
 
 
-def provision_windows(
-    root: Path, port: str, options: tuple[str, ...], *, throwaway: bool = False
-) -> str:
+def provision_windows(root: Path, port: str, options: tuple[str, ...]) -> str:
     data = root / "data"
     cluster = (data / "PG_VERSION").is_file()
     if not cluster and data.exists() and any(data.iterdir()):
         raise RuntimeError(f"{data} is not a PostgreSQL cluster; nothing was changed.")
-    binary = install_binaries(root, throwaway=throwaway)
+    reused = (root / "pgsql" / "bin" / "pg_ctl.exe").is_file()
+    binary = install_binaries(root)
     env = os.environ.copy()
     env["PATH"] = os.pathsep.join((str(binary), str(binary.parent / "lib"), env.get("PATH", "")))
+    if reused:
+        require_archive_version(binary, env)
     if cluster and accepts_connections(port):
         status = "running"
     else:
@@ -282,6 +286,7 @@ def verify_windows_server(binary: Path, data: Path, port: str, env: dict[str, st
 
 @dataclass(frozen=True)
 class Container:
+    image: str
     running: bool
     volumes: frozenset[str]
     command: tuple[str, ...]
@@ -305,6 +310,7 @@ def inspect_container(docker: str, name: str) -> Container | None:
         "/var/lib/postgresql/18/docker",
     )
     return Container(
+        image=details["Config"].get("Image") or "",
         running=details["State"]["Running"] is True,
         volumes=frozenset(
             mount["Name"]
@@ -366,6 +372,12 @@ def provision_docker(
         raise RuntimeError(
             f"Container {name} does not publish only loopback port {port}; nothing was changed."
         )
+    image = production_image()
+    if existing is not None and existing.image != image:
+        raise RuntimeError(
+            f"Container {name} runs {existing.image}, not {image}; nothing was changed. Dump its "
+            f"data, remove the container and volume {volume}, rerun and restore the dump."
+        )
     if existing is not None and existing.running:
         wait_for_container(docker, name)
         return "running"
@@ -389,7 +401,7 @@ def provision_docker(
             "POSTGRES_DB=pyracast",
             "-e",
             "POSTGRES_HOST_AUTH_METHOD=trust",
-            POSTGRES_IMAGE if volume else production_image(),
+            image,
             *(("postgres", *options) if options else ()),
         )
         status = "created"
@@ -438,7 +450,7 @@ def main(argv: list[str] | None = None) -> None:
             if not root.exists():
                 root.mkdir(parents=True)
                 grant_current_user(root)
-        status = provision_windows(root, port, options, throwaway=arguments.ephemeral)
+        status = provision_windows(root, port, options)
         where = str(root)
     elif sys.platform == "linux":
         docker = shutil.which("docker")

@@ -262,9 +262,13 @@ test("the undo notice is gone after leaving the workspace and coming back", asyn
     );
     await deleteFromSettings(page);
     await expect(deletionNotice(page)).toBeVisible();
-    await page.getByLabel("Workspace").selectOption("2");
+    await page
+        .getByRole("combobox", { name: "Workspace", exact: true })
+        .selectOption("2");
     await expect(page).toHaveURL("/app/w/2/");
-    await page.getByLabel("Workspace").selectOption("1");
+    await page
+        .getByRole("combobox", { name: "Workspace", exact: true })
+        .selectOption("1");
     await expect(page).toHaveURL("/app/w/1/");
     await expect(
         page.getByRole("button", { name: "Add a plant" }),

@@ -6,8 +6,9 @@ import { mockApi, paged, plant, region, user } from "./support/workspace";
 const chunks = "**/_next/static/**/*.js";
 const englishCatalogue = (body: string) => body.includes("Calibration history");
 const turkishCatalogue = (body: string) => body.includes("Kalibrasyon geçmişi");
-const registering = (name: string) => (body: string) =>
-    new RegExp(`[\\w$]\\.s\\(\\[(?:[^\\]]*?,)?"${name}",`).test(body);
+// Code that reads the namespace's texts; a catalogue holds it as a key, not as an argument.
+const readingTexts = (namespace: string) => (body: string) =>
+    body.includes(`("${namespace}")`);
 
 // Every script is answered from the server; one that matches is held until `release` or `fail`, or
 // aborted, and after `release` or `fail` none is.
@@ -303,7 +304,11 @@ test("a link into an on-demand section keeps the plant header, tabs and back but
     page,
 }) => {
     await mockPlant(page);
-    const section = await interceptScript(page, registering("Outages"), "held");
+    const section = await interceptScript(
+        page,
+        readingTexts("Outages"),
+        "held",
+    );
     await page.goto("/app/w/1/plants/11/outages/", {
         waitUntil: "domcontentloaded",
     });
@@ -757,7 +762,22 @@ test("a language whose catalogue fails after the session ended reports nothing o
     await page.getByLabel("Language", { exact: true }).selectOption("tr");
     await turkish.reached;
     await endSessionElsewhere(page);
+    const failed = page.waitForEvent(
+        "requestfailed",
+        (request) => request.resourceType() === "script",
+    );
     await turkish.fail();
+    await failed;
+    // The failed import settles in the page after the request fails; the checks below come after
+    // the frames that follow it, so a report it caused would be on the screen.
+    await page.evaluate(
+        () =>
+            new Promise<void>((resolve) =>
+                requestAnimationFrame(() =>
+                    requestAnimationFrame(() => resolve()),
+                ),
+            ),
+    );
     await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
     await expect(
         page.getByRole("button", { name: "Reload page", exact: true }),

@@ -199,7 +199,9 @@ def _ties(account_id: int) -> models.QuerySet[ReminderRecipientTie]:
 def _entries(account_id: int, addresses: Collection[str]) -> models.QuerySet[ReminderRecipient]:
     """Reminder entries of the addresses no other account holds verified, and the entries tied
     only to the account's memberships, whatever address they hold. An entry keeps the address
-    as an administrator typed it, so it is matched and checked for a holder by its key."""
+    as an administrator typed it, so it is matched and checked for a holder by its key: it stays
+    while another account holds verified any address with that key, also one spelled
+    differently."""
     ties = ReminderRecipientTie.objects.filter(recipient=OuterRef("pk"))
     ours = _memberships(account_id)
     return ReminderRecipient.objects.filter(
@@ -211,6 +213,9 @@ def _entries(account_id: int, addresses: Collection[str]) -> models.QuerySet[Rem
 
 
 def _delivered(account_id: int, addresses: Collection[str]) -> models.QuerySet[DeliveryRecipient]:
+    """Delivery recipient rows of the addresses, matched by key like reminder entries: a row
+    stays while another account holds verified any address with that key, also one spelled
+    differently."""
     return DeliveryRecipient.objects.filter(
         Q(key__in={recipient_key(address) for address in addresses})
         & _unheld(account_id, "key", _keyed)
@@ -462,7 +467,7 @@ def erase_account(account_id: int, *, execute: bool) -> Erasure:
     rolled back, so the result reports what erasure would change."""
     if is_erased(User.objects.get(pk=account_id)):
         return Erasure(account_id, {}, already_erased=True)
-    # Refused before any lock: workspace writers lock the workspace before its administrator.
+    # Refused before any lock, so a refused erasure waits for no account or workspace.
     _refuse_administrator(account_id)
     try:
         with transaction.atomic():

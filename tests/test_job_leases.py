@@ -321,12 +321,32 @@ def test_an_interrupted_outbound_mail_is_released_before_it_is_claimed_again() -
     assert outbox._claim(mail.pk, later) is None
     assert lease_of(stored) == ("retry", 1, None)
     assert stored.get().last_error == "interrupted_connection"
+    assert lease_violations()["notifications_outboundmail"] == 0
     second = outbox._claim(mail.pk, later)
 
     assert second is not None
     assert second[1] != first[1]
     assert lease_of(stored) == ("sending", 2, second[1])
     assert stored.get().lease_expires_at == later + LEASE
+
+
+def test_an_outbound_mail_interrupted_after_its_marker_is_uncertain_and_keeps_its_lease() -> None:
+    mail = outbound_mail()
+    now = timezone.now()
+    first = outbox._claim(mail.pk, now)
+    assert first is not None
+    stored = OutboundMail.objects.filter(pk=mail.pk)
+    stored.update(transmit_started_at=now)
+    later = now + LEASE + timedelta(seconds=1)
+
+    assert pending_mail_ids(later) == [mail.pk]
+    assert outbox._claim(mail.pk, later) is None
+    assert lease_of(stored) == ("uncertain", 1, first[1])
+    assert stored.get().last_error == "interrupted_send"
+    assert lease_violations()["notifications_outboundmail"] == 0
+    assert pending_mail_ids(later) == []
+    assert outbox._claim(mail.pk, later) is None
+    assert lease_of(stored) == ("uncertain", 1, first[1])
 
 
 def test_the_background_commands_keep_their_names() -> None:

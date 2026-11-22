@@ -25,7 +25,7 @@ def test_an_mfa_administrator_reviews_a_plant_and_changes_settings_under_csp(
         web_gateway,
         BROWSER_ADMIN_EMAIL=accounts.system.admin.email,
         BROWSER_ADMIN_PASSWORD=accounts.password,
-        BROWSER_ADMIN_TOTP_SEED=accounts.admin_totp,
+        BROWSER_ADMIN_RECOVERY_CODES=accounts.admin_codes,
         BROWSER_REVIEW_REGION=str(review.region.pk),
     )
 
