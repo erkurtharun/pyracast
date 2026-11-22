@@ -214,6 +214,26 @@ def test_an_edge_authority_that_is_not_only_x509_certificates_is_refused(value: 
         host_contract.parse(host(origin_pull_ca=value))
 
 
+@pytest.mark.parametrize("email", ["ops@pyracast.app", "first.last+tls@mail.example.co.uk"])
+def test_an_acme_email_with_a_dotted_domain_is_accepted(email: str) -> None:
+    assert host_contract.parse(host(acme_email=email)).acme_email == email
+
+
+@pytest.mark.parametrize(
+    "email",
+    [
+        "ops@example..com",
+        "ops@.example.com",
+        "ops@example.com.",
+        "ops@example",
+        "ops@" + "." * 4096 + "x",
+    ],
+)
+def test_an_acme_email_whose_domain_has_an_empty_label_is_refused(email: str) -> None:
+    with pytest.raises(HostConfigError, match="acme_email must be an email address"):
+        host_contract.parse(host(acme_email=email))
+
+
 @pytest.mark.parametrize(
     ("values", "refusal"),
     [

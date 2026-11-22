@@ -1,7 +1,14 @@
 import { expect, test } from "@playwright/test";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import { ApiError } from "../src/lib/api/errors";
 import { keys } from "../src/lib/api/keys";
-import { fetchList, invalidate, pollInterval } from "../src/lib/api/query";
+import {
+    fetchList,
+    invalidate,
+    languagePlaceholder,
+    pollInterval,
+    sameRequest,
+} from "../src/lib/api/query";
 
 const sites = "/api/tenants/{tenant_id}/sites/";
 const forecast =
@@ -74,6 +81,72 @@ test("a request key carries its path parameters, query and language", () => {
     );
     expect(cached(client, keys.path("1:a", forecast, scope))).toHaveLength(1);
 });
+
+test("a request read in another language is the same request, one for another plant or day is not", () => {
+    const scope = { tenant_id: 5, region_id: 11, plant_id: 21 };
+    const read = (plant: number, date: string, locale: string) =>
+        keys.request(
+            "1:a",
+            forecast,
+            { path: { ...scope, plant_id: plant }, query: { date } },
+            locale,
+        );
+    const english = read(21, "2026-11-20", "en");
+    expect(sameRequest(english, read(21, "2026-11-20", "tr"))).toBe(true);
+    expect(sameRequest(english, read(22, "2026-11-20", "tr"))).toBe(false);
+    expect(sameRequest(english, read(21, "2026-11-21", "tr"))).toBe(false);
+    expect(
+        sameRequest(
+            keys.request("1:a", sites, { path: { tenant_id: 5 } }, "en"),
+            keys.request("2:b", sites, { path: { tenant_id: 5 } }, "tr"),
+        ),
+    ).toBe(false);
+});
+
+for (const status of [403, 404])
+    test(`rows whose request was refused with ${status} are not shown again in another language, rows still allowed are`, async () => {
+        const client = new QueryClient({
+            defaultOptions: { queries: { retry: false } },
+        });
+        const read = (locale: string) =>
+            keys.request("1:a", sites, { path: { tenant_id: 5 } }, locale);
+        const english = read("en");
+        const observer = new QueryObserver(client, {
+            queryKey: english,
+            queryFn: () => Promise.resolve("English rows"),
+        });
+        const unsubscribe = observer.subscribe(() => {});
+        const speak = (locale: string) => {
+            const queryKey = read(locale);
+            observer.setOptions({
+                queryKey,
+                queryFn: () => new Promise<string>(() => {}),
+                placeholderData: languagePlaceholder(queryKey),
+            });
+            return observer.getCurrentResult();
+        };
+        try {
+            await expect
+                .poll(() => observer.getCurrentResult().data)
+                .toBe("English rows");
+            const allowed = speak("tr");
+            expect(allowed.data).toBe("English rows");
+            expect(allowed.isPlaceholderData).toBe(true);
+
+            observer.setOptions({
+                queryKey: english,
+                queryFn: () =>
+                    Promise.reject(new ApiError("Refused.", { status })),
+            });
+            await observer.refetch();
+            expect(observer.getCurrentResult().error).toBeInstanceOf(ApiError);
+            const denied = speak("de");
+            expect(denied.data).toBeUndefined();
+            expect(denied.isPlaceholderData).toBe(false);
+        } finally {
+            unsubscribe();
+        }
+    });
 
 function json(body: unknown, status = 200) {
     return new Response(JSON.stringify(body), {

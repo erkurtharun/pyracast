@@ -1,7 +1,6 @@
 "use client";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import type { RegionScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { useErrorMessage } from "@/ui/form";
@@ -29,11 +28,18 @@ export function MoveToRecycleBin({
     const [step, setStep] = useState<Step>({ kind: "idle" });
     const heading = useRef<HTMLHeadingElement>(null);
     const opener = useRef<HTMLButtonElement>(null);
+    const returning = useRef(false);
     const confirming = step.kind === "confirming";
+    const idle = step.kind === "idle";
     useEffect(() => {
         if (confirming) heading.current?.focus();
     }, [confirming]);
-    if (step.kind === "idle")
+    useEffect(() => {
+        if (!idle || !returning.current) return;
+        returning.current = false;
+        opener.current?.focus();
+    }, [idle]);
+    if (idle)
         return (
             <button
                 ref={opener}
@@ -60,8 +66,8 @@ export function MoveToRecycleBin({
                     className="button secondary"
                     disabled={working}
                     onClick={() => {
-                        flushSync(() => setStep({ kind: "idle" }));
-                        opener.current?.focus();
+                        returning.current = true;
+                        setStep({ kind: "idle" });
                     }}
                 >
                     {t("cancel")}

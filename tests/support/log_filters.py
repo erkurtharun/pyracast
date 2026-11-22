@@ -18,6 +18,8 @@ STRING = re.compile(r'"((?:[^"\\]|\\.)*)"')
 PLACEHOLDER = re.compile(r"\$\{([\w.]+)\}")
 NUMBER = re.compile(r"-?[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?")
 WORD = re.compile(r"[A-Za-z]+")
+# The service needs quotes around a value with other characters, such as `/` or `:`.
+UNQUOTED = re.compile(r"\w+")
 # Words Python or Logging might read as a number; the documentation does not say.
 NUMBER_WORDS = {"nan", "inf", "infinity"}
 # RE2's largest repetition count.
@@ -93,7 +95,7 @@ def converted(text: str, quoted: bool, actual: object) -> object:
 def searched(pattern: str, actual: object) -> bool:
     if not isinstance(actual, str):
         raise UnsupportedTermError("a regular expression on a value that is not a string")
-    if "\\" in pattern or "(?" in pattern or "$" in pattern[:-1] or "[:" in pattern:
+    if any(part in pattern for part in ("\\", "(?", "[:", "{,")) or "$" in pattern[:-1]:
         raise UnsupportedTermError(f"{pattern!r} may read differently in RE2")
     if any(
         int(count or 0) > REPEAT_BOUND for bounds in REPEAT.findall(pattern) for count in bounds
@@ -112,6 +114,8 @@ def compared(operator: str, literal: str, actual: object) -> bool:
         if not quoted:
             raise UnsupportedTermError("a regular expression that is not a quoted string")
         return searched(text, actual)
+    if not quoted and not (UNQUOTED.fullmatch(text) or NUMBER.fullmatch(text)):
+        raise UnsupportedTermError(f"the unquoted value {text!r}")
     if operator == ":" and not isinstance(actual, str):
         raise UnsupportedTermError("`:` on a value that is not a string")
     expected = converted(text, quoted, actual)

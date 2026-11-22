@@ -1,15 +1,19 @@
+from collections import Counter
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from django.db.models import Exists, F, OuterRef, Q, QuerySet
 
+from pyracast.background.deadlines import DATABASE_LOCK_SECONDS, PROVIDER_REQUEST
+from pyracast.background.lease import held
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.forecasts.jobs.ready import WAITING
+from pyracast.forecasts.jobs.claim import LEASE_DURATION, attempts_used_up, claimable_from
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJob,
     CollectionJobStatus,
     CollectionSchedule,
+    ForecastSnapshot,
     RequestAttempt,
     RequestOutcome,
     RequestPurpose,
@@ -18,18 +22,20 @@ from pyracast.forecasts.scheduler import SLOT_FINAL_ERRORS
 from pyracast.forecasts.timing import (
     ForecastTiming,
     armed_again_by_validation,
+    awaits_validation,
     forecast_timing,
     latest_forecast_job,
     latest_forecast_slot,
+    on_the_schedule,
 )
 from pyracast.local_time import local_slot
 from pyracast.regions.models import RegionStatus, active_region
 
 OPEN = (CollectionJobStatus.PENDING, CollectionJobStatus.RETRY, CollectionJobStatus.RUNNING)
-ENDED = (CollectionJobStatus.SUCCEEDED, CollectionJobStatus.FAILED, CollectionJobStatus.STALE)
-# An unanswered validation attempt younger than this is still in flight: it outlasts the
-# whole-request read deadline of a provider answer (outbound.READ_DEADLINE_SECONDS).
-VALIDATION_IN_FLIGHT = timedelta(minutes=1)
+# An unanswered validation attempt younger than this is still in flight: the provider request
+# and the region and account lock waits before its answer commits. An answer committed later
+# checks the reserve again (validation.validate_binding).
+VALIDATION_IN_FLIGHT = PROVIDER_REQUEST + timedelta(seconds=2 * DATABASE_LOCK_SECONDS)
 
 
 def validations_in_flight(now: datetime) -> QuerySet[RequestAttempt]:
@@ -51,18 +57,23 @@ def approved_bindings(account: ProviderAccount) -> QuerySet[SiteBinding]:
     )
 
 
+def slot_day(slot: datetime) -> date:
+    """The UTC day whose bound a forecast job of the slot counts against, whenever it is sent."""
+    return slot.astimezone(UTC).date()
+
+
 def forecast_starts(binding_id: int, timing: ForecastTiming, utc_day: date) -> int:
-    """Forecast jobs the binding started on the UTC day; claim admits `len(timing.times)`."""
-    earlier = RequestAttempt.objects.filter(job_id=OuterRef("job_id"), utc_day__lt=utc_day)
+    """Sent forecast jobs of the binding's slots in the UTC day; claim admits
+    `len(timing.times)`."""
+    day_start = datetime.combine(utc_day, datetime.min.time(), UTC)
     return (
         RequestAttempt.objects.filter(
             binding_id=binding_id,
             purpose=RequestPurpose.FORECAST,
-            utc_day=utc_day,
-            job__isnull=False,
+            job__scheduled_for__gte=day_start,
+            job__scheduled_for__lt=day_start + timedelta(days=1),
         )
         .exclude(job_id=timing.first_job_id)
-        .exclude(Exists(earlier))
         .values("job_id")
         .distinct()
         .count()
@@ -75,8 +86,26 @@ def started_jobs(timing: ForecastTiming, job_ids: list[int]) -> set[int]:
     return {pk for pk in job_ids if pk == timing.first_job_id or pk in sent}
 
 
+def _answered() -> Exists:
+    """The job's provider answer is stored: collection publishes it without a request
+    (jobs.collect._collect_leased)."""
+    return Exists(ForecastSnapshot.objects.filter(job=OuterRef("pk")))
+
+
+def _request_out() -> Exists:
+    """The request a worker made since claim took the job's lease is in flight or answered. A
+    lease is taken once per claim for LEASE_DURATION and never extended."""
+    return Exists(
+        RequestAttempt.objects.filter(
+            job=OuterRef("pk"),
+            outcome__in=(RequestOutcome.UNCERTAIN, RequestOutcome.SUCCEEDED),
+            created_at__gte=OuterRef("lease_expires_at") - LEASE_DURATION,
+        )
+    )
+
+
 def _jobs_still_sent(
-    binding: SiteBinding, timing: ForecastTiming, now: datetime
+    binding: SiteBinding, timing: ForecastTiming, now: datetime, *, scheduled: bool
 ) -> dict[datetime, CollectionJob | None]:
     day_start = datetime.combine(now.astimezone(UTC).date(), datetime.min.time(), UTC)
     day_end = day_start + timedelta(days=1)
@@ -89,24 +118,31 @@ def _jobs_still_sent(
             binding=binding,
             endpoint=CollectionEndpoint.FORECASTS,
             reference_import__isnull=True,
-        )
+        ).annotate(claimable=claimable_from(now), answered=_answered(), request_out=_request_out())
     )
-    attempted = set(
-        RequestAttempt.objects.filter(job__binding=binding, utc_day=day_start.date()).values_list(
-            "job_id", flat=True
+
+    def sent_today(job: CollectionJob) -> bool:
+        """A worker holding the job's lease sends unless its request is out; claim takes any
+        other open job when it is ready and ends it unsent when it is older than the due slot, was
+        taken as often as it may be or, under a saved schedule, is off its clocks. A request
+        refused earlier today does not keep the job from being sent again."""
+        if job.status not in OPEN or job.__dict__["answered"]:
+            return False
+        if held(job, CollectionJobStatus.RUNNING, now):
+            return not job.__dict__["request_out"]
+        return (
+            job.__dict__["claimable"] < day_end
+            and (due is None or job.scheduled_for >= due)
+            and not attempts_used_up(job)
+            and (not scheduled or on_the_schedule(job, timing, binding.region.timezone))
         )
-    )
-    paid_or_ended = {
-        job.scheduled_for for job in jobs if job.pk in attempted or job.status in ENDED
-    }
+
     sent: dict[datetime, CollectionJob | None] = {
-        job.scheduled_for: job
-        for job in jobs
-        if job.status in OPEN
-        and job.pk not in attempted
-        and job.available_at < day_end
-        and not (job.status in WAITING and due is not None and job.scheduled_for < due)
+        job.scheduled_for: job for job in jobs if sent_today(job)
     }
+    # The scheduler opens a slot's job once (scheduler._schedule_forecast_slot), so a slot that
+    # has one is decided by it.
+    taken = {job.scheduled_for for job in jobs}
     zone = ZoneInfo(binding.region.timezone)
     day = day_start.astimezone(zone).date()
     last = (day_end - timedelta(microseconds=1)).astimezone(zone).date()
@@ -116,42 +152,56 @@ def _jobs_still_sent(
             if (
                 slot is not None
                 and max(now, timing.effective_from, day_start) <= slot < day_end
-                and slot not in paid_or_ended
+                and slot not in taken
             ):
                 sent.setdefault(slot, None)
         day += timedelta(days=1)
     if due is not None:
-        job = CollectionJob.objects.filter(
-            binding=binding, endpoint=CollectionEndpoint.FORECASTS, scheduled_for=due
-        ).first()
+        job = (
+            CollectionJob.objects.filter(
+                binding=binding, endpoint=CollectionEndpoint.FORECASTS, scheduled_for=due
+            )
+            .annotate(answered=_answered())
+            .first()
+        )
         if job is None or (
             job.status == CollectionJobStatus.STALE
             and job.last_error not in SLOT_FINAL_ERRORS
-            and job.pk not in attempted
+            and not job.__dict__["answered"]
         ):
             sent.setdefault(due, job)
     latest = latest_forecast_job(binding.pk, now).first()
-    if latest is not None and armed_again_by_validation(latest, due):
+    if latest is not None and armed_again_by_validation(
+        latest,
+        timing,
+        binding.region.timezone,
+        due,
+        awaited=awaits_validation(binding, binding.provider_account),
+    ):
         sent[latest.scheduled_for] = latest
     return sent
 
 
 def forecast_need(binding: SiteBinding, now: datetime, daily_quota: int) -> int:
-    """Forecast requests the binding still sends in the UTC day of `now`, as claim admits them."""
-    timing = forecast_timing(
-        binding,
-        CollectionSchedule.objects.filter(region_id=binding.region_id).first(),
-        daily_quota=daily_quota,
-    )
+    """Forecast requests the binding still sends in the UTC day of `now`, as claim admits them: a
+    job not sent yet needs a start of its slot's UTC day, also when it is carried past that day."""
+    schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
+    timing = forecast_timing(binding, schedule, daily_quota=daily_quota)
     if timing is None:
         return 0
-    sent = _jobs_still_sent(binding, timing, now)
+    sent = _jobs_still_sent(binding, timing, now, scheduled=schedule is not None)
     free = started_jobs(timing, [job.pk for job in sent.values() if job is not None])
-    starts = sum(1 for job in sent.values() if job is None or job.pk not in free)
-    left = max(
-        len(timing.times) - forecast_starts(binding.pk, timing, now.astimezone(UTC).date()), 0
+    starts = Counter(
+        slot_day(slot) for slot, job in sent.items() if job is None or job.pk not in free
     )
-    return len(sent) - starts + min(starts, left)
+    return (
+        len(sent)
+        - starts.total()
+        + sum(
+            min(count, max(len(timing.times) - forecast_starts(binding.pk, timing, day), 0))
+            for day, count in starts.items()
+        )
+    )
 
 
 def remaining_forecast_requests(

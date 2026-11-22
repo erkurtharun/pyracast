@@ -25,7 +25,7 @@ def test_a_platform_administrator_creates_a_workspace_with_a_plant_and_manages_m
         web_gateway,
         BROWSER_CONSOLE_EMAIL=accounts.console.email,
         BROWSER_ADMIN_PASSWORD=accounts.password,
-        BROWSER_CONSOLE_TOTP_SEED=accounts.console_totp,
+        BROWSER_CONSOLE_RECOVERY_CODES=accounts.console_codes,
         BROWSER_OTHER_TENANT=str(other.tenant.pk),
         BROWSER_REMOVABLE_MEMBER=other.removable.email,
     )

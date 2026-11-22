@@ -14,13 +14,14 @@ from django.db.models import Q
 from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
+from pyracast.background.claims import claim_unless_contended
 from pyracast.background.clock import Clock
 from pyracast.background.deadlines import ACTORS
 from pyracast.background.failures import log_failure
 from pyracast.background.lease import claimable, held, owns
 from pyracast.background.retry_policy import CALIBRATION
 from pyracast.connections.models import ProviderAccount
-from pyracast.plants.automation import attempt_promotion
+from pyracast.plants.automation import Enabler, attempt_promotion, lock_enabler
 from pyracast.plants.calibration_data import build_calibration_dataset, current_source_validation
 from pyracast.plants.calibration_runs import (
     OPEN_STATUSES,
@@ -62,8 +63,8 @@ class _Lease:
     tenant_id: int
 
 
-def _follow_up(plant: Plant, run: CalibrationRun, now: datetime) -> None:
-    attempt_promotion(plant, run, now)
+def _follow_up(plant: Plant, run: CalibrationRun, now: datetime, enabler: Enabler) -> None:
+    attempt_promotion(plant, run, now, enabler)
     request_preparation([run.plant_id], now)
 
 
@@ -88,6 +89,7 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
         return None
     tenant_id = identity.plant.region.tenant_id
     with transaction.atomic():
+        enabler = lock_enabler(identity.plant_id)
         Tenant.objects.select_for_update().get(pk=tenant_id)
         if not Region.objects.select_for_update().filter(pk=identity.plant.region_id).exists():
             return None
@@ -114,16 +116,17 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
             return None
         else:
             return _Lease(run, configuration, start_run(run, now, LEASE_DURATION), tenant_id)
-        _follow_up(plant, run, now)
+        _follow_up(plant, run, now, enabler)
         return None
 
 
-def _lock_calibration_records(lease: _Lease) -> tuple[Plant, CalibrationRun]:
+def _lock_calibration_records(lease: _Lease) -> tuple[Enabler, Plant, CalibrationRun]:
+    enabler = lock_enabler(lease.run.plant_id)
     Tenant.objects.select_for_update().get(pk=lease.tenant_id)
     Region.objects.select_for_update().get(pk=lease.configuration.binding.region_id)
     plant = Plant.objects.select_for_update().get(pk=lease.run.plant_id)
     run = CalibrationRun.objects.select_for_update().get(pk=lease.run.pk)
-    return plant, run
+    return enabler, plant, run
 
 
 def _holds_lease(run: CalibrationRun, lease: _Lease, now: datetime) -> bool:
@@ -136,7 +139,7 @@ def _holds_lease(run: CalibrationRun, lease: _Lease, now: datetime) -> bool:
 def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now: datetime) -> bool:
     clock = Clock(now)
     with transaction.atomic():
-        plant, run = _lock_calibration_records(lease)
+        enabler, plant, run = _lock_calibration_records(lease)
         ProviderAccount.objects.select_for_update().get(
             pk=lease.configuration.binding.provider_account_id
         )
@@ -159,14 +162,14 @@ def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now:
         finish_run(
             run, CalibrationStatus.SUPERSEDED if reason else result.status, now, reason or ""
         )
-        _follow_up(plant, run, now)
+        _follow_up(plant, run, now, enabler)
         return reason is None
 
 
 def _fail(lease: _Lease, now: datetime) -> None:
     clock = Clock(now)
     with transaction.atomic():
-        plant, run = _lock_calibration_records(lease)
+        enabler, plant, run = _lock_calibration_records(lease)
         now = clock.now()
         if not _holds_lease(run, lease, now):
             return
@@ -174,12 +177,12 @@ def _fail(lease: _Lease, now: datetime) -> None:
             requeue_run(run, CalibrationError.INVALID_CALIBRATION_DATA, now)
             return
         finish_run(run, CalibrationStatus.FAILED, now, CalibrationError.INVALID_CALIBRATION_DATA)
-        _follow_up(plant, run, now)
+        _follow_up(plant, run, now, enabler)
 
 
 def run_calibration(run_id: int, now: datetime | None = None) -> bool:
     clock = Clock(timezone.now() if now is None else now)
-    lease = _claim(run_id, clock.entered)
+    lease = claim_unless_contended("calibrate_plant", run_id, lambda: _claim(run_id, clock.entered))
     if lease is None:
         return False
     try:

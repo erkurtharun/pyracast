@@ -146,11 +146,25 @@ def test_an_exception_no_longer_reported_must_be_removed() -> None:
         json.dumps([{**exception(IN_PICOMATCH), "scope": "dev"}]),
         json.dumps([{**exception(IN_PICOMATCH), "package": 1}]),
         json.dumps([exception(IN_PICOMATCH, expires="next month")]),
+        json.dumps([exception(IN_PICOMATCH, expires="20261217")]),
+        json.dumps([exception(IN_PICOMATCH, expires="2026-W51-4")]),
+        json.dumps([{**exception(IN_PICOMATCH), "advisory": " "}]),
+        json.dumps([{**exception(IN_PICOMATCH), "package": ""}]),
     ],
 )
 def test_a_malformed_exceptions_file_fails(text: str) -> None:
     with pytest.raises(ValueError, match=EXCEPTION_ERRORS):
         load_exceptions(text)
+
+
+def test_two_exceptions_for_one_advisory_in_one_package_are_refused() -> None:
+    pair = [exception(IN_PICOMATCH), exception(IN_PICOMATCH, reason="Again.")]
+
+    with pytest.raises(
+        ValueError, match=r"^Duplicate audit exception: GHSA-aaaa-bbbb-cccc in picomatch$"
+    ):
+        load_exceptions(json.dumps(pair))
+    assert load_exceptions(json.dumps([exception(IN_PICOMATCH), exception(IN_NEXT)]))
 
 
 def test_the_committed_exceptions_load() -> None:

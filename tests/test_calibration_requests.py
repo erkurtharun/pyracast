@@ -278,11 +278,13 @@ def failing_promotions(monkeypatch: pytest.MonkeyPatch, failures: int) -> list[i
     original = automation.promote_automatic_calibration
     calls: list[int] = []
 
-    def fail_first(plant: Plant, candidate: CalibrationRun, now: datetime) -> bool:
+    def fail_first(
+        plant: Plant, candidate: CalibrationRun, now: datetime, enabler: automation.Enabler
+    ) -> bool:
         calls.append(candidate.pk)
         if len(calls) <= failures:
             raise RuntimeError("private promotion detail")
-        return original(plant, candidate, now)
+        return original(plant, candidate, now, enabler)
 
     monkeypatch.setattr(automation, "promote_automatic_calibration", fail_first)
     return calls

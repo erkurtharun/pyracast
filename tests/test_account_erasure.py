@@ -1,10 +1,11 @@
 import io
 import json
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import date, timedelta
 from functools import reduce
 from operator import or_
 from typing import Any
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -52,7 +53,12 @@ from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.accounts.processes import PROVIDER_SIGNUP_SESSION_KEY
 from pyracast.change_requests.models import ChangeRequest
 from pyracast.change_requests.operations import submit_production
+from pyracast.connections import operations as provider_operations
+from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.erasure import AdministersWorkspaceError, erase_account
+from pyracast.forecasts.models import RequestAttempt
+from pyracast.forecasts.revalidation import RevalidationOutcome, revalidate_account
+from pyracast.forecasts.validation import validate_binding
 from pyracast.incidents.models import IncidentRevision, PlantIncident
 from pyracast.notifications import outbox
 from pyracast.notifications.models import (
@@ -68,9 +74,11 @@ from pyracast.notifications.preparation import prepare_delivery
 from pyracast.notifications.recipients import recipient_key
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.orchestration import dispatcher
+from pyracast.plants.approval import approve_region
 from pyracast.plants.models import Plant, PlantSubmission
 from pyracast.plants.production_changes import ProductionChange
 from pyracast.regions.models import Region, RegionLocationChangeRequest
+from pyracast.regions.operations import configure_binding
 from tests.support.account_sessions import capture_security_events
 from tests.support.api import verified_admin
 from tests.support.auth_lifecycle import submit
@@ -82,7 +90,7 @@ from tests.support.concurrency import (
     row_locked_elsewhere,
     short_lock_timeout,
 )
-from tests.support.domain import NOW, System
+from tests.support.domain import NOW, FakeAdapter, System, make_system, provider_key
 from tests.support.notifications import SLOT, saved
 from tests.support.plant_operations import make_plant
 from tests.support.social_accounts import PROVIDERS, begin, complete, serve_provider_profile
@@ -1210,6 +1218,32 @@ def test_a_mail_row_held_by_another_client_while_another_account_verifies_its_ad
     assert list(OutboundMail.objects.values_list("pk", flat=True)) == [held.pk]
 
 
+def test_an_invitation_held_by_another_client_while_its_address_is_verified_elsewhere_is_kept() -> (
+    None
+):
+    earlier, current = "was.invited@example.com", "invited.now@example.com"
+    person = person_with(current)
+    newcomer = User.objects.create_user(username="newcomer", email="newcomer@example.com")
+    tenant, inviter = administered_workspace()
+    outbound(
+        OutboundMailKind.EMAIL_CHANGED,
+        earlier,
+        {"from_email": earlier, "to_email": current},
+        finished=True,
+    )
+    held = WorkspaceInvitation.objects.create(
+        tenant=tenant, email=earlier, created_by=inviter, expires_at=NOW + timedelta(days=7)
+    )
+
+    def hold_and_verify() -> None:
+        WorkspaceInvitation.objects.select_for_update().get(pk=held.pk)
+        EmailAddress.objects.create(user=newcomer, email=earlier, primary=True, verified=True)
+
+    behind_open_transaction(hold_and_verify, lambda: erase_account(person.pk, execute=True))
+
+    assert list(WorkspaceInvitation.objects.values_list("pk", flat=True)) == [held.pk]
+
+
 def test_erasure_reports_only_the_tables_it_changes() -> None:
     person = person_with("plain.person@example.com")
 
@@ -1552,6 +1586,73 @@ def test_the_console_and_the_api_show_kept_history_under_the_anonymized_name(
     )
     assert detail.status_code == 200
     assert detail.json()["proposed_by"] == {"id": person.pk, "name": name}
+
+
+def test_an_erased_provider_account_authorizer_is_shown_only_by_the_anonymized_name() -> None:
+    system = make_system()
+    person = person_with(PRIMARY, SECONDARY)
+    User.objects.filter(pk=person.pk).update(is_staff=True, is_superuser=True)
+    person.refresh_from_db()
+    account = provider_operations.create_account(
+        person,
+        provider="solcast",
+        external_account_id="authorized-owner",
+        api_key=provider_key("CURRENT"),
+        authorization_reference="Authorized service use",
+    )
+    binding = configure_binding(
+        person,
+        system.region.pk,
+        provider_account_id=account.pk,
+        site_id="authorized-site",
+        capacity_kw=1,
+        capacity_semantics_verified=True,
+        installation_date=date(2020, 1, 1),
+        settings_verification_reference="Verified site settings",
+    )
+    validate_binding(person, binding.pk, FakeAdapter(), timezone.now())
+    approve_region(person, system.region.pk, binding.pk, timezone.now())
+    provider_operations.replace_api_key(
+        person, account.pk, provider_key("REPLACEMENT"), expected_revision=1
+    )
+    lease = ProviderAccount.objects.get(pk=account.pk).revalidation_due_at
+    assert lease is not None
+
+    erase_account(person.pk, execute=True)
+    requests = MagicMock()
+    attempts = RequestAttempt.objects.filter(provider_account=account).count()
+
+    outcome = revalidate_account(
+        account.pk,
+        timezone.now(),
+        claim=lease,
+        adapter_for=lambda _: FakeAdapter(requests),
+    )
+
+    assert outcome == RevalidationOutcome.STOPPED
+    requests.assert_not_called()
+    assert RequestAttempt.objects.filter(provider_account=account).count() == attempts
+    assert ProviderAccount.objects.get(pk=account.pk).revalidation_due_at is None
+    assert SiteBinding.objects.get(pk=binding.pk).validated_credential_revision == 1
+    assert ProviderAccount.objects.get(pk=account.pk).authorized_by_id == person.pk
+    name = f"erased-{person.pk}"
+    client, _ = verified_admin()
+    account_page = client.get(reverse("admin:workspace_provider_account", args=(account.pk,)))
+    plant_page = client.get(reverse("admin:workspace_plant", args=(system.region.pk,)))
+
+    assert (account_page.status_code, plant_page.status_code) == (200, 200)
+    shown = {"account": account_page.content.decode(), "plant": plant_page.content.decode()}
+    assert [page for page, text in shown.items() if name not in text] == []
+    assert [page for page, text in shown.items() if ">None<" in text] == []
+    assert [
+        (page, value)
+        for page, text in shown.items()
+        for value in PERSONAL
+        if value.casefold() in text.casefold()
+    ] == []
+    history = shown["account"].split('id="history-title"', 1)[1]
+    assert history.count(name) == 2
+    assert "1 approved plant waits for revalidation with the current key." in shown["account"]
 
 
 @pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])

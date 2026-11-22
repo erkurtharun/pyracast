@@ -15,7 +15,7 @@ test("an MFA administrator reviews plants and operations on desktop and mobile u
         page,
         process.env.BROWSER_ADMIN_EMAIL!,
         process.env.BROWSER_ADMIN_PASSWORD!,
-        process.env.BROWSER_ADMIN_TOTP_SEED!,
+        process.env.BROWSER_ADMIN_RECOVERY_CODES!,
     );
     const session = await page.request.get("/api/session/");
     expect((await session.json()).user.can_admin).toBe(true);

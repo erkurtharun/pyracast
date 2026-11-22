@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from django.db import DatabaseError, transaction
 
+from pyracast.background.claims import claim_unless_contended
 from pyracast.background.clock import Clock
 from pyracast.background.failures import log_failure
 from pyracast.background.lease import RELEASED, owns
@@ -305,7 +306,7 @@ def collect[Prepared](
     hooks: PublicationHooks[Prepared],
 ) -> bool:
     progress = _Progress(Clock(now))
-    lease = claim(job_id, now)
+    lease = claim_unless_contended("collect_forecast", job_id, lambda: claim(job_id, now))
     if lease is None:
         return False
     try:

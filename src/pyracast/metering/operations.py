@@ -32,6 +32,13 @@ def member_plant(plant_id: int, actor: User) -> Plant:
     return plant
 
 
+def _lock_platform_admin(actor: User) -> None:
+    # The person's account before the workspace's rows, the order of member removal and erasure;
+    # the lock keeps the actor a platform administrator until the change commits. No key update:
+    # a workspace writer that commits a row naming this person does not wait for it.
+    require_platform_admin(User.objects.select_for_update(no_key=True).get(pk=actor.pk))
+
+
 @dataclass(frozen=True)
 class EpiasConnect:
     connection: EpiasConnection
@@ -61,9 +68,9 @@ def connect_epias(
         raise DomainError(ErrorCode.EPIAS_PLANT_IDENTITY_MISMATCH)
     settlement = provider.resolve_settlement_plant(selected.eic)
     with transaction.atomic():
+        _lock_platform_admin(actor)
         Region.objects.select_for_update().get(pk=plant.region_id)
         plant = Plant.objects.select_for_update().get(pk=plant.pk)
-        require_platform_admin(User.objects.select_for_update().get(pk=actor.pk))
         if (
             plant.region.deleted_at is not None
             or plant.current_configuration is None
@@ -122,9 +129,9 @@ def disconnect_epias(plant_id: int, *, actor: User) -> bool:
     require_platform_admin(actor)
     plant = Plant.objects.active().select_related("region").get(pk=plant_id)
     with transaction.atomic():
+        _lock_platform_admin(actor)
         Region.objects.select_for_update().get(pk=plant.region_id)
         Plant.objects.select_for_update().get(pk=plant.pk)
-        require_platform_admin(User.objects.select_for_update().get(pk=actor.pk))
         connection = EpiasConnection.objects.select_for_update().filter(plant=plant).first()
         if connection is None or not connection.enabled:
             return False

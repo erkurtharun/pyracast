@@ -9,6 +9,7 @@ from django.db.models import Case, F, Q, Value, When
 from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
+from pyracast.background.claims import claim_unless_contended
 from pyracast.background.clock import Clock
 from pyracast.background.deadlines import ACTORS
 from pyracast.background.failures import log_failure
@@ -130,42 +131,43 @@ def _mark_transmit(
         return True
 
 
-def process_notification(delivery_id: int, now: datetime) -> bool:
-    clock = Clock(now)
+def _claim(
+    delivery_id: int, clock: Clock
+) -> tuple[NotificationDelivery, EmailMultiAlternatives, uuid.UUID, datetime] | None:
     with transaction.atomic():
         _lock_workspace(delivery_id)
         limit = recipient_limit(lock=True)
         delivery = _locked_delivery(delivery_id)
         if delivery is None:
-            return False
+            return None
         now = clock.now()
         if delivery.status == NotificationDeliveryStatus.SENDING:
             if expired(delivery, now):
                 _recover_interrupted(delivery, now)
-            return False
+            return None
         if (
             delivery.status
             not in {NotificationDeliveryStatus.PENDING, NotificationDeliveryStatus.RETRY}
             or delivery.available_at > now
         ):
-            return False
+            return None
         addresses, reason = _authorize(delivery, limit)
         if reason:
             delivery.status, delivery.last_error = NotificationDeliveryStatus.SKIPPED, reason
             delivery.save()
-            return False
+            return None
         if now - delivery.scheduled_for > MAX_LATENESS:
             delivery.status, delivery.last_error = (
                 NotificationDeliveryStatus.SKIPPED,
                 NotificationDeliveryError.MISSED_SCHEDULE,
             )
             delivery.save()
-            return False
+            return None
         frozen = delivery.prepared_message is not None
         frozen_snapshot_id, frozen_at = delivery.snapshot_id, delivery.prepared_at
         try:
             if not prepare_delivery(delivery, now):
-                return False
+                return None
             message = build_message(delivery)
         except DatabaseError:
             raise
@@ -182,6 +184,17 @@ def process_notification(delivery_id: int, now: datetime) -> bool:
         token = take(delivery, NotificationDeliveryStatus.SENDING, now, LEASE_DURATION)
         delivery.transmit_started_at = None
         delivery.save()
+        return delivery, message, token, now
+
+
+def process_notification(delivery_id: int, now: datetime) -> bool:
+    clock = Clock(now)
+    claimed = claim_unless_contended(
+        "send_forecast_reminder", delivery_id, lambda: _claim(delivery_id, clock)
+    )
+    if claimed is None:
+        return False
+    delivery, message, token, now = claimed
     available_at = now
     error_code: str
     transmitting = False

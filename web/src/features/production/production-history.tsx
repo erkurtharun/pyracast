@@ -4,12 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import type { PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { cadence, useApiQuery } from "@/lib/api/query";
-import { useProposalKey } from "@/lib/idempotency";
 import type { components } from "@/lib/schema";
 import { productionExport } from "@/lib/exports";
 import { plantDay } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
-import { qualityOf } from "@/lib/production";
 import { CsvDownload } from "@/ui/csv-download";
 import { useExportPlant } from "@/ui/export-plant";
 import { CheckboxField, ControlField, useErrorMessage } from "@/ui/form";
@@ -20,19 +18,30 @@ import { ProductionDayNav } from "./history/day-nav";
 import { IntervalEditor } from "./history/interval-editor";
 import {
     daylightRows,
+    energyValue,
     intervalKey,
     mostFrequentReason,
-    reconcileEditor,
     saveFailure,
-    type Editor,
     type History,
     type Interval,
 } from "./history/model";
+import { ProposalDraft } from "./history/proposal-draft";
 import { ProductionTable } from "./history/production-table";
+import {
+    canAct,
+    controls,
+    dropped,
+    initialScreen,
+    locked,
+    reduceScreen,
+    type Access,
+    type ScreenEvent,
+} from "./history/screen";
 import { ProductionSourceDetails } from "./history/source-details";
 import { ProductionImport } from "./production-import";
 
 type ChangeRow = components["schemas"]["ProductionChangeRow"];
+type Bounds = Pick<Interval, "starts_at" | "ends_at">;
 
 export function ProductionHistory({
     scope,
@@ -57,7 +66,6 @@ export function ProductionHistory({
     const reason = useCodeLabel("ProductionHistory.reasons");
     const canManage = useCanManageWorkspace();
     const proposals = useTranslations("ChangeRequests");
-    const proposalKey = useProposalKey();
     const plant = useExportPlant();
     const [reconciled, setReconciled] = useState<History>();
     // The server builds days in the zone it answers with; the last answer bounds the day picker.
@@ -66,14 +74,23 @@ export function ProductionHistory({
     const date = shown(requestedDay);
     // A step taken while a day change loads continues from the day being navigated to.
     const stepFrom = shown(baseDay);
-    const [showFullDay, setShowFullDay] = useState(false);
-    const [editor, setEditor] = useState<Editor>({ status: "closed" });
-    const [message, setMessage] = useState("");
+    const access: Access = !configuration
+        ? "none"
+        : canManage
+          ? "direct"
+          : "propose";
+    const [screen, setScreen] = useState(() => initialScreen(date, access));
+    // Each message replaces the spoken node, so a message said again is announced again.
+    const [message, setSaid] = useState({ text: "", count: 0 });
+    const setMessage = (text: string) =>
+        setSaid((said) => ({ text, count: said.count + 1 }));
     // Saves whose reload of these rows is still running; no export is built from rows being reloaded.
     const [reloads, setReloads] = useState(0);
     const editButtons = useRef(new Map<string, HTMLButtonElement>());
     const pendingFocus = useRef<string | null>(null);
     const summaryRef = useRef<HTMLDivElement>(null);
+    const orphanCancel = useRef<HTMLButtonElement>(null);
+    const { editor, draft } = screen;
     const reading = useApiQuery(
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/",
         {
@@ -82,14 +99,33 @@ export function ProductionHistory({
         },
         { poll: editor.status === "closed" ? cadence.live : false },
     );
+    const apply = (event: ScreenEvent) =>
+        setScreen((current) => reduceScreen(current, event));
+    if (screen.day !== date || screen.access !== access) {
+        const shownDay = reduceScreen(screen, { type: "dayShown", day: date });
+        const next = reduceScreen(shownDay, { type: "accessChanged", access });
+        setScreen(next);
+        // An access change replaces the notice of an earlier one, or clears it when it dropped nothing.
+        if (screen.access !== access)
+            setMessage(
+                dropped(shownDay, next) ? t("access_dropped", { access }) : "",
+            );
+    }
     if (reading.data && reading.data !== reconciled) {
         const fresh = reading.data;
         setReconciled(fresh);
-        setEditor((previous) =>
-            reconcileEditor(previous, fresh, t("interval_changed")),
-        );
+        apply({ type: "rowsLoaded", day: date, history: fresh });
     }
     const history = reading.data;
+    const derived = controls(screen, history?.intervals);
+    const drafting = draft !== null;
+    useEffect(() => {
+        if (!drafting) return;
+        // A full page load drops the unsent draft, so the browser asks before leaving.
+        const keep = (event: BeforeUnloadEvent) => event.preventDefault();
+        window.addEventListener("beforeunload", keep);
+        return () => window.removeEventListener("beforeunload", keep);
+    }, [drafting]);
     useEffect(() => {
         if (editor.status !== "closed" || !history || !pendingFocus.current)
             return;
@@ -98,10 +134,19 @@ export function ProductionHistory({
         if (button && !button.disabled) button.focus();
         else summaryRef.current?.focus();
     }, [editor.status, history]);
+    useEffect(() => {
+        const active = document.activeElement;
+        // The editor's form is gone, so a focus lost with it moves to the editor's one control left.
+        if (
+            editor.status === "orphaned" &&
+            (!active || active === document.body)
+        )
+            orphanCancel.current?.focus();
+    }, [editor.status]);
     const rows = history?.intervals ?? [];
     const day = history?.days.find((day) => day.date === date);
     const daylight = daylightRows(rows, day?.daylight_windows ?? []);
-    const visibleRows = showFullDay || !daylight.length ? rows : daylight;
+    const visibleRows = screen.fullDay || !daylight.length ? rows : daylight;
     const hasValues = rows.some((row) => row.effective != null);
     const timeFormatter = format.intervals(
         history?.timezone ?? timezone,
@@ -115,15 +160,20 @@ export function ProductionHistory({
         ]),
     );
     const time = (value: string) => timeFormatter.format(new Date(value));
-    const intervalLabel = (row: Interval) =>
+    const intervalLabel = (row: Bounds) =>
         `${time(row.starts_at)}–${time(row.ends_at)}`;
-    const canAct = (row: Interval) =>
-        canManage ? row.can_edit : row.can_propose;
-    const saving =
-        editor.status === "saving" ||
-        editor.status === "reloading" ||
-        (editor.status === "orphaned" && editor.pendingWrite === true);
+    const staged = new Set(
+        draft && !derived.away ? draft.items.map((item) => item.key) : [],
+    );
+    const saving = locked(editor);
 
+    // Applies an event decided on the shown state; null when the screen refuses it.
+    function request(event: ScreenEvent) {
+        const next = reduceScreen(screen, event);
+        if (next === screen) return null;
+        setScreen(next);
+        return next;
+    }
     async function reloadAfterSave() {
         setReloads((count) => count + 1);
         try {
@@ -133,50 +183,53 @@ export function ProductionHistory({
         }
     }
     function selectDate(value: string) {
-        if (!value || value > yesterday || saving) return;
+        if (!value || value > yesterday || !derived.dayNav) return;
         onDay(value);
-        setEditor({ status: "closed" });
         setMessage("");
     }
-    function close(key: string) {
+    function cancel(key: string) {
+        if (request({ type: "cancel" })) pendingFocus.current = key;
+    }
+    function stage(row: Interval, action: "set" | "revert") {
+        const key = intervalKey(row);
+        const next = request({ type: "stage", row, action });
+        if (next?.editor.status !== "closed") return;
         pendingFocus.current = key;
-        setEditor({ status: "closed" });
+        setMessage(
+            proposals(staged.has(key) ? "stagedUpdated" : "staged", {
+                interval: intervalLabel(row),
+            }),
+        );
+    }
+    function unstage(key: string) {
+        const item = draft?.items.find((item) => item.key === key);
+        const next = item && request({ type: "remove", key });
+        if (!item || !next) return;
+        setMessage(
+            proposals("stagedRemoved", { interval: intervalLabel(item) }),
+        );
+        if (!next.draft) summaryRef.current?.focus();
+    }
+    function finish(text: string) {
+        setMessage(text);
+        summaryRef.current?.focus();
+    }
+    function editStaged(key: string) {
+        const row = rows.find((row) => intervalKey(row) === key);
+        // The editor opens in its row, so a row outside daylight brings the full day into view.
+        if (row)
+            request({ type: "open", row, reveal: !visibleRows.includes(row) });
     }
     async function reloadEditor() {
-        if (editor.status === "closed" || saving) return;
-        const attempt = { ...editor, implausible: false };
-        setEditor({ ...attempt, status: "reloading" });
+        const next = request({ type: "reload" });
+        if (next?.editor.status !== "reloading") return;
+        const { key } = next.editor;
+        setMessage("");
         try {
             const updated = await reading.reload();
-            const row = updated.intervals.find(
-                (row) => intervalKey(row) === attempt.key,
-            );
-            if (row && canAct(row)) {
-                setEditor({
-                    ...attempt,
-                    status: "editing",
-                    expectedRevision: row.revision_id,
-                    error: undefined,
-                });
-                setMessage(t("reloaded_draft_preserved"));
-            } else {
-                setEditor({
-                    ...attempt,
-                    status: "orphaned",
-                    error: t("interval_changed"),
-                    pendingWrite: false,
-                });
-            }
+            apply({ type: "rowsLoaded", day: date, history: updated });
         } catch (error) {
-            setEditor((current) =>
-                current.status === "orphaned" && current.key === attempt.key
-                    ? current
-                    : {
-                          ...attempt,
-                          status: "failed",
-                          error: errorMessage(error),
-                      },
-            );
+            apply({ type: "reloadFailed", key, message: errorMessage(error) });
         }
     }
     async function save(
@@ -184,47 +237,10 @@ export function ProductionHistory({
         action: "set" | "revert",
         confirmImplausible = false,
     ) {
-        if (
-            !configuration ||
-            !(canManage || row.can_propose) ||
-            saving ||
-            !history ||
-            !canAct(row) ||
-            (action === "revert" &&
-                !(canManage ? row.can_revert : row.can_propose_revert))
-        )
-            return;
-        const attempt =
-            editor.status !== "closed" && editor.key === intervalKey(row)
-                ? editor
-                : {
-                      key: intervalKey(row),
-                      energy: row.effective?.energy_mwh.toString() ?? "",
-                      quality: qualityOf(row.observation?.quality),
-                      expectedRevision: row.revision_id,
-                      reason: "",
-                  };
-        const energy = Number(attempt.energy.trim().replace(",", "."));
-        if (
-            action === "set" &&
-            (!attempt.energy.trim() || !Number.isFinite(energy) || energy < 0)
-        ) {
-            setEditor({
-                ...attempt,
-                status: "failed",
-                error: t("invalid_energy"),
-            });
-            return;
-        }
-        if (!canManage && !attempt.reason?.trim()) {
-            setEditor({
-                ...attempt,
-                status: "failed",
-                error: proposals("reasonRequired"),
-            });
-            return;
-        }
-        setEditor({ ...attempt, status: "saving" });
+        if (!configuration) return;
+        const attempt = request({ type: "save", row, action })?.editor;
+        if (attempt?.status !== "saving") return;
+        const energy = energyValue(attempt.energy);
         setMessage("");
         try {
             const change: ChangeRow = {
@@ -233,64 +249,32 @@ export function ProductionHistory({
                 expected_revision_id: attempt.expectedRevision,
                 action,
                 // An edit on this screen is the operator's value; a revert ignores quality and source.
-                ...(action === "set"
+                ...(action === "set" && energy !== null
                     ? { energy, quality: attempt.quality, source: "operator" }
                     : { quality: "valid", source: "operator" }),
             };
-            const payload = {
-                configuration_id: configuration,
-                unit: "MWh" as const,
-                changes: [change],
-            };
-            if (canManage) {
-                await api.post(
-                    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/changes/",
-                    {
-                        path: scope,
-                        body: {
-                            ...payload,
-                            confirm_implausible: confirmImplausible,
-                        },
+            await api.post(
+                "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/changes/",
+                {
+                    path: scope,
+                    body: {
+                        configuration_id: configuration,
+                        unit: "MWh",
+                        changes: [change],
+                        confirm_implausible: confirmImplausible,
                     },
-                );
-            } else {
-                const proposal = {
-                    ...payload,
-                    reason: attempt.reason?.trim() ?? "",
-                };
-                await api.post(
-                    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/change-requests/production/",
-                    {
-                        path: scope,
-                        body: {
-                            ...proposal,
-                            idempotency_key: proposalKey.forPayload(proposal),
-                        },
-                    },
-                );
-                proposalKey.reset();
-            }
-            pendingFocus.current = attempt.key;
-            setEditor({ status: "closed" });
-            setMessage(
-                canManage
-                    ? action === "revert"
-                        ? t("reverted")
-                        : t("saved")
-                    : proposals("submitted"),
+                },
             );
+            pendingFocus.current = attempt.key;
+            apply({ type: "saved" });
+            setMessage(action === "revert" ? t("reverted") : t("saved"));
             await reloadAfterSave();
         } catch (error) {
-            setEditor((current) =>
-                current.status === "orphaned" && current.key === attempt.key
-                    ? { ...current, pendingWrite: false }
-                    : {
-                          ...attempt,
-                          status: "failed",
-                          ...saveFailure(error),
-                          error: errorMessage(error),
-                      },
-            );
+            apply({
+                type: "saveFailed",
+                message: errorMessage(error),
+                implausible: saveFailure(error).implausible,
+            });
         }
     }
     const unavailable = (row: Interval | undefined) => {
@@ -299,12 +283,25 @@ export function ProductionHistory({
             : row?.proposal_unavailable_reason;
         return code ? reason(code, t("unavailable")) : t("unavailable");
     };
+    const orphaned = {
+        unavailable: t("interval_changed"),
+        held: t("interval_held"),
+        day_left: t("interval_day_left"),
+    };
+    // The day_left text speaks of the write still running; once it failed, the editor says it was not saved and why.
+    const orphanNotice = (
+        cause: keyof typeof orphaned,
+        pendingWrite: boolean,
+    ) =>
+        cause === "day_left" && !pendingWrite
+            ? t("interval_day_left_unsaved")
+            : orphaned[cause];
     const refreshButton = (
         <button
             className="button secondary production-refresh"
             type="button"
             aria-label={t("refresh")}
-            disabled={saving || editor.status !== "closed"}
+            disabled={!derived.refresh}
             onClick={reading.retry}
         >
             <span aria-hidden="true">↻</span>
@@ -318,18 +315,25 @@ export function ProductionHistory({
                     date={date}
                     stepFrom={stepFrom}
                     yesterday={yesterday}
-                    disabled={saving}
+                    disabled={!derived.dayNav}
                     onSelect={selectDate}
                 />
                 <CheckboxField
                     label={t("show_full_day")}
-                    checked={showFullDay}
-                    disabled={editor.status !== "closed"}
-                    onChange={setShowFullDay}
+                    checked={screen.fullDay}
+                    disabled={!derived.fullDay}
+                    onChange={(on) => apply({ type: "fullDay", on })}
                 />
                 {!history && refreshButton}
             </div>
-            {message && <Notice>{message}</Notice>}
+            {message.text && (
+                <Notice>
+                    <span key={message.count}>{message.text}</span>
+                </Notice>
+            )}
+            {editor.status === "editing" && editor.reloaded && (
+                <Notice>{t("reloaded_draft_preserved")}</Notice>
+            )}
             {history && reading.error && (
                 <Notice error>
                     {t("refresh_failed", { error: reading.error })}
@@ -337,7 +341,10 @@ export function ProductionHistory({
             )}
             {editor.status === "orphaned" && (
                 <div className="production-row-editor">
-                    <Notice error>{editor.error}</Notice>
+                    <Notice error>
+                        {orphanNotice(editor.cause, editor.pendingWrite)}
+                        {editor.error && ` ${editor.error}`}
+                    </Notice>
                     <ControlField
                         label={t("attempted_energy", {
                             interval: editor.key.split("/").map(time).join("–"),
@@ -346,10 +353,11 @@ export function ProductionHistory({
                         <input value={editor.energy} readOnly />
                     </ControlField>
                     <button
+                        ref={orphanCancel}
                         className="button secondary"
                         type="button"
                         disabled={saving}
-                        onClick={() => close(editor.key)}
+                        onClick={() => cancel(editor.key)}
                     >
                         {t("cancel")}
                     </button>
@@ -403,14 +411,15 @@ export function ProductionHistory({
                         <p>{t("no_intervals")}</p>
                     ) : (
                         <ProductionTable
+                            tenantId={scope.tenant_id}
                             rows={rows}
                             visibleRows={visibleRows}
                             timeFormatter={timeFormatter}
                             intervalLabel={intervalLabel}
                             canManage={canManage}
-                            canAct={canAct}
+                            canAct={(row) => canAct(access, row)}
                             hasConfiguration={Boolean(configuration)}
-                            editorOpen={editor.status !== "closed"}
+                            actionsDisabled={!derived.rowActions}
                             editingKey={
                                 editor.status !== "closed" &&
                                 editor.status !== "orphaned"
@@ -419,18 +428,7 @@ export function ProductionHistory({
                             }
                             editButtons={editButtons}
                             unavailable={unavailable}
-                            onOpen={(row) =>
-                                setEditor({
-                                    status: "editing",
-                                    key: intervalKey(row),
-                                    energy:
-                                        row.effective?.energy_mwh.toString() ??
-                                        "",
-                                    quality:
-                                        row.observation?.quality ?? "valid",
-                                    expectedRevision: row.revision_id,
-                                })
-                            }
+                            onOpen={(row) => request({ type: "open", row })}
                             renderEditor={(row) =>
                                 editor.status !== "closed" && (
                                     <IntervalEditor
@@ -438,27 +436,23 @@ export function ProductionHistory({
                                         editor={editor}
                                         interval={intervalLabel(row)}
                                         canManage={canManage}
+                                        staged={staged.has(intervalKey(row))}
                                         saving={saving}
                                         onChange={(change) =>
-                                            setEditor({
-                                                ...editor,
-                                                status: "editing",
-                                                ...change,
-                                                error: undefined,
-                                                implausible: false,
-                                            })
+                                            apply({ type: "change", ...change })
                                         }
                                         onSave={(action, confirmImplausible) =>
-                                            void save(
-                                                row,
-                                                action,
-                                                confirmImplausible,
-                                            )
+                                            canManage
+                                                ? void save(
+                                                      row,
+                                                      action,
+                                                      confirmImplausible,
+                                                  )
+                                                : stage(row, action)
                                         }
-                                        onCancel={() => {
-                                            proposalKey.reset();
-                                            close(intervalKey(row));
-                                        }}
+                                        onCancel={() =>
+                                            cancel(intervalKey(row))
+                                        }
                                         onReload={() => void reloadEditor()}
                                     />
                                 )
@@ -477,6 +471,32 @@ export function ProductionHistory({
                         }
                     />
                 </>
+            )}
+            {configuration && draft && (
+                <ProposalDraft
+                    key={draft.day}
+                    scope={scope}
+                    configuration={configuration}
+                    draft={draft}
+                    controls={derived}
+                    rows={history?.intervals}
+                    intervalLabel={intervalLabel}
+                    request={request}
+                    onEvent={apply}
+                    onEdit={editStaged}
+                    onRemove={unstage}
+                    onReturn={() => onDay(draft.day)}
+                    onDiscard={() => {
+                        if (request({ type: "discard" }))
+                            finish(proposals("discarded"));
+                    }}
+                    onReload={reading.reload}
+                    onSent={() => {
+                        apply({ type: "sent" });
+                        finish(proposals("submitted"));
+                        void reloadAfterSave();
+                    }}
+                />
             )}
             <ProductionSourceDetails scope={scope} />
             {canManage && configuration && (

@@ -19,6 +19,7 @@ export function nativeProductionHistory(
         proposal_unavailable_reason: null,
         can_revert: false,
         edit_unavailable_reason: null,
+        pending_request_id: null,
         ...row,
     }));
     const recorded = intervals.filter((row) => row.observation).length;

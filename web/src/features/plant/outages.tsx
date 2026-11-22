@@ -1,26 +1,55 @@
 "use client";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Plant, PlantScope } from "@/lib/api";
+import { DisplayError } from "@/lib/api/errors";
 import { useApiList } from "@/lib/api/query";
 import { outagesExport } from "@/lib/exports";
-import { useProposalKey } from "@/lib/idempotency";
 import { CsvDownload } from "@/ui/csv-download";
 import { useExportPlant } from "@/ui/export-plant";
 import { Resource } from "@/ui/resource";
 import { Notice } from "@/ui/ui";
+import { useCodeLabel, useLabel } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import {
+    INITIAL_OUTAGES,
+    isEnding,
+    outageControls,
+    proposalBody,
+    reduceOutages,
     staleVersion,
     submitOutageChange,
+    type Hold,
+    type Live,
     type Outage,
     type OutageChange,
+    type OutageEvent,
+    type OutageRow,
+    type Workflow,
 } from "./outage/model";
 import { OutageCard } from "./outage/outage-card";
 import { OutageEditor, type Ceilings } from "./outage/outage-editor";
 
 type Configuration = NonNullable<Plant["current_configuration"]>;
-type Editor = { status: "closed" } | { status: "open"; outage?: Outage };
+
+// After a workflow closed or was sent, the focus it lost goes to the control that opened it, else to its outage's
+// heading, else to the screen's status messages, else to the screen's heading; a hidden candidate takes no focus.
+function returnFocus(screen: HTMLElement, closed: Workflow) {
+    const outage = closed.kind === "create" ? "" : String(closed.outage.id);
+    const candidates = [
+        screen.querySelector(
+            `[data-opens="${closed.kind}"][data-outage="${outage}"]`,
+        ),
+        outage && screen.querySelector(`h3[data-outage="${outage}"]`),
+        screen.querySelector("[data-screen-status]:not(:empty)"),
+        screen.querySelector("h2"),
+    ];
+    for (const candidate of candidates) {
+        if (!(candidate instanceof HTMLElement)) continue;
+        candidate.focus();
+        if (document.activeElement === candidate) return;
+    }
+}
 
 export function Outages({
     scope,
@@ -34,18 +63,45 @@ export function Outages({
     configuration?: Configuration | null;
 }) {
     const t = useTranslations("Outages");
+    const reason = useCodeLabel("Outages.proposalReasons");
+    const label = useLabel();
     const proposals = useTranslations("ChangeRequests");
     const direct = useCanManageWorkspace();
     const plant = useExportPlant();
-    const proposalKey = useProposalKey();
-    const [submitted, setSubmitted] = useState(false);
-    const [editor, setEditor] = useState<Editor>({ status: "closed" });
-    const [resolving, setResolving] = useState<number | null>(null);
+    const [screen, setScreen] = useState(INITIAL_OUTAGES);
+    const [reconciled, setReconciled] = useState<Live>();
     const [reloads, setReloads] = useState(0);
     const resource = useApiList(
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/",
         { path: scope },
     );
+    const offer = resource.data;
+    const live: Live = { offer, direct, configured: !!configuration };
+    const apply = (event: OutageEvent) =>
+        setScreen((current) => reduceOutages(current, event));
+    // The open workflow meets every list it is shown beside, and the viewer's access when that changes alone; a
+    // workflow that is sending meets what changed meanwhile once its answer arrived.
+    if (
+        offer &&
+        screen.workflow?.phase.status !== "sending" &&
+        (offer !== reconciled?.offer || direct !== reconciled.direct)
+    ) {
+        setReconciled(live);
+        apply({ type: "rowsLoaded", live });
+    }
+    const derived = outageControls(screen, live);
+    const { workflow } = screen;
+    const section = useRef<HTMLElement>(null);
+    const shown = useRef(workflow);
+    useEffect(() => {
+        const closed = shown.current;
+        shown.current = workflow;
+        const active = document.activeElement;
+        if (!closed || workflow || !section.current) return;
+        if (active && active !== document.body) return;
+        returnFocus(section.current, closed);
+    }, [workflow]);
+
     async function reload() {
         setReloads((count) => count + 1);
         try {
@@ -55,19 +111,35 @@ export function Outages({
         }
     }
     async function submit(change: OutageChange) {
+        const next = reduceOutages(screen, {
+            type: "send",
+            payload: JSON.stringify(direct ? null : proposalBody(change)),
+            key: crypto.randomUUID(),
+        });
+        const attempt = next.workflow?.attempt;
+        if (next === screen || !attempt) return;
+        setScreen(next);
         try {
-            await submitOutageChange(scope, change, { proposalKey, direct });
+            await submitOutageChange(scope, change, {
+                key: attempt.key,
+                direct,
+            });
         } catch (error) {
-            // The list shows the version the edit lost to while the form keeps what was typed.
-            if (
-                change.action !== "create" &&
-                staleVersion(error, change.outage.id)
-            )
-                void reload();
-            throw error;
+            const current =
+                change.action === "create"
+                    ? null
+                    : staleVersion(error, change.outage.id);
+            apply({ type: "sendFailed", current, direct });
+            if (!current) throw error;
+            // The list shows the version the change lost to while the form keeps what was typed.
+            void reload();
+            throw new DisplayError(t("staleEdit"));
         }
-        if (!direct) setSubmitted(true);
-        await reload();
+        try {
+            await reload();
+        } finally {
+            apply({ type: "sent", proposed: !direct });
+        }
     }
     const ceilings = (outage?: Outage): Ceilings | undefined =>
         configuration &&
@@ -76,68 +148,131 @@ export function Outages({
             outage.declared_configuration_id === configuration.id)
             ? configuration
             : undefined;
-    const open = (outage?: Outage) => {
-        proposalKey.reset();
-        setEditor({ status: "open", outage });
-    };
-    const card = (outage: Outage) => (
+    const holdText = (hold: Hold) =>
+        hold === "held"
+            ? t("editorHeld")
+            : hold === "removed"
+              ? t("targetRemoved")
+              : isEnding(hold)
+                ? t("staleClosed", { status: label("IncidentStatus", hold) })
+                : reason(hold, t("proposalUnavailable"));
+    const hold = derived.hold && holdText(derived.hold);
+    const unavailable = direct
+        ? !configuration && t("configurationRequired")
+        : offer &&
+          !offer.can_propose &&
+          reason(
+              offer.proposal_unavailable_reason ?? "",
+              t("proposalUnavailable"),
+          );
+    const editing =
+        workflow?.kind === "create" || workflow?.kind === "update"
+            ? workflow
+            : null;
+    const carded =
+        workflow?.kind === "resolve" || workflow?.kind === "cancel"
+            ? workflow
+            : null;
+    const card = (outage: OutageRow) => (
         <OutageCard
             key={outage.id}
             outage={outage}
+            tenantId={scope.tenant_id}
+            pendingRequestId={outage.pending_request_id}
             timezone={timezone}
             direct={direct}
+            offered={derived.offered.has(outage.id)}
+            controls={derived}
+            hold={hold}
             configurationChanged={
                 outage.status === "active" &&
                 !!configuration &&
                 outage.declared_configuration_id !== configuration.id
             }
-            resolving={resolving === outage.id}
-            onEdit={() => open(outage)}
-            onResolve={(next) => {
-                proposalKey.reset();
-                setResolving(next ? outage.id : null);
-            }}
+            workflow={carded?.outage.id === outage.id ? carded : null}
+            onOpen={(kind) =>
+                apply({ type: "open", target: { kind, outage }, live })
+            }
+            onClose={() => apply({ type: "close" })}
+            onDiscard={() => apply({ type: "discard" })}
             onSubmit={submit}
         />
     );
     return (
-        <section className="panel">
+        <section className="panel" ref={section}>
             <div className="section-heading">
                 <div>
-                    <h2>{t("plantOutages")}</h2>
+                    <h2 tabIndex={-1}>{t("plantOutages")}</h2>
                 </div>
-                {configuration && (
-                    <button className="button" onClick={() => open()}>
+                {derived.create && (
+                    <button
+                        className="button"
+                        data-opens="create"
+                        data-outage=""
+                        disabled={!derived.acts}
+                        onClick={() =>
+                            apply({
+                                type: "open",
+                                target: { kind: "create" },
+                                live,
+                            })
+                        }
+                    >
                         {direct
                             ? t("reportOutage")
                             : proposals("proposeOutage")}
                     </button>
                 )}
             </div>
-            {!configuration && <Notice>{t("configurationRequired")}</Notice>}
-            {submitted && <Notice>{proposals("submitted")}</Notice>}
+            <div data-screen-status tabIndex={-1}>
+                {screen.submitted && <Notice>{proposals("submitted")}</Notice>}
+                {/* The open workflow says the same itself, and the page says it once. */}
+                {unavailable && unavailable !== hold && (
+                    <Notice>{unavailable}</Notice>
+                )}
+            </div>
             {!direct && <p className="fine">{proposals("approvalHelp")}</p>}
             <details>
                 <summary>{t("howToReportAnOutage")}</summary>
                 <p>{t("reportingHelp")}</p>
                 <p className="fine">{t("editingHelp")}</p>
             </details>
-            {editor.status === "open" && (
+            {editing && (
                 <OutageEditor
-                    key={editor.outage?.id ?? "new"}
-                    outage={editor.outage}
+                    key={editing.kind === "create" ? "new" : editing.outage.id}
+                    outage={
+                        editing.kind === "create" ? undefined : editing.outage
+                    }
+                    stale={editing.stale}
                     timezone={timezone}
-                    ceilings={ceilings(editor.outage)}
+                    ceilings={ceilings(
+                        editing.kind === "create" ? undefined : editing.outage,
+                    )}
                     direct={direct}
+                    controls={derived}
+                    hold={hold}
                     onSubmit={submit}
-                    onClose={() => setEditor({ status: "closed" })}
+                    onClose={() => apply({ type: "close" })}
                 />
             )}
             <Resource resource={resource} loading={t("loadingOutages")}>
                 {(list) => {
+                    // The card of the open resolution or cancellation stays among the listed outages while the
+                    // workflow is open: also once its outage was cancelled, and from the workflow once it left the list.
+                    const open = carded?.outage.id;
                     const cancelled = list.results.filter(
-                        (outage) => outage.status === "cancelled",
+                        (outage) =>
+                            outage.status === "cancelled" && outage.id !== open,
                     );
+                    const listed = list.results.filter(
+                        (outage) =>
+                            outage.status !== "cancelled" || outage.id === open,
+                    );
+                    const gone =
+                        carded &&
+                        !list.results.some((outage) => outage.id === open)
+                            ? [{ ...carded.outage, pending_request_id: null }]
+                            : [];
                     return (
                         <>
                             <div className="toolbar">
@@ -152,11 +287,7 @@ export function Outages({
                             {!list.results.length && (
                                 <p>{t("noOutagesRecorded")}</p>
                             )}
-                            {list.results
-                                .filter(
-                                    (outage) => outage.status !== "cancelled",
-                                )
-                                .map(card)}
+                            {[...listed, ...gone].map(card)}
                             {cancelled.length > 0 && (
                                 <details>
                                     <summary>

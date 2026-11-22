@@ -5,6 +5,7 @@ import type { components } from "@/lib/schema";
 
 export type Outage = components["schemas"]["IncidentOutput"];
 type OutageInput = components["schemas"]["IncidentInput"];
+export type OutageRow = components["schemas"]["IncidentListOutput"];
 
 export type OutageChange =
     | { action: "create"; values: OutageInput; reason: string }
@@ -12,9 +13,245 @@ export type OutageChange =
     | { action: "resolve"; outage: Outage; ends_at: string; reason: string }
     | { action: "cancel"; outage: Outage; reason: string };
 
-type ProposalKey = { forPayload(payload: unknown): string; reset(): void };
+export type Stale = { before: Outage; current: Outage };
 
-function proposal(change: OutageChange) {
+type Offer = {
+    can_propose: boolean;
+    proposal_unavailable_reason: string | null;
+    results: readonly OutageRow[];
+};
+
+// What the screen reads besides its own state: the list, whether the viewer writes directly, whether a configuration exists.
+export type Live = {
+    offer: Offer | undefined;
+    direct: boolean;
+    configured: boolean;
+};
+
+// Why an open workflow cannot send: a member's outage holds their own pending request or they reached the limit, or
+// anyone's outage was cancelled, resolved (for a resolution) or left the list. A workflow stays held until closed.
+export type Hold = "held" | "pending_request_limit" | Ending;
+
+export type Ending = "cancelled" | "resolved" | "removed";
+
+type Phase =
+    { status: "idle" } | { status: "sending" } | { status: "held"; hold: Hold };
+
+type Target =
+    | { kind: "create" }
+    | { kind: "update" | "resolve" | "cancel"; outage: Outage };
+
+// `outage` is the version the workflow sends against; `form` counts restarts of its form after a discarded stale change.
+export type Workflow = Target & {
+    phase: Phase;
+    attempt: { payload: string; key: string } | null;
+    stale: Stale | null;
+    form: number;
+};
+
+// The one state of the outage screen: at most one open workflow, and whether a proposal was just sent.
+export type OutageScreen = { workflow: Workflow | null; submitted: boolean };
+
+export const INITIAL_OUTAGES: OutageScreen = {
+    workflow: null,
+    submitted: false,
+};
+
+export type OutageEvent =
+    | { type: "open"; target: Target; live: Live }
+    | { type: "close" }
+    | { type: "discard" }
+    | { type: "send"; payload: string; key: string }
+    // The answer and the reload that follows it have both finished.
+    | { type: "sent"; proposed: boolean }
+    | { type: "sendFailed"; current: OutageRow | null; direct: boolean }
+    | { type: "rowsLoaded"; live: Live };
+
+export type OutageControls = {
+    create: boolean;
+    acts: boolean;
+    offered: ReadonlySet<number>;
+    send: boolean;
+    editable: boolean;
+    close: boolean;
+    hold: Hold | null;
+};
+
+const atLimit = (live: Live) =>
+    live.offer?.proposal_unavailable_reason === "pending_request_limit";
+
+const sending = (workflow: Workflow | null) =>
+    workflow?.phase.status === "sending";
+
+const targetOf = (workflow: Workflow | null) =>
+    workflow && workflow.kind !== "create" ? workflow.outage.id : null;
+
+export const isEnding = (hold: Hold | null): hold is Ending =>
+    hold === "cancelled" || hold === "resolved" || hold === "removed";
+
+// An outage that is gone or cancelled takes no change at all, and one no longer active takes no resolution.
+function endingOf(
+    kind: Target["kind"],
+    row: Outage | undefined,
+): Ending | null {
+    if (!row) return "removed";
+    if (row.status === "cancelled") return "cancelled";
+    return kind === "resolve" && row.status !== "active" ? "resolved" : null;
+}
+
+// An ending holds anyone; only a member is held by their own request or the limit.
+function holdOf(workflow: Workflow, live: Live): Hold | null {
+    const id = targetOf(workflow);
+    const row = live.offer?.results.find((row) => row.id === id);
+    const ending =
+        workflow.kind === "create" ? null : endingOf(workflow.kind, row);
+    if (ending || live.direct) return ending;
+    if (row?.pending_request_id != null) return "held";
+    return atLimit(live) ? "pending_request_limit" : null;
+}
+
+export function outageControls(
+    screen: OutageScreen,
+    live: Live,
+): OutageControls {
+    const { workflow } = screen;
+    const busy = sending(workflow);
+    const open = targetOf(workflow);
+    const offered = new Set(
+        (live.offer?.results ?? [])
+            .filter(
+                (row) =>
+                    row.status !== "cancelled" &&
+                    row.id !== open &&
+                    (live.direct ||
+                        (!atLimit(live) && row.pending_request_id == null)),
+            )
+            .map((row) => row.id),
+    );
+    const free = !!workflow && workflow.phase.status !== "held";
+    return {
+        create: live.direct ? live.configured : !!live.offer?.can_propose,
+        acts: !busy,
+        offered,
+        send: free && !busy,
+        editable: free,
+        close: !!workflow && !busy,
+        hold: workflow?.phase.status === "held" ? workflow.phase.hold : null,
+    };
+}
+
+function isOpen(workflow: Workflow | null, target: Target) {
+    if (!workflow || workflow.kind !== target.kind) return false;
+    return target.kind === "create" || targetOf(workflow) === target.outage.id;
+}
+
+export function reduceOutages(
+    screen: OutageScreen,
+    event: OutageEvent,
+): OutageScreen {
+    const { workflow } = screen;
+    switch (event.type) {
+        case "open": {
+            const derived = outageControls(screen, event.live);
+            const { target } = event;
+            const allowed =
+                target.kind === "create"
+                    ? derived.create
+                    : derived.offered.has(target.outage.id) &&
+                      !endingOf(target.kind, target.outage);
+            if (!derived.acts || !allowed || isOpen(workflow, target))
+                return screen;
+            return {
+                submitted: false,
+                workflow: {
+                    ...target,
+                    phase: { status: "idle" },
+                    attempt: null,
+                    stale: null,
+                    form: 0,
+                },
+            };
+        }
+        case "close":
+            if (!workflow || sending(workflow)) return screen;
+            return { ...screen, workflow: null };
+        case "discard":
+            if (!workflow?.stale || sending(workflow)) return screen;
+            // A held workflow cannot send, so discarding its change leaves nothing to start again.
+            if (workflow.phase.status === "held")
+                return { ...screen, workflow: null };
+            return {
+                ...screen,
+                workflow: { ...workflow, stale: null, form: workflow.form + 1 },
+            };
+        case "send": {
+            if (workflow?.phase.status !== "idle") return screen;
+            // The same payload sent again keeps its key, so the server recognises a retried proposal.
+            const attempt =
+                workflow.attempt?.payload === event.payload
+                    ? workflow.attempt
+                    : { payload: event.payload, key: event.key };
+            return {
+                submitted: false,
+                workflow: {
+                    ...workflow,
+                    phase: { status: "sending" },
+                    attempt,
+                },
+            };
+        }
+        case "sent":
+            if (!sending(workflow)) return screen;
+            return { workflow: null, submitted: event.proposed };
+        case "sendFailed": {
+            if (workflow?.phase.status !== "sending") return screen;
+            const { current } = event;
+            // Only a conflict about the outage the workflow sends against moves it to that outage's current version.
+            if (
+                workflow.kind === "create" ||
+                current?.id !== workflow.outage.id
+            )
+                return {
+                    ...screen,
+                    workflow: { ...workflow, phase: { status: "idle" } },
+                };
+            const hold =
+                endingOf(workflow.kind, current) ??
+                (!event.direct && current.pending_request_id != null
+                    ? "held"
+                    : null);
+            return {
+                ...screen,
+                workflow: {
+                    ...workflow,
+                    outage: current,
+                    stale: {
+                        before: workflow.stale?.before ?? workflow.outage,
+                        current,
+                    },
+                    phase: hold ? { status: "held", hold } : { status: "idle" },
+                },
+            };
+        }
+        case "rowsLoaded": {
+            if (!workflow || sending(workflow)) return screen;
+            const hold = holdOf(workflow, event.live);
+            // Only an ending replaces a hold, and nothing replaces an ending.
+            if (
+                !hold ||
+                (workflow.phase.status === "held" &&
+                    (isEnding(workflow.phase.hold) || !isEnding(hold)))
+            )
+                return screen;
+            return {
+                ...screen,
+                workflow: { ...workflow, phase: { status: "held", hold } },
+            };
+        }
+    }
+}
+
+export function proposalBody(change: OutageChange) {
     const target =
         change.action === "create"
             ? {}
@@ -33,25 +270,20 @@ function proposal(change: OutageChange) {
     };
 }
 
-// An administrator writes the outage; any other member proposes the same change for approval.
+// An administrator writes the outage; any other member proposes the same change for approval under the attempt's key.
 export async function submitOutageChange(
     scope: PlantScope,
     change: OutageChange,
-    { proposalKey, direct }: { proposalKey: ProposalKey; direct: boolean },
+    { key, direct }: { key: string; direct: boolean },
 ) {
     if (!direct) {
-        const payload = proposal(change);
         await api.post(
             "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/change-requests/incidents/",
             {
                 path: scope,
-                body: {
-                    ...payload,
-                    idempotency_key: proposalKey.forPayload(payload),
-                },
+                body: { ...proposalBody(change), idempotency_key: key },
             },
         );
-        proposalKey.reset();
         return;
     }
     if (change.action === "create") {
@@ -89,7 +321,7 @@ export async function submitOutageChange(
         );
 }
 
-function isOutage(value: unknown): value is Outage {
+function isOutage(value: unknown): value is OutageRow {
     return (
         !!value &&
         typeof value === "object" &&
@@ -100,7 +332,8 @@ function isOutage(value: unknown): value is Outage {
     );
 }
 
-export function staleVersion(error: unknown, id: number): Outage | null {
+// The outage as it now stands, with the member's own pending request, from a conflict answer about this outage.
+export function staleVersion(error: unknown, id: number): OutageRow | null {
     if (
         !(error instanceof ApiError) ||
         error.code !== "incident_revision_changed" ||
