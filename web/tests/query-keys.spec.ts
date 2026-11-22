@@ -1,7 +1,12 @@
 import { expect, test } from "@playwright/test";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { keys } from "../src/lib/api/keys";
-import { fetchList, invalidate, pollInterval } from "../src/lib/api/query";
+import {
+    fetchList,
+    invalidate,
+    pollInterval,
+    sameRequest,
+} from "../src/lib/api/query";
 
 const sites = "/api/tenants/{tenant_id}/sites/";
 const forecast =
@@ -73,6 +78,27 @@ test("a request key carries its path parameters, query and language", () => {
         2,
     );
     expect(cached(client, keys.path("1:a", forecast, scope))).toHaveLength(1);
+});
+
+test("a request read in another language is the same request, one for another plant or day is not", () => {
+    const scope = { tenant_id: 5, region_id: 11, plant_id: 21 };
+    const read = (plant: number, date: string, locale: string) =>
+        keys.request(
+            "1:a",
+            forecast,
+            { path: { ...scope, plant_id: plant }, query: { date } },
+            locale,
+        );
+    const english = read(21, "2026-11-20", "en");
+    expect(sameRequest(english, read(21, "2026-11-20", "tr"))).toBe(true);
+    expect(sameRequest(english, read(22, "2026-11-20", "tr"))).toBe(false);
+    expect(sameRequest(english, read(21, "2026-11-21", "tr"))).toBe(false);
+    expect(
+        sameRequest(
+            keys.request("1:a", sites, { path: { tenant_id: 5 } }, "en"),
+            keys.request("2:b", sites, { path: { tenant_id: 5 } }, "tr"),
+        ),
+    ).toBe(false);
 });
 
 function json(body: unknown, status = 200) {

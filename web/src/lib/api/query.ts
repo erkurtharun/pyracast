@@ -1,5 +1,6 @@
 "use client";
 import {
+    hashKey,
     partialMatchKey,
     QueryClient,
     useQuery,
@@ -86,6 +87,11 @@ export type Loaded<T> = {
 
 type Polling = { poll?: number | false };
 
+// The same request in another language: every part of the key but the last, the locale, matches.
+export function sameRequest(before: QueryKey, after: QueryKey) {
+    return hashKey(before.slice(0, -1)) === hashKey(after.slice(0, -1));
+}
+
 function useOwner() {
     const owner = useContext(QueryOwner);
     if (owner === undefined)
@@ -108,6 +114,12 @@ function useLoaded<T>(
         queryKey,
         queryFn: () => read(url),
         select: (fetched) => fetched.value,
+        // A language change shows the rows already read until they arrive in the new language, so the screen
+        // showing them is not mounted again and keeps what was typed into it and its focus.
+        placeholderData: (previous, previousQuery) =>
+            previousQuery && sameRequest(previousQuery.queryKey, queryKey)
+                ? previous
+                : undefined,
         refetchInterval: (query) =>
             pollInterval(poll, query.state.data?.requests),
     });
