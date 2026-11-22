@@ -36,6 +36,7 @@ from pyracast.regions.models import Region
 
 ROOT = Path(__file__).resolve().parents[1]
 REVISION = "a" * 40
+RELEASE_DIRECTORY = f"{REVISION}-0123456789ab"
 BACKEND_IMAGE = "registry.example/backend@sha256:" + "1" * 64
 SUPPORT = {"postgres", "rabbitmq"}
 EDGE = {"gateway", "maintenance"}
@@ -183,7 +184,7 @@ class FakeCommands:
 
 @pytest.fixture
 def host(tmp_path: Path) -> Host:
-    release = tmp_path / "releases" / REVISION
+    release = tmp_path / "releases" / RELEASE_DIRECTORY
     (release / "deploy").mkdir(parents=True)
     (release / "deploy/release.env").write_text(
         f"BACKEND_IMAGE={BACKEND_IMAGE}\nSITE_ADDRESS=example.com\n"
@@ -319,7 +320,7 @@ def test_prepare_blocks_drains_dumps_uploads_verifies_and_keeps_the_archive(
         f"gs://private-backups/{name}",
         digest,
         str(archive),
-        REVISION,
+        f"Release commit: {REVISION}\n",
         f"BACKEND_IMAGE={BACKEND_IMAGE}",
         "projects/example/secrets/runtime/versions/7",
         "accounts_tenant 2",

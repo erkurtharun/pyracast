@@ -910,7 +910,8 @@ def print_prepared(host: Host, record: Record, solcast: SolcastExport) -> None:
     print(f"  Solcast export: gs://{host.bucket}/{solcast.object}")
     print(f"  Solcast SHA-256: {solcast.sha256}")
     print(f"  Solcast snapshots: {solcast.rows}")
-    print(f"  Release commit: {host.release.resolve().name}")
+    # install-release.sh names a release directory <commit>-<image digest prefix>.
+    print(f"  Release commit: {host.release.resolve().name.partition('-')[0]}")
     for key, value in sorted(release_values(host).items()):
         if key.endswith("_IMAGE"):
             print(f"  {key}={value}")
