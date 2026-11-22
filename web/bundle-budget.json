@@ -1,17 +1,17 @@
 {
     "tolerancePercent": 1,
     "firstLoad": {
-        "/app": 647761,
-        "/app/w/[tenantId]": 674012,
-        "/app/w/[tenantId]/plants/[siteId]/[section]": 751121
+        "/app": 647819,
+        "/app/w/[tenantId]": 674052,
+        "/app/w/[tenantId]/plants/[siteId]/[section]": 754012
     },
     "onDemand": {
         "Calibrations": 15147,
-        "Outages": 13268,
+        "Outages": 13242,
         "ProductionSection": 20548,
         "ForecastPerformance": 7130,
-        "english": 66927,
-        "turkish": 72764
+        "english": 67101,
+        "turkish": 72973
     },
     "otherOnDemand": 13994
 }
