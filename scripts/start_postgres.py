@@ -422,8 +422,8 @@ def parse(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--port",
-        default=os.environ.get("PGPORT", "55432"),
-        help="listening port; defaults to PGPORT, else 55432",
+        default=os.environ.get("PGPORT", "5432"),
+        help="listening port; defaults to PGPORT, else 5432 as in the settings",
     )
     arguments = parser.parse_args(argv)
     if arguments.non_durable and not arguments.ephemeral:

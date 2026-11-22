@@ -110,6 +110,14 @@ def test_the_port_argument_overrides_pgport(
     assert options == "-h 127.0.0.1 -p 5432"
 
 
+def test_without_a_port_or_pgport_the_server_listens_on_the_application_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PGPORT", raising=False)
+
+    assert start_postgres.parse([]).port == 5432
+
+
 def test_durable_data_lives_in_the_per_user_data_directory(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
