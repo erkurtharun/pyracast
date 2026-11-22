@@ -91,6 +91,7 @@ ROUTE_POLICIES: Mapping[str, Mapping[str, Policy]] = {
     PLANT + "change-requests/production/": {
         "POST": Policy(Access.MEMBER, Throttle.PRODUCTION_IMPORT)
     },
+    PLANT + "days/": {"GET": Policy(Access.MEMBER, Throttle.FORECAST)},
     PLANT + "forecast/": {"GET": Policy(Access.MEMBER, Throttle.FORECAST)},
     PLANT + "outages/": {"GET": MEMBER, "POST": ADMIN},
     PLANT + "outages/<int:incident_id>/": {"PUT": ADMIN},

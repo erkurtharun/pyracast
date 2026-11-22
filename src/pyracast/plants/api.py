@@ -26,6 +26,7 @@ from pyracast.plants.models import (
     Plant,
 )
 from pyracast.plants.performance import forecast_performance
+from pyracast.plants.plant_days import plant_days
 from pyracast.plants.production import production_history
 from pyracast.plants.production_changes import (
     AuditContext,
@@ -48,6 +49,7 @@ from pyracast.plants.serializers import (
     PerformanceOutput,
     PerformanceQuery,
     PlantConflict,
+    PlantDaysOutput,
     PlantForecastOutput,
     PlantInput,
     PlantOutput,
@@ -284,3 +286,9 @@ class PlantForecastView(ScopedView[Plant]):
             source=values["data_source"],
         )
         return Response(PlantForecastOutput(result).data)
+
+
+class PlantDaysView(ScopedView[Plant]):
+    @extend_schema(responses=PlantDaysOutput)
+    def get(self, _request: Request, **_kwargs: Any) -> Response:
+        return Response(PlantDaysOutput(plant_days(*self.scope())).data)

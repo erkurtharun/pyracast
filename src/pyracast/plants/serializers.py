@@ -1,6 +1,7 @@
 from dataclasses import fields as dataclass_fields
 from typing import Any
 
+from django.db import models
 from django.utils.dateparse import parse_datetime
 from django.utils.translation import gettext
 from drf_spectacular.utils import extend_schema_field
@@ -664,3 +665,74 @@ class PlantForecastOutput(ForecastEnvelope):
     regional_irradiance = IrradianceSummaryField(allow_null=True)
     outage_scenario = OutageScenarioField(allow_null=True, default=None)
     production_diagnostic = ProductionDiagnosticField(allow_null=True, default=None)
+
+
+class ForecastDayRowOutput(serializers.Serializer[Any]):
+    """Energy in MWh on the measurement basis of the plant."""
+
+    start = serializers.DateTimeField()
+    end = serializers.DateTimeField()
+    mwh = serializers.FloatField(allow_null=True)
+    affected_mwh = serializers.FloatField(allow_null=True)
+    sources = serializers.ListField(child=serializers.CharField(), allow_null=True)
+
+
+class AffectedDayOutput(serializers.Serializer[Any]):
+    status = serializers.ChoiceField(choices=("estimated", "unknown_impact"))
+    total_mwh = serializers.FloatField(allow_null=True)
+
+    def get_fields(self) -> dict[str, serializers.Field[Any, Any, Any, Any]]:
+        return {**super().get_fields(), "partial": serializers.BooleanField()}
+
+
+class DayUnavailableReason(models.TextChoices):
+    CONFIGURATION_UNAVAILABLE = "configuration_unavailable"
+    FORECAST_UNAVAILABLE = "forecast_unavailable"
+    ESTIMATED_ACTUALS_UNAVAILABLE = "estimated_actuals_unavailable"
+    CALCULATION_OUT_OF_RANGE = ErrorCode.CALCULATION_OUT_OF_RANGE.value
+
+
+class ForecastDayOutput(ForecastEnvelope):
+    unavailable_reason = serializers.ChoiceField(
+        choices=DayUnavailableReason.choices, allow_null=True
+    )
+    collected_at = serializers.DateTimeField(allow_null=True)
+    total_mwh = serializers.FloatField(allow_null=True)
+
+    def get_fields(self) -> dict[str, serializers.Field[Any, Any, Any, Any]]:
+        return {
+            **super().get_fields(),
+            "partial": serializers.BooleanField(),
+            "affected": AffectedDayOutput(allow_null=True),
+            "rows": ForecastDayRowOutput(many=True),
+        }
+
+
+class ProductionDayRowOutput(serializers.Serializer[Any]):
+    start = serializers.DateTimeField()
+    end = serializers.DateTimeField()
+    mwh = serializers.FloatField(allow_null=True)
+    quality = serializers.CharField(allow_null=True)
+
+    def get_fields(self) -> dict[str, serializers.Field[Any, Any, Any, Any]]:
+        return {
+            **super().get_fields(),
+            "source": serializers.CharField(allow_null=True),
+            "provisional": serializers.BooleanField(allow_null=True),
+        }
+
+
+class SavedProductionDayOutput(serializers.Serializer[Any]):
+    date = serializers.DateField()
+    timezone = serializers.CharField()
+    total_mwh = serializers.FloatField(allow_null=True)
+    complete = serializers.BooleanField()
+    rows = ProductionDayRowOutput(many=True)
+
+
+class PlantDaysOutput(serializers.Serializer[Any]):
+    plant_id = serializers.IntegerField()
+    name = serializers.CharField()
+    today = serializers.DateField()
+    forecast = ForecastDayOutput(many=True)
+    production = SavedProductionDayOutput(many=True)

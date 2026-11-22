@@ -311,6 +311,12 @@ SPECTACULAR_SETTINGS = {
         "PerformanceSelectionPolicyEnum": "pyracast.plants.performance.SelectionPolicy",
         "DaylightStatusEnum": ["normal", "polar_day", "polar_night"],
         "OutageScenarioStatusEnum": ["estimated", "unknown_impact"],
+        "UnavailableReasonEnum": [
+            "configuration_unavailable",
+            "forecast_unavailable",
+            "estimated_actuals_unavailable",
+        ],
+        "DayUnavailableReasonEnum": "pyracast.plants.serializers.DayUnavailableReason",
         "DiagnosticStatusEnum": ["suspected", "normal", "insufficient"],
         "DiagnosticDayStatusEnum": ["shortfall", "within_threshold"],
     },
