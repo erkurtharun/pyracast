@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import type { components } from "./schema";
 import {
     changedSession,
@@ -23,6 +23,11 @@ type SessionState = {
     replaced: boolean;
     signOut: SignOutState;
 };
+type Confirmation = { answeredAt: number; failedAt?: number };
+
+// PYRACAST_SESSION_IDLE_SECONDS in settings.py: the server ends a session left this long.
+const serverIdleLimitMs = 30 * 60_000;
+const clockTickMs = 30_000;
 
 // The last session tag any tab of this browser observed. A write is an observation of a session
 // read, never a new value, so tabs that read crossing answers converge.
@@ -35,6 +40,7 @@ let state: SessionState = {
     replaced: false,
     signOut: { status: "idle" },
 };
+let confirmation: Confirmation = { answeredAt: 0 };
 let documentOwner: string | null | undefined;
 // What a session read's answer may have missed: this tab's session changes, another tab's
 // observation and every read started or session adopted here.
@@ -52,6 +58,11 @@ export function sessionState() {
     return state;
 }
 
+function unconfirmed() {
+    const { answeredAt, failedAt } = confirmation;
+    return failedAt !== undefined && failedAt - answeredAt >= serverIdleLimitMs;
+}
+
 function subscribeSession(listener: () => void) {
     listeners.add(listener);
     return () => {
@@ -65,6 +76,43 @@ function notify() {
 
 export function useSessionState() {
     return useSyncExternalStore(subscribeSession, sessionState, sessionState);
+}
+
+export function useSessionUnconfirmed() {
+    return useSyncExternalStore(subscribeSession, unconfirmed, unconfirmed);
+}
+
+export function useSessionClock() {
+    const [now, setNow] = useState(Date.now);
+    useEffect(() => {
+        const tick = () => setNow(Date.now());
+        const timer = window.setInterval(tick, clockTickMs);
+        document.addEventListener("visibilitychange", tick);
+        return () => {
+            window.clearInterval(timer);
+            document.removeEventListener("visibilitychange", tick);
+        };
+    }, []);
+    return now;
+}
+
+export function confirmAnswer(at: number) {
+    if (at <= confirmation.answeredAt) return;
+    confirmation = { ...confirmation, answeredAt: at };
+    notify();
+}
+
+function failConfirmation() {
+    confirmation = { ...confirmation, failedAt: Date.now() };
+    notify();
+}
+
+export function confirmIdleSession(now: number) {
+    if (
+        state.session?.user &&
+        now - confirmation.answeredAt >= serverIdleLimitMs
+    )
+        loadSession().catch(() => {});
 }
 
 function takeReplacedMark() {
@@ -133,6 +181,7 @@ export function adoptSession(session: Session) {
             session,
             replaced: state.replaced || owner !== documentOwner,
         };
+    confirmation = { ...confirmation, answeredAt: Date.now() };
     setCsrfToken(session.csrf_token);
     observe(session.session_tag ?? "");
     generation += 1;
@@ -162,8 +211,14 @@ function unchangedSince(since: Mark) {
     );
 }
 
-const readSession = () =>
-    send<Session>({ method: "GET", url: "/api/session/" });
+async function readSession() {
+    try {
+        return await send<Session>({ method: "GET", url: "/api/session/" });
+    } catch (error) {
+        failConfirmation();
+        throw error;
+    }
+}
 
 // A read that carried a key another tab's confirmation replaced meanwhile shows no session; the
 // tab adopts an ended session only when a second read sent after it agrees.

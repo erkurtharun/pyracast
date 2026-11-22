@@ -214,6 +214,8 @@
     },
     "Session": {
         "signingOut": "Çıkış yapılıyor",
+        "unconfirmed": "Oturumunuz doğrulanamadı",
+        "unconfirmedHelp": "Bu sayfa ve girdikleriniz korunuyor. Sunucu yanıt verdiğinde yeniden gösterilir.",
         "retry": "Tekrar dene"
     },
     "InstallApp": {

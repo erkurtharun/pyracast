@@ -6,7 +6,6 @@ import {
     Suspense,
     useContext,
     useEffect,
-    useState,
     useTransition,
     type ReactNode,
 } from "react";
@@ -17,7 +16,9 @@ import { contactEmail } from "@/lib/public-metadata";
 import { cadence, useApiList } from "@/lib/api/query";
 import { routes, screenOf, type Screen } from "@/lib/routes";
 import {
+    confirmAnswer,
     signOut,
+    useSessionClock,
     useSessionState,
     type SessionUser,
 } from "@/lib/session-client";
@@ -87,7 +88,6 @@ export function WorkspaceShell({
 }) {
     const t = useTranslations("Dashboard");
     const errors = useTranslations("Errors");
-    const format = useFormat();
     const router = useRouter();
     const screen = screenOf(usePathname());
     const { session, changed } = useSessionState();
@@ -98,7 +98,10 @@ export function WorkspaceShell({
         {},
         { poll: cadence.background },
     );
-    const endingSoon = useEndingSoon(session?.expires_at ?? null);
+    const { updatedAt } = tenants;
+    useEffect(() => {
+        if (updatedAt) confirmAnswer(updatedAt);
+    }, [updatedAt]);
     const rows = tenants.data?.results ?? [];
     const tenant =
         tenantId === undefined
@@ -257,14 +260,8 @@ export function WorkspaceShell({
                         screen === "account" ? "account-settings" : undefined
                     }
                 >
-                    {endingSoon && (
-                        <Notice>
-                            {t("sessionEndingSoon", {
-                                time: format.time(endingSoon, deviceZone(), {
-                                    timeStyle: "short",
-                                }),
-                            })}
-                        </Notice>
+                    {session.expires_at && (
+                        <SessionEndingSoon expiresAt={session.expires_at} />
                     )}
                     {changed && <Notice>{errors("sessionChanged")}</Notice>}
                     <RefreshFailed resource={tenants} />
@@ -317,16 +314,20 @@ export function WorkspaceShell({
     );
 }
 
-function useEndingSoon(expiresAt: string | null) {
-    const [endingAt, setEndingAt] = useState<string>();
-    useEffect(() => {
-        if (!expiresAt) return;
-        // Five minutes (300 000 ms) before the absolute session limit.
-        const timer = setTimeout(
-            () => setEndingAt(expiresAt),
-            Math.max(0, new Date(expiresAt).getTime() - Date.now() - 300_000),
-        );
-        return () => clearTimeout(timer);
-    }, [expiresAt]);
-    return endingAt;
+const endingSoonMs = 5 * 60_000;
+
+function SessionEndingSoon({ expiresAt }: { expiresAt: string }) {
+    const t = useTranslations("Dashboard");
+    const format = useFormat();
+    const now = useSessionClock();
+    if (now < new Date(expiresAt).getTime() - endingSoonMs) return null;
+    return (
+        <Notice>
+            {t("sessionEndingSoon", {
+                time: format.time(expiresAt, deviceZone(), {
+                    timeStyle: "short",
+                }),
+            })}
+        </Notice>
+    );
 }

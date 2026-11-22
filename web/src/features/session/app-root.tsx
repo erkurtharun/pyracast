@@ -15,6 +15,7 @@ import { reloadPage } from "@/lib/on-demand";
 import { routes } from "@/lib/routes";
 import { browserErrors } from "@/i18n/browser";
 import {
+    confirmIdleSession,
     endDocument,
     isCurrent,
     loadSession,
@@ -22,7 +23,9 @@ import {
     sessionOwner,
     sessionState,
     signOut,
+    useSessionClock,
     useSessionState,
+    useSessionUnconfirmed,
     type Session,
     type SignOutState,
 } from "@/lib/session-client";
@@ -50,17 +53,23 @@ export function AppRoot({ children }: { children: ReactNode }) {
     useRestoredDocumentReload();
     useDocumentReplacement(replaced);
     const current = useCurrentSession(session, ready, fail, clear);
+    const unconfirmed = useSessionUnconfirmed();
     return (
         <QueryClientProvider client={client}>
             <SessionLanguage value={language}>
                 <LiveRegion>
+                    <IdleSessionCheck />
                     {replaced ? (
                         <Bootstrap retry={retry} />
                     ) : leaving.status !== "idle" ? (
                         <SigningOut state={leaving} />
                     ) : ready && current ? (
                         <QueryOwner value={sessionOwner(session)}>
-                            {children}
+                            <Screens
+                                covered={unconfirmed && Boolean(session?.user)}
+                            >
+                                {children}
+                            </Screens>
                         </QueryOwner>
                     ) : language.status === "failed" ? (
                         <Bootstrap
@@ -245,6 +254,50 @@ function useRestoredDocumentReload() {
         window.addEventListener("pageshow", restored);
         return () => window.removeEventListener("pageshow", restored);
     }, []);
+}
+
+function IdleSessionCheck() {
+    const now = useSessionClock();
+    useEffect(() => {
+        if (document.visibilityState === "visible") confirmIdleSession(now);
+    }, [now]);
+    return null;
+}
+
+function Screens({
+    covered,
+    children,
+}: {
+    covered: boolean;
+    children: ReactNode;
+}) {
+    return (
+        <>
+            {covered && <SessionUnconfirmed />}
+            <div hidden={covered} inert={covered}>
+                {children}
+            </div>
+        </>
+    );
+}
+
+function SessionUnconfirmed() {
+    const t = useTranslations("Session");
+    return (
+        <main className="auth-page">
+            <div className="auth-card">
+                <Brand />
+                <h1>{t("unconfirmed")}</h1>
+                <p>{t("unconfirmedHelp")}</p>
+                <button
+                    className="button"
+                    onClick={() => void loadSession().catch(() => {})}
+                >
+                    {t("retry")}
+                </button>
+            </div>
+        </main>
+    );
 }
 
 function SigningOut({

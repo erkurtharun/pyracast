@@ -214,6 +214,8 @@
     },
     "Session": {
         "signingOut": "Signing out",
+        "unconfirmed": "Could not confirm your session",
+        "unconfirmedHelp": "This page and what you entered are kept. They are shown again once the server answers.",
         "retry": "Try again"
     },
     "InstallApp": {
