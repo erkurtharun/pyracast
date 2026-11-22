@@ -182,6 +182,30 @@ exact_headers /admin/login/
 exact_headers /health/live/
 [[ $(curl --silent --show-error --output /dev/null --write-out '%{redirect_url}' \
   http://localhost:18080/) == https://localhost:18443/ ]]
+app_file() {
+  local headers expected
+  headers=$("${secure_curl[@]}" --output "$temporary/app-file" --dump-header - "https://localhost:18443$1")
+  headers=${headers,,}
+  headers=${headers//$'\r'/}
+  [[ $(head -n 1 <<<"$headers") == http/*' 200'* ]]
+  for expected in "${@:2}"; do
+    grep -qxF "$expected" <<<"$headers"
+  done
+  if grep -q '^service-worker-allowed:' <<<"$headers"; then return 1; fi
+}
+app_file /app/sw.js 'content-type: text/javascript' 'cache-control: no-store' \
+  "content-security-policy: default-src 'none'; connect-src 'self'"
+app_file /app/manifest.webmanifest 'content-type: application/manifest+json'
+"${compose[@]}" exec -T api python -c '
+import json, sys
+manifest = json.load(sys.stdin)
+assert [manifest[member] for member in ("id", "start_url", "scope")] == ["/app/"] * 3, manifest
+' < "$temporary/app-file"
+for icon in any-192 any-512 maskable-192 maskable-512 apple-touch-icon; do
+  app_file "/app/icons/$icon.png" 'content-type: image/png'
+done
+app_file / 'cache-control: private, no-store'
+app_file /app/ 'cache-control: private, no-store'
 # Each router refuses one byte over its body limit; the API answers with its error body.
 too_large() {
   head -c "$1" /dev/zero | "${tls_curl[@]}" --data-binary @- --output "$temporary/too-large" \

@@ -1378,6 +1378,29 @@ def test_smoke_refusals_without_a_broker_name_their_cause() -> None:
     assert "[[ $refused != 0 && $missing_broker == *PYRACAST_RABBITMQ_URL* ]]" in smoke
 
 
+def test_smoke_pins_the_app_worker_manifest_and_icons_through_the_gateway() -> None:
+    smoke = text(DEPLOY / "smoke.sh")
+    worker = re.search(r'source: "/app/sw\.js",(.*?)\]', text(ROOT / "web" / "next.config.ts"), re.S)
+    assert worker is not None
+    pinned = re.search(r"^app_file /app/sw\.js (.*?[^\\])$", smoke, re.M | re.S)
+    assert pinned is not None
+    headers = re.findall(r'key: "([^"]+)",\s*value:\s*"([^"]+)"', worker[1])
+    assert len(headers) == 3
+    for name, value in headers:
+        assert f"{name.lower()}: {value}" in pinned[1], name
+    assert "if grep -q '^service-worker-allowed:' <<<\"$headers\"; then return 1; fi" in smoke
+    manifest = json.loads(text(ROOT / "web" / "public" / "app" / "manifest.webmanifest"))
+    assert [manifest[member] for member in ("id", "start_url", "scope")] == ["/app/"] * 3
+    assert 'for member in ("id", "start_url", "scope")] == ["/app/"] * 3' in smoke
+    assert "app_file /app/manifest.webmanifest 'content-type: application/manifest+json'" in smoke
+    icons = sorted(path.stem for path in (ROOT / "web" / "public" / "app" / "icons").glob("*.png"))
+    looped = re.search(r"^for icon in (.+); do\n  app_file \"/app/icons/\$icon\.png\"", smoke, re.M)
+    assert looped is not None
+    assert sorted(looped[1].split()) == icons
+    for page in ("/", "/app/"):
+        assert f"app_file {page} 'cache-control: private, no-store'" in smoke
+
+
 def test_smoke_proves_the_maintenance_notice_and_the_restricted_roles() -> None:
     smoke = text(DEPLOY / "smoke.sh")
 
