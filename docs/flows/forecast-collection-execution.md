@@ -115,7 +115,7 @@ sequenceDiagram
 | Snapshot source kind differs from the endpoint, or the target-day calculation or issuance preparation raises | `retry`, `invalid_source_kind` or `calculation_failure`; snapshot reused without a new request. A failing supplemental day in `prepare_daily_payloads` is only logged and left out of `daily_payloads`; publication continues |
 | Lease lost at publication, or binding no longer current there | False and reclaimed after expiry with the snapshot reused, or `stale` with the snapshot kept unpublished |
 | Estimated actuals still incomplete after publication | `succeeded`, `history_incomplete`; new job 30 minutes later if before `retry_until` |
-| Lock timeout or deadlock inside `claim` | The delivery ends normally with `job_claim_contended` (`worker-runtime`); the job row is untouched and published again |
+| Lock timeout or deadlock inside `claim` | The delivery ends normally with `job_claim_contended` (`worker-runtime`); the job row is untouched and published again while it stays eligible |
 | Other database error inside `claim` | The exception escapes `deliver`; the job row is untouched |
 | Database error after the claim | `retry`, `lock_contention` (lock timeout or deadlock: attempt returned when nothing was reserved, otherwise counted) or `publication_failure`; the open transaction rolls back |
 | Any other exception after the claim | `retry`, `publication_failure`, logged without its message |
