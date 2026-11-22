@@ -62,7 +62,7 @@ sequenceDiagram
 | `regions_auditevent` | R | Latest `region_approved`, `region_rejected` or `region_suspended` row per region (`with_review_outcome`): `reviewed_at`, `review_reason` |
 | `plants_plant` | R | One plant per region (`plant_region_uniq`) |
 | `plants_plantconfiguration`, `plants_plantsubmission` | R | Approved configuration and the submission; `PlantOutput.parameters` is the declaration (the submission while it awaits approval, else the configuration) |
-| `notifications_reminderschedule`, `notifications_reminderrecipient`, `notifications_reminderrecipienttie`, `notifications_notificationsettings`, `notifications_notificationdelivery`, `connections_provideraccount`, `account_emailaddress` | R | `reminder_summaries`: schedule state (explicit addresses with their member ties, the recipient limit) and latest delivery per listed region, null without a saved schedule |
+| `notifications_reminderschedule`, `notifications_reminderrecipient`, `notifications_reminderrecipienttie`, `notifications_notificationsettings`, `notifications_notificationdelivery`, `connections_provideraccount`, `accounts_membership`, `auth_user`, `account_emailaddress` | R | `reminder_summaries`: schedule state (explicit addresses with their member ties, the recipient limit) and latest delivery per listed region, null without a saved schedule; the workspace's active members and their verified addresses through `notifications/recipients.py` `workspace` |
 | `django_session`, `usersessions_usersession` | W | Session middleware: the activity marker and device record, at most once a minute |
 
 ## Authorization
