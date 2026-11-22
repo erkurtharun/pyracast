@@ -11,7 +11,7 @@ from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
-PREVIOUS = ("plants", "0006_submission_updated_at")
+PREVIOUS = ("plants", "0007_plant_parameters_revision")
 
 
 def test_a_requeued_run_waits_from_the_upgrade_and_every_other_run_keeps_no_wait_time(

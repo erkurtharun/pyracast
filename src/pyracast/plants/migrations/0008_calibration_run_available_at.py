@@ -6,7 +6,7 @@ from django.db.migrations.operations.base import Operation
 
 class Migration(migrations.Migration):
     dependencies: ClassVar = [
-        ("plants", "0006_submission_updated_at"),
+        ("plants", "0007_plant_parameters_revision"),
     ]
 
     operations: ClassVar[list[Operation]] = [
