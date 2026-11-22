@@ -120,6 +120,18 @@ def test_a_colour_written_in_a_console_template_is_refused(template: str) -> Non
     assert template_colours(template) != []
 
 
+def test_every_property_a_console_stylesheet_reads_is_declared_in_its_root() -> None:
+    declared = root_tokens()
+    undeclared = sorted(
+        (path.name, name)
+        for path in STATIC.glob("*.css")
+        for name in set(re.findall(r"var\(\s*(--[\w-]+)", path.read_text(encoding="utf-8")))
+        if name not in declared
+    )
+
+    assert undeclared == []
+
+
 def test_the_console_tokens_carry_the_brand_kit_colours() -> None:
     tokens = root_tokens()
     rules = (STATIC / "admin-workspace.css").read_text(encoding="utf-8")
