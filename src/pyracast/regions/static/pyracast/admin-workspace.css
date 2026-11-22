@@ -117,7 +117,9 @@ a:hover {
     transform: none;
 }
 .skip-link:focus-visible {
-    outline-color: var(--white);
+    outline: 3px solid var(--forest);
+    outline-offset: 0;
+    box-shadow: 0 0 0 6px var(--cream);
 }
 
 .shell {

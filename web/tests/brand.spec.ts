@@ -137,6 +137,56 @@ test("the logo's surfaces take the brand palette", async ({ page }) => {
     );
 });
 
+function contrast(first: string, second: string) {
+    const [high, low] = [first, second]
+        .map((colour) => {
+            const [r, g, b] = colour
+                .match(/\d+/g)!
+                .slice(0, 3)
+                .map((channel) => {
+                    const value = Number(channel) / 255;
+                    return value <= 0.04045
+                        ? value / 12.92
+                        : ((value + 0.055) / 1.055) ** 2.4;
+                }) as [number, number, number];
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        })
+        .sort((a, b) => b - a) as [number, number];
+    return (high + 0.05) / (low + 0.05);
+}
+
+test("the skip link's focus rings hold over the sidebar and over the page", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.goto("/app/");
+    await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
+    await page.keyboard.press("Tab");
+    const skip = page.getByRole("link", { name: "Skip to content" });
+    await expect(skip).toBeFocused();
+    await expect(skip).toHaveCSS("outline-style", "solid");
+    await expect(skip).toHaveCSS("outline-width", "3px");
+    await expect(skip).toHaveCSS("outline-offset", "0px");
+    const dark = "rgb(9, 56, 58)";
+    const light = "rgb(244, 242, 232)";
+    await expect(skip).toHaveCSS("outline-color", dark);
+    await expect(skip).toHaveCSS("box-shadow", `${light} 0px 0px 0px 6px`);
+    expect(contrast(dark, light)).toBeGreaterThanOrEqual(9);
+    const surfaces = [
+        await page
+            .getByRole("complementary")
+            .evaluate((node) => getComputedStyle(node).backgroundColor),
+        await page
+            .locator("body")
+            .evaluate((node) => getComputedStyle(node).backgroundColor),
+    ];
+    for (const surface of surfaces)
+        expect(
+            Math.max(contrast(dark, surface), contrast(light, surface)),
+            surface,
+        ).toBeGreaterThanOrEqual(3);
+});
+
 for (const path of ["/", "/tr/"]) {
     test(`the public site ${path} links home through the logo for light surfaces`, async ({
         page,

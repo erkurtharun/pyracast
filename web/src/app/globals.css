@@ -1369,7 +1369,9 @@ pre,
     top: 12px;
 }
 .skip-link:focus-visible {
-    outline-color: var(--amber);
+    outline: 3px solid var(--forest);
+    outline-offset: 0;
+    box-shadow: 0 0 0 6px var(--cream);
 }
 .onboarding {
     max-width: 900px;

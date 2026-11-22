@@ -132,6 +132,34 @@ def test_every_property_a_console_stylesheet_reads_is_declared_in_its_root() -> 
     assert undeclared == []
 
 
+def luminance(colour: str) -> float:
+    channels = [int(colour[index : index + 2], 16) / 255 for index in (1, 3, 5)]
+    red, green, blue = (
+        value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+        for value in channels
+    )
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+
+
+def contrast(first: str, second: str) -> float:
+    high, low = sorted((luminance(first), luminance(second)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+
+def test_the_skip_link_focus_rings_hold_over_the_rail_and_over_the_page() -> None:
+    tokens = root_tokens()
+    rules = (STATIC / "admin-workspace.css").read_text(encoding="utf-8")
+    dark, light = tokens["--forest"], tokens["--cream"]
+
+    assert (
+        ".skip-link:focus-visible {\n    outline: 3px solid var(--forest);\n"
+        "    outline-offset: 0;\n    box-shadow: 0 0 0 6px var(--cream);\n}"
+    ) in rules
+    assert contrast(dark, light) >= 9
+    for surface in (tokens["--forest"], tokens["--cream-39"]):
+        assert max(contrast(dark, surface), contrast(light, surface)) >= 3
+
+
 def test_the_console_tokens_carry_the_brand_kit_colours() -> None:
     tokens = root_tokens()
     rules = (STATIC / "admin-workspace.css").read_text(encoding="utf-8")
