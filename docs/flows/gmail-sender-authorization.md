@@ -5,8 +5,8 @@ An operator runs `deploy/authorize_gmail.py` on a local workstation after saving
 ## Entry points
 
 - Script `deploy/authorize_gmail.py` `main` (calls `authorize`: listener, consent URL, code exchange): `--client` (default `secrets/gmail-client.json`), `--runtime` (default `secrets/runtime.json`), `--sender` (default `info@pyracast.app`), `--replace`, `--no-browser`. Invoked as `uv run --locked python deploy/authorize_gmail.py` (`docs/DEPLOYMENT.md`, section 2). The 180 s timeout of `authorize` has no CLI option.
-- Hint from `deploy/create_secrets.py` `main`, which prints the helper name when the mail backend is `gmail`.
-- Consumers of the result: `deploy/runtime_secrets.py` `prepare_runtime` (copies `PYRACAST_*` keys to the VM `runtime.env`), `src/pyracast/settings.py` (`MAILERS`), `src/pyracast/mail/gmail.py` `EmailBackend` (`__init__` validates `DEFAULT_FROM_EMAIL` and credentials, `open` refreshes the token), `pyracast check_mail`, deploy check `src/pyracast/accounts/checks.py` `check_authentication_mail_delivery`. No `web/` screen, API view or database is involved.
+- Hint from `deploy/host_secrets.py` `create`, which prints the helper name when the mail backend is `gmail`.
+- Consumers of the result: `deploy/runtime_secrets.py` `runtime_files` (copies `PYRACAST_*` keys to the VM `runtime.env`), `src/pyracast/settings.py` (`MAILERS`), `src/pyracast/mail/gmail.py` `EmailBackend` (`__init__` validates `DEFAULT_FROM_EMAIL` and credentials, `open` refreshes the token), `pyracast check_mail` (run by `deploy/install-release.sh` after readiness; a failure only warns), deploy check `src/pyracast/accounts/checks.py` `check_authentication_mail_delivery`. No `web/` screen, API view or database is involved.
 
 ## Sequence
 
@@ -63,7 +63,7 @@ sequenceDiagram
 
 - No application authentication. Access is possession of the local secret files and a Google login for the sender mailbox, chosen in the browser (`login_hint` is only a hint). Google enforces consent and the scope; the helper rejects any token response whose scope is not exactly `gmail.send` (`exchange_code`).
 - The listener accepts one callback only if path is `/`, `Host` equals `127.0.0.1:<port>`, `state` matches and exactly one of `code` or `error` is present (`Callback.do_GET`). It binds to loopback only.
-- Runtime side, enforced later: `EmailBackend.open` refreshes the access token and again requires scope set `{gmail.send}`; `check_authentication_mail_delivery` (run by `check --deploy` in `deploy/install-release.sh` and `deploy/smoke.sh`) requires, when `DEBUG` is off, a sender with `@` and a non-`localhost` domain and options the backend accepts (credentials, valid sender, positive timeout).
+- Runtime side, enforced later: `EmailBackend.open` refreshes the access token and again requires scope set `{gmail.send}` (an `invalid_grant` answer means the authorization was revoked: run the helper again with `--replace`); `check_authentication_mail_delivery` (run by `check --deploy` in `deploy/install-release.sh` and `deploy/smoke.sh`) requires, when `DEBUG` is off, a sender with `@` and a non-`localhost` domain and options the backend accepts (credentials, valid sender, positive timeout).
 
 ## Failure paths
 
@@ -83,13 +83,13 @@ sequenceDiagram
 - Every handled failure collapses to one message so that tokens, codes and client secrets never reach the terminal. The cost is that the operator cannot tell causes apart.
 - State and PKCE bind the redirect to this run: `state` is 32 random bytes, the verifier 64 random bytes, challenge S256, port random per run.
 - `--replace` guards only the three `PYRACAST_GMAIL_*` keys; the previous refresh token is overwritten, not revoked. `merge_runtime` is atomic (same-directory temp file, `fsync`, `os.replace`) and never removes keys, so SMTP settings stay in the file but are inert once the backend is `gmail`.
-- The sender is written as a bare address (display name lost). The check mail goes through the same `users/{sender}` endpoint as production, so it proves before anything is saved that the consenting account is that mailbox.
+- The sender is written as a bare address (display name lost). The check mail carries its own `Date` and `MIME-Version` headers and goes through the same `users/{sender}` endpoint as production, so it proves before anything is saved that the consenting account is that mailbox.
 - The helper needs Python 3.14+ syntax (`except A, B`); it is not in the `py312` per-file target list in `pyproject.toml` because it only runs on the workstation.
 - `docs/DEPLOYMENT.md` states that an external app in Testing gets seven-day refresh tokens (not verified here); the code cannot detect that.
 
 ## Tests
 
-- `tests/test_gmail_authorization.py`: Desktop-client and endpoint validation, merge keeps unrelated keys and requires `--replace`, failed `os.replace` preserves the file, scope and credential rejection without disclosure, loopback rejects forged state and sends the PKCE verifier and offline parameters, timeout never exchanges, `main` saves only after Gmail accepts the check mail and redacts failures.
+- `tests/test_gmail_authorization.py`: Desktop-client and endpoint validation, merge keeps unrelated keys and requires `--replace`, failed `os.replace` preserves the file, scope and credential rejection without disclosure, loopback rejects forged state and sends the PKCE verifier and offline parameters, a malformed callback is refused and a denial ends the run, timeout never exchanges, a symlinked or malformed runtime file is refused, `main` refuses a sender that is not one address, saves only after Gmail accepts the check mail (sent with `From`, `To`, `Date` and `MIME-Version`) and redacts failures.
 - `tests/test_gmail_mail.py` and `tests/test_mail_configuration.py`: runtime backend refresh and scope recheck, settings build of Gmail `MAILERS`, the deploy check (`accounts.E001`).
 - `tests/test_operations_contracts.py`: the helper's scope and token endpoint equal `pyracast.mail.gmail`, and its credential keys equal the `PYRACAST_GMAIL_*` variables `settings.py` reads.
-- Gaps: `deploy/` is outside the coverage source (`pyproject.toml`, `[tool.coverage.run]`), so the 100 percent floor does not see it. Untested: successful `main`, `--no-browser`, `--replace` through `main`, denied consent, wrong `Host` or path, symlinked runtime file, sender validation, Windows `os.replace`, a `runtime.json` written by the helper read back by settings. No Playwright test applies.
+- Gaps: untested are the printed URL of `--no-browser`, `--replace` through `main`, a callback with the wrong `Host` or path, Windows `os.replace`, and a `runtime.json` written by the helper read back by settings. No Playwright test applies.

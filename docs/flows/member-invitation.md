@@ -1,12 +1,12 @@
-# Invite a member by email, list and cancel pending invitations
+# Invite a member by email, list, resend and cancel invitations
 
-A workspace administrator submits an email address on the Members screen. The backend stores a hashed, seven-day, single-use invitation (superseding any earlier pending one for that address) and mails a link `{PYRACAST_PUBLIC_ORIGIN}/app/#token=...` after commit. The administrator can list and cancel pending invitations; acceptance is the separate `invitation-acceptance` flow.
+A workspace administrator submits an email address on the Members screen. The backend stores a seven-day, single-use invitation (superseding any earlier open one for that address) and a mail intent in one transaction. The mailer then mints the token and sends the link `{PYRACAST_PUBLIC_ORIGIN}/app/invitation/#token=...`. The administrator can list open invitations, send one again and cancel one; acceptance is the separate `invitation-acceptance` flow.
 
 ## Entry points
 
-- `web/src/components/dashboard.tsx` `Dashboard` renders `web/src/components/workspace-members.tsx` `WorkspaceMembers` only when the tenant role is `admin` and the view is `members`.
-- `GET|POST /api/tenants/{t}/invitations/` -> `pyracast.api.workspaces.WorkspaceInvitationsView`; `DELETE /api/tenants/{t}/invitations/{i}/` -> `WorkspaceInvitationView` (`src/pyracast/urls.py`). Actor: workspace administrator. They are the only callers of `pyracast.accounts.invitations.invite_workspace_member` and `revoke_workspace_invitation`.
-- Mail templates `src/pyracast/accounts/templates/mail/workspace_invitation.txt` and `.html`. No command, script or Dramatiq job: the mail is sent synchronously in the request through the configured backend (`pyracast.mail.send.send`, flow `email-transport`), timeout 15 s.
+- `web/src/features/workspace/workspace-members.tsx` `WorkspaceMembers` at `/app/w/<tenant>/members/` (administrators only) composes `members/invite-member.tsx` `InviteMember` (form and the `plants_at_recipient_limit` warning) and `members/pending-invitations.tsx` `PendingInvitations` (state, delivery hints, "Send again", "Cancel invitation").
+- `GET|POST /api/tenants/{t}/invitations/` -> `pyracast.api.workspaces.WorkspaceInvitationsView`; `DELETE .../invitations/{i}/` -> `WorkspaceInvitationView`; `POST .../invitations/{i}/resend/` -> `WorkspaceInvitationResendView` (`src/pyracast/urls.py`). Actor: workspace administrator. They call `pyracast.accounts.invitations.invite_workspace_member`, `reissue_workspace_invitation` and `revoke_workspace_invitation`, as does the platform console with `platform=True` (`/admin/workspaces/{id}/invitations/...`, `pyracast.platform_admin.tenant_views`) and workspace creation, which can invite the first administrator.
+- Mail templates `src/pyracast/accounts/templates/mail/workspace_invitation.txt` and `.html`. The intent is an `OutboundMail` row; the `send_outbound_mail` actor (`pyracast.notifications.outbox`) sends through `pyracast.mail.send.send` (flow `email-transport`).
 
 ## Sequence
 
@@ -17,75 +17,80 @@ sequenceDiagram
     participant V as Invitation views
     participant Op as Invitation operations
     participant DB as PostgreSQL
+    participant W as Mailer
     participant M as Mail backend
     A->>UI: "submit email"
     UI->>V: "POST invitations/ with X-CSRFToken"
-    V->>V: "session auth, CSRF, WorkspaceWritePermission, InvitationInput"
-    alt not authenticated, not admin, unknown field or bad email
-        V-->>UI: "403 or 400"
+    V->>V: "session auth, CSRF, route policy admin, InvitationInput"
+    alt "not authenticated, not admin, unknown field or bad email"
+        V-->>UI: "401, 403 or 400"
     end
     V->>Op: "invite_workspace_member(actor, tenant_id, email)"
-    Op->>DB: "BEGIN, lock tenant row, check admin, member check, count recent rows"
-    alt existing member or rate limit
-        Op-->>V: "ValidationError or InvitationRateLimitError, rollback"
-        V-->>UI: "400, or 429 with Retry-After 60"
+    Op->>DB: "BEGIN, lock tenant row, check admin, member check"
+    Op->>DB: "sender and address advisory locks, count rows per budget"
+    alt "existing member or budget used up"
+        Op-->>V: "DomainError, rollback"
+        V-->>UI: "400, or 429 with Retry-After"
     end
-    Op->>DB: "expire pending rows for the address, insert hashed invitation"
-    Op->>Op: "render the mail in the admin language, then COMMIT"
-    Op->>M: "on_commit deliver: send(message)"
-    Op->>DB: "delivery_status = accepted, failed if NotSentError, else uncertain"
-    Op-->>V: "invitation"
-    V-->>UI: "201 id, email, expires_at, delivery_status"
-    UI->>V: "GET invitations/ (refetch after version bump)"
-    V->>DB: "lock tenant, check admin, select unaccepted unexpired rows"
+    Op->>DB: "supersede open rows for the address, insert invitation and mail intent, COMMIT"
+    V-->>UI: "201 invitation, delivery_status pending"
+    W->>DB: "lock the intent and the open invitation, store the digest of a new token"
+    W->>M: "send(message with the link)"
+    W->>DB: "delivery_status = sent, failed or uncertain"
+    UI->>V: "GET invitations/ (refetch after each action)"
+    V->>DB: "open invitations, newest first"
     V-->>UI: "200 invitations"
-    A->>UI: "Cancel invitation"
-    UI->>V: "DELETE invitations/{i}/ with X-CSRFToken"
-    V->>V: "session auth, CSRF, WorkspaceWritePermission"
-    V->>Op: "revoke_workspace_invitation(actor, tenant_id, invitation_id)"
-    Op->>DB: "lock tenant, check admin, lock row, expires_at = min(expires_at, now)"
-    V-->>UI: "204, then refetch"
+    A->>UI: "Send again or Cancel invitation"
+    UI->>V: "POST invitations/{i}/resend/ or DELETE invitations/{i}/"
+    V->>Op: "reissue_workspace_invitation or revoke_workspace_invitation"
+    Op->>DB: "lock tenant, check admin; resend invites the same address again, cancel locks the row and stores revoked_at"
+    V-->>UI: "201 invitation, or 204, then refetch"
 ```
 
 ## Data
 
 | Table | R/W | What |
 | --- | --- | --- |
-| `accounts_workspaceinvitation` | R/W | Insert with SHA-256 `token_hash` (unique), `created_by`, `expires_at = now + 7 days`; update `delivery_status`; supersede and revoke set `expires_at`; list reads unaccepted unexpired rows; rate limit counts rows by `created_at` |
-| `accounts_tenant` | R (`FOR UPDATE`) | Tenant lock in `require_workspace_admin`; workspace name for the mail |
-| `accounts_membership`, `auth_user`, `accounts_userlanguagepreference` | R | Administrator checks (permission class and operation); existing-member check through `user__email`; active flag; administrator's mail language |
-| `django_session`, `usersessions_usersession` | R/W | Session middleware on every request (session read, `last_activity_at` refresh, activity tracking) under a per-session advisory lock. `pyracast_authentication_cache`, listed in `flows.json`, is not touched: limits are database counts |
+| `accounts_workspaceinvitation` | R/W | Insert with `role`, `created_by`, `expires_at = now + 7 days`, `delivery_status` `pending` and no token; the mailer stores the SHA-256 `token_hash` (unique) and the delivery status; supersede and cancel store `revoked_at` and `revoked_reason`; the list reads open rows |
+| `notifications_outboundmail` | W | One `workspace_invitation` intent per invitation, written in the same transaction; it never holds the token |
+| `accounts_tenant` | R (`FOR UPDATE`) | Tenant lock; workspace name for the mail |
+| `accounts_membership`, `auth_user`, `accounts_userlanguagepreference` | R | Administrator check; existing-member check; administrator's mail language |
+| `django_session`, `usersessions_usersession` | R/W | Session middleware on every request under a per-session advisory lock |
 
 ## Authorization
 
-- Authentication and CSRF: `SessionAuthentication` plus `IsAuthenticated` (`REST_FRAMEWORK` in `settings.py`); CSRF is enforced on `POST` and `DELETE`, and the SPA sends `X-CSRFToken` from the session payload.
-- View: `WorkspaceWritePermission` (`pyracast.api.permissions`) admits non-safe methods only for an active administrator of `tenant_id`, without a lock. `GET` skips it.
-- Operation: `require_workspace_admin` (`pyracast.accounts.operations`) locks the tenant row and re-checks the administrator; it is the only workspace check on `GET`. A missing tenant and a non-admin both give 403.
-- Database: only `token_hash` is unique; no constraint limits pending invitations per tenant and address, which rests on the tenant lock and the update-then-insert. The Members screen is admin-only in the UI as a convenience.
+- Authentication and CSRF: `SessionAuthentication` plus `RoutePolicy` (`REST_FRAMEWORK` in `settings.py`); CSRF is enforced on an authenticated `POST` and `DELETE`, and the SPA sends `X-CSRFToken` from the session payload.
+- Route: every invitation route is `ADMIN` in `ROUTE_POLICIES` (`pyracast.api.permissions`): an active administrator membership of `tenant_id`, without a lock.
+- Operation: `authorize_workspace_admin` locks the tenant row and re-reads the membership; with `platform=True` a platform administrator replaces the membership check. An `admin` invitation needs platform authority (403 `platform_admin_required` otherwise) and a workspace without administrator (409 `workspace_admin_changed`); the API only ever invites viewers.
+- Database: `token_hash` unique; `workspaceinvitation_tenant_email_uniq` (one open invitation per workspace and address) and `workspaceinvitation_tenant_administrator_uniq` (one open administrator invitation per workspace), plus check constraints. The Members screen is admin-only in the UI as a convenience.
 
 ## Failure paths
 
 | Condition | Result |
 | --- | --- |
-| Not authenticated (any method), or missing or wrong CSRF token (`POST`, `DELETE`) | 403 `http_403` |
-| Non-admin or foreign tenant, any method | 403 "Workspace administrator required." |
-| Unknown JSON field such as `role` | 400 "Unknown fields are not accepted." |
-| Invalid email, or email already a member (`user.email`, case-insensitive, inactive users included) | 400 `http_400`, "This account already belongs to the workspace." for members |
-| 20 invitations in the last hour for the tenant, or same address within one minute (cancelled rows count) | 429 `http_429`, `Retry-After: 60` in both cases |
-| Tenant or invitation row lock not acquired within 5 s; same-session request still running after 5 s | 503 `workspace_busy` / 429 `session_busy`, both `Retry-After: 1` |
-| Mail known not sent (`NotSentError`) / any other mail error | Still 201, `delivery_status` `failed` / `uncertain`, UI hint in `workspace-members.tsx` |
-| Mail template fails to render / email of 255 to 320 characters passes both validators (inferred) | 500 and the transaction rolls back, no row is left / 500 on the `varchar(254)` column |
-| Cancel with unknown id or id of another tenant | 400 "The invitation is invalid or expired." |
-| Cancel of an already expired or accepted row | 204; `expires_at` never moves later |
+| Not authenticated | 401 `not_authenticated` with `WWW-Authenticate: Session` |
+| Missing or wrong CSRF token (`POST`, `DELETE`) | 403 `csrf_failed` |
+| Foreign tenant, any method | 403 `membership_required` |
+| Viewer, any method | 403 `workspace_admin_required` |
+| Unknown JSON field such as `role`, invalid email | 400 `invalid_request` with "Unknown fields are not accepted." or a field error |
+| Email already a member (case-insensitive, inactive users included) | 400 `invitation_member_exists` |
+| A budget is used up (see Rules) | 429 `invitation_rate_limited`, `Retry-After` equal to the wait of the largest violated budget |
+| Row lock not acquired within 5 s; same-session request still running after 5 s | 503 `busy` / 429 `session_busy`, both `Retry-After: 1` |
+| Cancel or resend with an unknown id, another tenant's id or an accepted invitation; resend of a closed one | 400 `invitation_unavailable` |
+| Cancel of an invitation already cancelled or superseded | 204, nothing changes |
+| Mail not sent or not confirmed | Still 201; the worker ends the intent with `failed` or `uncertain` |
 
 ## Rules and invariants
 
-- Lock order: tenant row, then invitation row (revoke). The tenant lock serializes issuance per tenant, so the rate-limit count is race-free. Only the SHA-256 digest is stored; the plaintext token exists only in the mail, in a URL fragment. Reissue first expires every unaccepted, unexpired row for the same lower-cased address.
-- Expiry is the revocation mechanism: reissue, member removal and administrator transfer set `expires_at` to now, cancel to `min(expires_at, now)`. No code path deletes rows.
-- The mail runs in `transaction.on_commit`, so a rolled-back invitation sends nothing. `delivery_status` is `pending` until the callback ends, then `accepted` (the backend took the message, not the invitation), `failed` or `uncertain`.
-- Mail language is the administrator's saved language, else the request language, not the invitee's. The role is always viewer; no role choice, no resend. Limits are literals in `invite_workspace_member`: 20 per hour per tenant, 1 per minute per address, 7 days. The templates repeat "seven days".
+- Lock order: tenant row, sender and address advisory locks (`INVITATION_LOCK_SPACE`), then the invitation row (cancel). The tenant lock serializes issuance per workspace; the advisory locks serialize the budgets that span workspaces.
+- Budgets (`InvitationBudget` in `invitations.py`): 20 an hour per workspace; one a minute per workspace and address (not counting an invitation whose delivery `failed` or was `uncertain`); 50 a day per sender; 3 a day per address; one workspace per address a day. Cancelled, superseded and accepted rows count.
+- One open invitation per address: a new invitation sets `revoked_at` and `revoked_reason` `superseded` on every open invitation of that address in the workspace, expired ones included; an administrator invitation also closes every open administrator invitation. `WorkspaceInvitation.state_at` derives the state; `expires_at` is the natural deadline and never moves. Cancel stores reason `cancelled`; member removal and administrator reassignment close with `member_removed` and `administrator_changed`.
+- Resend takes an open invitation of this workspace (pending or expired) and issues a new one with the same address and role under the same budgets; the old one becomes superseded.
+- No token exists until the mailer sends: it mints one, stores only its digest and renders the link into the message. An invitation closed before the send is skipped (`invitation_unavailable`) and stays `pending`; a send that fails before transmission is retried with a new token.
+- Mail language is the language chosen in the console form, else the administrator's saved language, else the request language, never the invitee's. The requests of this flow delete no rows. The retention phase deletes an invitation, after its mail, 90 days after it closed (accepted, revoked or past `expires_at`; `accounts.retention.purge_closed_invitations`), and account erasure deletes the invitations addressed to an address of the erased account or accepted by it (flow `account-erasure`).
 
 ## Tests
 
-- `tests/test_workspaces.py`: operation rules, reissue, API scoping (400, 403, 429, 204), email failure, hourly limit, admin-language mail, transfer expiry; `tests/test_workspace_authorization.py` (viewer 403), `tests/test_transactional_mail.py` (content, escaping, `#token=` link), `tests/test_workspace_member_removal.py` (removal expires invitations), `web/tests/workspace-roles.spec.ts` (invite, error, cancel against a mocked API).
-- Gaps: no real-backend Playwright run; no parallel-issuance test; nothing for emails over 254 characters, `Retry-After` on 429 or `workspace_busy` here; the mocked 400 "An invitation is already pending." is never returned by the backend.
+- `tests/test_invitation_lifecycle.py` (state, cancel, supersede, send again), `tests/test_invitation_limits.py` (each budget, wait values), `tests/test_workspace_http_failures.py` (every failure above), `tests/test_outbound_mail.py` (answer before send, token only in the message, retries).
+- `web/tests/workspace-roles.spec.ts` (invite, send again, cancel against a mocked API).
+- Gaps: no real-backend Playwright run; no Playwright test shows the recipient-limit warning (mocks return 0).

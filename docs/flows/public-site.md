@@ -9,9 +9,9 @@ a readable page or file whose calls to action hand off to the private applicatio
 - Pages: `web/src/app/page.tsx` (`/`) and `tr/page.tsx` render `WebsiteData` and `HomePage`; `privacy/page.tsx`,
   `terms/page.tsx` and their `tr/` twins render `LegalPage` with `legalCopy(language, kind)`. All wrap `SiteShell`.
 - Discovery: `sitemap.ts`, `robots.ts`, `opengraph-image.tsx`, `tr/opengraph-image.tsx` (`createSocialImage`), `icon.svg`.
-- Legacy links: `/` with any query key `token`, `next`, `social_callback`, `account` or `workspace`. Handoff:
-  `/app/?signup=1&language=<lang>` (sign-up) and `/app/?language=<lang>` (header sign-in) for `Dashboard`; `Auth` links
-  back. Traefik router `frontend` takes every path not in `backend` (`/api`, `/admin`, `/static/`, `/health/`).
+- Handoff: `/app/?signup=1&language=<lang>` (sign-up) and `/app/?language=<lang>` (header sign-in) for `AppRoot`
+  (`useLanguageHandoff`) and `RequireUser`; `Auth` links back. Traefik router `frontend` (`deploy/routes.yml`) takes
+  every path the `api`, `authentication`, `admin` and `backend` routers do not (`/api`, `/admin`, `/static/`, `/health/`).
 
 ## Sequence
 
@@ -20,7 +20,7 @@ sequenceDiagram
     actor V as Visitor
     participant P as proxy.ts
     participant N as Next page
-    participant D as Dashboard
+    participant D as AppRoot
     participant A as Django API
     V->>P: GET path via Traefik
     alt "sitemap, robots, image, icon or identity/ file"
@@ -32,11 +32,7 @@ sequenceDiagram
             P-->>V: "308 to the slash form, query kept"
         else public page path
             P->>N: "set x-pyracast-public-language from URL"
-            alt "path is / with a legacy query key"
-                N-->>V: "307 to /app/ with the same query"
-            else render
-                N-->>V: "HTML with lang and metadata, JSON-LD under nonce on home pages"
-            end
+            N-->>V: "HTML with lang and metadata, JSON-LD under nonce on home pages"
         else "other path"
             P->>N: "no language header"
             N-->>V: "response plus X-Robots-Tag noindex; unknown path renders the bilingual not-found page"
@@ -57,7 +53,7 @@ sequenceDiagram
 | Table | R/W | What |
 | --- | --- | --- |
 | None | - | Public pages: no API call, table or job; copy lives in `home-copy.ts`, `legal-copy.ts`, `public-metadata.ts`. |
-| `accounts_userlanguagepreference` | W | Only on a signed-in language POST, which `Dashboard` never sends. |
+| `accounts_userlanguagepreference` | W | Only on a signed-in language POST, which `AppRoot` never sends. |
 
 ## Authorization
 
@@ -66,14 +62,13 @@ sequenceDiagram
   from `languages` and `publicPages`) to a language and page; every other matched path gets `X-Robots-Tag: noindex,
   nofollow`. Its matcher skips the discovery files and `identity/`, so they carry no page headers. It deletes a client-sent `x-pyracast-public-language` before setting its
   own, so `i18n/request.ts` can prefer that header over the `pyracast_language` cookie.
-- Handoff: `SessionLanguageView` is `AllowAny` with `csrf_protect`; a `ChoiceField` rejects other languages.
+- Handoff: `SessionView` and `SessionLanguageView` are public routes of `RoutePolicy`; the language POST is `csrf_protect` and a `ChoiceField` rejects other languages.
 
 ## Failure paths
 
 | Condition | Result |
 | --- | --- |
-| `/` has a legacy query key | 307 to `/app/?<same query>`, repeated keys kept; backend now emits `/app/` links |
-| `/tr/` has the same keys | No redirect; Turkish home renders, query ignored |
+| `/` or `/tr/` with any query (for example `?account=security`) | The home page renders, the query is ignored |
 | Unknown path (for example `/tr/foo/`) | 404 `not-found.tsx` in English and Turkish with links to `/` and `/tr/`, `X-Robots-Tag: noindex, nofollow` |
 | Public page without trailing slash (`/privacy`) | 308 from `proxy.ts` to `/privacy/`, query kept |
 | `language` param not `en` or `tr` | Ignored and kept in the URL; the form shows at once |
@@ -93,9 +88,9 @@ sequenceDiagram
 
 - `web/tests/public-site.spec.ts`: per page, no-JS render at 320px with spoofed header and cookie, status, no
   `X-Robots-Tag`, CSP, title, `lang`, canonical, hreflang, og/twitter image, robots meta, no `/api/` call, language
-  switch, home JSON-LD; axe on three pages; 200% text; sitemap, robots, `/app/` noindex, image size; 307 redirect;
-  discovery files without page headers; localized not-found page. `web/tests/public-routes.spec.ts`: every public path
+  switch, home JSON-LD; axe on three pages; 200% text; sitemap, robots, `/app/` noindex, image size;
+  discovery files without page headers; localized not-found page. `web/tests/app-routes.spec.ts` (`/?account=security` stays on the home page). `web/tests/public-routes.spec.ts`: every public path
   round-trips through `publicRoute`; slash-less paths answer 308.
 - `web/tests/localization.spec.ts` (guest language first, retry, no write when signed in or matching; auth links),
   `auth-registration.spec.ts` (sign-up public links), `tests/test_language.py` (CSRF, anonymous cookie).
-- Gaps: `/tr/` legacy keys, HTML cache, legal dates, header link.
+- Gaps: HTML cache, legal dates, header link.
