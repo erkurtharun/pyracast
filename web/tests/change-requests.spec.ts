@@ -1613,6 +1613,30 @@ test("a member sees which intervals wait for approval and opens the request", as
     ).toBeVisible();
 });
 
+test("a waiting marker opened in a new tab leaves the page where it is", async ({
+    page,
+}) => {
+    await member(page);
+    await serveDays(page, () => [{ pending_request_id: 7 }, {}]);
+    await openPlant(page, "Production");
+    const marker = page.getByRole("link", {
+        name: /^Waiting for approval: view the request for 08:00/,
+    });
+    await expect(marker).toBeVisible();
+    const before = page.url();
+    const opened = page.context().waitForEvent("page");
+    await marker.click({ modifiers: ["ControlOrMeta"] });
+    const tab = await opened;
+    await tab.waitForURL(/\/app\/w\/1\/inbox\/\?request=7$/, {
+        waitUntil: "commit",
+    });
+    await tab.close();
+    expect(page.url()).toBe(before);
+    await expect(
+        page.getByRole("group", { name: "Production intervals" }),
+    ).toBeVisible();
+});
+
 function proposalControls(page: Page, title: string) {
     const card = page.locator("article").filter({
         has: page.getByRole("heading", { name: title }),

@@ -1,7 +1,7 @@
 "use client";
-import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { routes } from "@/lib/routes";
+import { AppLink } from "@/ui/app-link";
 
 export function PendingApproval({
     tenantId,
@@ -14,12 +14,12 @@ export function PendingApproval({
 }) {
     const t = useTranslations("ChangeRequests");
     return (
-        <Link
+        <AppLink
             className="pending-approval"
             href={routes.inbox(tenantId, requestId)}
-            aria-label={t("waitingForApprovalOf", { subject })}
+            label={t("waitingForApprovalOf", { subject })}
         >
             {t("waitingForApproval")}
-        </Link>
+        </AppLink>
     );
 }
