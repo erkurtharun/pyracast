@@ -157,6 +157,32 @@ test("the ending-soon warning appears at the next tick once the clock passed its
     await expect(warning).toBeVisible();
 });
 
+test("a cover lifts at the answer of Retry after the clock was moved back", async ({
+    page,
+}) => {
+    await signedInOnClock(page);
+    await openSettingsForm(page);
+    await page.route("**/api/**", abort);
+    await page.clock.runFor(idleLimit + tick);
+    await expect(cover(page)).toBeVisible();
+    await page.unroute("**/api/**", abort);
+    await page.clock.setSystemTime(new Date(start.getTime() - 60 * 60_000));
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect(cover(page)).toHaveCount(0);
+    await expect(page.getByLabel(capacity)).toHaveValue("6.25");
+});
+
+test("a clock moved back does not postpone the idle session read", async ({
+    page,
+}) => {
+    await signedInOnClock(page);
+    await openSettingsForm(page);
+    await page.clock.setSystemTime(new Date(start.getTime() - 60 * 60_000));
+    const read = page.waitForRequest("**/api/session/");
+    await page.clock.runFor(tick);
+    await read;
+});
+
 test("a cover hides what the screens last announced", async ({ page }) => {
     await signedInOnClock(page);
     await page.goto("/app/w/1/");
@@ -166,4 +192,26 @@ test("a cover hides what the screens last announced", async ({ page }) => {
     await expect(cover(page)).toBeVisible();
     await expect(liveRegion(page)).toBeHidden();
     await expect(page.getByText(resentNotice)).toBeHidden();
+});
+
+test("a workspace-list answer after a failed session read covers nothing", async ({
+    page,
+}) => {
+    const server = await signedInOnClock(page);
+    await page.goto("/app/w/1/");
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
+    server.failing = true;
+    const failed = page.waitForResponse("**/api/session/");
+    await focusWindow(page);
+    expect((await failed).status()).toBe(503);
+    const listed = page.waitForResponse("**/api/tenants/");
+    await page.clock.runFor(4 * tick);
+    await listed;
+    await page.clock.runFor(tick);
+    await expect(cover(page)).toHaveCount(0);
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
 });

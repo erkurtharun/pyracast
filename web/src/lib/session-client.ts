@@ -115,10 +115,14 @@ function failConfirmation() {
     notify();
 }
 
-export function confirmIdleSession(now: number) {
+// The wall clock counts the time a suspended device slept. An answer stamped later than now counts
+// as old, so a clock set back cannot postpone the check.
+export function confirmIdleSession() {
+    const now = Date.now();
+    const { answeredAt } = confirmation;
     if (
         state.session?.user &&
-        now - confirmation.answeredAt >= serverIdleLimitMs
+        (now < answeredAt || now - answeredAt >= serverIdleLimitMs)
     )
         loadSession().catch(() => {});
 }
@@ -223,7 +227,7 @@ export function adoptSession(session: Session) {
             session,
             replaced: state.replaced || owner !== documentOwner,
         };
-    confirmation = { ...confirmation, answeredAt: Date.now() };
+    confirmation = { answeredAt: Date.now() };
     setCsrfToken(session.csrf_token);
     observe(session.session_tag ?? "");
     generation += 1;

@@ -260,7 +260,7 @@ function useRestoredDocument() {
 function IdleSessionCheck() {
     const now = useSessionClock();
     useEffect(() => {
-        if (document.visibilityState === "visible") confirmIdleSession(now);
+        if (document.visibilityState === "visible") confirmIdleSession();
     }, [now]);
     return null;
 }
