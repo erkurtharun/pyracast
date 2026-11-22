@@ -16,7 +16,7 @@ def test_a_verified_company_account_is_protected_by_a_second_factor_and_recovery
     web_gateway: Gateway, auth_mailbox: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     email = "security@example.com"
-    now = time()
+    now = int(time())
     totp_clock(monkeypatch, now)
 
     run_spec(
