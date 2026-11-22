@@ -135,6 +135,20 @@ def test_forwarded_recipient_and_plain_smtp_remain_compatible(smtp: SMTP) -> Non
     assert smtp.options == []
 
 
+def test_copy_recipients_without_a_to_recipient_are_sent_with_a_cc_header_only(
+    smtp: SMTP,
+) -> None:
+    outgoing = message()
+    outgoing.cc, outgoing.bcc = [RECIPIENTS[0]], [RECIPIENTS[1]]
+    send(outgoing)
+    assert smtp.envelope == RECIPIENTS
+    (content,) = smtp.content
+    parsed = BytesParser(policy=policy.default).parsebytes(content)
+    assert parsed["To"] is None
+    assert parsed["Cc"] == RECIPIENTS[0]
+    assert RECIPIENTS[1].encode() not in content
+
+
 def test_single_transactional_recipient_keeps_its_visible_header(smtp: SMTP) -> None:
     outgoing = message()
     outgoing.to, outgoing.bcc = [RECIPIENTS[0]], []

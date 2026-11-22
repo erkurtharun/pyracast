@@ -3,13 +3,16 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from allauth.account.models import EmailAddress
-from django.db.models import F, Q
+from django.db.models import Case, F, Q, Value, When
 
-from pyracast.accounts.models import Membership
+from pyracast.accounts.models import Membership, WorkspaceRole
+from pyracast.notifications.addressing import Candidate, roles
 from pyracast.notifications.models import (
     DeliveryRecipient,
     NotificationDelivery,
     NotificationDeliveryStatus,
+    RecipientRole,
+    ReminderMemberRole,
     ReminderRecipient,
     ReminderRecipientTie,
     ReminderSchedule,
@@ -37,12 +40,26 @@ class Explicit:
 
 
 @dataclass(frozen=True)
+class Member:
+    membership: int
+    address: str
+    administrator: bool
+
+
+@dataclass(frozen=True)
 class Workspace:
+    """Active memberships, and one member per verified primary address."""
+
     active: frozenset[int]
-    addresses: tuple[str, ...]
+    members: tuple[Member, ...]
+
+    @property
+    def addresses(self) -> tuple[str, ...]:
+        return tuple(member.address for member in self.members)
 
 
 NO_MEMBERS = Workspace(frozenset(), ())
+MemberRow = tuple[int, int, str, str]
 
 
 def workspace(tenant_id: int, *, leaving: int | None = None) -> Workspace:
@@ -50,20 +67,20 @@ def workspace(tenant_id: int, *, leaving: int | None = None) -> Workspace:
     memberships = Membership.objects.filter(tenant_id=tenant_id, user__is_active=True)
     if leaving is not None:
         memberships = memberships.exclude(pk=leaving)
-    members = list(memberships.order_by("pk").values_list("pk", "user_id", "user__email"))
+    members = list(memberships.order_by("pk").values_list("pk", "user_id", "user__email", "role"))
     return _workspace(members, _verified([tenant_id]))
 
 
 def workspaces(tenant_ids: Iterable[int]) -> dict[int, Workspace]:
     """`workspace` of several tenants in two queries."""
     ids = set(tenant_ids)
-    found: dict[int, list[tuple[int, int, str]]] = {pk: [] for pk in ids}
-    for tenant_id, pk, user_id, email in (
+    found: dict[int, list[MemberRow]] = {pk: [] for pk in ids}
+    for tenant_id, pk, user_id, email, role in (
         Membership.objects.filter(tenant_id__in=ids, user__is_active=True)
         .order_by("pk")
-        .values_list("tenant_id", "pk", "user_id", "user__email")
+        .values_list("tenant_id", "pk", "user_id", "user__email", "role")
     ):
-        found[tenant_id].append((pk, user_id, email))
+        found[tenant_id].append((pk, user_id, email, role))
     verified = _verified(ids)
     return {tenant_id: _workspace(members, verified) for tenant_id, members in found.items()}
 
@@ -77,15 +94,13 @@ def _verified(tenant_ids: Iterable[int]) -> set[tuple[int, str]]:
     }
 
 
-def _workspace(
-    members: Sequence[tuple[int, int, str]], verified: set[tuple[int, str]]
-) -> Workspace:
-    addresses: dict[str, str] = {}
-    for _, user_id, email in members:
+def _workspace(members: Sequence[MemberRow], verified: set[tuple[int, str]]) -> Workspace:
+    found: dict[str, Member] = {}
+    for pk, user_id, email, role in members:
         key = recipient_key(email)
         if (user_id, key) in verified:
-            addresses.setdefault(key, email.strip())
-    return Workspace(frozenset(pk for pk, _, _ in members), tuple(addresses.values()))
+            found.setdefault(key, Member(pk, email.strip(), role == WorkspaceRole.ADMIN))
+    return Workspace(frozenset(pk for pk, _, _, _ in members), tuple(found.values()))
 
 
 def grouped_recipients(
@@ -128,12 +143,97 @@ def effective(
     return list(addresses.values())
 
 
-def effective_recipients(schedule: ReminderSchedule) -> list[str]:
+@dataclass(frozen=True)
+class Resolved:
+    """A schedule's typed rows, the workspace read with them and the addresses they permit."""
+
+    explicit: list[Explicit]
+    members: Workspace
+    addresses: list[str]
+
+
+def resolve(schedule: ReminderSchedule) -> Resolved:
     explicit = explicit_recipients([schedule.pk]).get(schedule.pk or 0, [])
     include = schedule.include_workspace_members
-    if not needs_members(include, explicit):
-        return effective(include, explicit, NO_MEMBERS)
-    return effective(include, explicit, workspace(schedule.region.tenant_id))
+    members = (
+        workspace(schedule.region.tenant_id)
+        if needs_members(include, explicit) or not schedule.hide_recipients
+        else NO_MEMBERS
+    )
+    return Resolved(explicit, members, effective(include, explicit, members))
+
+
+def effective_recipients(schedule: ReminderSchedule) -> list[str]:
+    return resolve(schedule).addresses
+
+
+@dataclass(frozen=True)
+class Choices:
+    typed: dict[str, RecipientRole]
+    chosen: dict[int, RecipientRole]
+    holders: dict[str, set[int]]
+
+
+def stored_choices(schedule: ReminderSchedule, explicit: Sequence[Explicit]) -> Choices:
+    """The typed rows' choices by key, the members' choices by membership and, when a typed row
+    is tied, who holds each address now."""
+    typed = ReminderRecipient.objects.filter(schedule_id=schedule.pk).exclude(role="")
+    chosen = ReminderMemberRole.objects.filter(schedule_id=schedule.pk)
+    holders = (
+        address_holders(schedule.region.tenant_id) if any(row.ties for row in explicit) else {}
+    )
+    return Choices(
+        {key: RecipientRole(role) for key, role in typed.values_list("key", "role")},
+        {pk: RecipientRole(role) for pk, role in chosen.values_list("membership_id", "role")},
+        holders,
+    )
+
+
+def candidates(
+    addresses: Sequence[str], explicit: Sequence[Explicit], members: Workspace, choices: Choices
+) -> list[Candidate]:
+    """A typed row is settled while untied or while an active member it is tied to holds its
+    address; the choice of an unsettled row counts only when it hides."""
+    rows = {recipient_key(row.address): row for row in explicit}
+    holding = {recipient_key(member.address): member for member in members.members}
+    found = []
+    for address in addresses:
+        key = recipient_key(address)
+        row, member = rows.get(key), holding.get(key)
+        found.append(
+            Candidate(
+                address,
+                member=member is not None,
+                administrator=member is not None and member.administrator,
+                chosen=choices.chosen.get(member.membership) if member else None,
+                typed=choices.typed.get(key) if row else None,
+                settled=row is None
+                or not row.ties
+                or bool(row.ties & members.active & choices.holders.get(key, set())),
+            )
+        )
+    return found
+
+
+def placements(
+    schedule: ReminderSchedule, resolved: Resolved, addresses: Sequence[str]
+) -> list[RecipientRole]:
+    """The header of each address of the list; a hidden schedule reads no choice."""
+    found = (
+        [Candidate(address) for address in addresses]
+        if schedule.hide_recipients
+        else candidates(
+            addresses,
+            resolved.explicit,
+            resolved.members,
+            stored_choices(schedule, resolved.explicit),
+        )
+    )
+    return roles(
+        found,
+        hide_recipients=schedule.hide_recipients,
+        include_workspace_members=schedule.include_workspace_members,
+    )
 
 
 def address_holders(tenant_id: int) -> dict[str, set[int]]:
@@ -204,6 +304,27 @@ def narrow_recipients(delivery: NotificationDelivery, current: Sequence[str]) ->
     return [row.address for row in kept]
 
 
+def record_roles(
+    delivery: NotificationDelivery, addresses: Sequence[str], placed: Sequence[RecipientRole]
+) -> None:
+    """Writes every remaining row's header of this attempt, so a retry never keeps an earlier
+    attempt's role."""
+    keys = {
+        role: [
+            recipient_key(address)
+            for address, given in zip(addresses, placed, strict=True)
+            if given == role
+        ]
+        for role in (RecipientRole.TO, RecipientRole.CC)
+    }
+    DeliveryRecipient.objects.filter(delivery=delivery).update(
+        role=Case(
+            *(When(key__in=found, then=Value(role)) for role, found in keys.items() if found),
+            default=Value(RecipientRole.BCC),
+        )
+    )
+
+
 def delivery_addresses(delivery: NotificationDelivery) -> list[str]:
     """The envelope once the transmit marker is set, otherwise the rows not revoked."""
     return [
@@ -211,6 +332,13 @@ def delivery_addresses(delivery: NotificationDelivery) -> list[str]:
         for row in delivery.recipient_rows.all()
         if delivery.transmit_started_at is not None or not row.revoked
     ]
+
+
+def delivery_roles(delivery: NotificationDelivery) -> list[tuple[str, RecipientRole]] | None:
+    """Each envelope address with its header, once the transmit marker is set."""
+    if delivery.transmit_started_at is None:
+        return None
+    return [(row.address, RecipientRole(row.role)) for row in delivery.recipient_rows.all()]
 
 
 def remove_member_recipients(tenant_id: int, membership_id: int, emails: set[str]) -> None:

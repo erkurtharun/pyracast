@@ -1,5 +1,6 @@
 import logging
 import uuid
+from dataclasses import replace
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -30,11 +31,18 @@ from pyracast.notifications.models import (
     NotificationDeliveryError,
     NotificationDeliveryStatus,
     PreparedMessageKind,
+    RecipientRole,
 )
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.preparation import prepare_delivery
-from pyracast.notifications.recipients import narrow_recipients
-from pyracast.notifications.scheduler import MAX_LATENESS, slot_recipients
+from pyracast.notifications.recipients import (
+    Resolved,
+    narrow_recipients,
+    placements,
+    record_roles,
+    resolve,
+)
+from pyracast.notifications.scheduler import MAX_LATENESS, recipient_refusal
 from pyracast.regions.models import Region, active_region
 
 LEASE_DURATION = ACTORS["send_forecast_reminder"].lease
@@ -42,25 +50,26 @@ WAITING = (NotificationDeliveryStatus.PENDING, NotificationDeliveryStatus.RETRY)
 logger = logging.getLogger(__name__)
 
 
-def _authorize(delivery: NotificationDelivery, limit: int) -> tuple[list[str], str]:
-    """The addresses still permitted, narrowed in the database, or the reason to skip."""
+def _authorize(delivery: NotificationDelivery, limit: int) -> tuple[Resolved | None, str]:
+    """The reads that permit the delivery with its addresses narrowed in the database, or the
+    reason to skip."""
     schedule = delivery.schedule
     clock = delivery.scheduled_for.astimezone(ZoneInfo(schedule.region.timezone)).strftime("%H:%M")
     if not schedule.enabled or clock not in schedule.times:
-        return [], NotificationDeliveryError.CANCELLED_BY_SETTINGS_CHANGE
-    current, reason = slot_recipients(schedule, limit)
-    if reason:
-        return [], reason
-    addresses = narrow_recipients(delivery, current)
+        return None, NotificationDeliveryError.CANCELLED_BY_SETTINGS_CHANGE
+    resolved = resolve(schedule)
+    if reason := recipient_refusal(resolved.addresses, limit):
+        return None, reason
+    addresses = narrow_recipients(delivery, resolved.addresses)
     if not addresses:
-        return [], NotificationDeliveryError.NO_RECIPIENTS
+        return None, NotificationDeliveryError.NO_RECIPIENTS
     if (
         schedule.region_id != delivery.binding.region_id
         or clock not in schedule.times[: delivery.binding.provider_account.daily_quota]
         or not binding_can_notify(delivery.binding)
     ):
-        return [], NotificationDeliveryError.SCHEDULE_OR_AUTHORITY_CHANGED
-    return addresses, ""
+        return None, NotificationDeliveryError.SCHEDULE_OR_AUTHORITY_CHANGED
+    return replace(resolved, addresses=addresses), ""
 
 
 def _recover_interrupted(delivery: NotificationDelivery, now: datetime) -> None:
@@ -114,12 +123,12 @@ def _mark_transmit(
         delivery = _locked_delivery(delivery_id)
         if delivery is None or not carries(delivery, token, NotificationDeliveryStatus.SENDING):
             return False
-        addresses, reason = _authorize(delivery, limit)
+        resolved, reason = _authorize(delivery, limit)
         now = clock.now()
         if expired(delivery, now):
             _recover_interrupted(delivery, now)
             return False
-        if reason or now - delivery.scheduled_for > MAX_LATENESS:
+        if resolved is None or now - delivery.scheduled_for > MAX_LATENESS:
             delivery.status = NotificationDeliveryStatus.SKIPPED
             delivery.last_error = reason or NotificationDeliveryError.DELIVERY_DEADLINE_EXCEEDED
             release(delivery)
@@ -127,7 +136,13 @@ def _mark_transmit(
             return False
         delivery.transmit_started_at = now
         delivery.save(update_fields=("transmit_started_at",))
-        message.bcc = addresses
+        addresses = resolved.addresses
+        placed = placements(delivery.schedule, resolved, addresses)
+        record_roles(delivery, addresses, placed)
+        message.to, message.cc, message.bcc = (
+            [address for address, given in zip(addresses, placed, strict=True) if given == role]
+            for role in (RecipientRole.TO, RecipientRole.CC, RecipientRole.BCC)
+        )
         return True
 
 
@@ -151,8 +166,8 @@ def _claim(
             or delivery.available_at > now
         ):
             return None
-        addresses, reason = _authorize(delivery, limit)
-        if reason:
+        resolved, reason = _authorize(delivery, limit)
+        if resolved is None:
             delivery.status, delivery.last_error = NotificationDeliveryStatus.SKIPPED, reason
             delivery.save()
             return None
@@ -180,7 +195,7 @@ def _claim(
             delivery.forecast_kind = PreparedMessageKind.UNAVAILABLE
             delivery.forecast_complete = None
             message, delivery.prepared_message = build_unavailable_message(delivery)
-        message.bcc = addresses
+        message.bcc = resolved.addresses
         token = take(delivery, NotificationDeliveryStatus.SENDING, now, LEASE_DURATION)
         delivery.transmit_started_at = None
         delivery.save()
