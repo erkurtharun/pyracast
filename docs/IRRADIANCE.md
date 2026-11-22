@@ -31,11 +31,15 @@ equivalence to Solcast, and no interval or daily accuracy is claimed without mat
 - The adapter accepts only `PT30M` rows, reads `pv_estimate` (kW, nullable, finite) and turns
   `period_end` into explicit UTC bounds `[end - 30 min, end)`. Quantile columns are not used, the
   central value is not assumed to be P50 or an expectation, and the Hobby response gives no issue
-  time, so `issued_at` stays null; it is never invented. The raw payload is retained beside the
-  normalized intervals.
+  time, so `issued_at` stays null; it is never invented. The raw payload is retained whole; the
+  normalized intervals are clipped to the requested window, for a forecast the three local dates
+  `[today, today + 3)`.
 - Forecast requests ask for the smallest whole-hour horizon reaching the end of the day after
   tomorrow; estimated-actual requests ask for the shortest whole-hour lookback reaching the oldest
-  gap, capped at 168 hours. Scheduling, quota reservation and archiving are in
+  gap, capped at 168 hours. A gap is a completed native half-hour of those 168 hours that overlaps
+  the local whole hours around daylight (sunrise rounded down, sunset up) and that no archived
+  native estimated actuals cover; a polar night has none. Scheduling, quota reservation and
+  archiving are in
   [forecast-collection-scheduling](flows/forecast-collection-scheduling.md) and
   [forecast-collection-execution](flows/forecast-collection-execution.md).
 
@@ -98,7 +102,8 @@ overlaps daylight, clipped only to the local day, so sunrise and sunset never sp
 mean into invented day and night energy; original native bounds decide this even after
 composition or outage splits. The total is non-null only when valid values cover daylight and
 every selected boundary interval, so a missing boundary fragment leaves it null even at 100%
-daylight coverage. Polar night has no window, no total and a null `coverage_fraction`. The summary
+daylight coverage. Polar night has no window, no total and a null `coverage_fraction`; a polar
+day's window is the whole local day, so its total needs valid values for all of it. The summary
 does not depend on the 30/60-minute display resolution.
 
 On irradiance results, `input_coverage_seconds` and `input_coverage_fraction` report daylight
@@ -120,43 +125,6 @@ the millisecond, and unclaimed Astral events are dropped. The day keeps events i
 Any valid coordinate and timezone yields windows; only a local date the timezone skips is
 refused. An interval ending exactly at sunrise or starting at sunset has no daylight overlap.
 
-## Reference evaluation
-
-`pyracast.evaluation.evaluate_reference` measures prediction minus matched Solcast forecast:
-daily kWh/m² MAE and signed bias, duration-weighted daylight GHI error and coverage. A pair must
-share location, local date, configuration revision, a real issue time and interval bounds;
-duplicates and overlapping intervals of one vintage are refused. No product path calls it. Use
-chronological day blocks and held-out locations for geographic claims, avoid relative errors near
-zero and leakage from later observations; a few weeks verify the pipeline, not seasonal validity.
-
-## Auxiliary weather reference
-
-With `PYRACAST_WEATHER_ENABLED=1` (the code default; generated deployment secrets set `0`, see
-[DEPLOYMENT.md](DEPLOYMENT.md)) a Solcast forecast job also requests Open-Meteo
-`temperature_2m`, `snow_depth`, `snowfall` and `shortwave_radiation` for the source coverage
-window, with UTC Unix timestamps. No Solcast request or quota is used; fixture providers and
-estimated-actual jobs make no weather request. How the request is archived and retried is in
-[forecast-collection-execution](flows/forecast-collection-execution.md).
-
-`shortwave_radiation` is another model's GHI forecast, read as the mean of `[timestamp - 1 h,
-timestamp)`; temperature and snow depth are instantaneous endpoint values and snowfall is the
-preceding hour's sum. `open-meteo-hourly-ghi-v1` integrates elapsed overlap with the local day
-like the Solcast energy above, flags `uniform_mean_proration` on a partial hour, never splits an
-hour into half-hours, and leaves the total null when values are missing. `generationtime_ms` is
-execution time, so `issued_at` stays null. The `weather_reference` carries native intervals,
-requested and grid coordinates, a raw-payload SHA-256, coverage, acquisition time, the flags
-`independent_weather_model`, `unvalidated_against_ground` and `snow_loss_unknown`, and the
-attribution; a failure gives `status: unavailable` without blocking the Solcast result.
-
-The weather reference is shown separately. It never fills or replaces reconstructed GHI or plant
-power, trains calibration or becomes a matched Solcast label. Snow depth and snowfall do not
-identify panel snow loss, so the conditional inverse below stays unavailable with it. CSV downloads
-and reminder emails do not contain it.
-
-Open-Meteo's free endpoint is for evaluation and non-commercial use. `PYRACAST_OPEN_METEO_API_KEY`
-selects the customer endpoint, without fallback to the free one; the key stays out of raw
-snapshots and request logs. Display the Open-Meteo and CC BY 4.0 attribution with its processing
-note next to the data.
 
 ## Offline conditional reconstruction
 
@@ -183,10 +151,9 @@ physical thresholds or confidence levels.
 which also covers `a = 0` without cancellation. The model must be increasing over the support
 `[0, 1400 W/m²]` (an implementation domain, not a physical bound), the root must be finite and
 inside it and the forward residual small; the sensitivity is `dGHI/dP = 1000/(C*q*(b + 2*a*g))`.
-Missing or invalid weather, opaque snow, transmission below 0.05, caller-declared capped power and
-unsupported roots give no estimate; clipping is never inferred from power alone. Temperatures
-outside the fitted range are flagged `temperature_extrapolation`. Zero power is identifiable only
-under an explicit night class, which the offline workflow never derives from target GHI.
+Missing or invalid weather, opaque snow, transmission below 0.05, zero power and unsupported roots
+give no estimate; clipping is never inferred from power alone. Temperatures outside the fitted
+range are flagged `temperature_extrapolation`.
 
 Five-minute variance and covariance are lost in a half-hour mean, so this is a **conditional point
 approximation**, not an exact inverse or an irradiance bound. Native GHI fits and scores the model
@@ -369,8 +336,9 @@ objective; the one-dimensional solver evaluates every clipping breakpoint and ea
 not assume the capped objective is convex. These are versioned engineering defaults.
 
 Training excludes meter intervals at or above 98% of the known cap, intervals without positive
-reference power and days without positive measured energy and positive reference power (reported
-as `zero_production_training_days`); zero-source samples do not identify a multiplicative factor.
+reference power and days without an interval of both positive measured energy and positive
+reference power; `zero_production_training_days` counts the training days without positive
+measured energy. Zero-source samples do not identify a multiplicative factor.
 Clipped and zero days stay in the holdout and its scores. Training support needs five days, each
 with at least two hours of positive native power not already clipped at the minimum factor and at
 least 0.02 hours of normalized slope-squared exposure (the sum of meter-interval duration times
@@ -384,10 +352,10 @@ levels.
   out the last max(2, ceil(20% of days)) and give a `provisional` assessment; 30 or more hold out
   the last seven and are `evaluated`. The holdout is never refitted. Intervals within a day are
   correlated, so hundreds of half-hours are not hundreds of independent weather realizations.
-- A Huber candidate is `ready` when holdout interval MAE and daily MAE both improve by at least 1%
-  over factor 1, the factor lies strictly inside the bounds, neither MAE worsens against the
-  pinned incumbent, and absolute power and daily-energy bias worsen against neither (within a
-  tolerance of 1e-9 × max(1, |reference|)).
+- A Huber candidate is `ready` when holdout interval MAE and daily MAE both improve by more than
+  1% over factor 1, the factor lies more than 1e-6 inside the bounds, neither MAE worsens against
+  the pinned incumbent, and absolute power and daily-energy bias worsen against neither; "worsens"
+  allows a tolerance of 1e-9 × max(1, |reference|).
 - If those guards fail and the incumbent differs from 1, `identity_recovery` (factor 1) is
   accepted when it improves both MAEs by at least 1% over the incumbent without worsening either
   absolute bias. The fitted Huber factor and metrics are kept and `candidate_kind` names the
@@ -419,10 +387,10 @@ day at most seven and the earliest at most fourteen days old; both MAEs at least
 pinned incumbent; and source validation `native-final-7-settings-matched-selected-30-v3` — all
 seven holdout days from the current binding's native Hobby estimated actuals or authorized
 capacity-scaled copies of them, and at least 30 training and holdout days that are such days or
-the settings-matched historical export, recomputed from the per-day source manifest. Against an
-incumbent calibration it also needs seven holdout dates after the incumbent's last holdout date
-(or window end), and a `suspected` production diagnostic blocks a Huber candidate (identity
-recovery to 1 may pass). These are freshness and evidence guards, not statistical confidence
+the settings-matched historical export, recomputed from the per-day source manifest. Only against
+an incumbent calibration does it also need seven holdout dates after the incumbent's last holdout
+date (or window end) and no `suspected` production diagnostic for a Huber candidate (identity
+recovery to 1 may pass one); an uncalibrated plant is held to neither. These are freshness and evidence guards, not statistical confidence
 limits. Holdout improvement against estimated actuals does not establish better future forecasts.
 
 ### Reference sources
@@ -432,8 +400,10 @@ limits. Holdout improvement against estimated actuals does not establish better 
   historical rooftop export of the same configuration; legacy products of unknown origin only as a
   separate cohort, never pooled. Pooled products, coverage counts and excluded samples are
   recorded. Import rules are in [historical-reference-import](flows/historical-reference-import.md).
-- For estimated actuals, complete native acquisitions precede authorized capacity-scaled copies,
-  which precede historical exports. Normalization creates no observed days or provider requests.
+- For a past day's estimated actuals, native acquisitions keep precedence once they cover daylight
+  and its whole boundary intervals, even with nights missing; otherwise a complete authorized
+  capacity-scaled copy, then a historical export, takes the day. Normalization creates no observed
+  days or provider requests.
 - `normalize_reference_capacity` copies acquisitions after a confirmed capacity-only change with
   `P_new = P_old * C_new / C_old`. Both bindings must declare DC capacity with equal DC/AC ratios
   (an undeclared value leaves the provider's implicit ratio in effect), all other model inputs
@@ -453,8 +423,8 @@ Every analysis, insufficient or rejected included, reports `strong-unclipped-pow
 Its reference is the pinned active calibration (`reference_kind: active_calibration`) or factor 1
 (`uncalibrated_reference`); the new candidate is never its own reference and neither reference
 establishes a healthy plant. The window spans ten calendar days ending on the latest complete
-matched day, observed zero-production days included. It keeps meter intervals whose predicted
-energy is at least 25% of DC capacity and where neither prediction nor measurement reaches 98% of
+matched day, observed zero-production days included. It keeps meter intervals whose predicted mean
+power is at least 25% of DC capacity and where neither prediction nor measurement reaches 98% of
 the cap; a day qualifies with at least three such hours.
 
 Each qualifying day reports its measured/predicted ratio, hours, `shortfall` (below 0.92) or
@@ -535,7 +505,6 @@ combined reference-transfer bias; it is **not** a degradation estimate or an irr
 ## Primary references
 
 - [Hobby contract](https://docs.solcast.com.au/docs/section/rooftop-sites-hobbyist), [rooftop model](https://www.solcast.com/rooftop-pv-power-model), [irradiance and transposition methodology](https://www.solcast.com/irradiance-data-methodology) and [historical time-series parameters and interval means](https://solcast.com/time-series).
-- [Open-Meteo forecast fields](https://open-meteo.com/en/docs), [attribution](https://open-meteo.com/en/licence) and [access plans](https://open-meteo.com/en/pricing).
 - [EPİAŞ electricity API](https://seffaflik.epias.com.tr/electricity-service/technical/tr/index.html) and [reported-generation interface](https://seffaflik.epias.com.tr/electricity/electricity-generation/ex-post-generation/real-time-generation).
 - [TEİAŞ YTBS data definitions](https://ytbsbilgi.teias.gov.tr/ytbsbilgi/frm_sorular.jsf) and [daily operating reports](https://ytbsbilgi.teias.gov.tr/ytbsbilgi/frm_istatistikler.jsf).
 - [EPİAŞ published-data list, rows 104–105](https://www.epias.com.tr/wp-content/uploads/2022/01/S%CC%A7effaflik-Platformunda-Yayimlanacak-Veri-Listesi.pdf) and [DUY articles 81–85, official English translation](https://www.epias.com.tr/wp-content/uploads/2026/02/Electricity-Market-Balancing-and-Settlement-Regulation-29.12.2025.pdf).
