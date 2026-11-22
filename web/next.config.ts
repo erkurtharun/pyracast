@@ -20,7 +20,11 @@ const config = (phase: string): NextConfig => ({
                 ],
             },
             {
-                source: "/app/:file([^/]+\\.(?:webmanifest|png))",
+                source: "/app/:file([^/]+\\.webmanifest)",
+                headers: [{ key: "Cache-Control", value: "no-cache" }],
+            },
+            {
+                source: "/app/icons/:file([^/]+\\.png)",
                 headers: [{ key: "Cache-Control", value: "no-cache" }],
             },
         ]);

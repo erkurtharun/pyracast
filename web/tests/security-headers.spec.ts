@@ -71,10 +71,11 @@ test("the app manifest and icons are served as files with their own type and rev
 }) => {
     for (const [file, type] of [
         ["/app/manifest.webmanifest", "application/manifest+json"],
-        ["/app/icon-192.png", "image/png"],
-        ["/app/icon-512.png", "image/png"],
-        ["/app/icon-512-maskable.png", "image/png"],
-        ["/app/apple-touch-icon.png", "image/png"],
+        ["/app/icons/any-192.png", "image/png"],
+        ["/app/icons/any-512.png", "image/png"],
+        ["/app/icons/maskable-192.png", "image/png"],
+        ["/app/icons/maskable-512.png", "image/png"],
+        ["/app/icons/apple-touch-icon.png", "image/png"],
     ] as const) {
         const response = await request.get(file);
         expect(response.status(), file).toBe(200);
@@ -94,6 +95,8 @@ test("pages and unknown files under /app/ keep the page headers", async ({
         "/app/account/",
         "/app/w/1/plants/2/forecast/",
         "/app/icon-1024.png",
+        "/app/icons/any-1024.png",
+        "/app/icons/apple-touch-icon-precomposed.png",
         "/app/manifest.json",
     ]) {
         const headers = (await request.get(address)).headers();

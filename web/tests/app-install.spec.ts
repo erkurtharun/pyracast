@@ -35,7 +35,7 @@ test("workspace pages link the manifest, the touch icon and the theme colour", a
     await expect(links.manifest).not.toHaveAttribute("crossorigin");
     await expect(links.touchIcon).toHaveAttribute(
         "href",
-        "/app/apple-touch-icon.png",
+        "/app/icons/apple-touch-icon.png",
     );
     await expect(links.themeColour).toHaveAttribute(
         "content",
