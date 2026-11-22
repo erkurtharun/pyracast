@@ -4,9 +4,11 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from django.conf import settings as django_settings
 from django.core.cache import caches
 from django.db.backends.base.base import NO_DB_ALIAS, BaseDatabaseWrapper
 from django.db.backends.signals import connection_created
+from django.utils.log import configure_logging
 from hypothesis import settings
 
 pytest.register_assert_rewrite("tests.support")
@@ -234,6 +236,12 @@ def pytest_runtest_call(item: pytest.Item) -> Iterator[None]:
 @pytest.fixture(autouse=True)
 def fresh_throttle_counters() -> None:
     caches["throttle"].clear()
+
+
+@pytest.fixture
+def restored_logging() -> Iterator[None]:
+    yield
+    configure_logging(django_settings.LOGGING_CONFIG, django_settings.LOGGING)
 
 
 @pytest.fixture

@@ -201,6 +201,7 @@ def test_smoke_accepts_the_anonymous_session_contract(
     client: Client,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    restored_logging: None,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     response = client.get("/api/session/")
