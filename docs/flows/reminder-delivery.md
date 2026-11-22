@@ -110,7 +110,8 @@ No user acts in this flow; authority is the state of the plant at each step and 
 | Claimed or transmitted after 2 h | `skipped`, `missed_schedule` (claim) or `delivery_deadline_exceeded` (transmit) |
 | Slot collection pending, or due but not yet created, before the 15 min deadline | Status unchanged; `available_at` moved to `min(now + 30 s, deadline)` |
 | Preparation or rendering raises a non-database error | Plain-text "forecast unavailable" notice frozen and sent, `forecast_kind` `unavailable`, `forecast_complete` null, `prepared_at` kept from an earlier freeze, else now; it names the plant, links to it and gives the reminder time in plant time |
-| Database error during claim or preparation | Transaction rolls back; the actor fails without a Dramatiq retry; row stays ready for the next cycle |
+| Lock timeout or deadlock during claim or preparation | Transaction rolls back; the delivery ends normally with `job_claim_contended` (`worker-runtime`); row stays ready for the next cycle |
+| Other database error during claim or preparation | Transaction rolls back; the actor fails without a Dramatiq retry; row stays ready for the next cycle |
 | Lease expired before transmission marker | `retry`, `interrupted_connection` (or `failed` after 8 attempts or past 2 h) |
 | Lease expired after the transmit marker | `uncertain`, `interrupted_send`; never retried |
 | `NotSentError` or an unclassified error before the marker | `retry` with backoff and the `MailFailure` code (`mail_not_sent` when unclassified); `failed` when the budget is exhausted |
@@ -132,7 +133,7 @@ No user acts in this flow; authority is the state of the plant at each step and 
 
 ## Tests
 
-- Scheduling and runtime: `tests/test_notifications.py`, `test_notifications_runtime.py`, `test_notification_schedule_isolation.py` (a failing schedule is logged and the others published), `test_reminder_limit_lock.py`, `test_notification_recipient_validation.py`, `test_shared_reminder_schedule.py`, `test_dispatch_resilience.py`.
+- Scheduling and runtime: `tests/test_notifications.py`, `test_notifications_runtime.py`, `test_claim_contention.py` (a delivery behind a held workspace lock ends without claiming), `test_notification_schedule_isolation.py` (a failing schedule is logged and the others published), `test_reminder_limit_lock.py`, `test_notification_recipient_validation.py`, `test_shared_reminder_schedule.py`, `test_dispatch_resilience.py`.
 - Preparation and content: `test_notification_preparation.py`, `test_notification_completeness.py`, `test_notification_intraday.py`, `test_notification_report_data.py`, `test_notification_presentation.py`, `test_notification_workbook.py`, `test_notification_language.py`, `test_notification_render_failure.py`, `test_reminder_mail_footer.py`, `test_reminder_message_id.py`, `test_delivery_metadata.py` (typed metadata, no history or health query reads the rendered mail), `test_delivery_metadata_migration.py`, `test_retention_sweeps.py` (rendered mail trimmed).
 - Transmission and concurrency: `test_notification_transmission.py`, `test_notifications_races.py`, `test_notification_mail.py`, `test_smtp_mail.py`, `test_gmail_mail.py`, `test_vocabularies.py` (every `MailFailure` is a storable `last_error`).
 - Recipients: `test_notification_groups.py`, `test_notification_group_boundaries.py`, `test_notification_revocations.py`, `test_notification_recipient_history.py`, `test_reminder_recipient_rows.py`; trash and restore: `test_trash_operations.py`, `test_trash_boundaries.py`, `test_trash_restore_rules.py` (`definition_trashed`); health counters and console: `test_delivery_health.py`, `test_admin_health_queries.py`, `test_notification_admin.py`.
