@@ -127,10 +127,12 @@ export default defineConfig([
     {
         files: ["src/**/*.{ts,tsx,css}"],
         plugins: { pyracast },
-        rules: {
-            "pyracast/design-tokens": "error",
-            "pyracast/brand-source": "error",
-        },
+        rules: { "pyracast/design-tokens": "error" },
+    },
+    {
+        files: ["src/**/*.{ts,tsx}", "**/*.css"],
+        plugins: { pyracast },
+        rules: { "pyracast/brand-source": "error" },
     },
     {
         files: ["src/styles/tokens.{ts,css}"],

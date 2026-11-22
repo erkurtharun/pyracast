@@ -43,6 +43,12 @@ test("a brand property is declared only in the tokens module", async () => {
     ).toEqual([1, 1]);
     expect(
         await declared(
+            "public/identity/probe.css",
+            ".probe {\n    --forest: var(--line);\n}\n",
+        ),
+    ).toEqual([2]);
+    expect(
+        await declared(
             "src/app/globals.css",
             ".probe {\n    --forestry: var(--line);\n    --ink: var(--forest);\n    color: var(--amber);\n}\n",
         ),
