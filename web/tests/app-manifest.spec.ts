@@ -19,9 +19,7 @@ function token(name: string) {
 }
 
 function image(address: string) {
-    const file = readFileSync(publicFile(address));
-    const header = PNG.sync.read(file, { checkCRC: true });
-    return { header, signature: file.subarray(1, 4).toString("ascii") };
+    return PNG.sync.read(readFileSync(publicFile(address)), { checkCRC: true });
 }
 
 function pixel(png: PNG, x: number, y: number) {
@@ -92,9 +90,8 @@ test("the app manifest declares one fixed identity under /app/ and nothing else"
 test("every manifest icon is a PNG of its declared size", () => {
     for (const icon of manifest.icons) {
         expect(existsSync(publicFile(icon.src)), icon.src).toBe(true);
-        const { header, signature } = image(icon.src);
+        const header = image(icon.src);
         expect(icon.type, icon.src).toBe("image/png");
-        expect(signature, icon.src).toBe("PNG");
         expect(`${header.width}x${header.height}`, icon.src).toBe(icon.sizes);
     }
 });
@@ -103,7 +100,7 @@ test("the maskable icons are opaque, full bleed and keep the mark inside the saf
     for (const icon of manifest.icons.filter(
         ({ purpose }) => purpose === "maskable",
     )) {
-        const { header } = image(icon.src);
+        const header = image(icon.src);
         expect(translucentPixels(header), icon.src).toEqual([]);
         expect(new Set(edgePixels(header)), icon.src).toEqual(
             new Set([pixel(header, 0, 0)]),
@@ -113,8 +110,7 @@ test("the maskable icons are opaque, full bleed and keep the mark inside the saf
 });
 
 test("the touch icon is a fully opaque 180 px PNG", () => {
-    const { header, signature } = image("/app/icons/apple-touch-icon.png");
-    expect(signature).toBe("PNG");
+    const header = image("/app/icons/apple-touch-icon.png");
     expect(`${header.width}x${header.height}`).toBe("180x180");
     expect(translucentPixels(header)).toEqual([]);
 });
