@@ -61,7 +61,7 @@ sequenceDiagram
 ## Authorization
 
 - No per-user check: the phase selects rows only by `deleted_at` and `purge_started_at`, across all tenants. Authorization happened when a workspace administrator trashed the item (`plant-trash-and-restore`).
-- Database: rows are deleted explicitly, children before parents, in primary-key chunks of 500 (`PURGE_CHUNK_SIZE`) by raw statements that read no column but the key, so Django's cascades never run; a child the purge forgets leaves a reference the deferred foreign keys reject when the transaction commits. `tests/test_purge_graph.py` lists every foreign key among purged rows with its handling. No trigger blocks deleting archives: the issuance guard (`immutable_forecast_issuance`, declared in `pyracast/schema_objects.py`) fires on INSERT and UPDATE only.
+- Database: rows are deleted explicitly, children before parents, in primary-key chunks of 500 (`PURGE_CHUNK_SIZE`) by raw statements that read no column but the key, so Django's cascades never run; a child the purge forgets leaves a reference the deferred foreign keys reject when the transaction commits. `tests/test_purge_graph.py` lists every foreign key among purged rows with its handling. No trigger blocks deleting archives: the issuance guard (`immutable_forecast_issuance`, declared in `src/pyracast/schema_objects.py`) fires on INSERT and UPDATE only.
 
 ## Failure paths
 

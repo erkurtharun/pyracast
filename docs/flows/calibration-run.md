@@ -4,7 +4,7 @@ New evidence (production writes, EPİAŞ and estimated-actual acquisitions, hist
 
 ## Entry points
 
-- Screen: `Calibrations` (`web/src/features/calibration/calibrations.tsx`) polls `GET .../calibrations/` every 60 s and shows each run's status and selection state. A blocked run's detail offers "request a new calibration" for the same window only when `requestState` (`calibration/model.ts`) predicts that `request_calibration` accepts it.
+- Screen: `Calibrations` (`web/src/features/calibration/calibrations.tsx`) polls `GET .../calibrations/` every 60 s and shows each run's status and selection state. A blocked run's detail offers "request a new calibration" for the same window only when `requestState` (`web/src/features/calibration/model.ts`) predicts that `request_calibration` accepts it.
 - `POST /api/tenants/{t}/regions/{r}/plants/{p}/calibrations/` -> `CalibrationsView.post` (`src/pyracast/plants/api.py`) with `CalibrationInput` (`plants/serializers.py`) -> `request_calibration` (`plants/operations.py`); 202 `CalibrationOutput`.
 - Command `calibrate_plant --username --plant-id --configuration-id --start-date --end-date [--run]` (`plants/management/commands/calibrate_plant.py`): same operation; `--run` calls `run_calibration` in-process, without RabbitMQ.
 - `request_preparation` (`plants/preparation.py`) callers: `change_production` and `import_observations` (`plants/production_changes.py`), EPİAŞ job end unless superseded (`metering/jobs.py`), a succeeded estimated-actuals collection (`PlantPublication.actuals_published` in `plants/publication.py`), a restored estimated-actuals snapshot (`request_region_preparation`, `forecasts/snapshot_restore.py`), `incidents_changed` (`plants/preparation.py`, from `incidents/operations.py`), `set_calibration_automation` (`plants/automation.py`, flow `calibration-automation`) and `_follow_up` (`plants/training.py`). Each sets `plants_plant.calibration_preparation_due_at` in the caller's transaction and attempts preparation after commit.
@@ -134,7 +134,7 @@ sequenceDiagram
 - Lease 5 minutes, at most 3 attempts counted at claim, including leases lost without an error. The dispatcher marks nothing as sent, so each tick it resends every run without a live lease (oldest 100); duplicate deliveries end at claim.
 - Dataset build and fitting run outside any transaction and call no provider; each finished fit logs `calibration_fit_completed run=<id> seconds=<n>` (timing stays out of `result`); publication adds elapsed lock wait to `now` and rechecks lease token, expiry, configuration, binding, source identity and incidents.
 - Each terminal transition made by the worker (`_claim`, `_publish`, `_fail` on the last attempt) calls `_follow_up` in the same transaction: automatic promotion in a savepoint, then a preparation request that is attempted after commit.
-- Configuration revisions (`_save_configuration`) and trashing (`_cancel_calibrations` in `pyracast/trash.py`) supersede open runs in bulk without follow-up; incident revisions supersede only runs whose incident set changed, then request preparation. Fitting policy (`regularized-huber-v7`, holdout split, acceptance guards) is in `docs/IRRADIANCE.md`.
+- Configuration revisions (`_save_configuration`) and trashing (`_cancel_calibrations` in `src/pyracast/trash.py`) supersede open runs in bulk without follow-up; incident revisions supersede only runs whose incident set changed, then request preparation. Fitting policy (`regularized-huber-v7`, holdout split, acceptance guards) is in `docs/IRRADIANCE.md`.
 
 ## Tests
 

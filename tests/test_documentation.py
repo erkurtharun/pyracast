@@ -35,6 +35,15 @@ TOP_DIRECTORIES = (
     "tests",
     "web",
 )
+# A backticked file name below no top directory (`accounts/social.py`) is looked up from each of
+# these bases; a slash-free name in the form of a root file (`pyproject.toml`) only at the root.
+SHORT_BASES = ("", "src/pyracast/", "web/", "web/src/")
+SOURCE_SUFFIXES = frozenset(
+    {".py", ".ts", ".tsx", ".js", ".mjs", ".sh", ".yaml", ".yml", ".tf", ".tftpl", ".service"}
+    | {".timer", ".sql", ".conf", ".json", ".html", ".txt", ".md", ".css", ".go", ".po", ".toml"}
+)
+SHORT_PATH = re.compile(r"[\w<{*][\w./<>{},*\[\]-]*")
+ROOT_FILE = re.compile(r"[a-z][a-z-]*\.(?:toml|lock|cmd|properties|yaml)|Dockerfile")
 # Files that exist only on a host, next to a copy of the tree; none is tracked or ignored here.
 HOST_FILES = {
     "deploy/release.env": "the release installer writes it into each release directory",
@@ -150,19 +159,18 @@ def _alternatives(path: str) -> list[str]:
 def _path_problem(token: str) -> str | None:
     """A placeholder segment such as `<release>` stands for any name, so it and a glob must match
     at least one entry; a `file::test` node id must name a test function of that file."""
-    path, _, node = token.partition("::")
-    path = re.sub(r":\d+(?:-\d+)?$", "", path)
+    path, node = _location(token), token.partition("::")[2]
     if path in HOST_FILES:
         return None
     for alternative in _alternatives(path):
         pattern = PLACEHOLDER.sub("*", alternative)
         relative = PurePosixPath(pattern)
+        if _ignored(relative):
+            continue
         if "*" in pattern or "?" in pattern:
             escaped = pattern.rstrip("/").replace("[", "[[]")
             if not any(ROOT.glob(escaped, case_sensitive=True)):
                 return f"no file matches {alternative}"
-        elif _ignored(relative):
-            continue
         elif not _exists(relative):
             return f"{alternative} does not exist"
         elif alternative.endswith("/") and not (ROOT / relative).is_dir():
@@ -175,6 +183,37 @@ def _path_problem(token: str) -> str | None:
         re.MULTILINE,
     ):
         return f"{path} has no test {node}"
+    return None
+
+
+def _location(token: str) -> str:
+    return re.sub(r":\d+(?:-\d+)?$", "", token.partition("::")[0])
+
+
+def _short_path(path: str) -> bool:
+    return (
+        "/" in path
+        and path.split("/")[0] not in TOP_DIRECTORIES
+        and SHORT_PATH.fullmatch(path) is not None
+        and any(
+            PurePosixPath(PLACEHOLDER.sub("x", alternative)).suffix in SOURCE_SUFFIXES
+            for alternative in _alternatives(path)
+        )
+    )
+
+
+def _word_problem(word: str) -> str | None:
+    path = _location(word)
+    if path.split("/")[0] in TOP_DIRECTORIES and "/" in path:
+        return _path_problem(word)
+    if _short_path(path):
+        if all(_path_problem(base + word) for base in SHORT_BASES):
+            return f"no {path} below the root, {', '.join(SHORT_BASES[1:])}"
+        return None
+    if ROOT_FILE.fullmatch(path):
+        return _path_problem(word)
+    if DOTTED.match(word):
+        return _name_problem(word)
     return None
 
 
@@ -322,10 +361,7 @@ def _problems(document: str) -> list[str]:
             if not SCHEME.match(target) and (problem := _link_problem(document, target)):
                 found.append(f"{document}:{number}: link {problem}")
     for number, word in _words(document):
-        if word.split("/")[0] in TOP_DIRECTORIES and "/" in word:
-            if problem := _path_problem(word):
-                found.append(f"{document}:{number}: `{word}`: {problem}")
-        elif DOTTED.match(word) and (problem := _name_problem(word)):
+        if problem := _word_problem(word):
             found.append(f"{document}:{number}: `{word}`: {problem}")
     return found
 
@@ -371,12 +407,38 @@ def test_heading_anchors_follow_githubs_slug_rule(heading: str, anchor: str) -> 
         ("docs/readme.md", "docs/readme.md does not exist"),
         ("docs/README.md/", "docs/README.md/ is not a directory"),
         ("tests/test_documentation.py::test_absent", "tests/test_documentation.py has no test"),
-        ("web/node_modules/absent.py::test_x", "web/node_modules/absent.py does not exist"),    ],
+        ("web/node_modules/absent.py::test_x", "web/node_modules/absent.py does not exist"),
+    ],
 )
 def test_path_rules_accept_globs_placeholders_and_ignored_outputs_only(
     token: str, problem: str | None
 ) -> None:
     found = _path_problem(token)
+
+    assert found == problem if problem is None else (found or "").startswith(problem)
+
+
+@pytest.mark.parametrize(
+    ("word", "problem"),
+    [
+        ("accounts/social.py", None),
+        ("features/plant/plant-site.tsx", None),
+        ("lib/api/client.ts", None),
+        ("messages/{en,tr}/shell.json", None),
+        ("rooftop_sites/{site}/forecasts", None),
+        ("application/json", None),
+        ("pyproject.toml", None),
+        ("start.cmd", None),
+        ("pylock.*.toml", None),
+        ("accounts/absent.py", "no accounts/absent.py below the root, src/pyracast/, web/"),
+        ("features/Plant/plant-site.tsx", "no features/Plant/plant-site.tsx below the root"),
+        ("pyracast/settings.py", "no pyracast/settings.py below the root"),
+        ("project.toml", "project.toml does not exist"),
+        ("hooks.lock", "hooks.lock does not exist"),
+    ],
+)
+def test_short_paths_and_root_file_names_must_name_a_file(word: str, problem: str | None) -> None:
+    found = _word_problem(word)
 
     assert found == problem if problem is None else (found or "").startswith(problem)
 

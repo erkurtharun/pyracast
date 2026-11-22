@@ -59,7 +59,7 @@ sequenceDiagram
 | --- | --- | --- |
 | `django_migrations` and app tables | R/W | `migrate --noinput` subprocess on every `start` (after the catalog compile): schema changes and data migrations that read and update rows (see `database-migration`). |
 | `forecasts_collectionjob`, `metering_epiascollectionjob`, `plants_calibrationrun`, `notifications_notificationdelivery`, `notifications_outboundmail` | R | `wait_for_jobs` polls for any `status="running"` (`"sending"` for deliveries and outbound mail), all tenants, before terminating a legacy worker or mailer. |
-| `.dev/` files | R/W | `state.json` (via `state.tmp`; role identities), `launcher.lock`, `<role>.log`, `setup.log`, `<role>.stop` markers, `npm-lock.sha256`. Git-ignored. Dependency data and logs live in the per-user data root, not in `.dev/`. |
+| `.dev/` files | R/W | `state.json` (via `state.tmp`; role identities), `.dev/launcher.lock`, `<role>.log`, `setup.log`, `<role>.stop` markers, `npm-lock.sha256`. Git-ignored. Dependency data and logs live in the per-user data root, not in `.dev/`. |
 
 ## Authorization
 

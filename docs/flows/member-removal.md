@@ -4,7 +4,7 @@ A workspace administrator opens the Members screen, sees the active members and 
 
 ## Entry points
 
-- `web/src/features/workspace/workspace-members.tsx` `WorkspaceMembers` at `/app/w/<tenant>/members/` (`MembersPage`, administrators only) renders `members/member-list.tsx` `MemberList`. The remove panel is one `removal` union (idle, confirming, pending, success, error) around `web/src/ui/action.tsx` `ConfirmAction`; the button shows only for viewers other than the signed-in user.
+- `web/src/features/workspace/workspace-members.tsx` `WorkspaceMembers` at `/app/w/<tenant>/members/` (`MembersPage`, administrators only) renders `web/src/features/workspace/members/member-list.tsx` `MemberList`. The remove panel is one `removal` union (idle, confirming, pending, success, error) around `web/src/ui/action.tsx` `ConfirmAction`; the button shows only for viewers other than the signed-in user.
 - Actor workspace administrator: `GET /api/tenants/{t}/members/` -> `pyracast.api.workspaces.WorkspaceMembersView` (active members and `plants_at_recipient_limit`); `DELETE /api/tenants/{t}/members/{u}/` -> `WorkspaceMemberView`, which calls `pyracast.accounts.operations.remove_workspace_member` (routes in `src/pyracast/urls.py`, both `ADMIN` in `ROUTE_POLICIES`).
 - Platform console: `GET|POST /admin/workspaces/{id}/members/{user_id}/removal/` (`pyracast.platform_admin.tenant_views.member_removal`) shows a confirmation page and calls the same operation with `platform=True`; the administrator is refused there, and a GET on someone who is no longer a member answers 404.
 - `pyracast.notifications.recipients.remove_member_recipients` is called only by that operation; no command, script or job removes members.
