@@ -168,7 +168,7 @@ test("without an install event a Chromium browser shows the browser menu steps",
     await page.keyboard.press("Enter");
     await expect(steps).toHaveAttribute("open", "");
     await expect(steps).toContainText(
-        "Open the browser menu and choose Install or Add to Home screen.",
+        "Open the browser menu and choose the command with Install in its name, such as Install this site as an app or Install and create shortcut. In some browsers it is inside a submenu.",
     );
     expect(await accessibilityViolations(page, ".sidebar")).toEqual([]);
 });
@@ -186,7 +186,7 @@ test.describe("on a phone", () => {
         const steps = installSteps(page);
         await steps.locator("summary").click();
         await expect(steps).toContainText(
-            "Tap Share, then Add to Home Screen.",
+            "Tap Share, then Add to Home Screen. If Share is not shown, it is in the page menu.",
         );
         expect(await accessibilityViolations(page, ".sidebar")).toEqual([]);
     });
