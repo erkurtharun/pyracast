@@ -1,6 +1,9 @@
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
+
+from django.db.models import Max, Q
 
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts import budget
@@ -8,6 +11,7 @@ from pyracast.forecasts.jobs.ready import pending_job_ids
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
 from pyracast.forecasts.revalidation import RevalidationOutcome, revalidate_account
 from pyracast.forecasts.scheduler import enqueue_due
+from pyracast.forecasts.timing import forecast_timing
 from pyracast.forecasts.validation import validate_binding
 from pyracast.plants.approval import approve_region
 from pyracast.regions.models import Region
@@ -114,32 +118,55 @@ def current_plants(system: System) -> list[SiteBinding]:
     ]
 
 
-def retried_after_a_provider_failure(plants: list[SiteBinding], moment: datetime) -> int:
-    """Forecast jobs the provider failed earlier in the UTC day that retry before it ends: the
-    failed request spent the room held for the job, and its retry is counted again."""
+def last_request() -> int:
+    return RequestAttempt.objects.aggregate(last=Max("pk"))["last"] or 0
+
+
+def resent_after_a_provider_failure(plants: list[SiteBinding], moment: datetime, quota: int) -> int:
+    """Requests beyond the one held for each forecast job the provider failed (a server error or
+    no answer) in the UTC day: its requests of the day plus the one the budget still counts for
+    it. A job answered, superseded or off the schedule since its failure adds only a request it
+    really sent again."""
     day = moment.astimezone(UTC).date()
-    return (
-        CollectionJob.objects.filter(
-            binding__in=plants,
-            endpoint="forecasts",
-            status="retry",
-            available_at__lt=datetime.combine(day + timedelta(days=1), time(), UTC),
-            requestattempt__utc_day=day,
-            requestattempt__purpose="forecast",
-            requestattempt__outcome="failed",
-        )
-        .distinct()
-        .count()
+    forecasts = RequestAttempt.objects.filter(
+        binding__in=plants, purpose="forecast", utc_day=day, job__isnull=False
     )
+    failed = set(
+        forecasts.filter(
+            Q(http_status__gte=500) | Q(http_status__isnull=True), outcome="failed"
+        ).values_list("job_id", flat=True)
+    )
+    counted: set[int] = set()
+    for binding in plants:
+        schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
+        timing = forecast_timing(binding, schedule, daily_quota=quota)
+        if timing is not None:
+            sent = budget._jobs_still_sent(binding, timing, moment, scheduled=schedule is not None)
+            counted |= {job.pk for job in sent.values() if job is not None}
+    requests = Counter(forecasts.filter(job_id__in=failed).values_list("job_id", flat=True))
+    return sum(requests[job] + (job in counted) - 1 for job in failed)
 
 
 def assert_current_plants_keep_their_forecasts(system: System, moment: datetime) -> None:
     quota = account(system).daily_quota
+    need = sum(budget.forecast_need(binding, moment, quota) for binding in current_plants(system))
+    assert used(system, moment) + need <= quota, moment
+
+
+def assert_the_step_kept_the_reserve(system: System, moment: datetime, since: int) -> None:
+    """After a step whose requests come after `since`: one that admitted a validation or a
+    history request left the current plants' forecasts their room; one that sent forecasts only
+    exceeds it by no more than the requests provider failures of the day made a job send again."""
+    quota = account(system).daily_quota
     plants = current_plants(system)
     need = sum(budget.forecast_need(binding, moment, quota) for binding in plants)
-    assert used(system, moment) + need <= quota + retried_after_a_provider_failure(
-        plants, moment
-    ), moment
+    admitted = (
+        RequestAttempt.objects.filter(provider_account=system.account, pk__gt=since)
+        .exclude(purpose="forecast")
+        .exists()
+    )
+    allowed = 0 if admitted else resent_after_a_provider_failure(plants, moment, quota)
+    assert used(system, moment) + need <= quota + allowed, (moment, admitted)
 
 
 def dispatch_round(moment: datetime, provider: HistoricalFixture | None = None) -> None:
