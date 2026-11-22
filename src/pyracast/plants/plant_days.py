@@ -1,4 +1,3 @@
-from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any, Literal, cast
@@ -12,7 +11,7 @@ from pyracast.db import read_snapshot
 from pyracast.errors import DomainError
 from pyracast.plants.history import automatic_outlook
 from pyracast.plants.models import Plant
-from pyracast.plants.production import production_history
+from pyracast.plants.production import NativeSlot, native_production_days
 from pyracast.regions.models import Region
 
 FORECAST_DAYS_BEFORE = 7
@@ -191,35 +190,26 @@ def _sources(row: dict[str, Any]) -> tuple[str, ...] | None:
 
 
 def _production_days(plant: Plant, today: date) -> tuple[ProductionDay, ...]:
-    history = production_history(
-        plant,
-        start_date=today - timedelta(days=PRODUCTION_DAYS_BEFORE),
-        end_date=today - timedelta(days=1),
-        native_intervals=True,
+    production = native_production_days(
+        plant, today - timedelta(days=PRODUCTION_DAYS_BEFORE), today - timedelta(days=1)
     )
-    zone = history["timezone"]
-    rows: defaultdict[date, list[ProductionRow]] = defaultdict(list)
-    for interval in history["intervals"]:
-        rows[interval["starts_at"].astimezone(ZoneInfo(zone)).date()].append(
-            _production_row(interval)
-        )
     return tuple(
         ProductionDay(
-            date=day["date"],
-            timezone=zone,
-            total_mwh=day["total_mwh"],
-            complete=day["complete"],
-            rows=_with_figures(rows[day["date"]]),
+            date=day.date,
+            timezone=production.timezone,
+            total_mwh=day.total_mwh,
+            complete=day.complete,
+            rows=_with_figures(tuple(_production_row(slot) for slot in day.slots)),
         )
-        for day in history["days"]
+        for day in production.days
     )
 
 
-def _production_row(interval: dict[str, Any]) -> ProductionRow:
-    value: dict[str, Any] | None = interval["effective"]
+def _production_row(slot: NativeSlot) -> ProductionRow:
+    value = slot.effective
     return ProductionRow(
-        start=interval["starts_at"],
-        end=interval["ends_at"],
+        start=slot.starts_at,
+        end=slot.ends_at,
         mwh=value["energy_mwh"] if value else None,
         quality=value["quality"] if value else None,
         source=value["source"] if value else None,
@@ -227,5 +217,5 @@ def _production_row(interval: dict[str, Any]) -> ProductionRow:
     )
 
 
-def _with_figures(rows: list[ProductionRow]) -> tuple[ProductionRow, ...]:
-    return tuple(rows) if any(row.mwh is not None for row in rows) else ()
+def _with_figures(rows: tuple[ProductionRow, ...]) -> tuple[ProductionRow, ...]:
+    return rows if any(row.mwh is not None for row in rows) else ()

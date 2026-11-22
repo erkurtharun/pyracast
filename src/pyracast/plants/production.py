@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from math import fsum
 from typing import Any, cast
@@ -120,6 +121,63 @@ def _slots(
         result.append((cursor, finish))
         cursor = finish
     return result
+
+
+@dataclass(frozen=True)
+class NativeSlot:
+    starts_at: datetime
+    ends_at: datetime
+    effective: dict[str, Any] | None
+
+
+@dataclass(frozen=True)
+class NativeProductionDay:
+    date: date
+    total_mwh: float | None
+    complete: bool
+    slots: tuple[NativeSlot, ...]
+
+
+@dataclass(frozen=True)
+class NativeProduction:
+    timezone: str
+    days: tuple[NativeProductionDay, ...]
+
+
+def native_production_days(plant: Plant, start_date: date, end_date: date) -> NativeProduction:
+    configuration = (
+        PlantConfiguration.objects.select_related("binding__provider_account").get(
+            pk=plant.current_configuration_id
+        )
+        if plant.current_configuration_id is not None
+        else None
+    )
+    location = configuration.binding if configuration else plant.region
+    zone = location.timezone
+    range_start, _ = local_day_bounds(start_date, zone)
+    _, range_end = local_day_bounds(end_date, zone)
+    effective = select_production_measurements(
+        plant, configuration, range_start, range_end, timezone.now()
+    ).selection.effective
+    days = []
+    day = start_date
+    while day <= end_date:
+        start, end = local_day_bounds(day, zone)
+        rows = [row for row in effective if row.starts_at >= start and row.ends_at <= end]
+        daylight = daylight_window(day, zone, location.latitude, location.longitude)
+        days.append(
+            NativeProductionDay(
+                date=day,
+                total_mwh=_total(rows, daylight.windows or ((start, end),)),
+                complete=_coverage(rows, start, end),
+                slots=tuple(
+                    NativeSlot(begin, finish, _slot_value(rows, begin, finish))
+                    for begin, finish in _slots(rows, start, end, 60, native_intervals=True)
+                ),
+            )
+        )
+        day += timedelta(days=1)
+    return NativeProduction(zone, tuple(days))
 
 
 def _role(actor: User | None, plant: Plant) -> str | None:
