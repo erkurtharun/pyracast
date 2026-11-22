@@ -19,6 +19,7 @@ export default defineConfig({
         baseURL: origin,
         browserName: "chromium",
         trace: "retain-on-failure",
+        serviceWorkers: "block",
     },
     webServer: {
         command: `npm start -- --port ${port}`,

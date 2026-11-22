@@ -3,6 +3,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { AppRoot } from "@/features/session/app-root";
+import { WorkerRegistration } from "@/lib/worker-registration";
 import { appWindowColour } from "@/styles/tokens";
 
 // Next streams page metadata into a new boundary on every client navigation, which leaves the document untitled until it arrives; the layout keeps one title mounted instead.
@@ -25,6 +26,7 @@ export default async function AppLayout({
     return (
         <NextIntlClientProvider messages={null}>
             <title>Pyracast workspace | Pyracast</title>
+            <WorkerRegistration />
             <Suspense>
                 <AppRoot>{children}</AppRoot>
             </Suspense>

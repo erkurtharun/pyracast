@@ -231,7 +231,7 @@ test("the withdrawal script unregisters on activate, claims nothing and navigate
     expect(withdrawal.calls).toEqual(["unregister"]);
 });
 
-test("no application source registers a worker", () => {
+test("only the registering module of the app layout mentions a worker", () => {
     const source = path.resolve(__dirname, "../src");
     const registering = readdirSync(source, { recursive: true })
         .map(String)
@@ -240,6 +240,7 @@ test("no application source registers a worker", () => {
             readFileSync(path.join(source, file), "utf8").includes(
                 "serviceWorker",
             ),
-        );
-    expect(registering).toEqual([]);
+        )
+        .map((file) => file.split(path.sep).join("/"));
+    expect(registering).toEqual(["lib/worker-registration.tsx"]);
 });
