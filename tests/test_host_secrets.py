@@ -309,13 +309,60 @@ def test_set_refuses_an_unknown_or_managed_key_and_an_invalid_value(
     assert read(created, "runtime.json") == before
 
 
-def test_set_and_rotate_need_the_files_create_wrote(
+def test_unset_removes_a_retired_key_and_leaves_every_other_key_as_it_was(
+    created: Path, capsys: pytest.CaptureFixture[str], generated: list[str]
+) -> None:
+    runtime = created / "runtime.json"
+    before = runtime.read_bytes()
+    entries = list(read(created, "runtime.json").items())
+    entries.insert(2, ("PYRACAST_WEATHER_ENABLED", "retired-value"))
+    runtime.write_text(json.dumps(dict(entries), indent=2), encoding="utf-8")
+    capsys.readouterr()
+
+    assert run(created, "unset", "PYRACAST_WEATHER_ENABLED") == 0
+
+    assert runtime.read_bytes() == before
+    output = printed(capsys)
+    assert output == "Removed PYRACAST_WEATHER_ENABLED from runtime.json.\n"
+    assert not any(value in output for value in [*generated, "retired-value", "smtp-password"])
+    assert sorted(path.name for path in created.iterdir()) == sorted(FILES)
+    if os.name == "posix":
+        assert runtime.stat().st_mode & 0o777 == 0o600
+    assert run(created, "check") == 0
+
+
+@pytest.mark.parametrize(
+    ("key", "refusal"),
+    [
+        ("PGPASSWORD", "PGPASSWORD is a setting the application reads; unset keeps it."),
+        (
+            "PYRACAST_SECRET_KEY_FALLBACKS",
+            "PYRACAST_SECRET_KEY_FALLBACKS is a setting the application reads; unset keeps it.",
+        ),
+        ("EPIAS_USERNAME", "EPIAS_USERNAME is a setting the application reads; unset keeps it."),
+        ("PYRACAST_WEATHER_ENABLED", "runtime.json has no PYRACAST_WEATHER_ENABLED to remove."),
+    ],
+)
+def test_unset_refuses_a_key_the_contract_knows_or_the_file_lacks(
+    created: Path, capsys: pytest.CaptureFixture[str], key: str, refusal: str
+) -> None:
+    before = (created / "runtime.json").read_bytes()
+    capsys.readouterr()
+
+    assert run(created, "unset", key) == 2
+
+    assert printed(capsys) == refusal + "\n"
+    assert (created / "runtime.json").read_bytes() == before
+
+
+def test_set_rotate_and_unset_need_the_files_create_wrote(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert run(tmp_path, "rotate", "secret-key") == 2
     assert run(tmp_path, "set", "EPIAS_USERNAME") == 2
+    assert run(tmp_path, "unset", "PYRACAST_WEATHER_ENABLED") == 2
 
-    assert printed(capsys).count("runtime.json is missing or not a JSON object.") == 2
+    assert printed(capsys).count("runtime.json is missing or not a JSON object.") == 3
 
 
 @pytest.mark.parametrize(
@@ -345,9 +392,15 @@ def test_set_and_rotate_need_the_files_create_wrote(
             {"PYRACAST_LOG_LEVEL": 0},
             "runtime.json: Secret contains an invalid environment entry.",
         ),
+        (
+            ("unset", "PYRACAST_WEATHER_ENABLED"),
+            "runtime.json",
+            {"PYRACAST_WEATHER_ENABLED": "1", "PYRACAST_LOG_LEVEL": 0},
+            "runtime.json: Secret contains an invalid environment entry.",
+        ),
     ],
 )
-def test_rotate_and_set_refuse_a_file_that_is_not_environment_strings(
+def test_rotate_set_and_unset_refuse_a_file_that_is_not_environment_strings(
     created: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
