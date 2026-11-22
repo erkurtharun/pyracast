@@ -994,6 +994,17 @@ test("a direct edit refused as stale ends as saved only when an unanswered try o
         stale: { current: { status: "cancelled" } },
     });
 
+    const ended = edit({ ends_at: "2026-11-09T10:30:00.000Z" });
+    expect(
+        ending(
+            refuse(lostOnce(opened, ended), ended, {
+                ...written,
+                ends_at: "2026-11-09T13:30:00+03:00",
+                status: "resolved",
+            }),
+        ),
+    ).toEqual({ status: "saved" });
+
     expect(
         ending(refuse(lostOnce(opened), edit(), { ...written, revision: 4 })),
     ).toEqual({ status: "idle" });

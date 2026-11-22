@@ -332,7 +332,7 @@ function lostAnswerApplied(
     const { outage, values } = change;
     return (
         current.revision === outage.revision + 1 &&
-        current.status === outage.status &&
+        current.status !== "cancelled" &&
         VALUE_FIELDS.every(
             (field) =>
                 comparable(

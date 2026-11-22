@@ -501,6 +501,44 @@ test("an edit saved again after its answer was lost closes as saved, shows the o
     expect(revisions).toEqual([1, 1]);
 });
 
+test("an edit that ends an active outage, saved again after its answer was lost, closes as saved although the status moved to resolved", async ({
+    page,
+}) => {
+    const state = await workspace(page);
+    await create(page);
+    const revisions: unknown[] = [];
+    page.on("request", (request) => {
+        if (request.method() === "PUT")
+            revisions.push(request.postDataJSON().expected_revision);
+    });
+    await page
+        .getByRole("button", { name: "Edit report", exact: true })
+        .click();
+    await page
+        .getByLabel("Resolved at (optional)", { exact: true })
+        .fill("2026-11-11T14:00");
+    const save = page.getByRole("button", { name: "Save outage changes" });
+    const dropped = state.dropAnswer();
+    await save.click();
+    await dropped;
+    await expect(
+        page
+            .getByRole("alert")
+            .filter({ hasText: "did not confirm the change" }),
+    ).toBeVisible();
+    await save.click();
+    await expect(save).toHaveCount(0);
+    await expect(
+        page.getByText("Someone changed this outage after you opened it."),
+    ).toHaveCount(0);
+    expect(state.incident()).toMatchObject({
+        revision: 2,
+        status: "resolved",
+        ends_at: "2026-11-11T11:00:00.000Z",
+    });
+    expect(revisions).toEqual([1, 1]);
+});
+
 test("a first save that meets an outage someone else saved with the same values shows the stale notice and saves only when asked", async ({
     page,
 }) => {
