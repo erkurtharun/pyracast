@@ -252,6 +252,9 @@ def uncached_pinned_install(command: list[str]) -> bool:
         ("RUN\tapk add b", [["apk", "add", "b"]]),
         ("  RUN apk \\\n  add b", [["apk", "add", "b"]]),
         ("RUN make apkindex", []),
+        ("RUN true && apk add b", [["apk", "add", "b"]]),
+        ("RUN --mount=type=cache,target=/var/cache/apk apk add b", [["apk", "add", "b"]]),
+        ("RUN apk add b; apk add c | tee log || true", [["apk", "add", "b"], ["apk", "add", "c"]]),
         ("RUN echo apk", []),
         ("# RUN apk add b", []),
     ],
@@ -272,10 +275,15 @@ def test_apk_commands_are_run_instructions_whose_command_is_apk(
         "apk add --no-cache 'a>=1-r0' --repository=https://example.com",
         "apk add --no-cache 'a>=1-r0' && apk upgrade",
         "apk upgrade --no-cache 'a>=1-r0'",
+        "true && apk add b",
+        "--mount=type=cache,target=/var/cache/apk apk add b",
     ],
 )
 def test_an_install_outside_the_supported_form_is_refused(command: str) -> None:
-    assert not uncached_pinned_install(*apk_commands(f"RUN {command}"))
+    commands = apk_commands(f"RUN {command}")
+
+    assert commands
+    assert not all(uncached_pinned_install(found) for found in commands)
 
 
 def test_the_postgresql_image_adds_packages_uncached_at_a_quoted_minimum_version() -> None:
