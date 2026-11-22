@@ -495,6 +495,24 @@ def test_main_refuses_a_finding_without_its_id_or_package(
         check_image_scans.main()
 
 
+@pytest.mark.parametrize("value", [["CVE-1"], {"id": "CVE-1"}, 1, None])
+@pytest.mark.parametrize("field", ["VulnerabilityID", "PkgName"])
+def test_main_refuses_a_finding_whose_id_or_package_is_not_text(
+    reports: Path,
+    exceptions_file: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: object,
+) -> None:
+    add_finding(reports, "backend", finding={**OPENSSL, field: value})
+    monkeypatch.setattr("sys.argv", ["check_image_scans.py", str(reports)])
+
+    with pytest.raises(
+        SystemExit, match=f"^Image scan gate failed: backend: {field} of a finding is not text\\.$"
+    ):
+        check_image_scans.main()
+
+
 @pytest.mark.parametrize("field", ["VulnerabilityID", "PkgName"])
 def test_main_reports_a_finding_with_an_empty_id_or_package(
     reports: Path,
