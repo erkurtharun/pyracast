@@ -4,14 +4,15 @@ from zoneinfo import ZoneInfo
 from django.db.models import Exists, F, OuterRef, Q, QuerySet
 
 from pyracast.background.deadlines import DATABASE_LOCK_SECONDS, PROVIDER_REQUEST
+from pyracast.background.lease import held
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.forecasts.jobs.claim import claimable_from
-from pyracast.forecasts.jobs.ready import WAITING
+from pyracast.forecasts.jobs.claim import LEASE_DURATION, claimable_from
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJob,
     CollectionJobStatus,
     CollectionSchedule,
+    ForecastSnapshot,
     RequestAttempt,
     RequestOutcome,
     RequestPurpose,
@@ -28,7 +29,6 @@ from pyracast.local_time import local_slot
 from pyracast.regions.models import RegionStatus, active_region
 
 OPEN = (CollectionJobStatus.PENDING, CollectionJobStatus.RETRY, CollectionJobStatus.RUNNING)
-ENDED = (CollectionJobStatus.SUCCEEDED, CollectionJobStatus.FAILED, CollectionJobStatus.STALE)
 # An unanswered validation attempt younger than this is still in flight: the provider request
 # and the region and account lock waits before its answer commits. An answer committed later
 # checks the reserve again (validation.validate_binding).
@@ -78,6 +78,24 @@ def started_jobs(timing: ForecastTiming, job_ids: list[int]) -> set[int]:
     return {pk for pk in job_ids if pk == timing.first_job_id or pk in sent}
 
 
+def _answered() -> Exists:
+    """The job's provider answer is stored: collection publishes it without a request
+    (jobs.collect._collect_leased)."""
+    return Exists(ForecastSnapshot.objects.filter(job=OuterRef("pk")))
+
+
+def _request_out() -> Exists:
+    """The request a worker made since claim took the job's lease is in flight or answered. A
+    lease is taken once per claim for LEASE_DURATION and never extended."""
+    return Exists(
+        RequestAttempt.objects.filter(
+            job=OuterRef("pk"),
+            outcome__in=(RequestOutcome.UNCERTAIN, RequestOutcome.SUCCEEDED),
+            created_at__gte=OuterRef("lease_expires_at") - LEASE_DURATION,
+        )
+    )
+
+
 def _jobs_still_sent(
     binding: SiteBinding, timing: ForecastTiming, now: datetime
 ) -> dict[datetime, CollectionJob | None]:
@@ -92,24 +110,25 @@ def _jobs_still_sent(
             binding=binding,
             endpoint=CollectionEndpoint.FORECASTS,
             reference_import__isnull=True,
-        ).annotate(claimable=claimable_from(now))
+        ).annotate(claimable=claimable_from(now), answered=_answered(), request_out=_request_out())
     )
-    attempted = set(
-        RequestAttempt.objects.filter(job__binding=binding, utc_day=day_start.date()).values_list(
-            "job_id", flat=True
-        )
-    )
-    paid_or_ended = {
-        job.scheduled_for for job in jobs if job.pk in attempted or job.status in ENDED
-    }
+
+    def sent_today(job: CollectionJob) -> bool:
+        """A worker holding the job's lease sends unless its request is out; claim takes any
+        other open job when it is ready and ends it unsent when it is older than the due slot.
+        A request refused earlier today does not keep the job from being sent again."""
+        if job.status not in OPEN or job.__dict__["answered"]:
+            return False
+        if held(job, CollectionJobStatus.RUNNING, now):
+            return not job.__dict__["request_out"]
+        return job.__dict__["claimable"] < day_end and (due is None or job.scheduled_for >= due)
+
     sent: dict[datetime, CollectionJob | None] = {
-        job.scheduled_for: job
-        for job in jobs
-        if job.status in OPEN
-        and job.pk not in attempted
-        and job.__dict__["claimable"] < day_end
-        and not (job.status in WAITING and due is not None and job.scheduled_for < due)
+        job.scheduled_for: job for job in jobs if sent_today(job)
     }
+    # The scheduler opens a slot's job once (scheduler._schedule_forecast_slot), so a slot that
+    # has one is decided by it.
+    taken = {job.scheduled_for for job in jobs}
     zone = ZoneInfo(binding.region.timezone)
     day = day_start.astimezone(zone).date()
     last = (day_end - timedelta(microseconds=1)).astimezone(zone).date()
@@ -119,18 +138,22 @@ def _jobs_still_sent(
             if (
                 slot is not None
                 and max(now, timing.effective_from, day_start) <= slot < day_end
-                and slot not in paid_or_ended
+                and slot not in taken
             ):
                 sent.setdefault(slot, None)
         day += timedelta(days=1)
     if due is not None:
-        job = CollectionJob.objects.filter(
-            binding=binding, endpoint=CollectionEndpoint.FORECASTS, scheduled_for=due
-        ).first()
+        job = (
+            CollectionJob.objects.filter(
+                binding=binding, endpoint=CollectionEndpoint.FORECASTS, scheduled_for=due
+            )
+            .annotate(answered=_answered())
+            .first()
+        )
         if job is None or (
             job.status == CollectionJobStatus.STALE
             and job.last_error not in SLOT_FINAL_ERRORS
-            and job.pk not in attempted
+            and not job.__dict__["answered"]
         ):
             sent.setdefault(due, job)
     latest = latest_forecast_job(binding.pk, now).first()
