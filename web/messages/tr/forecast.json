@@ -402,6 +402,8 @@
         "interval_changed": "Bu aralık değişti ve artık kullanılamıyor. Yazdığınız değer aşağıda korundu. Güncel bir aralık seçmek için Vazgeç işlemini kullanın.",
         "interval_held": "Bu aralık için onay bekleyen bir başvurunuz artık var. Yazdığınız değer aşağıda korundu. Başka bir aralık seçmek için Vazgeç işlemini kullanın.",
         "interval_day_left": "Bu aralığın günü artık gösterilmiyor. Yazdığınız değer kaydedilirken aşağıda korunuyor.",
+        "interval_day_left_unsaved": "Bu aralığın günü artık gösterilmiyor. Yazdığınız değer kaydedilmedi ve aşağıda korunuyor.",
+        "access_dropped": "{access, select, direct {Artık üretimi doğrudan düzenleyebilirsiniz; hazırladığınız düzeltme talebinden vazgeçildi.} propose {Değişiklikler artık onay gerektiriyor; düzenlediğiniz değer kaydedilmedi.} other {Üretim artık burada değiştirilemiyor; hazırladığınız değişiklikten vazgeçildi.}}",
         "attempted_energy": "{interval} aralığı için yazdığınız üretim (MWh)",
         "unavailable": "Bu aralık düzenlenemiyor.",
         "none_available": "Bu gündeki hiçbir değer değiştirilemez. {reason}",

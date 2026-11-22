@@ -93,11 +93,15 @@ export function canAct(access: Access, row: Interval) {
 }
 
 // A write still running keeps its editor until the write ends.
-function writing(editor: Editor) {
-    return (
-        editor.status === "saving" ||
+function runningWrite(editor: Editor) {
+    return editor.status === "saving" ||
         (editor.status === "orphaned" && editor.pendingWrite)
-    );
+        ? editor
+        : null;
+}
+
+function writing(editor: Editor) {
+    return runningWrite(editor) !== null;
 }
 
 // The day navigation and the editor's own controls wait for a write or for the editor's reload.
@@ -191,8 +195,17 @@ export function reconcileEditor(
               ...values(editor),
               status: "editing",
               expectedRevision: row.revision_id,
+              reloaded: true,
           }
         : editor;
+}
+
+// Whether an access change dropped what the person had prepared: the draft, or an open editor with its values.
+export function dropped(before: Screen, after: Screen) {
+    return (
+        (before.draft !== null && after.draft === null) ||
+        (before.editor.status !== "closed" && after.editor.status === "closed")
+    );
 }
 
 export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
@@ -294,12 +307,8 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
             };
         }
         case "discard":
-            if (!draft || sending(screen)) return screen;
-            return {
-                ...screen,
-                draft: null,
-                editor: writing(editor) ? editor : CLOSED,
-            };
+            if (!draft || sending(screen) || locked(editor)) return screen;
+            return { ...screen, draft: null, editor: CLOSED };
         case "reason":
             if (!draft || sending(screen)) return screen;
             return {
@@ -368,25 +377,22 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
             return { ...screen, editor: { ...values(open), status: "saving" } };
         }
         case "saved":
-            if (
-                (editor.status !== "saving" && editor.status !== "orphaned") ||
-                editor.key !== event.key
-            )
-                return screen;
+            if (runningWrite(editor)?.key !== event.key) return screen;
             return { ...screen, editor: CLOSED };
-        case "saveFailed":
-            if (
-                (editor.status !== "saving" && editor.status !== "orphaned") ||
-                editor.key !== event.key
-            )
-                return screen;
+        case "saveFailed": {
+            const write = runningWrite(editor);
+            if (write?.key !== event.key) return screen;
             return {
                 ...screen,
                 editor:
-                    editor.status === "orphaned"
-                        ? { ...editor, pendingWrite: false }
+                    write.status === "orphaned"
+                        ? {
+                              ...write,
+                              pendingWrite: false,
+                              error: event.message,
+                          }
                         : {
-                              ...values(editor),
+                              ...values(write),
                               status: "failed",
                               issue: {
                                   message: event.message,
@@ -394,6 +400,7 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
                               },
                           },
             };
+        }
         case "reload":
             if (editor.status !== "editing" && editor.status !== "failed")
                 return screen;
@@ -478,7 +485,7 @@ export function controls(
             : new Set<string>(),
         editable,
         remove: open,
-        discard: open,
+        discard: open && !locked(editor),
         reason: open,
         send: open && shown !== null && closed && !held.size,
     };

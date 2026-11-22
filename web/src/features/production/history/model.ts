@@ -20,13 +20,16 @@ export type OrphanCause = "unavailable" | "held" | "day_left";
 
 export type Editor =
     | { status: "closed" }
-    | ({ status: "editing" | "saving" | "reloading" } & Draft)
+    // An editor its reload returned to editing says so until it is changed.
+    | ({ status: "editing"; reloaded?: true } & Draft)
+    | ({ status: "saving" | "reloading" } & Draft)
     | ({ status: "failed"; issue: EditorIssue } & Draft)
     // A write still running when its interval became unavailable keeps the controls locked until it ends.
     | ({
           status: "orphaned";
           cause: OrphanCause;
           pendingWrite: boolean;
+          error?: string;
       } & Draft);
 
 type Window = Pick<Interval, "starts_at" | "ends_at">;

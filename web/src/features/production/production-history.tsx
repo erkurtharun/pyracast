@@ -30,6 +30,7 @@ import { ProductionTable } from "./history/production-table";
 import {
     canAct,
     controls,
+    dropped,
     initialScreen,
     locked,
     reduceScreen,
@@ -98,8 +99,11 @@ export function ProductionHistory({
     const apply = (event: ScreenEvent) =>
         setScreen((current) => reduceScreen(current, event));
     if (screen.day !== date || screen.access !== access) {
-        apply({ type: "dayShown", day: date });
-        apply({ type: "accessChanged", access });
+        const shownDay = reduceScreen(screen, { type: "dayShown", day: date });
+        const next = reduceScreen(shownDay, { type: "accessChanged", access });
+        setScreen(next);
+        if (dropped(shownDay, next))
+            setMessage(t("access_dropped", { access }));
     }
     if (reading.data && reading.data !== reconciled) {
         const fresh = reading.data;
@@ -214,14 +218,10 @@ export function ProductionHistory({
         const next = request({ type: "reload" });
         if (next?.editor.status !== "reloading") return;
         const { key } = next.editor;
+        setMessage("");
         try {
             const updated = await reading.reload();
-            const row = updated.intervals.find(
-                (row) => intervalKey(row) === key,
-            );
             apply({ type: "rowsLoaded", day: date, history: updated });
-            if (row && canAct(access, row))
-                setMessage(t("reloaded_draft_preserved"));
         } catch (error) {
             apply({ type: "reloadFailed", key, message: errorMessage(error) });
         }
@@ -283,6 +283,14 @@ export function ProductionHistory({
         held: t("interval_held"),
         day_left: t("interval_day_left"),
     };
+    // The day_left text speaks of the write still running; once it failed, the editor says it was not saved and why.
+    const orphanNotice = (
+        cause: keyof typeof orphaned,
+        pendingWrite: boolean,
+    ) =>
+        cause === "day_left" && !pendingWrite
+            ? t("interval_day_left_unsaved")
+            : orphaned[cause];
     const refreshButton = (
         <button
             className="button secondary production-refresh"
@@ -314,6 +322,9 @@ export function ProductionHistory({
                 {!history && refreshButton}
             </div>
             {message && <Notice>{message}</Notice>}
+            {editor.status === "editing" && editor.reloaded && (
+                <Notice>{t("reloaded_draft_preserved")}</Notice>
+            )}
             {history && reading.error && (
                 <Notice error>
                     {t("refresh_failed", { error: reading.error })}
@@ -321,7 +332,10 @@ export function ProductionHistory({
             )}
             {editor.status === "orphaned" && (
                 <div className="production-row-editor">
-                    <Notice error>{orphaned[editor.cause]}</Notice>
+                    <Notice error>
+                        {orphanNotice(editor.cause, editor.pendingWrite)}
+                        {editor.error && ` ${editor.error}`}
+                    </Notice>
                     <ControlField
                         label={t("attempted_energy", {
                             interval: editor.key.split("/").map(time).join("–"),
