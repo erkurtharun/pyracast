@@ -21,6 +21,7 @@ from pyracast.accounts.models import (
     OutboundMailStatus,
     WorkspaceInvitation,
 )
+from pyracast.background.claims import claim_unless_contended
 from pyracast.background.clock import Clock
 from pyracast.background.deadlines import ACTORS, PUBLISH_BATCH
 from pyracast.background.lease import carries, claimable, expired, release, take
@@ -229,7 +230,7 @@ def _record(
 
 def send_outbound_mail(mail_id: int, now: datetime) -> bool:
     clock = Clock(now).now
-    claimed = _claim(mail_id, now)
+    claimed = claim_unless_contended("send_outbound_mail", mail_id, lambda: _claim(mail_id, now))
     if claimed is None:
         return False
     mail, token = claimed
