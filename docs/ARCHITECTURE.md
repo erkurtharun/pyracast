@@ -50,7 +50,7 @@ gunicorn's access log to standard output. `PYRACAST_LOG_LEVEL` sets verbosity, a
 
 ## Module boundaries
 
-Each Django app owns the models and migrations of one domain.
+Each Django app owns the models and migrations of one domain; the table names its main records.
 
 | Package | Owns |
 | --- | --- |
