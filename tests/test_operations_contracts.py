@@ -638,7 +638,7 @@ def test_every_workflow_job_caches_exactly_the_locked_dependencies_it_installs()
     installs_by_key: dict[str, set[tuple[str, ...]]] = {}
     jobs = {
         (path.name, identifier): job
-        for path in sorted(WORKFLOWS.glob("*.yml"))
+        for path in sorted(WORKFLOWS.glob("*.y*ml"))
         for identifier, job in workflow(path.name)["jobs"].items()
     }
     assert {("release.yml", "scan"), ("release.yml", "deploy")} <= jobs.keys()
@@ -646,13 +646,12 @@ def test_every_workflow_job_caches_exactly_the_locked_dependencies_it_installs()
         commands = "\n".join(step.get("run", "") for step in job["steps"])
         scripts = run_scripts(commands)
         installs = locked_installs(commands, scripts)
-        actions = {
-            step["uses"].split("@", 1)[0]: step.get("with", {})
+        actions = [
+            (step["uses"].split("@", 1)[0], step.get("with") or {})
             for step in job["steps"]
             if "uses" in step
-        }
-        if "astral-sh/setup-uv" in actions:
-            uv = actions["astral-sh/setup-uv"]
+        ]
+        for uv in (inputs for action, inputs in actions if action == "astral-sh/setup-uv"):
             assert uv.get("enable-cache") is bool(installs), key
             if installs:
                 assert all(
@@ -660,7 +659,9 @@ def test_every_workflow_job_caches_exactly_the_locked_dependencies_it_installs()
                 ), key
                 installs_by_key.setdefault(uv.get("cache-suffix", ""), set()).add(installs)
         if "npm ci" in commands:
-            assert actions["actions/setup-node"].get("cache") == "npm", key
+            node = [inputs for action, inputs in actions if action == "actions/setup-node"]
+            assert node, key
+            assert all(inputs.get("cache") == "npm" for inputs in node), key
 
     # One key per OS and suffix serves every job; the first job to finish saves it.
     assert all(len(installs) == 1 for installs in installs_by_key.values()), installs_by_key
