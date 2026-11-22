@@ -98,7 +98,7 @@ No PostgreSQL table is read or written. The stores that carry this flow's state:
 | Change would destroy a secret, the backup bucket or the data disk | Plan error from `prevent_destroy` |
 | `init` with another prefix than the one holding the state (`backend.hcl.example` and `DEPLOYMENT.md` use `production`) | Empty state: the plan proposes creating everything and apply fails on existing names (not run) |
 | VM replacement or delete while `deletion_protection = true` | Apply error |
-| `machine_type` change (resize), or another field that needs a stop (service account, scopes, minimum CPU platform), on a running VM | The plan shows an in-place update; apply stops the VM, changes it and starts it again (`allow_stopping_for_update = true`), so the service is down meanwhile; an update that fails after the stop leaves the VM stopped until it is started again |
+| `machine_type` change (resize), or another field that needs a stop (service account, scopes, minimum CPU platform), on a running VM | The plan shows an in-place update; apply stops the VM, changes it and starts it again (`allow_stopping_for_update = true`), so the service is down meanwhile; a failed apply can leave it stopped, so check the VM's actual state before recovery |
 | Host is not Ubuntu 24.04 amd64 | Script exits 1, nothing changed |
 | Data disk not visible within 90 s | Startup script exits; first boot leaves no units |
 | Disk has a non-ext4 filesystem, or no filesystem but a signature or a nonzero first MiB | Script exits 1 without formatting |
