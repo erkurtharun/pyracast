@@ -79,9 +79,11 @@ export function Outages({
     const live: Live = { offer, direct, configured: !!configuration };
     const apply = (event: OutageEvent) =>
         setScreen((current) => reduceOutages(current, event));
-    // The open workflow meets every list it is shown beside, and the viewer's access when that changes alone.
+    // The open workflow meets every list it is shown beside, and the viewer's access when that changes alone; a
+    // workflow that is sending meets what changed meanwhile once its answer arrived.
     if (
         offer &&
+        screen.workflow?.phase.status !== "sending" &&
         (offer !== reconciled?.offer || direct !== reconciled.direct)
     ) {
         setReconciled(live);
