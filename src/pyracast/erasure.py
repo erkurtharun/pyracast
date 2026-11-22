@@ -467,7 +467,7 @@ def erase_account(account_id: int, *, execute: bool) -> Erasure:
     rolled back, so the result reports what erasure would change."""
     if is_erased(User.objects.get(pk=account_id)):
         return Erasure(account_id, {}, already_erased=True)
-    # Refused before any lock: workspace writers lock the workspace before its administrator.
+    # Refused before any lock, so a refused erasure waits for no account or workspace.
     _refuse_administrator(account_id)
     try:
         with transaction.atomic():

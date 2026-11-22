@@ -3,7 +3,7 @@ from datetime import datetime
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, QuerySet
 from django.db.models.functions import Lower
 from django.utils import timezone
 
@@ -32,12 +32,8 @@ def register_account(user: User, *, language: str, workspace_name: str | None) -
     UserLanguagePreference.objects.create(user=user, language=language)
 
 
-def _membership(tenant_id: int, user_id: int) -> Membership | None:
-    return (
-        Membership.objects.filter(tenant_id=tenant_id, user_id=user_id)
-        .select_related("user")
-        .first()
-    )
+def _membership(tenant_id: int, user_id: int) -> QuerySet[Membership]:
+    return Membership.objects.filter(tenant_id=tenant_id, user_id=user_id)
 
 
 def _refuse_administrator(actor: User, membership: Membership | None) -> None:
@@ -51,15 +47,15 @@ def _refuse_administrator(actor: User, membership: Membership | None) -> None:
 def remove_workspace_member(
     actor: User, tenant_id: int, user_id: int, *, platform: bool = False
 ) -> bool:
-    # A refused caller or target locks nothing: workspace-first writers lock the administrator's
-    # account under the workspace. Then the member's account rows before the workspace, the
-    # order of the account processes: an acceptance or an address verified meanwhile is among
-    # what is read below, and the target is checked again under those locks.
+    # A refused caller or target locks nothing. Then the member's account rows before the
+    # workspace, the order of every transaction that locks a person and a workspace: an
+    # acceptance or an address verified meanwhile is among what is read below, and the target is
+    # checked again under those locks.
     authorize_workspace_admin(actor, tenant_id, platform=platform, lock=False)
-    _refuse_administrator(actor, _membership(tenant_id, user_id))
+    _refuse_administrator(actor, _membership(tenant_id, user_id).first())
     lock_account(user_id)
     authorize_workspace_admin(actor, tenant_id, platform=platform)
-    membership = _membership(tenant_id, user_id)
+    membership = _membership(tenant_id, user_id).select_related("user").first()
     if membership is None:
         return False
     _refuse_administrator(actor, membership)
