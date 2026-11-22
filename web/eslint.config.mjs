@@ -6,6 +6,7 @@ import hooks from "eslint-plugin-react-hooks";
 import a11y from "eslint-plugin-jsx-a11y-x";
 import css from "@eslint/css";
 import pyracast from "./eslint/design-tokens.mjs";
+import { generatedCode } from "./eslint/generated-code.mjs";
 
 // Imports point down: app -> features -> ui -> lib and i18n. A feature reaches another one only
 // through its top-level modules; nested folders are its internals.
@@ -95,11 +96,7 @@ export default defineConfig([
                 URL: "readonly",
             },
         },
-        rules: {
-            "no-eval": "error",
-            "no-implied-eval": "error",
-            "no-new-func": "error",
-        },
+        rules: generatedCode,
     },
     restrict(
         ["src/lib/**/*.{ts,tsx}", "src/i18n/**/*.{ts,tsx}"],
