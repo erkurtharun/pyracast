@@ -232,7 +232,7 @@ function webCodes(file: string, literals: Set<string>) {
         ts.ScriptTarget.Latest,
     );
     ts.forEachChild(source, function visit(node): void {
-        if (ts.isStringLiteral(node) && CODE.test(node.text))
+        if (ts.isStringLiteralLike(node) && CODE.test(node.text))
             literals.add(node.text);
         ts.forEachChild(node, visit);
     });
@@ -243,8 +243,11 @@ function webCodes(file: string, literals: Set<string>) {
 function codePatterns(root: string): RegExp[] {
     const literals = new Set<string>();
     const composed = new Set<string>();
-    for (const file of files(path.join(root, "src", "pyracast"), /\.py$/))
-        if (!file.split(path.sep).includes("migrations"))
+    const backend = path.join(root, "src", "pyracast");
+    for (const file of files(backend, /\.py$/))
+        if (
+            !path.relative(backend, file).split(path.sep).includes("migrations")
+        )
             pythonCodes(readFileSync(file, "utf8"), literals, composed);
     for (const file of files(path.join(root, "web", "src"), /\.tsx?$/))
         webCodes(file, literals);
