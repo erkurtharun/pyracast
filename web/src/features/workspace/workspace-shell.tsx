@@ -7,6 +7,7 @@ import {
     useContext,
     useEffect,
     useState,
+    useTransition,
     type ReactNode,
 } from "react";
 import type { Tenant } from "@/lib/api";
@@ -25,11 +26,14 @@ import { useErrorMessage } from "@/ui/form";
 import { LanguageSelect } from "@/ui/language-select";
 import { Empty, Notice, RefreshFailed } from "@/ui/ui";
 import { WorkspaceAccess } from "@/ui/workspace-access";
+import { RecentDeletionProvider } from "@/features/trash/recent-deletion";
 
 const rememberedKey = "pyracast.workspace";
-const Workspace = createContext<{ tenant?: Tenant; user: SessionUser } | null>(
-    null,
-);
+const Workspace = createContext<{
+    tenant?: Tenant;
+    user: SessionUser;
+    navigating: boolean;
+} | null>(null);
 
 function useWorkspaceContext() {
     const value = useContext(Workspace);
@@ -45,6 +49,10 @@ export function useWorkspace() {
 
 export function useOptionalWorkspace() {
     return useWorkspaceContext().tenant;
+}
+
+export function useNavigating() {
+    return useWorkspaceContext().navigating;
 }
 
 function remembered() {
@@ -104,7 +112,8 @@ export function WorkspaceShell({
     const inboxCount =
         (canManage ? (tenant?.pending_review_count ?? 0) : 0) +
         (tenant?.unread_outcome_count ?? 0);
-    const go = (target: string) => router.push(target);
+    const [navigating, startNavigation] = useTransition();
+    const go = (target: string) => startNavigation(() => router.push(target));
     const entry = (active: boolean) => ({
         className: active ? "active" : "",
         "aria-current": active ? ("page" as const) : undefined,
@@ -268,42 +277,46 @@ export function WorkspaceShell({
                     {logoutError && <Notice error>{logoutError}</Notice>}
                     <RefreshFailed resource={tenants} />
                     <WorkspaceAccess value={screen === "account" || canManage}>
-                        <Workspace value={{ tenant, user }}>
-                            {screen === "account" ? (
-                                children
-                            ) : tenants.loading ? (
-                                <p role="status">{t("loadingWorkspaces")}</p>
-                            ) : !tenants.data ? (
-                                <>
-                                    <Notice error>{tenants.error}</Notice>
-                                    <button
-                                        className="button secondary"
-                                        onClick={tenants.retry}
+                        <Workspace value={{ tenant, user, navigating }}>
+                            <RecentDeletionProvider tenant={tenant?.id}>
+                                {screen === "account" ? (
+                                    children
+                                ) : tenants.loading ? (
+                                    <p role="status">
+                                        {t("loadingWorkspaces")}
+                                    </p>
+                                ) : !tenants.data ? (
+                                    <>
+                                        <Notice error>{tenants.error}</Notice>
+                                        <button
+                                            className="button secondary"
+                                            onClick={tenants.retry}
+                                        >
+                                            {t("retry")}
+                                        </button>
+                                    </>
+                                ) : tenant ? (
+                                    <Suspense
+                                        fallback={
+                                            <p role="status">
+                                                {t("loadingScreen")}
+                                            </p>
+                                        }
                                     >
-                                        {t("retry")}
-                                    </button>
-                                </>
-                            ) : tenant ? (
-                                <Suspense
-                                    fallback={
-                                        <p role="status">
-                                            {t("loadingScreen")}
-                                        </p>
-                                    }
-                                >
-                                    {children}
-                                </Suspense>
-                            ) : tenantId === undefined ? (
-                                <Empty page title={t("noWorkspace")}>
-                                    {t("contactAdmin", {
-                                        contact: contactEmail,
-                                    })}
-                                </Empty>
-                            ) : (
-                                <Notice error>
-                                    {t("workspaceUnavailable")}
-                                </Notice>
-                            )}
+                                        {children}
+                                    </Suspense>
+                                ) : tenantId === undefined ? (
+                                    <Empty page title={t("noWorkspace")}>
+                                        {t("contactAdmin", {
+                                            contact: contactEmail,
+                                        })}
+                                    </Empty>
+                                ) : (
+                                    <Notice error>
+                                        {t("workspaceUnavailable")}
+                                    </Notice>
+                                )}
+                            </RecentDeletionProvider>
                         </Workspace>
                     </WorkspaceAccess>
                 </main>

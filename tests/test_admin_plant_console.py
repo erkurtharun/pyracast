@@ -8,11 +8,11 @@ from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
 from pyracast.forecasts.validation import validate_binding
-from pyracast.plants.approval import approve_region
+from pyracast.plants.approval import approve_region, decide_review
 from pyracast.plants.models import Plant, PlantConfiguration, PlantSubmission
 from pyracast.plants.operations import create_plant
 from pyracast.plants.parameters import PlantParameters
-from pyracast.platform_admin.plants import PlantDetailsForm, save_plant_details
+from pyracast.platform_admin.plants import PlantDetailsForm, SiteForm, save_plant_details
 from pyracast.regions.models import (
     AuditAction,
     AuditEvent,
@@ -116,6 +116,110 @@ def test_plant_values_are_judged_by_the_site_input_and_the_operation(
     assert f'href="#id_{field}"' in html
     assert 'value="Console solar"' in html
     assert not Region.objects.exists()
+
+
+NOT_A_NUMBER = "A valid number is required."
+
+# The web's single-value table (web/tests/site-forms-model.spec.ts), row for row. Both ignore
+# spaces around a value, as a value copied from a sheet often carries one.
+ACCEPTED_COORDINATES = [
+    ("latitude", "41,0082", 41.0082),
+    ("latitude", "41.0082", 41.0082),
+    ("longitude", "17,5", 17.5),
+    ("longitude", "17.5", 17.5),
+    ("latitude", "-36,9", -36.9),
+    ("latitude", "-33,8688", -33.8688),
+    ("latitude", "-33.8688", -33.8688),
+    ("longitude", "-33,8688", -33.8688),
+    ("longitude", "-33.8688", -33.8688),
+    ("latitude", "1,234", 1.234),
+    ("latitude", "0", 0),
+    ("latitude", "90", 90),
+    ("latitude", "-90,000", -90),
+    ("longitude", "-180", -180),
+    ("longitude", "179,999999", 179.999999),
+    ("longitude", "180,0", 180),
+    ("latitude", " 41,0082", 41.0082),
+    ("latitude", "41,0082 ", 41.0082),
+]
+
+REFUSED_COORDINATES = [
+    ("latitude", "", "This field is required."),
+    ("latitude", "41,00,82", NOT_A_NUMBER),
+    ("latitude", "41,0082.5", NOT_A_NUMBER),
+    ("latitude", "41.0082,5", NOT_A_NUMBER),
+    ("latitude", "1.234,5", NOT_A_NUMBER),
+    ("latitude", "1,234.5", NOT_A_NUMBER),
+    ("latitude", "1 234", NOT_A_NUMBER),
+    ("latitude", "41, 0082", NOT_A_NUMBER),
+    ("latitude", "+41,0082", NOT_A_NUMBER),
+    ("latitude", "--41", NOT_A_NUMBER),
+    ("latitude", "41-", NOT_A_NUMBER),
+    ("latitude", "\u221241", NOT_A_NUMBER),
+    ("latitude", "41,", NOT_A_NUMBER),
+    ("latitude", ",5", NOT_A_NUMBER),
+    ("latitude", "041,5", NOT_A_NUMBER),
+    ("latitude", "4e1", NOT_A_NUMBER),
+    ("latitude", "NaN", NOT_A_NUMBER),
+    ("latitude", "Infinity", NOT_A_NUMBER),
+    ("latitude", "90,1", "Ensure this value is less than or equal to 90."),
+    ("latitude", "-90.000001", "Ensure this value is greater than or equal to -90."),
+    ("latitude", "410082", "Ensure this value is less than or equal to 90."),
+    ("longitude", "180,5", "Ensure this value is less than or equal to 180."),
+    ("longitude", "-181", "Ensure this value is greater than or equal to -180."),
+    ("longitude", "175,0,1", NOT_A_NUMBER),
+    ("latitude", "\u0664\u0661", NOT_A_NUMBER),
+]
+
+
+@pytest.mark.parametrize(("axis", "text", "value"), ACCEPTED_COORDINATES)
+def test_a_console_coordinate_with_one_decimal_comma_or_point_is_that_number(
+    axis: str, text: str, value: float
+) -> None:
+    form = SiteForm(data=site_values(**{axis: text}))
+    assert form.is_valid(), form.errors
+    assert form.site.location()[axis] == value
+
+
+@pytest.mark.parametrize(("axis", "text", "message"), REFUSED_COORDINATES)
+def test_a_console_coordinate_that_is_not_one_plain_number_in_range_is_refused(
+    axis: str, text: str, message: str
+) -> None:
+    form = SiteForm(data=site_values(**{axis: text}))
+    assert not form.is_valid()
+    assert form.errors[axis] == [message]
+
+
+def test_coordinates_with_decimal_commas_are_saved_as_numbers_on_both_console_forms() -> None:
+    tenant = Tenant.objects.create(name="Console customer")
+    client, _ = verified_admin()
+    page = client.get(f"/admin/workspaces/{tenant.pk}/plants/new/").content.decode()
+    for name in ("latitude", "longitude"):
+        field = re.search(rf'<input [^>]*name="{name}"[^>]*>', page)
+        assert field is not None
+        assert "inputmode" not in field.group(0)
+    assert re.search(r'<input [^>]*name="dc_capacity_mw"[^>]*inputmode="decimal"', page)
+    created = client.post(
+        f"/admin/workspaces/{tenant.pk}/plants/new/",
+        site_values(latitude="41,0082", longitude="28,9784"),
+    )
+    assert created.status_code == 302
+    region = Region.objects.get(tenant=tenant)
+    assert (region.latitude, region.longitude) == (41.0082, 28.9784)
+    corrected = client.post(
+        f"/admin/plants/{region.pk}/details/",
+        details(
+            client,
+            region,
+            name="Console solar",
+            latitude="40,5",
+            longitude="-29,25",
+            dc_capacity_mw="12.5",
+        ),
+    )
+    assert corrected.status_code == 302
+    region.refresh_from_db()
+    assert (region.latitude, region.longitude) == (40.5, -29.25)
 
 
 def test_a_second_plant_at_the_same_location_is_refused_in_the_form() -> None:
@@ -447,3 +551,41 @@ def test_a_details_page_opened_before_an_approval_cannot_save_onto_the_approved_
     assert "This plant changed after you opened this page." in refused.content.decode()
     configuration = PlantConfiguration.objects.get(plant=plant)
     assert (configuration.revision, configuration.dc_capacity_mw) == (1, 130)
+
+
+BLOCKED_FOR_OPERATOR = (
+    "Technical details cannot change while the plant is suspended or its data connection is "
+    "not current. Approve the plant again or validate its connection first."
+)
+
+
+def test_a_blocked_details_save_tells_the_operator_what_to_do_and_saves_nothing() -> None:
+    system, plant = approved_plant()
+    decide_review(system.admin, system.region.pk, "suspend", reason="Paused by support.")
+    client, _ = verified_admin()
+    url = f"/admin/plants/{system.region.pk}/details/"
+    response = client.post(
+        url, details(client, system.region, dc_capacity_mw="140", latitude="40.5")
+    )
+    assert response.status_code == 400
+    page = response.content.decode()
+    assert BLOCKED_FOR_OPERATOR in page
+    assert "Contact Pyracast support" not in page
+    region = Region.objects.get(pk=system.region.pk)
+    assert (region.status, region.latitude) == (RegionStatus.SUSPENDED, 40)
+    assert Plant.objects.get(pk=plant.pk).current_configuration_id == plant.current_configuration_id
+
+
+def test_a_location_correction_of_a_suspended_plant_returns_it_to_review() -> None:
+    system, _plant = approved_plant()
+    decide_review(system.admin, system.region.pk, "suspend", reason="Paused by support.")
+    client, _ = verified_admin()
+    url = f"/admin/plants/{system.region.pk}/details/"
+    response = client.post(url, details(client, system.region, latitude="40.5"))
+    assert response.status_code == 302
+    region = Region.objects.get(pk=system.region.pk)
+    assert (region.status, region.latitude, region.approved_binding_id) == (
+        RegionStatus.PENDING,
+        40.5,
+        None,
+    )

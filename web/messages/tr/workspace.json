@@ -33,11 +33,20 @@
         "geometry": " · eğim {tilt}° · azimut {azimuth}°",
         "description": "Konum ve ekipman bilgilerinizi girin. Yönetici veri kaynağını bağlar ve veri toplamayı onaylar.",
         "examplePlantName": "Ör. Antalya güneş santrali",
-        "ianaTimezone": "IANA saat dilimi",
         "locationHelp": "Günlük tahminler için santralin koordinatlarını ve yerel saat dilimini kullanın.",
         "dcNameplate": "DC kurulu güç",
         "acGeneration": "AC üretim",
-        "approvalNotice": "Santraliniz yönetici onayını bekleyecek. Onay durumu ve tahminlerin kullanılabilirliği ayrı gösterilir."
+        "approvalNotice": "Santraliniz yönetici onayını bekleyecek. Onay durumu ve tahminlerin kullanılabilirliği ayrı gösterilir.",
+        "rejectedSetup": "Pyracast bu konumu henüz onaylamadı. Teknik bilgilerini ekleyin, ardından santrali kendi sayfasından yeniden incelemeye gönderin.",
+        "keptLocation": "Konum: {latitude}°, {longitude}° · {timezone}",
+        "inBin": "{name} geri dönüşüm kutusunda",
+        "inBinHelp": "Kayıtlı verilerini ve geçmişini korumak için geri yükleyin ya da bu konuma yeni bir santral ekleyin.",
+        "inBinMore": "Bu konumdan {count} santral daha geri dönüşüm kutusunda.",
+        "restore": "Geri yükle: {name}",
+        "restoring": "Geri yükleniyor…",
+        "addNewPlant": "Yeni santral ekle",
+        "unableToRestore": "Santral geri yüklenemedi.",
+        "openExisting": "Mevcut santrali aç"
     },
     "PlantConfiguration": {
         "plantName": "Santral adı",
@@ -79,7 +88,6 @@
         "dataCollection": "Veri toplama",
         "emailReminders": "E-posta hatırlatıcıları",
         "saveConfiguration": "Yapılandırmayı kaydet",
-        "deletePlant": "Santrali sil",
         "productionViews": "Üretim görünümleri",
         "comparison": "Karşılaştırma",
         "approvalStatus": "Santral durumu: {status}. Veri toplamayı sürdürmek için {contact} adresinden Pyracast desteğine yazın.",
@@ -92,16 +100,20 @@
         "loadingGeneration": "Elektrik üretimi tahmini yükleniyor…",
         "loadingIrradiance": "Işınım tahmini yükleniyor…",
         "loadingSection": "Bölüm yükleniyor…",
-        "awaitingApproval": "Yönetici onayı bekleniyor. Santral bilgileriniz kaydedildi; tahminler veri bağlantısı onaylandıktan ve veri toplama başarılı olduktan sonra kullanılabilir.",
+        "awaitingApproval": "Yönetici onayı bekleniyor. Santral bilgileriniz kaydedildi.",
         "minutes30": "30 dakika",
         "minutes60": "60 dakika",
         "selectDateInRange": "Bu veri kaynağı için {min} ile {max} arasında bir yerel gün seçin.",
         "calibrationChangeNote": "Değişiklikler bekleyen kalibrasyonun yerini alabilir.",
         "approvalDetailsRequired": "Onay istemek için teknik bilgileri tamamlayın.",
-        "deletionHelp": "Bu santrali, konumunu ve ilişkili geçmişini 30 günlüğüne geri dönüşüm kutusuna taşıyın.",
         "calibrationUnavailable": "Kalibrasyon, yönetici onayı ve eşleşen üretim geçmişinden sonra kullanılabilir.",
         "actuals": "Gerçekleşen",
         "plantTime": "Bu santraldeki saatler santral saatindedir: {zone}.",
+        "nextSteps": "Sonraki adımlar",
+        "nextReview": "Pyracast santral bilgilerini kontrol eder ve veri kaynağını bağlar.",
+        "nextForecasts": "Onaydan sonra tahminler burada görünür ve planlanan saatlerde toplanır.",
+        "nextSettings": "O zamana kadar teknik bilgileri veya konumu Ayarlar bölümünde düzeltebilirsiniz.",
+        "deletion": "Silme",
         "serverChanges": "Bu arada başka biri tarafından değiştirilenler:",
         "editKept": "(girdiğiniz {value} korunuyor)",
         "editDropped": "{field}: girdiğiniz {value} artık geçerli olmadığı için kaldırıldı."
@@ -117,17 +129,17 @@
         "currentLocation": "Mevcut konum: {latitude}°, {longitude}° · {timezone}",
         "location": "{latitude}°, {longitude}° · {timezone}",
         "approvalHelp": "Konum değişikliği yönetici onayı ve bağlantının yeniden doğrulanmasını gerektirir.",
-        "ianaTimezone": "IANA saat dilimi",
         "latestApproved": "Konum değişikliği {date} tarihinde onaylandı. Yeni bağlantı onaylanana kadar tahminler duraklar.",
         "latestRejected": "Konum değişikliği {date} tarihinde reddedildi.",
         "latestWithdrawn": "Konum değişikliği {date} tarihinde geri çekildi.",
         "decisionNote": "Not: {reason}",
-        "withdraw": "Talebi geri çek"
+        "withdraw": "Talebi geri çek",
+        "timezone": "Saat dilimi"
     },
     "RegionWorkspace": {
         "allPlants": "Tüm santraller",
         "loadingPlant": "Santral yükleniyor...",
-        "plantUnavailable": "Tesis kurulumu bekleniyor.",
+        "plantUnavailable": "Kurulumu bir yöneticinin tamamlaması bekleniyor.",
         "siteUnavailable": "Bu santral kullanılamıyor."
     },
     "Reminders": {
@@ -285,14 +297,18 @@
         "noDeletedPlants": "Silinmiş santral yok",
         "nothingToRestore": "Geri yüklenecek bir şey yok.",
         "confirmMove": "{name} geri dönüşüm kutusuna taşınsın mı?",
-        "restored": "{name} geri yüklendi. Santraller bölümünde bulabilirsiniz.",
+        "restored": "{name} geri yüklendi.",
         "restore": "Geri yükle: {name}",
-        "deletionHelp": "Veri toplama duracak. Bu santrali ve kayıtlı verilerini 30 gün boyunca geri yükleyebilirsiniz. Sonrasında kalıcı olarak silinirler.",
-        "retentionHelp": "Silinen santraller ve verileri 30 gün saklanır.",
+        "deletionHelp": "Veri toplama ve e-posta hatırlatmaları durur; kutuda geçen günler için tahmin oluşmaz. Bu santrali ve kayıtlı verilerini 30 gün boyunca geri yükleyebilirsiniz; sonrasında kalıcı olarak silinirler.",
+        "retentionHelp": "Silinen santraller ve kayıtlı verileri 30 gün saklanır.",
         "blockers": {
             "trash_retention_expired": "30 günlük geri yükleme süresi doldu.",
             "location_already_exists": "Bu konumu artık başka bir santral kullanıyor. Önce o santrali taşıyın veya silin."
-        }
+        },
+        "openPlant": "Santrali aç",
+        "movedToBin": "{name} geri dönüşüm kutusunda.",
+        "undo": "Geri al",
+        "dismiss": "Kapat"
     },
     "WorkspaceMembers": {
         "title": "Üyeler",
@@ -443,5 +459,10 @@
         "waitingForApprovalOf": "Onay bekliyor: {subject} için talebi görüntüle",
         "linkedRequest": "Bağlantılı gönderim",
         "unread": "Okunmamış sonuç"
+    },
+    "CoordinateField": {
+        "latitude": "-90 ile 90 arasında bir enlem; örneğin 41,0082 veya 41.0082.",
+        "longitude": "-180 ile 180 arasında bir boylam; örneğin 28,9784 veya 28.9784.",
+        "pasteHint": "İkisini birden doldurmak için 41.0082, 28.9784 gibi bir çifti Enlem alanına yapıştırın."
     }
 }

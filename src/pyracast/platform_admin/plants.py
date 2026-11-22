@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 from functools import cache
 from typing import TYPE_CHECKING, Any, cast
 
@@ -12,6 +13,7 @@ from django.shortcuts import get_object_or_404, redirect
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 from django.views.decorators.http import require_http_methods
+from rest_framework import serializers
 
 from pyracast.accounts.authorization import require_platform_admin
 from pyracast.accounts.models import Tenant
@@ -54,6 +56,19 @@ def _number(
     )
 
 
+# The workspace's coordinate fields read a value the same way (web site-location.ts
+# coordinateValue); the bounds stay with RegionInput and its messages.
+COORDINATE_NUMBER = re.compile(r"-?(?:0|[1-9]\d*)(?:[.,]\d+)?", re.ASCII)
+
+
+def coordinate_number(text: str) -> float:
+    if not COORDINATE_NUMBER.fullmatch(text):
+        raise forms.ValidationError(
+            serializers.FloatField.default_error_messages["invalid"], code="invalid"
+        )
+    return float(text.replace(",", "."))
+
+
 def _choices(vocabulary: type[models.TextChoices]) -> list[tuple[str, StrOrPromise]]:
     return [(value, gettext_lazy(label)) for value, label in vocabulary.choices]
 
@@ -71,7 +86,6 @@ class SiteForm(forms.Form):
         label=gettext_lazy("Latitude (°)"),
         widget=forms.TextInput(
             attrs={
-                "inputmode": "decimal",
                 "autocomplete": "off",
                 "placeholder": "41.0082",
                 "data-coordinate-pair": "longitude",
@@ -80,9 +94,7 @@ class SiteForm(forms.Form):
     )
     longitude = forms.CharField(
         label=gettext_lazy("Longitude (°)"),
-        widget=forms.TextInput(
-            attrs={"inputmode": "decimal", "autocomplete": "off", "placeholder": "28.9784"}
-        ),
+        widget=forms.TextInput(attrs={"autocomplete": "off", "placeholder": "28.9784"}),
     )
     timezone = forms.CharField(
         label=gettext_lazy("Timezone"),
@@ -111,6 +123,12 @@ class SiteForm(forms.Form):
         help_text=gettext_lazy("Clockwise from north; south is 180."),
     )
     site: SiteInput
+
+    def clean_latitude(self) -> float:
+        return coordinate_number(self.cleaned_data["latitude"])
+
+    def clean_longitude(self) -> float:
+        return coordinate_number(self.cleaned_data["longitude"])
 
     def clean(self) -> dict[str, Any]:
         data = super().clean() or {}

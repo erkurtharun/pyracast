@@ -53,6 +53,10 @@ test("a platform administrator creates a workspace, adds a plant and manages mem
         page.getByText("Paste a pair such as 41.0082, 28.9784 into Latitude"),
     ).toBeVisible();
     const latitude = page.getByLabel(/^Latitude/);
+    await expect(latitude).not.toHaveAttribute("inputmode");
+    await expect(page.getByLabel(/^Longitude/)).not.toHaveAttribute(
+        "inputmode",
+    );
     const pasteCoordinates = (text: string) =>
         latitude.evaluate((element, text) => {
             const data = new DataTransfer();
@@ -69,6 +73,7 @@ test("a platform administrator creates a workspace, adds a plant and manages mem
         [" -41.5 ; 28.9 ", "-41.5", "28.9"],
         ["41.5\t-28.9", "41.5", "-28.9"],
         ["41.0082, 28.9784", "41.0082", "28.9784"],
+        ["41,0082; 28,9784", "41,0082", "28,9784"],
     ] as const) {
         expect(await pasteCoordinates(text)).toBe(true);
         await expect(latitude).toHaveValue(expectedLatitude);
@@ -79,8 +84,8 @@ test("a platform administrator creates a workspace, adds a plant and manages mem
     for (const text of ["41,,29", "41 29 30", "41. 29", "NaN,29"]) {
         expect(await pasteCoordinates(text)).toBe(false);
     }
-    await expect(latitude).toHaveValue("41.0082");
-    await expect(page.getByLabel(/^Longitude/)).toHaveValue("28.9784");
+    await expect(latitude).toHaveValue("41,0082");
+    await expect(page.getByLabel(/^Longitude/)).toHaveValue("28,9784");
     await page.getByLabel(/^DC capacity/).fill("12");
     const tilt = page.getByLabel(/^Tilt/);
     await expect(tilt).toBeHidden();

@@ -1,13 +1,15 @@
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import models, transaction
 from django.db.models import Max
 from django.utils import timezone
-from django.utils.translation import gettext
+from django.utils.translation import gettext, gettext_lazy
 
 from pyracast.accounts.authorization import authorize_workspace_admin, tenant_membership
 from pyracast.accounts.models import WorkspaceRole
@@ -34,7 +36,10 @@ from pyracast.plants.models import (
 )
 from pyracast.plants.parameters import PlantParameters, declaration, declared_parameters
 from pyracast.regions.audit import record_audit
-from pyracast.regions.models import AuditAction, Region
+from pyracast.regions.models import AuditAction, Region, RegionStatus
+
+if TYPE_CHECKING:
+    from django_stubs_ext import StrPromise
 
 
 class StaleParametersError(ConflictError):
@@ -51,13 +56,42 @@ def configuration_is_current(configuration: PlantConfiguration) -> bool:
     ).exists() and binding_is_current(configuration.binding)
 
 
-def _binding(region: Region, binding_id: int) -> SiteBinding:
-    binding = SiteBinding.objects.select_related("provider_account").get(
-        pk=binding_id, region=region
-    )
-    if not binding_is_current(binding):
-        raise ValidationError(gettext("An approved current provider binding is required."))
-    return binding
+class PlantEditBlock(models.TextChoices):
+    SUSPENDED = "suspended"
+    CONNECTION_UNAVAILABLE = "connection_unavailable"
+
+
+EDIT_BLOCK_MESSAGES: Mapping[PlantEditBlock, StrPromise] = {
+    PlantEditBlock.SUSPENDED: gettext_lazy(
+        "The plant is suspended, so its technical details cannot change. "
+        "Contact Pyracast support to resume it."
+    ),
+    PlantEditBlock.CONNECTION_UNAVAILABLE: gettext_lazy(
+        "The plant's data connection needs attention from Pyracast support, "
+        "so its technical details cannot change yet."
+    ),
+}
+
+
+def plant_edit_block(region: Region) -> PlantEditBlock | None:
+    """Why a plant's declared values cannot change now; reads the region's approved binding
+    and its provider account, so a list loads them with the region."""
+    if region.status == RegionStatus.SUSPENDED:
+        return PlantEditBlock.SUSPENDED
+    binding = region.approved_binding
+    if region.status == RegionStatus.APPROVED and (
+        binding is None or not binding_is_current(binding, region)
+    ):
+        return PlantEditBlock.CONNECTION_UNAVAILABLE
+    return None
+
+
+def _editable_binding(region: Region) -> SiteBinding | None:
+    """The approved binding a change is saved against, or None while the plant is in review."""
+    block = plant_edit_block(region)
+    if block is not None:
+        raise DomainError(ErrorCode.PLANT_EDIT_BLOCKED, EDIT_BLOCK_MESSAGES[block])
+    return region.approved_binding
 
 
 def current_configuration(plant: Plant) -> PlantConfiguration:
@@ -204,10 +238,8 @@ def _save_plant_parameters(
     expected_revision: int | None,
 ) -> bool:
     """Returns whether the save wrote anything."""
+    binding = _editable_binding(region)
     current = declared_parameters(plant)
-    # A plant in review (pending or rejected) holds no approved binding.
-    approved = region.approved_binding_id
-    binding = None if approved is None else _binding(region, approved)
     configuration = plant.current_configuration
     rebound = binding is not None and (
         configuration is None or configuration.binding_id != binding.pk

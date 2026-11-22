@@ -212,7 +212,11 @@
         "useAnotherAddress": "Use another address",
         "emailCodeExpired": "The code is no longer valid. Request a new one.",
         "emailChangeCancelled": "The address change was cancelled.",
-        "emailChanged": "{email} is now your address."
+        "emailChanged": "{email} is now your address.",
+        "shownOf": "{shown} of {total} plants shown",
+        "needAttention": "{attention, plural, one {# plant needs attention.} other {# plants need attention.}}",
+        "attentionReason": "Needs attention: {reason}",
+        "awaitingSetup": "Waiting for an administrator to finish setup"
     },
     "Common": {
         "unexpected": "Something went wrong.",
@@ -471,6 +475,16 @@
             "schedule_disabled": "Data collection is turned off for this plant.",
             "quota_too_low": "The provider allowance leaves no request for forecasts; only the daily history is collected.",
             "provider_unavailable": "The provider is not accepting requests right now; collection continues automatically."
+        },
+        "SiteAttention": {
+            "setup_incomplete": "Setup is not complete.",
+            "review_rejected": "Not approved. Edit the plant and resubmit it.",
+            "suspended": "Suspended. Forecasts are paused.",
+            "connection_unavailable": "The data connection needs Pyracast support."
+        },
+        "PlantEditBlock": {
+            "suspended": "The plant is suspended, so its technical details cannot change. Contact Pyracast support to resume it.",
+            "connection_unavailable": "The plant's data connection needs attention from Pyracast support, so its technical details cannot change yet."
         }
     }
 }

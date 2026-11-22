@@ -18,6 +18,9 @@ REFUSALS = {
     "429": "Too many requests; Retry-After gives the seconds to wait.",
 }
 
+# The 400 body of the endpoints whose duplicate-location refusal names the holding plant.
+LOCATION_REFUSAL = {"$ref": "#/components/schemas/LocationRefusal"}
+
 
 def documented_refusals(policy: Policy, method: str, operation: dict[str, Any]) -> list[str]:
     parameters = operation.get("parameters", [])
@@ -49,11 +52,11 @@ class AutoSchema(openapi.AutoSchema):
             route = re.sub(r"\{(\w+)\}", r"<int:\1>", path.removeprefix("/"))
             policy = ROUTE_POLICIES[route][self.method]
             for status in documented_refusals(policy, self.method, operation):
+                declared = operation["responses"].get(status, {}).get("content")
                 operation["responses"][status] = {
                     "description": REFUSALS[status],
-                    "content": {
-                        "application/json": {"schema": {"$ref": "#/components/schemas/Error"}}
-                    },
+                    "content": declared
+                    or {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}},
                 }
         return operation
 
@@ -75,6 +78,22 @@ def error_components(result: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
             "request_id": {"type": "string", "description": "Reference to the server log."},
         },
         "required": ["code", "message"],
+    }
+    schemas["LocationRefusal"] = {
+        "description": "A refusal that can name the plant already at the requested location.",
+        "allOf": [
+            {"$ref": "#/components/schemas/Error"},
+            {
+                "type": "object",
+                "properties": {
+                    "region_id": {
+                        "type": "integer",
+                        "description": "With location_already_exists: the workspace's plant "
+                        "that holds the location.",
+                    }
+                },
+            },
+        ],
     }
     for path in result.get("paths", {}).values():
         for method in ("get", "post", "put", "patch", "delete", "head", "options", "trace"):

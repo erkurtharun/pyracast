@@ -142,3 +142,20 @@ def test_trash_and_restore_keep_tenant_boundaries_and_session_csrf(
         == 400
     )
     assert Region.objects.get(pk=system.region.pk).deleted_at is None
+
+
+def test_a_bin_row_carries_the_plant_name_and_location_of_the_deleted_plant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    location, _ = sibling(system)
+    Region.objects.filter(pk=system.region.pk).update(name="Location name")
+    client = Client()
+    client.force_login(system.member)
+    tenant = f"/api/tenants/{system.tenant.pk}/"
+    assert client.delete(f"{tenant}regions/{system.region.pk}/").status_code == 204
+    assert client.delete(f"{tenant}regions/{location.pk}/").status_code == 204
+    rows = {row["id"]: row for row in client.get(tenant + "trash/regions/").json()["results"]}
+    assert rows[system.region.pk]["plant_name"] == plant.name
+    assert rows[location.pk]["plant_name"] == location.name
+    assert (rows[system.region.pk]["latitude"], rows[system.region.pk]["longitude"]) == (40, 29)

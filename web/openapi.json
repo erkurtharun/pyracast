@@ -1997,7 +1997,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/Error"
+                                    "$ref": "#/components/schemas/LocationRefusal"
                                 }
                             }
                         }
@@ -5448,7 +5448,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/Error"
+                                    "$ref": "#/components/schemas/LocationRefusal"
                                 }
                             }
                         }
@@ -7206,10 +7206,11 @@
                     "incumbent_changed",
                     "calibration_not_activatable",
                     "review_reason_required",
-                    "plant_parameters_changed"
+                    "plant_parameters_changed",
+                    "plant_edit_blocked"
                 ],
                 "type": "string",
-                "description": "* `invalid_request` - Invalid Request\n* `bad_request` - Bad Request\n* `session_ended` - Session Ended\n* `session_changed` - Session Changed\n* `not_authenticated` - Not Authenticated\n* `csrf_failed` - Csrf Failed\n* `permission_denied` - Permission Denied\n* `invalid_proxy_headers` - Invalid Proxy Headers\n* `membership_required` - Membership Required\n* `workspace_admin_required` - Workspace Admin Required\n* `admin_edits_directly` - Admin Edits Directly\n* `platform_admin_required` - Platform Admin Required\n* `invitation_email_unverified` - Invitation Email Unverified\n* `not_found` - Not Found\n* `method_not_allowed` - Method Not Allowed\n* `not_acceptable` - Not Acceptable\n* `unsupported_media_type` - Unsupported Media Type\n* `conflict` - Conflict\n* `throttled` - Throttled\n* `session_busy` - Session Busy\n* `invitation_rate_limited` - Invitation Rate Limited\n* `provider_throttled` - Provider Throttled\n* `quota_exhausted` - Quota Exhausted\n* `server_error` - Server Error\n* `provider_unavailable` - Provider Unavailable\n* `busy` - Busy\n* `database_conflict` - Database Conflict\n* `request_timeout` - Request Timeout\n* `provider_authentication_failed` - Provider Authentication Failed\n* `maintenance` - Maintenance\n* `request_too_large` - Request Too Large\n* `forecast_sources_changed` - Forecast Sources Changed\n* `configuration_unavailable` - Configuration Unavailable\n* `location_already_has_plant` - Location Already Has Plant\n* `plant_submission_required` - Plant Submission Required\n* `estimated_actuals_unavailable` - Estimated Actuals Unavailable\n* `location_unchanged` - Location Unchanged\n* `location_already_exists` - Location Already Exists\n* `calculation_out_of_range` - Calculation Out Of Range\n* `trash_retention_expired` - Trash Retention Expired\n* `date_out_of_range` - Date Out Of Range\n* `completed_day_required` - Completed Day Required\n* `invalid_epias_plant` - Invalid Epias Plant\n* `epias_plant_identity_mismatch` - Epias Plant Identity Mismatch\n* `incident_closed` - Incident Closed\n* `incident_overlap` - Incident Overlap\n* `incident_starts_in_future` - Incident Starts In Future\n* `incident_ends_before_start` - Incident Ends Before Start\n* `incident_ends_in_future` - Incident Ends In Future\n* `incident_capacity_exceeded` - Incident Capacity Exceeded\n* `production_implausible` - Production Implausible\n* `invitation_unavailable` - Invitation Unavailable\n* `invitation_member_exists` - Invitation Member Exists\n* `workspace_admin_not_removable` - Workspace Admin Not Removable\n* `member_unavailable` - Member Unavailable\n* `region_revision_changed` - Region Revision Changed\n* `location_change_already_pending` - Location Change Already Pending\n* `location_change_already_reviewed` - Location Change Already Reviewed\n* `incident_revision_changed` - Incident Revision Changed\n* `idempotency_key_reused` - Idempotency Key Reused\n* `pending_request_limit` - Pending Request Limit\n* `production_revision_changed` - Production Revision Changed\n* `request_already_closed` - Request Already Closed\n* `request_conflict` - Request Conflict\n* `review_context_changed` - Review Context Changed\n* `workspace_admin_changed` - Workspace Admin Changed\n* `reminder_time_required` - Reminder Time Required\n* `duplicate_reminder_times` - Duplicate Reminder Times\n* `too_many_reminder_times` - Too Many Reminder Times\n* `recipient_required` - Recipient Required\n* `duplicate_recipients` - Duplicate Recipients\n* `recipient_limit_exceeded` - Recipient Limit Exceeded\n* `reminder_schedule_changed` - Reminder Schedule Changed\n* `plant_not_approved` - Plant Not Approved\n* `provider_account_unavailable` - Provider Account Unavailable\n* `configuration_changed` - Configuration Changed\n* `production_source_changed` - Production Source Changed\n* `outage_history_changed` - Outage History Changed\n* `incumbent_changed` - Incumbent Changed\n* `calibration_not_activatable` - Calibration Not Activatable\n* `review_reason_required` - Review Reason Required\n* `plant_parameters_changed` - Plant Parameters Changed"
+                "description": "* `invalid_request` - Invalid Request\n* `bad_request` - Bad Request\n* `session_ended` - Session Ended\n* `session_changed` - Session Changed\n* `not_authenticated` - Not Authenticated\n* `csrf_failed` - Csrf Failed\n* `permission_denied` - Permission Denied\n* `invalid_proxy_headers` - Invalid Proxy Headers\n* `membership_required` - Membership Required\n* `workspace_admin_required` - Workspace Admin Required\n* `admin_edits_directly` - Admin Edits Directly\n* `platform_admin_required` - Platform Admin Required\n* `invitation_email_unverified` - Invitation Email Unverified\n* `not_found` - Not Found\n* `method_not_allowed` - Method Not Allowed\n* `not_acceptable` - Not Acceptable\n* `unsupported_media_type` - Unsupported Media Type\n* `conflict` - Conflict\n* `throttled` - Throttled\n* `session_busy` - Session Busy\n* `invitation_rate_limited` - Invitation Rate Limited\n* `provider_throttled` - Provider Throttled\n* `quota_exhausted` - Quota Exhausted\n* `server_error` - Server Error\n* `provider_unavailable` - Provider Unavailable\n* `busy` - Busy\n* `database_conflict` - Database Conflict\n* `request_timeout` - Request Timeout\n* `provider_authentication_failed` - Provider Authentication Failed\n* `maintenance` - Maintenance\n* `request_too_large` - Request Too Large\n* `forecast_sources_changed` - Forecast Sources Changed\n* `configuration_unavailable` - Configuration Unavailable\n* `location_already_has_plant` - Location Already Has Plant\n* `plant_submission_required` - Plant Submission Required\n* `estimated_actuals_unavailable` - Estimated Actuals Unavailable\n* `location_unchanged` - Location Unchanged\n* `location_already_exists` - Location Already Exists\n* `calculation_out_of_range` - Calculation Out Of Range\n* `trash_retention_expired` - Trash Retention Expired\n* `date_out_of_range` - Date Out Of Range\n* `completed_day_required` - Completed Day Required\n* `invalid_epias_plant` - Invalid Epias Plant\n* `epias_plant_identity_mismatch` - Epias Plant Identity Mismatch\n* `incident_closed` - Incident Closed\n* `incident_overlap` - Incident Overlap\n* `incident_starts_in_future` - Incident Starts In Future\n* `incident_ends_before_start` - Incident Ends Before Start\n* `incident_ends_in_future` - Incident Ends In Future\n* `incident_capacity_exceeded` - Incident Capacity Exceeded\n* `production_implausible` - Production Implausible\n* `invitation_unavailable` - Invitation Unavailable\n* `invitation_member_exists` - Invitation Member Exists\n* `workspace_admin_not_removable` - Workspace Admin Not Removable\n* `member_unavailable` - Member Unavailable\n* `region_revision_changed` - Region Revision Changed\n* `location_change_already_pending` - Location Change Already Pending\n* `location_change_already_reviewed` - Location Change Already Reviewed\n* `incident_revision_changed` - Incident Revision Changed\n* `idempotency_key_reused` - Idempotency Key Reused\n* `pending_request_limit` - Pending Request Limit\n* `production_revision_changed` - Production Revision Changed\n* `request_already_closed` - Request Already Closed\n* `request_conflict` - Request Conflict\n* `review_context_changed` - Review Context Changed\n* `workspace_admin_changed` - Workspace Admin Changed\n* `reminder_time_required` - Reminder Time Required\n* `duplicate_reminder_times` - Duplicate Reminder Times\n* `too_many_reminder_times` - Too Many Reminder Times\n* `recipient_required` - Recipient Required\n* `duplicate_recipients` - Duplicate Recipients\n* `recipient_limit_exceeded` - Recipient Limit Exceeded\n* `reminder_schedule_changed` - Reminder Schedule Changed\n* `plant_not_approved` - Plant Not Approved\n* `provider_account_unavailable` - Provider Account Unavailable\n* `configuration_changed` - Configuration Changed\n* `production_source_changed` - Production Source Changed\n* `outage_history_changed` - Outage History Changed\n* `incumbent_changed` - Incumbent Changed\n* `calibration_not_activatable` - Calibration Not Activatable\n* `review_reason_required` - Review Reason Required\n* `plant_parameters_changed` - Plant Parameters Changed\n* `plant_edit_blocked` - Plant Edit Blocked"
             },
             "EvidenceStateEnum": {
                 "enum": ["current", "stale"],
@@ -8304,6 +8305,23 @@
                 "type": "string",
                 "description": "* `pending` - Awaiting review\n* `approved` - Approved\n* `rejected` - Rejected\n* `withdrawn` - Withdrawn"
             },
+            "LocationRefusal": {
+                "description": "A refusal that can name the plant already at the requested location.",
+                "allOf": [
+                    {
+                        "$ref": "#/components/schemas/Error"
+                    },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "region_id": {
+                                "type": "integer",
+                                "description": "With location_already_exists: the workspace's plant that holds the location."
+                            }
+                        }
+                    }
+                ]
+            },
             "MeasurementBasisEnum": {
                 "enum": ["net_export", "ac_generation"],
                 "type": "string",
@@ -9125,6 +9143,11 @@
                     }
                 },
                 "required": ["code", "current", "message"]
+            },
+            "PlantEditBlockEnum": {
+                "enum": ["suspended", "connection_unavailable"],
+                "type": "string",
+                "description": "* `suspended` - Suspended\n* `connection_unavailable` - Connection Unavailable"
             },
             "PlantEventActionEnum": {
                 "enum": [
@@ -10882,6 +10905,16 @@
                     "username"
                 ]
             },
+            "SiteAttentionEnum": {
+                "enum": [
+                    "setup_incomplete",
+                    "review_rejected",
+                    "suspended",
+                    "connection_unavailable"
+                ],
+                "type": "string",
+                "description": "* `setup_incomplete` - Setup Incomplete\n* `review_rejected` - Review Rejected\n* `suspended` - Suspended\n* `connection_unavailable` - Connection Unavailable"
+            },
             "SiteInput": {
                 "type": "object",
                 "properties": {
@@ -11017,6 +11050,32 @@
                         "readOnly": true,
                         "nullable": true
                     },
+                    "attention": {
+                        "readOnly": true,
+                        "nullable": true,
+                        "description": "The first thing the plant needs from the customer; none when nothing.\n\n* `setup_incomplete` - Setup Incomplete\n* `review_rejected` - Review Rejected\n* `suspended` - Suspended\n* `connection_unavailable` - Connection Unavailable",
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/SiteAttentionEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "edit_blocked_reason": {
+                        "readOnly": true,
+                        "nullable": true,
+                        "description": "Why the plant's technical details cannot change now; none when they can.\n\n* `suspended` - Suspended\n* `connection_unavailable` - Connection Unavailable",
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/PlantEditBlockEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
                     "reminder": {
                         "allOf": [
                             {
@@ -11028,6 +11087,8 @@
                     }
                 },
                 "required": [
+                    "attention",
+                    "edit_blocked_reason",
                     "id",
                     "latitude",
                     "longitude",
@@ -11153,6 +11214,21 @@
                         "type": "string",
                         "readOnly": true
                     },
+                    "plant_name": {
+                        "type": "string",
+                        "readOnly": true,
+                        "description": "The plant's name, else the location's name."
+                    },
+                    "latitude": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true
+                    },
+                    "longitude": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true
+                    },
                     "deleted_at": {
                         "type": "string",
                         "format": "date-time"
@@ -11178,7 +11254,10 @@
                 "required": [
                     "deleted_at",
                     "id",
+                    "latitude",
+                    "longitude",
                     "name",
+                    "plant_name",
                     "purge_after",
                     "restore_blocker"
                 ]

@@ -298,6 +298,8 @@ SPECTACULAR_SETTINGS = {
         "SelectionStateEnum": "pyracast.plants.activation.SelectionState",
         "ActivationBlockerEnum": "pyracast.plants.activation.ActivationBlocker",
         "AutomationCauseEnum": "pyracast.plants.automation_state.AutomationCause",
+        "PlantEditBlockEnum": "pyracast.plants.operations.PlantEditBlock",
+        "SiteAttentionEnum": "pyracast.plants.sites.SiteAttention",
         "IncidentKindEnum": "pyracast.incidents.models.IncidentKind",
         "IncidentStatusEnum": "pyracast.incidents.models.IncidentStatus",
         "NotificationDeliveryStatusEnum": (

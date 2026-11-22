@@ -1,12 +1,17 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { api } from "@/lib/api/client";
 import { reloadPage } from "@/lib/on-demand";
-import { adoptSession, useSessionState } from "@/lib/session-client";
+import {
+    adoptSession,
+    sessionOwner,
+    sessionState,
+    useSessionState,
+} from "@/lib/session-client";
 import { loadCatalogue, useCatalogues } from "@/i18n/catalogue";
-import { isLanguage } from "@/i18n/language";
+import { isLanguage, type Language } from "@/i18n/language";
 
 export function LanguageSelect() {
     const t = useTranslations("Language");
@@ -14,9 +19,19 @@ export function LanguageSelect() {
     const id = useId();
     const chosen = useSessionState().session?.language;
     const catalogues = useCatalogues();
-    const [state, setState] = useState<{
-        status: "idle" | "saving" | "error" | "unavailable";
-    }>({ status: "idle" });
+    const [state, setState] = useState<
+        | { status: "idle" | "saving" | "unavailable" }
+        | { status: "error"; target: Language }
+    >({ status: "idle" });
+    if (state.status === "error" && state.target === locale)
+        setState({ status: "idle" });
+    const mounted = useRef(false);
+    useEffect(() => {
+        mounted.current = true;
+        return () => {
+            mounted.current = false;
+        };
+    }, []);
     // A failed catalogue stays failed for the life of the document, so only a reload can show it:
     // one chosen here, or one another tab chose for this session.
     const unavailable =
@@ -53,10 +68,21 @@ export function LanguageSelect() {
                             const language = event.target.value;
                             if (!isLanguage(language)) return;
                             setState({ status: "saving" });
+                            const owner = sessionOwner(sessionState().session);
                             try {
                                 await loadCatalogue(language);
                             } catch {
-                                setState({ status: "unavailable" });
+                                if (mounted.current)
+                                    setState({ status: "unavailable" });
+                                return;
+                            }
+                            // A control that has gone updates nothing; a choice made for a session
+                            // that has ended is neither saved nor reported for the session shown now.
+                            if (!mounted.current) return;
+                            if (
+                                sessionOwner(sessionState().session) !== owner
+                            ) {
+                                setState({ status: "idle" });
                                 return;
                             }
                             try {
@@ -65,9 +91,16 @@ export function LanguageSelect() {
                                         body: { language },
                                     }),
                                 );
-                                setState({ status: "idle" });
+                                if (mounted.current)
+                                    setState({ status: "idle" });
                             } catch {
-                                setState({ status: "error" });
+                                if (!mounted.current) return;
+                                setState(
+                                    sessionOwner(sessionState().session) !==
+                                        owner
+                                        ? { status: "idle" }
+                                        : { status: "error", target: language },
+                                );
                             }
                         })()
                     }

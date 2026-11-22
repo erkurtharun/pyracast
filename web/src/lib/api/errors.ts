@@ -120,6 +120,7 @@ const ERROR_CODES: Record<ErrorCode, true> = {
     calibration_not_activatable: true,
     review_reason_required: true,
     plant_parameters_changed: true,
+    plant_edit_blocked: true,
 };
 
 export function displayMessage(error: unknown, fallback: string): string {

@@ -129,7 +129,7 @@ test("viewer reads shared settings without write controls or requests", async ({
         page.getByRole("button", { name: "Save configuration" }),
     ).toHaveCount(0);
     await expect(
-        page.getByRole("button", { name: /Move to recycle bin/ }),
+        page.getByRole("button", { name: "Delete plant", exact: true }),
     ).toHaveCount(0);
     await expect(page.locator(".readonly-form input").first()).toBeDisabled();
     await page

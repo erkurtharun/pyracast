@@ -1,6 +1,6 @@
 "use client";
 import { useTranslations } from "next-intl";
-import type { Region, RegionScope } from "@/lib/api";
+import type { RegionScope, Site } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { useRefresh } from "@/lib/api/query";
 import { useFormat } from "@/lib/format/use-format";
@@ -22,17 +22,34 @@ export function ReviewNotice({
     scope,
     timezone,
 }: {
-    region: Region;
+    region: Site;
     scope: RegionScope;
     timezone: string;
 }) {
     const t = useTranslations("PlantWorkspace");
+    const dashboard = useTranslations("Dashboard");
     const format = useFormat();
     const label = useLabel();
     const refresh = useRefresh();
-    if (region.status === "approved") return null;
+    if (region.status === "approved")
+        return region.attention === "connection_unavailable" ? (
+            <Notice>
+                {dashboard("attentionReason", {
+                    reason: label("SiteAttention", region.attention),
+                })}
+            </Notice>
+        ) : null;
     if (region.status === "pending")
-        return <Notice>{t("awaitingApproval")}</Notice>;
+        return (
+            <Notice>
+                <p>{t("awaitingApproval")}</p>
+                <ol aria-label={t("nextSteps")}>
+                    <li>{t("nextReview")}</li>
+                    <li>{t("nextForecasts")}</li>
+                    <li>{t("nextSettings")}</li>
+                </ol>
+            </Notice>
+        );
     return (
         <Notice>
             <p>
