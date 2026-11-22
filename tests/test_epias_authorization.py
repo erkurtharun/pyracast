@@ -6,13 +6,22 @@ from django.core.exceptions import PermissionDenied
 from django.test import Client
 
 from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.operations import remove_workspace_member
 from pyracast.epias import EpiasClient
 from pyracast.metering import operations
 from pyracast.metering.jobs import run_epias_job
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection
+from pyracast.notifications import recipients
 from pyracast.plants.models import Plant, PlantEvent
 from tests.support.api import verified_admin
-from tests.support.metering import PROVIDER_PLANT, FixtureClient, connect, day_data
+from tests.support.concurrency import paused_in
+from tests.support.metering import (
+    PROVIDER_PLANT,
+    FixtureClient,
+    connect,
+    connected,
+    day_data,
+)
 from tests.support.plant_api import setup_plant
 from tests.support.plant_operations import make_plant
 
@@ -51,6 +60,35 @@ def test_connection_operations_require_admin_before_lookup_or_provider_access(
     assert provider.calls == 0
     assert PlantEvent.objects.filter(plant=plant, action="epias_connected").count() == 1
     assert not PlantEvent.objects.filter(plant=plant, action="epias_disconnected").exists()
+
+
+@pytest.mark.parametrize("change", ["connect", "disconnect"])
+def test_a_connection_change_waits_for_its_administrators_account_before_the_workspace(
+    monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    # The removal holds the person's account and then locks the workspace's regions; a connection
+    # change by that person that held the region while waiting for the account would close a cycle.
+    system, plant, _linked = connected(monkeypatch)
+    Membership.objects.create(user=system.admin, tenant=system.tenant)
+    if change == "connect":
+        operations.disconnect_epias(plant.pk, actor=system.admin)
+
+    def change_connection() -> object:
+        if change == "connect":
+            return connect(plant, system.admin).enabled
+        return operations.disconnect_epias(plant.pk, actor=system.admin)
+
+    removed, changed = paused_in(
+        monkeypatch,
+        recipients,
+        "remove_member_recipients",
+        lambda: remove_workspace_member(system.member, system.tenant.pk, system.admin.pk),
+        change_connection,
+    )
+
+    assert (removed, changed) == (True, True)
+    assert not Membership.objects.filter(user=system.admin).exists()
+    assert EpiasConnection.objects.get(plant=plant).enabled is (change == "connect")
 
 
 def test_admin_without_membership_connects_and_tenants_keep_isolated_status_reads(
