@@ -49,7 +49,7 @@ sequenceDiagram
 
 | Table | R/W | What |
 | --- | --- | --- |
-| `forecasts_collectionjob`, `connections_sitebinding`, `connections_provideraccount` | R | `forecasts.runtime.deliver` loads the job, binding and provider account to pick the adapter and the optional Open-Meteo weather provider before `collect`. |
+| `forecasts_collectionjob`, `connections_sitebinding`, `connections_provideraccount` | R | `forecasts.runtime.deliver` loads the job, binding and provider account to pick the adapter before `collect`. |
 | Job tables of the owning flows | R/W | `forecasts.jobs.collect`, `plants.training.run_calibration`, `metering.jobs.run_epias_job`, `notifications.jobs.process_notification` and `notifications.outbox.send_outbound_mail` claim and update `forecasts_collectionjob`, `plants_calibrationrun`, `metering_epiascollectionjob`, `notifications_notificationdelivery`, `notifications_outboundmail`. |
 | RabbitMQ queues | R/W | Per queue name a durable queue plus `.DQ` (delay) and `.XQ` (dead letter, 7-day TTL), declared lazily when a consumer or publisher first uses it. |
 
