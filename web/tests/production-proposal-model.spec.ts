@@ -114,7 +114,7 @@ test("a staged change whose interval moved on since staging is named", () => {
     ).toBe(0);
 });
 
-test("a refusal naming an item by its position names that staged change", () => {
+test("a refusal naming an item by its position names that staged change by its key", () => {
     const items = [staged(8), staged(9), staged(10)];
     const refusal = new ApiError("Invalid", {
         status: 400,
@@ -127,7 +127,7 @@ test("a refusal naming an item by its position names that staged change", () => 
         },
     });
     expect(refusals(refusal, items)).toEqual([
-        { item: items[2], message: "Too large. Unknown." },
+        { key: items[2]!.key, message: "Too large. Unknown." },
     ]);
     expect(
         refusals(

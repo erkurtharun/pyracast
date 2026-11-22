@@ -5,12 +5,9 @@ import {
     energyValue,
     intervalKey,
     mostFrequentReason,
-    reconcileEditor,
     sameInterval,
     saveFailure,
     shiftDay,
-    type Editor,
-    type History,
     type Interval,
 } from "../src/features/production/history/model";
 
@@ -48,25 +45,6 @@ function row(hour: number, fields: Partial<Interval> = {}): Interval {
     };
 }
 
-const history = (intervals: Interval[]) => ({ intervals }) as History;
-
-const draft = (
-    status: Exclude<Editor["status"], "closed">,
-    key: string,
-): Editor => {
-    const fields = {
-        key,
-        energy: "2",
-        quality: "valid" as const,
-        expectedRevision: 1,
-    };
-    if (status === "orphaned")
-        return { status, ...fields, error: "gone", pendingWrite: false };
-    return status === "failed"
-        ? { status, ...fields, error: "gone" }
-        : { status, ...fields };
-};
-
 test("typed energy accepts a comma or a point and only finite non-negative values", () => {
     expect(energyValue(" 0,75 ")).toBe(0.75);
     expect(energyValue("2.5")).toBe(2.5);
@@ -80,35 +58,10 @@ test("days step across month and year ends", () => {
     expect(shiftDay("2026-03-01", -1)).toBe("2026-02-28");
 });
 
-test("an open draft follows its interval and orphans when it disappears", () => {
-    const eight = row(8, { revision_id: 7 });
-    const key = intervalKey(eight);
-    expect(key).toBe("2026-11-09T08:00:00Z/2026-11-09T09:00:00Z");
-    const closed: Editor = { status: "closed" };
-    expect(reconcileEditor(closed, history([]), "gone")).toBe(closed);
-    const editing = draft("editing", key);
-    expect(reconcileEditor(editing, history([eight]), "gone")).toBe(editing);
-    expect(
-        reconcileEditor(draft("reloading", key), history([eight]), "gone"),
-    ).toEqual({ ...draft("editing", key), expectedRevision: 7 });
-    expect(reconcileEditor(draft("saving", key), history([]), "gone")).toEqual({
-        ...draft("orphaned", key),
-        error: "gone",
-        pendingWrite: true,
-    });
-    expect(
-        reconcileEditor(
-            draft("failed", key),
-            history([row(8, { can_edit: false })]),
-            "gone",
-        ),
-    ).toEqual({
-        ...draft("orphaned", key),
-        error: "gone",
-        pendingWrite: false,
-    });
-    const orphaned = draft("orphaned", key);
-    expect(reconcileEditor(orphaned, history([]), "gone")).toBe(orphaned);
+test("an interval's key is its start and end", () => {
+    expect(intervalKey(row(8))).toBe(
+        "2026-11-09T08:00:00Z/2026-11-09T09:00:00Z",
+    );
 });
 
 test("the most frequent unavailable reason names one of its rows", () => {

@@ -2029,12 +2029,13 @@ test("a draft stays with its day when a link shows another day", async ({
     );
 });
 
-test("a member promoted while a draft is open can choose another day", async ({
-    page,
-}) => {
+// A member whose clock runs, so reads become stale and polls and focus reads happen.
+async function memberOnClock(
+    page: Page,
+    role: () => "viewer" | "admin" = () => "viewer",
+) {
     await page.clock.install({ time: new Date("2026-11-10T12:00:00Z") });
     await mockApi(page);
-    let role: "viewer" | "admin" = "viewer";
     await page.route("**/api/session/", (route) =>
         route.fulfill({
             json: { user, language: "en", csrf_token: "signed-token" },
@@ -2042,12 +2043,28 @@ test("a member promoted while a draft is open can choose another day", async ({
     );
     await page.route("**/api/tenants/", (route) =>
         route.fulfill({
-            json: paged([tenantRow({ id: 1, name: "Workspace", role })]),
+            json: paged([
+                tenantRow({ id: 1, name: "Workspace", role: role() }),
+            ]),
         }),
     );
     await page.route("**/change-requests/?*", (route) =>
         route.fulfill({ json: paged([]) }),
     );
+}
+
+async function readOnFocus(page: Page) {
+    await page.clock.runFor(5_000);
+    await page.evaluate(() =>
+        document.dispatchEvent(new Event("visibilitychange")),
+    );
+}
+
+test("a member promoted while a draft is open can choose another day", async ({
+    page,
+}) => {
+    let role: "viewer" | "admin" = "viewer";
+    await memberOnClock(page, () => role);
     await serveDays(page, () => [{}, {}]);
     await openPlant(page, "Production");
     await stage(page, "08:00", "0,5");
@@ -2084,4 +2101,241 @@ test("the manual mark as read recovers a failed read receipt", async ({
         page.getByRole("button", { name: "Inbox", exact: true }),
     ).toBeVisible();
     expect(posts).toBe(2);
+});
+
+test("a draft holding an interval that comes to wait for the member's own request is sent only once that interval is removed", async ({
+    page,
+}) => {
+    await member(page);
+    let pending: number | null = null;
+    const submissions: Record<string, unknown>[] = [];
+    await serveDays(page, () => [{ pending_request_id: pending }, {}]);
+    await page.route("**/change-requests/production/", (route) => {
+        submissions.push(route.request().postDataJSON());
+        return route.fulfill({ status: 201, json: proposal() });
+    });
+    await openPlant(page, "Production");
+    await stage(page, "08:00", "0,5");
+    await stage(page, "08:30", "0,6");
+    const staged = draft(page);
+    await staged.getByLabel("Reason for correction").fill("Meter read on site");
+    pending = 7;
+    await page.locator(".production-refresh").click();
+
+    const send = staged.getByRole("button", {
+        name: "Send for approval",
+        exact: true,
+    });
+    await expect(staged.getByRole("listitem").nth(0)).toContainText(
+        "A request of yours for this interval already waits for approval.",
+    );
+    await expect(send).toBeDisabled();
+    await expect(send).toHaveAccessibleDescription(
+        "Intervals that already wait for a request of yours cannot be sent again. Remove them to send this request.",
+    );
+    await staged
+        .getByRole("button", { name: /^Remove staged correction for 08:00/ })
+        .click();
+    await expect(send).toBeEnabled();
+    await send.click();
+    await expect(page.getByText(/^Sent for approval\./)).toBeVisible();
+    expect(submissions).toHaveLength(1);
+    expect(submissions[0]).toMatchObject({
+        changes: [{ starts_at: expect.stringContaining("T08:30:00") }],
+    });
+});
+
+test("while a request is being sent nothing can be staged, edited or removed", async ({
+    page,
+}) => {
+    await member(page);
+    await serveDays(page, () => [{}, {}]);
+    let answer: () => void = () => undefined;
+    const answered = new Promise<void>((resolve) => {
+        answer = resolve;
+    });
+    const submissions: unknown[] = [];
+    await page.route("**/change-requests/production/", async (route) => {
+        submissions.push(route.request().postDataJSON());
+        await answered;
+        await route.fulfill({
+            status: 400,
+            json: errorBody("invalid_request", "The request is invalid.", {
+                fields: {
+                    "changes.0.energy":
+                        "Ensure this value is less than 1000000.",
+                },
+            }),
+        });
+    });
+    await openPlant(page, "Production");
+    await stage(page, "08:00", "5");
+    const staged = draft(page);
+    await staged.getByLabel("Reason for correction").fill("Meter read on site");
+    await staged
+        .getByRole("button", { name: "Send for approval", exact: true })
+        .click();
+
+    const other = page.getByRole("button", {
+        name: "Suggest correction for 08:30",
+    });
+    await expect(
+        staged.getByRole("button", { name: "Sending…", exact: true }),
+    ).toBeDisabled();
+    await expect(other).toBeDisabled();
+    for (const name of [
+        /^Edit staged correction for 08:00/,
+        /^Remove staged correction for 08:00/,
+        /^Discard request$/,
+    ])
+        await expect(staged.getByRole("button", { name })).toBeDisabled();
+    await expect(staged.getByLabel("Reason for correction")).toBeDisabled();
+
+    answer();
+    await expect(staged.getByRole("listitem").nth(0)).toContainText(
+        "Ensure this value is less than 1000000.",
+    );
+    await expect(other).toBeEnabled();
+    expect(submissions).toHaveLength(1);
+});
+
+test("an open editor whose interval comes to wait for the member's own request says so and can only be closed", async ({
+    page,
+}) => {
+    await memberOnClock(page);
+    let pending: number | null = null;
+    await serveDays(page, () => [{ pending_request_id: pending }, {}]);
+    await openPlant(page, "Production");
+    await page
+        .getByRole("button", { name: "Suggest correction for 08:00" })
+        .click();
+    const editor = page.locator(".production-row-editor");
+    await expect(
+        editor.getByRole("button", { name: "Add to request", exact: true }),
+    ).toBeVisible();
+
+    pending = 7;
+    await readOnFocus(page);
+    await expect(editor.getByRole("alert")).toHaveText(
+        "A request of yours for this interval now waits for approval. Your attempted value is preserved below. Cancel to choose another interval.",
+    );
+    await expect(
+        editor.getByRole("button", { name: "Add to request", exact: true }),
+    ).toHaveCount(0);
+    await editor.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(editor).toHaveCount(0);
+    await expect(
+        page.getByRole("link", {
+            name: /^Waiting for approval: view the request for 08:00/,
+        }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("group", { name: "Production intervals" }),
+    ).toBeFocused();
+});
+
+test("an open outage editor cannot send once its outage waits for the member's own request or the limit is reached", async ({
+    page,
+}) => {
+    await memberOnClock(page);
+    let held: number | null = null;
+    let reason: string | null = null;
+    const submissions: unknown[] = [];
+    await page.route("**/api/**/outages/", (route) =>
+        route.fulfill({
+            json: outagePage(
+                [
+                    { ...activeOutage(), pending_request_id: held },
+                    { ...activeOutage(), id: 5, title: "Export limited" },
+                ],
+                reason,
+            ),
+        }),
+    );
+    await page.route("**/change-requests/incidents/", (route) => {
+        submissions.push(route.request().postDataJSON());
+        return route.fulfill({ status: 201, json: proposal() });
+    });
+    await openPlant(page, "Outages");
+    const inverter = proposalControls(page, "Inverter offline");
+    await inverter[0].click();
+    const editor = page.getByRole("region", { name: "Edit outage" });
+    await expect(editor.getByLabel("Incident title")).toHaveValue(
+        "Inverter offline",
+    );
+    for (const control of inverter) await expect(control).toHaveCount(0);
+    for (const control of proposalControls(page, "Export limited"))
+        await expect(control).toBeVisible();
+
+    held = 9;
+    await readOnFocus(page);
+    await expect(editor.getByRole("status")).toHaveText(
+        "A request of yours for this outage now waits for approval. Withdraw it before proposing another change.",
+    );
+    await expect(
+        editor.getByRole("button", { name: "Send for approval", exact: true }),
+    ).toHaveCount(0);
+    await editor
+        .getByRole("button", { name: "Close editor", exact: true })
+        .click();
+    await expect(editor).toHaveCount(0);
+
+    held = null;
+    await readOnFocus(page);
+    await proposalControls(page, "Export limited")[0].click();
+    await expect(editor.getByLabel("Incident title")).toHaveValue(
+        "Export limited",
+    );
+    reason = "pending_request_limit";
+    await readOnFocus(page);
+    await expect(editor.getByRole("status")).toHaveText(
+        "Too many of your requests for this plant await approval. Withdraw one or wait for a decision before proposing another outage or a change to one.",
+    );
+    await expect(
+        editor.getByRole("button", { name: "Send for approval", exact: true }),
+    ).toHaveCount(0);
+    await editor
+        .getByRole("button", { name: "Close editor", exact: true })
+        .click();
+    await expect(editor).toHaveCount(0);
+    expect(submissions).toHaveLength(0);
+});
+
+test("an editor closes when a link shows a day whose read fails, and refresh reads that day again", async ({
+    page,
+}) => {
+    await member(page);
+    let failing = true;
+    await page.route("**/api/**/production/?*", (route) => {
+        const date = new URL(route.request().url()).searchParams.get(
+            "start_date",
+        )!;
+        return date === "2026-11-07" && failing
+            ? route.fulfill({
+                  status: 503,
+                  json: errorBody("busy", "Production is busy."),
+              })
+            : route.fulfill({ json: dayRows(date, [{}, {}]) });
+    });
+    await openPlant(page, "Production");
+    await page
+        .getByRole("button", { name: "Suggest correction for 08:00" })
+        .click();
+    const editor = page.locator(".production-row-editor");
+    await expect(editor).toHaveCount(1);
+
+    await showDay(page, "2026-11-07");
+    await expect(page.getByLabel("Day", { exact: true })).toHaveValue(
+        "2026-11-07",
+    );
+    await expect(page.getByRole("alert")).toHaveText("Production is busy.");
+    await expect(editor).toHaveCount(0);
+    const refresh = page.locator(".production-refresh");
+    await expect(refresh).toBeEnabled();
+    failing = false;
+    await refresh.click();
+    await expect(
+        page.getByRole("button", { name: "Suggest correction for 08:00" }),
+    ).toBeEnabled();
+    await expect(editor).toHaveCount(0);
 });
