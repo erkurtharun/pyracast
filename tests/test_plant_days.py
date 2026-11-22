@@ -634,19 +634,43 @@ def test_only_a_member_reads_the_days_of_a_plant_of_an_active_location_in_the_ad
     assert trashed.json()["code"] == "not_found"
 
 
-def test_the_days_read_spends_the_forecast_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    system, plant = make_plant(monkeypatch)
+def one_a_minute(scope: str) -> override_settings:
     rates = cast(dict[str, str], settings.REST_FRAMEWORK.get("DEFAULT_THROTTLE_RATES", {}))
-    client = client_for(system.member)
-    with override_settings(
+    return override_settings(
         REST_FRAMEWORK={
             **settings.REST_FRAMEWORK,
-            "DEFAULT_THROTTLE_RATES": {**rates, "forecast": "1/min"},
+            "DEFAULT_THROTTLE_RATES": {**rates, scope: "1/min"},
         }
-    ):
+    )
+
+
+def test_the_days_read_has_a_budget_of_its_own(monkeypatch: pytest.MonkeyPatch) -> None:
+    system, plant = make_plant(monkeypatch)
+    client = client_for(system.member)
+    forecast = {"date": TODAY.isoformat()}
+    with one_a_minute("days"):
         assert client.get(plant_path(system, plant)).status_code == 200
-        forecast = client.get(plant_path(system, plant, "forecast"), {"date": TODAY.isoformat()})
-        days = client.get(plant_path(system, plant))
-    for refused in (forecast, days):
-        assert refused.status_code == 429
-        assert refused.json()["code"] == "throttled"
+        refused = client.get(plant_path(system, plant))
+        assert client.get(plant_path(system, plant, "forecast"), forecast).status_code == 200
+    assert refused.status_code == 429
+    assert refused.json()["code"] == "throttled"
+    assert 0 < int(refused["Retry-After"]) <= 60
+
+
+def test_an_exhausted_forecast_budget_leaves_the_days_read_answering(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    client = client_for(system.member)
+    forecast = {"date": TODAY.isoformat()}
+    with one_a_minute("forecast"):
+        assert client.get(plant_path(system, plant, "forecast"), forecast).status_code == 200
+        assert client.get(plant_path(system, plant, "forecast"), forecast).status_code == 429
+        assert client.get(plant_path(system, plant)).status_code == 200
+        assert client.get(plant_path(system, plant)).status_code == 200
+
+
+def test_the_days_scope_admits_120_reads_an_hour() -> None:
+    rates = cast(dict[str, str], settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"])
+    assert rates["days"] == "120/hour"
+    assert rates["forecast"] == "60/min"
