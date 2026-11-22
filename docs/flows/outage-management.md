@@ -56,7 +56,7 @@ sequenceDiagram
 | `incidents_incidentrevision` | R/W | One snapshot per revision; `created_at` is the knowledge time for `as_of`; `incidents_changed` rereads it to compare open runs' pinned revisions |
 | `accounts_tenant`, `accounts_membership`, `regions_region`, `plants_plant` | R (`FOR UPDATE` on tenant, region, plant); R | Locked in that order by `tenant_membership` and `lock_incident_plant`; member check by the route policy, administrator check in the policy and again in the operation |
 | `plants_plantconfiguration` | R | Current or declared configuration gives the capacity ceilings |
-| `change_requests_changerequest`, `change_requests_incidentchange` | R | List only: the actor's own pending requests on the shown outages and their count for the proposal flag |
+| `change_requests_changerequest`, `change_requests_incidentchange` | R | The actor's own pending requests on the outages a list or a stale-write conflict returns, and their count for the proposal flag |
 | `plants_calibrationrun`, `plants_plantevent` | R/W | Pending or running runs superseded, one `calibration_completed` event each; after commit a preparation attempt may insert a pending run with a `calibration_scheduled` event |
 | `plants_plant` | W | `calibration_preparation_due_at`: the durable request for preparation |
 | `plants_productionobservation`, `metering_epiasconnection`, `metering_epiassnapshot`, `forecasts_forecastsnapshot`, `plants_calibrationactivation`, provider binding | R | After commit, in its own transaction: `prepare_calibration` reads these to decide whether a run is needed |
