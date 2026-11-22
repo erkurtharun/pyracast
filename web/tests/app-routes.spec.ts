@@ -132,14 +132,20 @@ test("the workspace lives in the address and survives a reload", async ({
     await expect(
         page.getByRole("button", { name: /West array/ }),
     ).toBeVisible();
-    await expect(page.getByLabel("Workspace")).toHaveValue("2");
-    await page.getByLabel("Workspace").selectOption("1");
+    await expect(
+        page.getByRole("combobox", { name: "Workspace", exact: true }),
+    ).toHaveValue("2");
+    await page
+        .getByRole("combobox", { name: "Workspace", exact: true })
+        .selectOption("1");
     await expect(page).toHaveURL("/app/w/1/");
     await expect(
         page.getByRole("button", { name: /East array/ }),
     ).toBeVisible();
     await page.reload();
-    await expect(page.getByLabel("Workspace")).toHaveValue("1");
+    await expect(
+        page.getByRole("combobox", { name: "Workspace", exact: true }),
+    ).toHaveValue("1");
     await page.goBack();
     await expect(page).toHaveURL("/app/w/2/");
     await expect(
@@ -282,7 +288,9 @@ test("a plant screen that fails to render keeps the workspace around its error",
     await expect(
         page.getByRole("heading", { name: "This page could not be displayed" }),
     ).toBeVisible();
-    await expect(page.getByLabel("Workspace")).toHaveValue("1");
+    await expect(
+        page.getByRole("combobox", { name: "Workspace", exact: true }),
+    ).toHaveValue("1");
     await expect(page.getByRole("main")).toHaveCount(1);
     await page.getByRole("button", { name: /Plants/ }).click();
     await expect(page).toHaveURL("/app/w/1/");

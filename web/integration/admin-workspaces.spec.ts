@@ -15,7 +15,7 @@ test("a platform administrator creates a workspace, adds a plant and manages mem
         page,
         process.env.BROWSER_CONSOLE_EMAIL!,
         process.env.BROWSER_ADMIN_PASSWORD!,
-        process.env.BROWSER_CONSOLE_TOTP_SEED!,
+        process.env.BROWSER_CONSOLE_RECOVERY_CODES!,
     );
 
     await page.goto("/admin/workspaces/");

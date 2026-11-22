@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 import pytest
 from allauth.account.models import EmailAddress
 from allauth.mfa.models import Authenticator
+from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from allauth.mfa.totp.internal.auth import generate_totp_secret
 from django.contrib.auth.models import User
 from django.db import transaction
@@ -224,17 +225,18 @@ def run_spec(spec: str, gateway: Gateway, **environment: str) -> None:
 class Accounts:
     system: System
     password: str
-    admin_totp: str
+    admin_codes: str
     console: User
-    console_totp: str
+    console_codes: str
 
 
-def with_totp(user: User) -> str:
-    secret = generate_totp_secret()
+def with_second_factor(user: User) -> str:
+    """Two recovery codes, comma-separated, of an account that also has an authenticator: a
+    code minted from the clock can reach the server in the next step and be refused."""
     Authenticator.objects.create(
-        user=user, type="totp", data={"secret": MFAAdapter().encrypt(secret)}
+        user=user, type="totp", data={"secret": MFAAdapter().encrypt(generate_totp_secret())}
     )
-    return secret
+    return ",".join(RecoveryCodes.activate(user).generate_codes()[:2])
 
 
 def seed_accounts() -> Accounts:
@@ -250,7 +252,9 @@ def seed_accounts() -> Accounts:
     )
     for user in (system.member, system.admin, console):
         EmailAddress.objects.create(user=user, email=user.email, primary=True, verified=True)
-    return Accounts(system, PASSWORD, with_totp(system.admin), console, with_totp(console))
+    return Accounts(
+        system, PASSWORD, with_second_factor(system.admin), console, with_second_factor(console)
+    )
 
 
 @dataclass(frozen=True)

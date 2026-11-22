@@ -6,7 +6,11 @@ from django.db import transaction
 
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.activation import activate_calibration
-from pyracast.plants.automation import promote_automatic_calibration, set_calibration_automation
+from pyracast.plants.automation import (
+    lock_enabler,
+    promote_automatic_calibration,
+    set_calibration_automation,
+)
 from pyracast.plants.models import (
     CalibrationActivation,
     Plant,
@@ -159,10 +163,11 @@ def test_durable_identity_recovery_obeys_promotion_and_observation_guards(
             candidate.factor = forged_factor
             candidate.save(update_fields=("factor", "result"))
             with transaction.atomic():
+                enabler = lock_enabler(plant.pk)
                 Region.objects.select_for_update().get(pk=plant.region_id)
                 locked = Plant.objects.select_for_update().get(pk=plant.pk)
                 assert not promote_automatic_calibration(
-                    locked, candidate, candidate.completed_at + timedelta(seconds=1)
+                    locked, candidate, candidate.completed_at + timedelta(seconds=1), enabler
                 )
             assert CalibrationActivation.objects.count() == 1
             assert CalibrationActivation.objects.get().calibration_id == incumbent.pk

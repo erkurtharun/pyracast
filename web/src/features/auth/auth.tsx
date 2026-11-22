@@ -29,7 +29,9 @@ import { submitAuth } from "./steps/submit";
 
 type ProviderCompletion = "signedIn" | "pending" | "refused";
 
-// The provider's redirect back only verified the login; this request signs in.
+// The provider's redirect back only verified the login; this request signs in. An
+// authenticated answer changed the server's session, so the session store follows it even
+// after the sign-in screen has gone.
 async function completeProviderLogin(): Promise<ProviderCompletion> {
     try {
         const result = await authRequest("auth/provider/complete", "POST");
@@ -128,7 +130,7 @@ export function Auth({
             );
         completion
             .then(async (completed) => {
-                if (completed === "signedIn") return;
+                if (completed === "signedIn" || !active) return;
                 refused = completed === "refused";
                 const result = await authRequest("auth/session", "GET");
                 if (!active) return;

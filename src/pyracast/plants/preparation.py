@@ -234,31 +234,36 @@ def _prepare_each(plant_ids: list[int], now: datetime | None) -> list[Calibratio
 
 
 def _prepare_requested(plant_id: int, now: datetime | None) -> CalibrationRun | None:
-    from pyracast.plants.automation import promote_undecided_candidate
+    from pyracast.plants.automation import lock_person, promote_undecided_candidate
 
     moment = now or timezone.now()
     with transaction.atomic():
         identity = (
-            Plant.objects.filter(pk=plant_id).values_list("region_id", "region__tenant_id").first()
+            Plant.objects.filter(pk=plant_id)
+            .values_list("region_id", "region__tenant_id", "automatic_calibration_enabled_by_id")
+            .first()
         )
         if identity is None:
             return None
+        enabler = lock_person(identity[2])
         Tenant.objects.select_for_update().get(pk=identity[1])
         Region.objects.select_for_update().get(pk=identity[0])
-        due_at = (
+        locked = (
             Plant.objects.select_for_update()
             .filter(pk=plant_id)
-            .values_list("calibration_preparation_due_at", flat=True)
+            .values_list("calibration_preparation_due_at", "automatic_calibration_enabled_by_id")
             .first()
         )
         if (
-            due_at is None
-            or due_at > moment
+            locked is None
+            or locked[0] is None
+            or locked[0] > moment
+            or locked[1] != enabler.user_id
             or CalibrationRun.objects.filter(plant_id=plant_id, status__in=OPEN_STATUSES).exists()
         ):
             return None
         run = prepare_calibration(plant_id, now)
-        settled = run is not None or promote_undecided_candidate(plant_id, moment)
+        settled = run is not None or promote_undecided_candidate(plant_id, moment, enabler)
         Plant.objects.filter(pk=plant_id).update(
             calibration_preparation_due_at=None if settled else moment + PREPARATION_RETRY_DELAY
         )

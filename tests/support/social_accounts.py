@@ -37,7 +37,7 @@ PROVIDER_TOKEN = {"access_token": "test-access-token", "token_type": "Bearer", "
 
 def provider_endpoint(url: str) -> tuple[str, str]:
     parts = urlsplit(url)
-    endpoint = PROVIDER_ENDPOINTS.get((parts.scheme, parts.netloc, parts.path))
+    endpoint = PROVIDER_ENDPOINTS.get((parts.scheme, parts.netloc.lower(), parts.path))
     if endpoint is None:
         raise AssertionError(f"Unexpected provider URL: {url}")
     return endpoint
