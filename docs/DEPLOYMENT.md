@@ -73,8 +73,9 @@ against both.
    release. The release refuses, before maintenance, a value that does not load as X.509
    certificates.
 
-With origin pulls required, each release sends one `/health/live/` request through the edge
-(`deploy/edge_gate.py`) before the new release becomes current. In an upgrade that began
+With origin pulls required, each release asks `/health/live/` through the edge
+(`deploy/edge_gate.py`: up to 12 requests 5 seconds apart, until the origin answers `ok` or the
+edge answers a challenge) before the new release becomes current. In an upgrade that began
 without the maintenance marker it runs before `migrate`, so a failure starts the previous
 release again; otherwise a failure leaves maintenance on. A Cloudflare challenge of the VM
 fails at once and names the remedies: an edge rule that lets the host's health request through,
@@ -170,9 +171,12 @@ uv run --locked python deploy/host_secrets.py check
 ```
 
 `create` generates the encryption key and the broker and database passwords, asks for the mail
-backend and sender, sets `PYRACAST_WEATHER_ENABLED=0`, and refuses to overwrite existing files.
-`check` names each problem by file and key. `set KEY` stores one runtime setting typed without
-echo (EPIAS or weather credentials); `rotate` and `drop-fallbacks` are under "Key rotation".
+backend and sender, and refuses to overwrite existing files. `check` names each problem by file
+and key. `set KEY` stores one runtime setting typed without echo (EPIAS credentials). `unset KEY`
+removes a key the application no longer reads, which `check` reports until then; it refuses a key
+the host contract knows or the file lacks. Run it once the release that stopped reading the key
+is live, then release the file as a runtime change ("Key rotation"). `rotate` and
+`drop-fallbacks` are under "Key rotation".
 
 For the Gmail sender, enable the Gmail API. In **Google Auth Platform** use an **Internal**
 audience and only `https://www.googleapis.com/auth/gmail.send`; Internal requires the OAuth
@@ -272,9 +276,10 @@ sessions and mails it a notice; then run `bootstrap_admin` again. Both commands 
 `pyracast check_mail --send-to ADDRESS` in the `api` container sends one test mail; without
 `--send-to` it only opens the transport, as each release does (a failure is a warning in the
 release log). Exit codes: 0 accepted, 1 invalid `--send-to` address, 2 configuration invalid,
-3 credentials rejected, 4 Gmail authorization revoked (run `authorize_gmail.py --replace`),
-5 sender forbidden, 6 message rejected, 7 rate limited, 8 not sent, 9 outcome uncertain,
-10 preparation failed.
+3 credentials rejected, 4 Gmail authorization revoked (on the workstation, run
+`authorize_gmail.py --sender SENDER --replace` as in "Add secrets" and release the file as a
+runtime change), 5 sender forbidden, 6 message rejected, 7 rate limited, 8 not sent, 9 outcome
+uncertain, 10 preparation failed.
 
 Then test signup, verification mail, sign-in, MFA and one authorized plant on the public site,
 confirm the Cloud Monitoring notification channel and send a test alert (below). A real provider
@@ -350,15 +355,18 @@ Inspect the host from `/opt/pyracast/current` as root with
   seven-day statement: change `web/src/features/public-site/legal-copy.ts` first. To restore a
   `daily/` object with the reset tool, copy it to a `postgres/` name.
 - **Key rotation:** `deploy/host_secrets.py rotate secret-key|runtime-password|owner-password`
-  changes the local file. Upload it as a new version of its secret (`runtime-password` and
-  `secret-key`: runtime; `owner-password`: migration), set the matching Terraform version
-  (`runtime_secret_version`, or `migration_secret_version` and the `GCP_MIGRATION_SECRET_VERSION`
-  variable), apply, run the startup script to refresh `host.json` and redeploy `main` at once:
-  the next start of `pyracast.service` reads the new version. The release sets the owner's
+  changes the local file. A runtime change (`secret-key`, `runtime-password`, and `set`, `unset`
+  or `drop-fallbacks`) is uploaded as a new version of `pyracast-runtime`; set
+  `runtime_secret_version` to it, apply, run the startup script to refresh `host.json` and
+  redeploy `main` at once: the next start of `pyracast.service` reads the new version.
+  `owner-password` is uploaded as a new version of `pyracast-migration`; set
+  `migration_secret_version` and the `GCP_MIGRATION_SECRET_VERSION` variable to it, apply and
+  redeploy `main`: only the release reads the migration secret. The release sets the owner's
   password before maintenance and the runtime role's once API and web have stopped. A new
   secret key keeps the old one first in `PYRACAST_SECRET_KEY_FALLBACKS`; after that release run
   `pyracast reencrypt_secrets --verify` in `api`, and once `pyracast check_secrets
-  --require-primary` exits 0, run `host_secrets.py drop-fallbacks` and release that version too.
+  --require-primary` exits 0, run `host_secrets.py drop-fallbacks` and release it as a runtime
+  change (upload, `runtime_secret_version`, apply, startup script, `main`).
   `check_secrets` exits 1 when a secret is unreadable or malformed and 2 under
   `--require-primary` when one still needs a fallback; `reencrypt_secrets` exits 1 or 2 for the
   same causes and commits nothing. Every release refuses, before maintenance, a key set that
@@ -377,8 +385,10 @@ Inspect the host from `/opt/pyracast/current` as root with
 ### Alert events
 
 The host scripts write these events to the `pyracast-operations` log; `deploy/operations_events.py`
-holds the list, and each alerted one has its own log-match policy in `monitoring.tf` with at most
-one notification an hour. Lines carry ids, states and counts only.
+holds the list with each event's severity and alert. A `match` event has its own log-match policy
+in `monitoring.tf` with at most one notification an hour; `pyracast_runtime_restarted` alerts
+through a threshold on its log-based metric, the heartbeat through its absence, and every other
+event raises no alert. Lines carry ids, states and counts only.
 `sudo python3 /opt/pyracast/current/deploy/operations_events.py --test-alert EVENT` writes one
 sample line with `test: true` and changes nothing else; it exits 1 when the line could not be
 written. A test line of an alerted event opens an incident on its policy; test lines never count
@@ -475,7 +485,10 @@ minutes of downtime.
    python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json abort
    ```
 
-   It ends with `The previous release serves again and the marker is removed.`
+   It ends with
+   `The previous release serves again and the marker is removed. Nothing else to do.`
+   The archive and export of step 1 stay in `/var/lib/pyracast/reset`; delete the directory as in
+   step 10 once you no longer need them.
 3. On your own machine, copy both objects out of the bucket's seven-day lifecycle:
    `gcloud storage cp gs://BUCKET/OBJECT gs://BUCKET/EXPORT .`, and check that `sha256sum`
    (Windows: `Get-FileHash -Algorithm SHA256`) shows each printed SHA-256. The archive's provider
