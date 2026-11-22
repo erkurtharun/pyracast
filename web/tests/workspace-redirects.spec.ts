@@ -73,6 +73,26 @@ test("a click on Inbox while a role change withdraws the members page opens the 
     ).toHaveAttribute("aria-current", "page");
 });
 
+test("a Plants click on the workspace index before the workspaces answer still opens the portfolio", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const releaseTenants = await hold(
+        page,
+        (url) => url.pathname === "/api/tenants/",
+    );
+    await page.goto("/app/w/");
+    await expect(page.getByText("Loading your workspaces…")).toBeVisible();
+    // A push to the address already shown settles without a new page; the redirect must follow it.
+    await page.getByRole("button", { name: "Plants", exact: true }).click();
+    await page.getByRole("button", { name: "Plants", exact: true }).click();
+    releaseTenants();
+    await expect(page).toHaveURL("/app/w/1/");
+    await expect(
+        page.getByRole("button", { name: "Plants", exact: true }),
+    ).toHaveAttribute("aria-current", "page");
+});
+
 test("the workspace index opens the portfolio once the workspaces answer late", async ({
     page,
 }) => {
