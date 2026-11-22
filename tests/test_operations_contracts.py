@@ -1380,7 +1380,9 @@ def test_smoke_refusals_without_a_broker_name_their_cause() -> None:
 
 def test_smoke_pins_the_app_worker_manifest_and_icons_through_the_gateway() -> None:
     smoke = text(DEPLOY / "smoke.sh")
-    worker = re.search(r'source: "/app/sw\.js",(.*?)\]', text(ROOT / "web" / "next.config.ts"), re.S)
+    worker = re.search(
+        r'source: "/app/sw\.js",(.*?)\]', text(ROOT / "web" / "next.config.ts"), re.S
+    )
     assert worker is not None
     pinned = re.search(r"^app_file /app/sw\.js (.*?[^\\])$", smoke, re.M | re.S)
     assert pinned is not None
