@@ -224,6 +224,7 @@ import os
 import socket
 import ssl
 context = ssl.create_default_context(cadata=os.environ['SMOKE_CA'])
+context.minimum_version = ssl.TLSVersion.TLSv1_2
 with socket.create_connection(('173.245.48.2', 8443), timeout=10) as connection:
     with context.wrap_socket(connection, server_hostname='localhost') as secure:
         secure.sendall(b'GET /__smoke/headers HTTP/1.1\r\nHost: localhost\r\n'
@@ -262,6 +263,7 @@ import socket
 import ssl
 import time
 context = ssl.create_default_context(cadata=os.environ['SMOKE_CA'])
+context.minimum_version = ssl.TLSVersion.TLSv1_2
 ROUTERS = {
     'backend': '/health/live/',
     'api': '/api/session/',
