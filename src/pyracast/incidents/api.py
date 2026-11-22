@@ -1,5 +1,4 @@
-from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager
 from typing import Any
 
 from drf_spectacular.utils import extend_schema, extend_schema_field
@@ -7,8 +6,9 @@ from rest_framework import serializers
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from pyracast.api import errors
 from pyracast.api.serializers import FiniteFloat, InputSerializer
-from pyracast.errors import ConflictError, ErrorCode
+from pyracast.errors import ErrorCode
 from pyracast.incidents import operations
 from pyracast.incidents.models import IncidentKind, IncidentStatus, PlantIncident
 from pyracast.plants.api import ScopedView
@@ -75,15 +75,11 @@ class IncidentConflict(serializers.Serializer[dict[str, Any]]):
     current = IncidentOutput()
 
 
-@contextmanager
-def current_on_conflict() -> Iterator[None]:
-    """A stale write answers with the version it lost to; the caller is already authorized."""
-    try:
-        yield
-    except operations.StaleIncidentError as error:
-        raise ConflictError(
-            error.code, details={"current": IncidentOutput(error.current).data}
-        ) from error
+def current_on_conflict() -> AbstractContextManager[None]:
+    """A stale incident write answers with the incident it lost to."""
+    return errors.current_on_conflict(
+        operations.StaleIncidentError, lambda stale: IncidentOutput(stale.current).data
+    )
 
 
 class IncidentsView(ScopedView[PlantIncident]):

@@ -1,4 +1,3 @@
-import io
 import json
 from datetime import datetime, timedelta
 
@@ -7,6 +6,8 @@ from django.core.management import CommandError, call_command
 
 from pyracast.forecasts.models import CollectionJob, DispatcherPhase, DispatcherStatus
 from pyracast.notifications.models import ReminderSchedule
+from pyracast.orchestration.delivery_health import CHECKS
+from tests.support.command_output import process_streams
 from tests.support.delivery_health import NOW, answering_broker, recent_forecast
 from tests.support.domain import make_system
 from tests.support.notifications import store
@@ -45,13 +46,13 @@ def printed_report(monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, object], 
         "pyracast.orchestration.management.commands.check_delivery_health.timezone.now", lambda: NOW
     )
     answering_broker(monkeypatch)
-    output = io.StringIO()
-    try:
-        call_command("check_delivery_health", stdout=output)
-    except CommandError:
-        failed = True
-    else:
-        failed = False
+    with process_streams() as (output, _):
+        try:
+            call_command("check_delivery_health")
+        except CommandError:
+            failed = True
+        else:
+            failed = False
     printed = output.getvalue()
     assert printed.endswith("\n")
     assert printed.count("\n") == 1
@@ -73,6 +74,10 @@ def assert_contract(report: dict[str, object], failed: bool) -> None:
         value = report[key]
         assert type(value) is int, key
         assert value >= 0, key
+    # The host watchdog names these in its alert; the counts of the other checks stay here.
+    assert report["alarms"] == {
+        item.key: report[item.key] for item in CHECKS if item.alarm and report[item.key]
+    }
 
 
 @pytest.mark.django_db(transaction=True)

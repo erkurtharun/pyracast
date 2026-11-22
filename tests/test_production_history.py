@@ -20,6 +20,7 @@ from pyracast.plants.availability import (
 from pyracast.plants.models import Plant, ProductionObservation
 from pyracast.plants.numerics import MODEL_VERSION, PowerInterval
 from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.production import production_history
 from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.regions.models import Region
@@ -137,7 +138,11 @@ def test_mixed_resolution_preserves_observations_after_revision_and_reference_lo
     assert upload(system, plant, [row])["existing"] == 1
     original_id = plant.current_configuration_id
     revise_plant(
-        system.member, system.tenant.pk, system.region.pk, plant.pk, name="New", dc_capacity_mw=140
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        PlantParameters(name="New", dc_capacity_mw=140),
     )
     plant.refresh_from_db()
     saved = ProductionObservation.objects.get().pk

@@ -42,7 +42,7 @@ def operations(request: HttpRequest, *, site: PlatformAdminSite) -> HttpResponse
         request,
         "operations",
         _("Operations"),
-        operations_context(request.GET.get("issue", "")[:80]),
+        operations_context(request.GET.get("issue", "")[:80], request.GET),
     )
 
 

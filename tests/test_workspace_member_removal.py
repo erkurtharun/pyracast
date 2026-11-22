@@ -39,6 +39,7 @@ from pyracast.notifications.models import ReminderRecipientTie, ReminderSchedule
 from pyracast.notifications.recipients import recipient_key
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import create_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import AuditEvent, Region
 from tests.support.concurrency import (
     behind_open_transaction,
@@ -84,7 +85,10 @@ def outstanding_invitation(
 def test_removal_revokes_access_in_existing_session_and_preserves_account_and_resources() -> None:
     system = make_system()
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="PV", dc_capacity_mw=1
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="PV", dc_capacity_mw=1),
     )
     viewer = User.objects.create_user(username="viewer", email="viewer@example.com")
     Membership.objects.create(tenant=system.tenant, user=viewer)

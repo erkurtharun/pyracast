@@ -72,7 +72,7 @@ def test_settings_load_local_environment_before_reading_configuration(
 
 
 @pytest.mark.parametrize("level", ["INFO", "WARNING"])
-def test_application_logs_use_stdout_and_configured_level(tmp_path: Path, level: str) -> None:
+def test_application_logs_use_stderr_and_configured_level(tmp_path: Path, level: str) -> None:
     result = subprocess.run(
         [
             sys.executable,
@@ -90,9 +90,9 @@ def test_application_logs_use_stdout_and_configured_level(tmp_path: Path, level:
         check=True,
     )
 
-    assert "warning-event" in result.stdout
-    assert ("info-event" in result.stdout) == (level == "INFO")
-    assert result.stderr == ""
+    assert "warning-event" in result.stderr
+    assert ("info-event" in result.stderr) == (level == "INFO")
+    assert result.stdout == ""
 
 
 @pytest.mark.parametrize("routed", [False, True])

@@ -2,6 +2,7 @@
 import { useTranslations } from "next-intl";
 import { useFormat } from "@/lib/format/use-format";
 import { MISSING } from "@/lib/format/number";
+import { ChangedFields } from "@/ui/changed-fields";
 import { useLabel } from "@/ui/vocabulary";
 import { changedFields, type Outage, type OutageField } from "./model";
 
@@ -61,17 +62,14 @@ export function StaleChanges({
                       })
                     : t("staleApply", { revision: current.revision })}
             </p>
-            <ul>
-                {changedFields(before, current).map((field) => (
-                    <li key={field}>
-                        {t("changedField", {
-                            field: fieldLabel(field),
-                            before: show(before, field),
-                            after: show(current, field),
-                        })}
-                    </li>
-                ))}
-            </ul>
+            <ChangedFields
+                changes={changedFields(before, current).map((field) => ({
+                    field,
+                    label: fieldLabel(field),
+                    before: show(before, field),
+                    after: show(current, field),
+                }))}
+            />
             <button
                 className="button secondary"
                 type="button"

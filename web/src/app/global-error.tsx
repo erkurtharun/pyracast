@@ -1,7 +1,7 @@
 "use client";
 import "./globals.css";
-import en from "../../messages/en/core.json";
-import tr from "../../messages/tr/core.json";
+import en from "../../messages/en/shell.json";
+import tr from "../../messages/tr/shell.json";
 
 export default function GlobalError({
     retry,

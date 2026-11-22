@@ -31,6 +31,7 @@ from pyracast.forecasts.models import CollectionJob
 from pyracast.forecasts.validation import validate_binding
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.plants.approval import approve_region
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.sites import submit_site
 from pyracast.providers import FixtureProvider
 from pyracast.regions.models import Region, RegionLocationChangeRequest
@@ -311,15 +312,17 @@ def seed_review(accounts: Accounts, other: OtherWorkspace) -> Review:
     region = submit_site(
         other.owner,
         other.tenant.pk,
-        name="Review solar plant",
+        PlantParameters(
+            name="Review solar plant",
+            dc_capacity_mw=12,
+            inverter_capacity_mw=10,
+            mounting_type="fixed",
+            surface_tilt_degrees=25,
+            surface_azimuth_degrees=180,
+        ),
         latitude=39.5,
         longitude=28.5,
         timezone="Europe/Istanbul",
-        dc_capacity_mw=12,
-        inverter_capacity_mw=10,
-        mounting_type="fixed",
-        surface_tilt_degrees=25,
-        surface_azimuth_degrees=180,
     )
     binding = configure_binding(
         system.admin,
