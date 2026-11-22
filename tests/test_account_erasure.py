@@ -1218,6 +1218,32 @@ def test_a_mail_row_held_by_another_client_while_another_account_verifies_its_ad
     assert list(OutboundMail.objects.values_list("pk", flat=True)) == [held.pk]
 
 
+def test_an_invitation_held_by_another_client_while_its_address_is_verified_elsewhere_is_kept() -> (
+    None
+):
+    earlier, current = "was.invited@example.com", "invited.now@example.com"
+    person = person_with(current)
+    newcomer = User.objects.create_user(username="newcomer", email="newcomer@example.com")
+    tenant, inviter = administered_workspace()
+    outbound(
+        OutboundMailKind.EMAIL_CHANGED,
+        earlier,
+        {"from_email": earlier, "to_email": current},
+        finished=True,
+    )
+    held = WorkspaceInvitation.objects.create(
+        tenant=tenant, email=earlier, created_by=inviter, expires_at=NOW + timedelta(days=7)
+    )
+
+    def hold_and_verify() -> None:
+        WorkspaceInvitation.objects.select_for_update().get(pk=held.pk)
+        EmailAddress.objects.create(user=newcomer, email=earlier, primary=True, verified=True)
+
+    behind_open_transaction(hold_and_verify, lambda: erase_account(person.pk, execute=True))
+
+    assert list(WorkspaceInvitation.objects.values_list("pk", flat=True)) == [held.pk]
+
+
 def test_erasure_reports_only_the_tables_it_changes() -> None:
     person = person_with("plain.person@example.com")
 

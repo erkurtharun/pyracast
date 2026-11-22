@@ -30,11 +30,15 @@ from pyracast.plants.models import (
 )
 from pyracast.plants.operations import revise_plant
 from pyracast.plants.parameters import PlantParameters
-from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.plants.training import run_calibration
 from pyracast.regions.models import Region
 from pyracast.trash import purge_expired, trash_region
-from tests.support.calibration_automation import declare_native_sources, evaluated_run, promote
+from tests.support.calibration_automation import (
+    declare_native_sources,
+    evaluated_run,
+    import_fit_history,
+    promote,
+)
 from tests.support.domain import NOW, System
 from tests.support.plant_operations import make_plant, ready_run
 from tests.support.plant_training import actual_snapshot_for
@@ -497,24 +501,7 @@ def test_offline_fit_publication_automatically_promotes_without_external_io(
     set_calibration_automation(
         system.member, system.tenant.pk, system.region.pk, plant.pk, enabled=True
     )
-    rows: list[ObservationInput] = []
-    for offset in range(30):
-        day = date(2026, 10, 9) + timedelta(days=offset)
-        actual_snapshot_for(system, day)
-        start, end = local_day_bounds(day, system.region.timezone)
-        while start < end:
-            rows.append(ObservationInput(start, start + timedelta(hours=1), 26))
-            start += timedelta(hours=1)
-    assert plant.current_configuration_id is not None
-    import_observations(
-        system.member,
-        system.tenant.pk,
-        system.region.pk,
-        plant.pk,
-        configuration_id=plant.current_configuration_id,
-        unit="MWh",
-        observations=rows,
-    )
+    import_fit_history(system, plant)
     run = CalibrationRun.objects.get()
     assert run_calibration(run.pk, NOW)
     run.refresh_from_db()

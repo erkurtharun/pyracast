@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -48,7 +49,7 @@ def exceptions_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def add_finding(
-    reports: Path, service: str, result: int = 0, finding: dict[str, str] = FINDING
+    reports: Path, service: str, result: int = 0, finding: Mapping[str, object] = FINDING
 ) -> None:
     path = reports / f"{service}.json"
     report = json.loads(path.read_text())
@@ -492,6 +493,24 @@ def test_main_refuses_a_finding_without_its_id_or_package(
     monkeypatch.setattr("sys.argv", ["check_image_scans.py", str(reports)])
 
     with pytest.raises(SystemExit, match=f"^Image scan gate failed: '{field}'$"):
+        check_image_scans.main()
+
+
+@pytest.mark.parametrize("value", [["CVE-1"], {"id": "CVE-1"}, 1, None])
+@pytest.mark.parametrize("field", ["VulnerabilityID", "PkgName"])
+def test_main_refuses_a_finding_whose_id_or_package_is_not_text(
+    reports: Path,
+    exceptions_file: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: object,
+) -> None:
+    add_finding(reports, "backend", finding={**OPENSSL, field: value})
+    monkeypatch.setattr("sys.argv", ["check_image_scans.py", str(reports)])
+
+    with pytest.raises(
+        SystemExit, match=f"^Image scan gate failed: backend: {field} of a finding is not text\\.$"
+    ):
         check_image_scans.main()
 
 

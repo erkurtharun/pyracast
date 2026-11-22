@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import shutil
 import socket
 import subprocess
@@ -8,6 +9,7 @@ import urllib.request
 import zipfile
 from contextlib import nullcontext
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -52,7 +54,7 @@ def windows_server_options(
     )
     monkeypatch.setattr(
         start_postgres,
-        "THROWAWAY_ARCHIVE_SHA256",
+        "ARCHIVE_SHA256",
         hashlib.sha256(archive.read_bytes()).hexdigest(),
     )
     monkeypatch.setenv("PYRACAST_POSTGRES_ARCHIVE", str(archive))
@@ -146,9 +148,14 @@ def test_non_durable_settings_are_refused_for_a_cluster_that_keeps_data(
 
 def windows_cluster(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> tuple[Path, list[tuple[str, ...]], dict[str, bool]]:
+) -> tuple[Path, list[tuple[str, ...]], dict[str, Any]]:
     commands: list[tuple[str, ...]] = []
-    server = {"running": False, "database": False, "createdb_fails": False}
+    server: dict[str, Any] = {
+        "running": False,
+        "database": False,
+        "createdb_fails": False,
+        "version": start_postgres.ARCHIVE_VERSION,
+    }
     root = tmp_path / "pyracast" / "postgres"
 
     def run(*args: str, env: dict[str, str] | None = None) -> None:
@@ -165,6 +172,10 @@ def windows_cluster(
     def execute(command: list[str], **options: object) -> subprocess.CompletedProcess[str]:
         if Path(command[0]).name == "pg_isready.exe":
             return subprocess.CompletedProcess(command, 0, stdout="")
+        if Path(command[0]).name == "pg_ctl.exe":
+            assert command[1:] == ["--version"]
+            version = f"pg_ctl (PostgreSQL) {server['version']}\n"
+            return subprocess.CompletedProcess(command, 0, stdout=version)
         assert Path(command[0]).name == "psql.exe"
         assert {"-w", "postgres"} <= set(command)
         if command[-1] == "SHOW data_directory":
@@ -249,6 +260,24 @@ def test_windows_provisioning_refuses_a_directory_that_is_not_a_cluster(
     assert commands == []
 
 
+@pytest.mark.parametrize("running", [False, True])
+def test_windows_provisioning_refuses_installed_binaries_of_another_minor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, running: bool
+) -> None:
+    root, commands, server = windows_cluster(monkeypatch, tmp_path)
+    start_postgres.provision_windows(root, "55432", ())
+    server.update(running=running, version="18.6")
+    commands.clear()
+    expected = rf"not {re.escape(start_postgres.ARCHIVE_VERSION)}; nothing was changed"
+
+    with pytest.raises(RuntimeError, match=expected):
+        start_postgres.provision_windows(root, "55432", ())
+
+    assert commands == []
+    assert (root / "pgsql" / "bin" / "pg_ctl.exe").is_file()
+    assert (root / "data" / "PG_VERSION").is_file()
+
+
 def inspected(running: bool, volumes: list[str], command: list[str]) -> str:
     mounts = [
         {"Type": "volume", "Name": name, "Destination": "/var/lib/postgresql", "RW": True}
@@ -259,7 +288,11 @@ def inspected(running: bool, volumes: list[str], command: list[str]) -> str:
             {
                 "State": {"Running": running},
                 "Mounts": mounts,
-                "Config": {"Cmd": command, "Env": ["PGDATA=/var/lib/postgresql/18/docker"]},
+                "Config": {
+                    "Image": start_postgres.production_image(),
+                    "Cmd": command,
+                    "Env": ["PGDATA=/var/lib/postgresql/18/docker"],
+                },
                 "HostConfig": {
                     "PortBindings": {"5432/tcp": [{"HostIp": "127.0.0.1", "HostPort": "55432"}]}
                 },
@@ -456,7 +489,7 @@ def test_durable_container_requires_data_inside_the_named_volume(
     assert commands == []
 
 
-def test_a_throwaway_docker_cluster_runs_the_production_postgresql_image(
+def test_every_docker_cluster_runs_the_production_postgresql_image(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     commands = fake_docker(monkeypatch, {})
@@ -464,10 +497,22 @@ def test_a_throwaway_docker_cluster_runs_the_production_postgresql_image(
     assert start_postgres.provision_docker("docker", "55432", (), volume=None) == "created"
     assert start_postgres.provision_docker("docker", "55432", (), volume="data") == "created"
 
-    throwaway, durable = commands
-    assert start_postgres.production_image() in throwaway
-    assert start_postgres.POSTGRES_IMAGE not in throwaway
-    assert start_postgres.POSTGRES_IMAGE in durable
+    for command in commands:
+        assert start_postgres.production_image() in command
+
+
+@pytest.mark.parametrize("running", [False, True])
+def test_a_durable_container_of_another_image_is_refused(
+    monkeypatch: pytest.MonkeyPatch, running: bool
+) -> None:
+    details = json.loads(inspected(running, ["data"], ["postgres"]))
+    details[0]["Config"]["Image"] = "postgres:18.6@sha256:" + "0" * 64
+    commands = fake_docker(monkeypatch, {"pyracast-postgres": json.dumps(details)})
+
+    with pytest.raises(RuntimeError, match="nothing was changed"):
+        start_postgres.provision_docker("docker", "55432", (), volume="data")
+
+    assert commands == []
 
 
 def test_a_dockerfile_without_a_pinned_postgresql_image_is_refused(
@@ -481,7 +526,7 @@ def test_a_dockerfile_without_a_pinned_postgresql_image_is_refused(
         start_postgres.production_image()
 
 
-def test_a_throwaway_windows_cluster_installs_the_production_minor(
+def test_a_windows_cluster_installs_the_production_minor(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     fetched: list[str] = []
@@ -496,10 +541,9 @@ def test_a_throwaway_windows_cluster_installs_the_production_minor(
     monkeypatch.delenv("PYRACAST_POSTGRES_ARCHIVE", raising=False)
     monkeypatch.setattr(urllib.request, "urlretrieve", retrieve)
     digest = hashlib.sha256(content.read_bytes()).hexdigest()
-    monkeypatch.setattr(start_postgres, "THROWAWAY_ARCHIVE_SHA256", digest)
+    monkeypatch.setattr(start_postgres, "ARCHIVE_SHA256", digest)
 
-    start_postgres.install_binaries(tmp_path / "throwaway", throwaway=True)
+    start_postgres.install_binaries(tmp_path / "cluster")
 
-    assert fetched == [start_postgres.THROWAWAY_ARCHIVE_URL]
-    assert start_postgres.THROWAWAY_ARCHIVE_URL != start_postgres.ARCHIVE_URL
-    assert (tmp_path / "throwaway" / "pgsql" / "bin" / "README").is_file()
+    assert fetched == [start_postgres.ARCHIVE_URL]
+    assert (tmp_path / "cluster" / "pgsql" / "bin" / "README").is_file()

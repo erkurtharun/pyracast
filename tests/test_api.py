@@ -6,12 +6,7 @@ from typing import Any
 
 import pytest
 from allauth.account.models import EmailAddress
-from allauth.mfa.totp.internal.auth import (
-    TOTP,
-    format_hotp_value,
-    generate_totp_secret,
-    hotp_value,
-)
+from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
 from django.contrib.auth.models import AnonymousUser, User
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.test import Client, RequestFactory
@@ -35,7 +30,9 @@ from pyracast.platform_admin.site import site
 from pyracast.providers import FixtureProvider, adapter_for
 from pyracast.regions.models import Region
 from pyracast.regions.operations import configure_binding, submit_region
+from tests.support.account_sessions import totp_clock
 from tests.support.api import verified_admin
+from tests.support.auth_lifecycle import totp_code
 from tests.support.jobs import collect
 
 pytestmark = pytest.mark.django_db
@@ -258,7 +255,9 @@ def test_binding_records_megawatt_reference_metadata(
 
 
 @pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
-def test_admin_login_requires_password_and_totp() -> None:
+def test_admin_login_requires_password_and_totp(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = time()
+    totp_clock(monkeypatch, now)
     password = "test-only-" + "x" * 40
     user = User.objects.create_superuser(
         username="mfa-login", email="operator@example.com", password=password
@@ -279,7 +278,7 @@ def test_admin_login_requires_password_and_totp() -> None:
     assert client.get("/admin/").status_code == 302
     response = client.post(
         "/api/auth/browser/v1/auth/2fa/authenticate",
-        {"code": format_hotp_value(hotp_value(secret, int(time()) // 30))},
+        {"code": totp_code(secret, now)},
         content_type="application/json",
         HTTP_X_CSRFTOKEN=token,
     )

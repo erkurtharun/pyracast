@@ -45,12 +45,19 @@ class Review(NamedTuple):
     problems: list[str]
 
 
+def _text(service: str, item: dict[str, Any], field: str) -> str:
+    value = item[field]
+    if not isinstance(value, str):
+        raise ValueError(f"{service}: {field} of a finding is not text.")
+    return value
+
+
 def _findings(service: str, report: dict[str, Any]) -> list[Finding]:
     return [
         Finding(
             service,
-            item["VulnerabilityID"],
-            item["PkgName"],
+            _text(service, item, "VulnerabilityID"),
+            _text(service, item, "PkgName"),
             item["InstalledVersion"],
             result["Target"],
         )
