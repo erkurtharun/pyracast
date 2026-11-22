@@ -1563,6 +1563,7 @@ export interface components {
          *     * `calibration_not_activatable` - Calibration Not Activatable
          *     * `review_reason_required` - Review Reason Required
          *     * `plant_parameters_changed` - Plant Parameters Changed
+         *     * `plant_edit_blocked` - Plant Edit Blocked
          * @enum {string}
          */
         ErrorCode:
@@ -1647,7 +1648,8 @@ export interface components {
             | "incumbent_changed"
             | "calibration_not_activatable"
             | "review_reason_required"
-            | "plant_parameters_changed";
+            | "plant_parameters_changed"
+            | "plant_edit_blocked";
         /**
          * @description * `current` - current
          *     * `stale` - stale
@@ -2010,6 +2012,11 @@ export interface components {
          */
         LocationChangeStatusEnum:
             "pending" | "approved" | "rejected" | "withdrawn";
+        /** @description A refusal that can name the plant already at the requested location. */
+        LocationRefusal: components["schemas"]["Error"] & {
+            /** @description With location_already_exists: the workspace's plant that holds the location. */
+            region_id?: number;
+        };
         /**
          * @description * `net_export` - Net export
          *     * `ac_generation` - AC generation
@@ -2417,6 +2424,12 @@ export interface components {
             message: string;
             current: components["schemas"]["PlantOutput"];
         };
+        /**
+         * @description * `suspended` - Suspended
+         *     * `connection_unavailable` - Connection Unavailable
+         * @enum {string}
+         */
+        PlantEditBlockEnum: "suspended" | "connection_unavailable";
         /**
          * @description * `submission_saved` - Submission saved
          *     * `configuration_created` - Configuration created
@@ -3024,6 +3037,18 @@ export interface components {
             readonly mfa_required: boolean;
             readonly language_preference: string | null;
         };
+        /**
+         * @description * `setup_incomplete` - Setup Incomplete
+         *     * `review_rejected` - Review Rejected
+         *     * `suspended` - Suspended
+         *     * `connection_unavailable` - Connection Unavailable
+         * @enum {string}
+         */
+        SiteAttentionEnum:
+            | "setup_incomplete"
+            | "review_rejected"
+            | "suspended"
+            | "connection_unavailable";
         SiteInput: {
             name: string;
             /** Format: double */
@@ -3060,6 +3085,32 @@ export interface components {
             readonly reviewed_at: string | null;
             readonly review_reason: string | null;
             readonly plant: components["schemas"]["PlantOutput"] | null;
+            /**
+             * @description The first thing the plant needs from the customer; none when nothing.
+             *
+             *     * `setup_incomplete` - Setup Incomplete
+             *     * `review_rejected` - Review Rejected
+             *     * `suspended` - Suspended
+             *     * `connection_unavailable` - Connection Unavailable
+             */
+            readonly attention:
+                | (
+                      | components["schemas"]["SiteAttentionEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+            /**
+             * @description Why the plant's technical details cannot change now; none when they can.
+             *
+             *     * `suspended` - Suspended
+             *     * `connection_unavailable` - Connection Unavailable
+             */
+            readonly edit_blocked_reason:
+                | (
+                      | components["schemas"]["PlantEditBlockEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
             readonly reminder:
                 components["schemas"]["ReminderSummaryOutput"] | null;
         };
@@ -3133,6 +3184,12 @@ export interface components {
         TrashedRegionOutput: {
             readonly id: number;
             readonly name: string;
+            /** @description The plant's name, else the location's name. */
+            readonly plant_name: string;
+            /** Format: double */
+            readonly latitude: number;
+            /** Format: double */
+            readonly longitude: number;
             /** Format: date-time */
             deleted_at: string;
             /** Format: date-time */
@@ -4707,7 +4764,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Error"];
+                    "application/json": components["schemas"]["LocationRefusal"];
                 };
             };
             /** @description Sign-in is required. */
@@ -7046,7 +7103,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Error"];
+                    "application/json": components["schemas"]["LocationRefusal"];
                 };
             };
             /** @description Sign-in is required. */

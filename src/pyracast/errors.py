@@ -93,6 +93,7 @@ class ErrorCode(models.TextChoices):
     CALIBRATION_NOT_ACTIVATABLE = "calibration_not_activatable"
     REVIEW_REASON_REQUIRED = "review_reason_required"
     PLANT_PARAMETERS_CHANGED = "plant_parameters_changed"
+    PLANT_EDIT_BLOCKED = "plant_edit_blocked"
 
 
 MESSAGES: Mapping[ErrorCode, StrPromise] = {
@@ -227,6 +228,9 @@ MESSAGES: Mapping[ErrorCode, StrPromise] = {
     ErrorCode.REVIEW_REASON_REQUIRED: _("Enter the reason the customer will read."),
     ErrorCode.PLANT_PARAMETERS_CHANGED: _(
         "The technical details changed after you opened them. Check the values and save again."
+    ),
+    ErrorCode.PLANT_EDIT_BLOCKED: _(
+        "The plant's technical details cannot change in its current state."
     ),
 }
 

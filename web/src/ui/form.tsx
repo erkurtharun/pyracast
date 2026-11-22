@@ -8,6 +8,7 @@ import {
     useRef,
     useState,
     type ChangeEventHandler,
+    type ClipboardEventHandler,
     type ReactNode,
     type RefObject,
 } from "react";
@@ -33,6 +34,17 @@ export function formTexts(data: FormData, name: string) {
     return data
         .getAll(name)
         .map((value) => (typeof value === "string" ? value : ""));
+}
+
+// Shows the server's refusal of each named field on that field.
+export function FieldErrors({
+    value,
+    children,
+}: {
+    value: Record<string, string>;
+    children: ReactNode;
+}) {
+    return <FormErrors value={value}>{children}</FormErrors>;
 }
 
 export function useErrorMessage() {
@@ -105,12 +117,15 @@ export function Field({
     min?: number;
     max?: number;
     step?: string;
+    pattern?: string;
+    title?: string;
     placeholder?: string;
     autoComplete?: string;
     hint?: string;
     maxLength?: number;
     minLength?: number;
     onChange?: ChangeEventHandler<HTMLInputElement>;
+    onPaste?: ClipboardEventHandler<HTMLInputElement>;
 }) {
     const control = useControl(name, hint);
     return (

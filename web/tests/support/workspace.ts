@@ -341,6 +341,8 @@ export async function mockApi(
                       collected_at: null,
                       issued_at: null,
                   });
+        else if (path.endsWith("/trash/regions/"))
+            data = answer("PaginatedTrashedRegionOutputList", paged([]));
         else if (path === "/api/invitations/preview/") data = invitationPreview;
         else throw new Error(`Unmocked API: ${method} ${path}`);
         await route.fulfill({ json: data });

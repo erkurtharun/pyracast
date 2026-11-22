@@ -606,16 +606,14 @@ test("a customer manages one plant site through the real API", async ({
         .getByRole("button", { name: "Recycle bin", exact: true })
         .click();
     await expect(
-        page.getByRole("button", { name: "Restore Site" }),
+        page.getByRole("button", { name: "Restore Browser plant" }),
     ).toBeVisible();
     await page.screenshot({
         path: testInfo.outputPath("recycle-bin-desktop.png"),
         fullPage: true,
     });
-    await page.getByRole("button", { name: "Restore Site" }).click();
-    await expect(
-        page.getByText("Site restored. Find it in Plants."),
-    ).toBeVisible();
+    await page.getByRole("button", { name: "Restore Browser plant" }).click();
+    await expect(page.getByText("Browser plant restored.")).toBeVisible();
     await page
         .getByRole("navigation", { name: "Main navigation" })
         .getByRole("button", { name: "Plants", exact: true })

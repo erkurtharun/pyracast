@@ -303,6 +303,14 @@ def test_operations_document_the_refusals_their_policy_allows() -> None:
         {"application/json": {"schema": {"$ref": f"#/components/schemas/{name}"}}}
         for name in ("IncidentConflict", "PlantConflict")
     ]
+    location = {"application/json": {"schema": {"$ref": "#/components/schemas/LocationRefusal"}}}
+    located = {
+        ("/api/tenants/{tenant_id}/sites/", "post"),
+        ("/api/tenants/{tenant_id}/regions/{region_id}/location-change-requests/", "post"),
+    }
+    assert schema["components"]["schemas"]["LocationRefusal"]["allOf"][0] == {
+        "$ref": "#/components/schemas/Error"
+    }
     for name in ("IncidentConflict", "PlantConflict"):
         assert schema["components"]["schemas"][name]["properties"].keys() == {
             "code",
@@ -343,6 +351,8 @@ def test_operations_document_the_refusals_their_policy_allows() -> None:
                 if status.startswith(("4", "5")) or status == "default":
                     if status == "409":
                         assert response["content"] in conflicts
+                    elif status == "400" and (route, method) in located:
+                        assert response["content"] == location
                     else:
                         assert response["content"] == error
 

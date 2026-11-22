@@ -1,102 +1,41 @@
 ﻿"use client";
 import { useTranslations } from "next-intl";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type { RegionScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { useFormat } from "@/lib/format/use-format";
 import type { components } from "@/lib/schema";
 import { useApiList, useRefresh } from "@/lib/api/query";
+import { routes } from "@/lib/routes";
 import { useErrorMessage } from "@/ui/form";
 import { Resource } from "@/ui/resource";
 import { Empty, Notice } from "@/ui/ui";
+import { useForgetDeletion } from "./recent-deletion";
 
 type DeletedRegion = components["schemas"]["TrashedRegionOutput"];
-
-export function MoveToRecycleBin({
-    name,
-    scope,
-    onDeleted,
-}: {
-    name: string;
-    scope: RegionScope;
-    onDeleted: () => void;
-}) {
-    const t = useTranslations("RecycleBin");
-    const errorMessage = useErrorMessage();
-    const [confirming, setConfirming] = useState(false);
-    const [working, setWorking] = useState(false);
-    const [error, setError] = useState("");
-    if (!confirming)
-        return (
-            <button
-                className="button secondary"
-                onClick={() => setConfirming(true)}
-            >
-                {t("deletePlant")}
-            </button>
-        );
-    return (
-        <section className="notice" aria-label={t("deletePlantConfirmation")}>
-            <h2>{t("confirmMove", { name })}</h2>
-            <p>{t("deletionHelp")}</p>
-            {error && <Notice error>{error}</Notice>}
-            <div className="button-group">
-                <button
-                    className="button secondary"
-                    disabled={working}
-                    onClick={() => {
-                        setConfirming(false);
-                        setError("");
-                    }}
-                >
-                    {t("cancel")}
-                </button>
-                <button
-                    className="button danger"
-                    disabled={working}
-                    onClick={() =>
-                        void (async () => {
-                            setWorking(true);
-                            setError("");
-                            try {
-                                await api.delete(
-                                    "/api/tenants/{tenant_id}/regions/{region_id}/",
-                                    { path: scope },
-                                );
-                                onDeleted();
-                            } catch (failure) {
-                                setError(errorMessage(failure));
-                                setWorking(false);
-                            }
-                        })()
-                    }
-                >
-                    {working ? t("moving") : t("movePlantToRecycleBin")}
-                </button>
-            </div>
-        </section>
-    );
-}
+type Restore =
+    | { kind: "idle" }
+    | { kind: "restoring"; id: number }
+    | { kind: "restored"; row: DeletedRegion }
+    | { kind: "failed"; message: string };
 
 export function RecycleBin({ tenant }: { tenant: number }) {
     const t = useTranslations("RecycleBin");
     const format = useFormat();
     const errorMessage = useErrorMessage();
-
+    const router = useRouter();
     const refresh = useRefresh();
-    const [working, setWorking] = useState<number | null>(null);
-    const [error, setError] = useState("");
-    const [message, setMessage] = useState("");
+    const forget = useForgetDeletion();
+    const [restore, setRestore] = useState<Restore>({ kind: "idle" });
+    // A restored row leaves the list before the reload that drops it arrives.
     const [restored, setRestored] = useState<number[]>([]);
     const regions = useApiList("/api/tenants/{tenant_id}/trash/regions/", {
         path: { tenant_id: tenant },
     });
     const rows =
         regions.data?.results.filter((row) => !restored.includes(row.id)) ?? [];
-    async function restore(row: DeletedRegion) {
-        setWorking(row.id);
-        setError("");
-        setMessage("");
+    async function restoreRow(row: DeletedRegion) {
+        setRestore({ kind: "restoring", id: row.id });
         try {
             await api.post(
                 "/api/tenants/{tenant_id}/regions/{region_id}/restore/",
@@ -104,15 +43,15 @@ export function RecycleBin({ tenant }: { tenant: number }) {
                     path: { tenant_id: tenant, region_id: row.id },
                 },
             );
-            setRestored((current) => [...current, row.id]);
-            await refresh.workspace(tenant);
-            setMessage(t("restored", { name: row.name }));
         } catch (failure) {
-            setError(errorMessage(failure));
+            setRestore({ kind: "failed", message: errorMessage(failure) });
             void refresh.workspace(tenant);
-        } finally {
-            setWorking(null);
+            return;
         }
+        setRestored((current) => [...current, row.id]);
+        forget(row.id);
+        await refresh.workspace(tenant);
+        setRestore({ kind: "restored", row });
     }
     return (
         <>
@@ -122,8 +61,25 @@ export function RecycleBin({ tenant }: { tenant: number }) {
                     <p>{t("retentionHelp")}</p>
                 </div>
             </div>
-            {error && <Notice error>{error}</Notice>}
-            {message && <Notice>{message}</Notice>}
+            {restore.kind === "failed" && (
+                <Notice error focus>
+                    {restore.message}
+                </Notice>
+            )}
+            {restore.kind === "restored" && (
+                <Notice focus>
+                    <p>{t("restored", { name: restore.row.plant_name })}</p>
+                    <button
+                        className="button secondary"
+                        type="button"
+                        onClick={() =>
+                            router.push(routes.plant(tenant, restore.row.id))
+                        }
+                    >
+                        {t("openPlant")}
+                    </button>
+                </Notice>
+            )}
             <section className="panel">
                 <h2>{t("deletedPlants")}</h2>
                 <Resource
@@ -139,7 +95,7 @@ export function RecycleBin({ tenant }: { tenant: number }) {
                                 {rows.map((row) => (
                                     <li className="trash-item" key={row.id}>
                                         <div>
-                                            <strong>{row.name}</strong>
+                                            <h3>{row.plant_name}</h3>
                                             <dl className="trash-meta">
                                                 <div>
                                                     <dt>{t("deleted")}</dt>
@@ -177,17 +133,19 @@ export function RecycleBin({ tenant }: { tenant: number }) {
                                             <button
                                                 className="button secondary"
                                                 disabled={
-                                                    working !== null ||
+                                                    restore.kind ===
+                                                        "restoring" ||
                                                     row.restore_blocker !== null
                                                 }
                                                 onClick={() =>
-                                                    void restore(row)
+                                                    void restoreRow(row)
                                                 }
                                             >
-                                                {working === row.id
+                                                {restore.kind === "restoring" &&
+                                                restore.id === row.id
                                                     ? t("restoring")
                                                     : t("restore", {
-                                                          name: row.name,
+                                                          name: row.plant_name,
                                                       })}
                                             </button>
                                             {row.restore_blocker && (

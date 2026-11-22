@@ -41,6 +41,10 @@ CONSOLE_MESSAGES = {
         "A location request is waiting for review. "
         "Approve or reject it before correcting the location."
     ),
+    ErrorCode.PLANT_EDIT_BLOCKED: gettext_lazy(
+        "Technical details cannot change while the plant is suspended or its data connection "
+        "is not current. Approve the plant again or validate its connection first."
+    ),
 }
 _REJECTED_KEY = gettext_lazy(
     "The provider rejected the API key. Enter the current key for this account, "

@@ -2,6 +2,7 @@ import pytest
 from django.test import Client
 
 from pyracast.plants.models import PlantConfiguration, PlantEvent, PlantSubmission
+from pyracast.plants.operations import EDIT_BLOCK_MESSAGES, PlantEditBlock
 from pyracast.regions.models import Region
 from tests.support.plant_operations import make_plant
 from tests.support.providers import replace_key
@@ -10,7 +11,7 @@ pytestmark = pytest.mark.django_db(transaction=True)
 
 
 @pytest.mark.parametrize("change", ["approval_revoked", "credential_rotated"])
-def test_revising_an_approved_plant_requires_a_current_validated_binding_and_keeps_history(
+def test_a_plant_without_a_current_approved_binding_refuses_edits_with_the_reason(
     monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
     system, plant = make_plant(monkeypatch)
@@ -33,8 +34,14 @@ def test_revising_an_approved_plant_requires_a_current_validated_binding_and_kee
 
     assert response.status_code == 400
     assert response.json() == {
-        "code": "invalid_request",
-        "message": "An approved current provider binding is required.",
+        "code": "plant_edit_blocked",
+        "message": str(
+            EDIT_BLOCK_MESSAGES[
+                PlantEditBlock.SUSPENDED
+                if change == "approval_revoked"
+                else PlantEditBlock.CONNECTION_UNAVAILABLE
+            ]
+        ),
     }
     plant.refresh_from_db()
     assert plant.name == "Plant"
