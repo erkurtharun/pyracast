@@ -29,9 +29,11 @@ uv sync --locked
 npm --prefix web ci --ignore-scripts
 ```
 
-Copy `.env.example` to `.env` (ignored) and fill it in; processes read it from their working
-directory and never override variables already set. Plant-specific Solcast accounts and keys
-belong in the operations console, not in `.env`.
+Copy `.env.example` to `.env` (ignored); processes read it from their working directory and never
+override variables already set. Set `PYRACAST_SECRET_KEY` to a long random value, because nothing
+generates it and Django refuses an empty one; with the example's `PYRACAST_DEBUG=1` and console
+mail, every other empty entry may stay empty. Plant-specific Solcast accounts and keys belong in
+the operations console, not in `.env`.
 
 The launcher below starts a missing local PostgreSQL itself (pinned binaries on Windows, a pinned
 Docker image on Ubuntu), and a missing RabbitMQ on Windows only. To start them by hand, pass the
@@ -95,7 +97,7 @@ Further checks:
 | Command | Checks |
 | --- | --- |
 | `npm --prefix web exec -- playwright install chromium`, then `npm --prefix web run check` | Web static checks and the mocked-API browser suite |
-| `npm --prefix web run build`, then `uv run --locked pytest tests/e2e -m browser -n 1 --no-cov` | Browser scenarios against real Django and PostgreSQL behind the production build |
+| `npm --prefix web run build`, then `uv run --locked pytest tests/e2e -m browser -n 1 --no-cov` with PostgreSQL running and the catalogs compiled | Browser scenarios against real Django and PostgreSQL behind the production build |
 | `uv run --no-project --python 3.15.2 python scripts/check_scientific.py` | The optional `scientific` extra (needs a C compiler) and the pvlib recomputation of the tracker gain table |
 | `npm --prefix web run api:generate` | Regenerates `web/openapi.json` and its types after an API change; commit both |
 | `uv build --no-sources` | Packaging |
@@ -104,7 +106,7 @@ Live checks reach real services and run only on request; the Solcast capture spe
 
 | Command or setting | Checks |
 | --- | --- |
-| `PYRACAST_LIVE_QUEUE=1` with a dedicated `PYRACAST_RABBITMQ_URL` | Real-broker delivery tests ([worker runtime](docs/flows/worker-runtime.md)) |
+| `PYRACAST_LIVE_QUEUE=1` with a dedicated `PYRACAST_RABBITMQ_URL`, then `uv run --locked pytest tests/test_live_queue.py tests/test_calibration_runtime.py tests/test_metering_runtime.py tests/test_notifications_runtime.py --no-cov` | Real-broker delivery tests ([worker runtime](docs/flows/worker-runtime.md)) |
 | `uv run --locked python scripts/check_solcast.py --live --binding-id BINDING_ID --kind settings` (or `--kind forecast`) | One quota-counted Solcast capture per binding, kind and UTC day ([provider connection setup](docs/flows/provider-connection-setup.md)) |
 | `PYRACAST_EPIAS_LIVE=1`, `EPIAS_LIVE_PLANT_ID` and `EPIAS_LIVE_EIC`, then `uv run --locked pytest tests/test_epias_live.py --no-cov` | Authorized EPİAŞ transparency-service access |
 
