@@ -1,4 +1,5 @@
 import { cadence } from "../src/lib/api/query";
+import { errorBody } from "./support/errors";
 import { expect, test, type Page } from "./support/test";
 import { mockApi, paged, plant, region, user } from "./support/workspace";
 
@@ -8,8 +9,8 @@ const turkishCatalogue = (body: string) => body.includes("Kalibrasyon geçmişi"
 const registering = (name: string) => (body: string) =>
     new RegExp(`[\\w$]\\.s\\(\\[(?:[^\\]]*?,)?"${name}",`).test(body);
 
-// Every script is answered from the server; one that matches is held until `release` or aborted,
-// and after `release` none is.
+// Every script is answered from the server; one that matches is held until `release` or `fail`, or
+// aborted, and after `release` or `fail` none is.
 async function interceptScript(
     page: Page,
     matches: (body: string) => boolean,
@@ -17,25 +18,34 @@ async function interceptScript(
 ) {
     let reach!: () => void;
     const reached = new Promise<void>((resolve) => (reach = resolve));
-    let release!: () => void;
-    const released = new Promise<void>((resolve) => (release = resolve));
+    let settle!: (failed: boolean) => void;
+    const settled = new Promise<boolean>((resolve) => (settle = resolve));
+    let abort!: () => void;
+    const aborted = new Promise<void>((resolve) => (abort = resolve));
     let active = true;
     await page.route(chunks, async (route) => {
         const response = await route.fetch();
         const body = await response.text();
         if (active && matches(body)) {
             reach();
-            if (outcome === "aborted")
-                return route.abort("internetdisconnected");
-            await released;
+            if (outcome === "aborted" || (await settled)) {
+                await route.abort("internetdisconnected");
+                abort();
+                return;
+            }
         }
         await route.fulfill({ response, body });
     });
+    const finish = (failed: boolean) => {
+        active = false;
+        settle(failed);
+    };
     return {
         reached,
-        release: () => {
-            active = false;
-            release();
+        release: () => finish(false),
+        fail: () => {
+            finish(true);
+            return aborted;
         },
     };
 }
@@ -294,7 +304,9 @@ test("a link into an on-demand section keeps the plant header, tabs and back but
 }) => {
     await mockPlant(page);
     const section = await interceptScript(page, registering("Outages"), "held");
-    await page.goto("/app/w/1/plants/11/outages/");
+    await page.goto("/app/w/1/plants/11/outages/", {
+        waitUntil: "domcontentloaded",
+    });
     await section.reached;
     await expect(
         page.getByRole("heading", { name: "East array", level: 1 }),
@@ -368,20 +380,14 @@ for (const visit of [
         turkish: true,
     },
 ])
-    test(`the app renders without a page or hydration error ${visit.name}`, async ({
+    test(`the app renders without a page or console error ${visit.name}`, async ({
         page,
         baseURL,
     }) => {
         const errors: string[] = [];
         page.on("pageerror", (error) => errors.push(error.message));
         page.on("console", (message) => {
-            if (
-                message.type() === "error" &&
-                /hydrat|react\.dev\/errors\/4(18|19|21|22|23|25)\b/i.test(
-                    message.text(),
-                )
-            )
-                errors.push(message.text());
+            if (message.type() === "error") errors.push(message.text());
         });
         if (visit.cookie)
             await page.context().addCookies([
@@ -411,7 +417,9 @@ test("a language hand-off shows no other language before the wanted catalogue ar
     await recordHeadings(page);
     const bodies = scriptBodies(page);
     const turkish = await interceptScript(page, turkishCatalogue, "held");
-    await page.goto("/app/?language=tr&signup=1");
+    await page.goto("/app/?language=tr&signup=1", {
+        waitUntil: "domcontentloaded",
+    });
     await turkish.reached;
     await expect(
         page.getByRole("heading", { name: "Create your company account" }),
@@ -482,6 +490,114 @@ test("a language whose catalogue cannot be loaded is not saved and offers a relo
     expect(session.writes()).toBe(1);
 });
 
+test("a language chosen before signing in whose catalogue arrives afterwards is not saved for the account", async ({
+    page,
+}) => {
+    await mockApi(page, { anonymous: true });
+    let signedIn = false;
+    let language = "en";
+    const written: string[] = [];
+    const session = () =>
+        signedIn
+            ? {
+                  user: { ...user, language_preference: language },
+                  csrf_token: "signed-token",
+                  language,
+              }
+            : { user: null, csrf_token: "anonymous-token", language };
+    await page.route("**/api/auth/browser/v1/auth/login", (route) => {
+        signedIn = true;
+        return route.fulfill({
+            json: { status: 200, meta: { is_authenticated: true } },
+        });
+    });
+    await page.route("**/api/session/", (route) =>
+        route.fulfill({ json: session() }),
+    );
+    await page.route("**/api/session/language/", (route) => {
+        language = route.request().postDataJSON().language as string;
+        written.push(`${signedIn ? "account" : "guest"}:${language}`);
+        return route.fulfill({ json: session() });
+    });
+    const turkish = await interceptScript(page, turkishCatalogue, "held");
+    await page.goto("/app/");
+    await expect(
+        page.getByRole("heading", { name: "Welcome back" }),
+    ).toBeVisible();
+    await page.getByLabel("Language", { exact: true }).selectOption("tr");
+    await turkish.reached;
+    await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
+    await page
+        .getByLabel("Password", { exact: true })
+        .fill("Test-only-cobalt-79!");
+    await page.locator("form").getByRole("button", { name: "Sign in" }).click();
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    // The account's own choice waits on the same held catalogue, so it is sent after anything the
+    // sign-in screen's choice could still send.
+    await page.getByLabel("Language", { exact: true }).selectOption("tr");
+    await expect(
+        page.getByRole("status").filter({ hasText: "Saving…" }),
+    ).toBeVisible();
+    turkish.release();
+    await expect(
+        page.getByRole("heading", { name: "Santraller", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Kaydediliyor…")).toHaveCount(0);
+    expect(written).toEqual(["account:tr"]);
+});
+
+test("a language another tab saved clears this tab's failed save of it for good", async ({
+    page,
+}) => {
+    await mockApi(page, { anonymous: true });
+    let language = "en";
+    await page.route("**/api/session/", (route) =>
+        route.fulfill({
+            json: { user: null, csrf_token: "anonymous-token", language },
+        }),
+    );
+    await page.route("**/api/session/language/", (route) =>
+        route.fulfill({
+            status: 500,
+            json: errorBody(
+                "server_error",
+                "The server could not complete this request.",
+            ),
+        }),
+    );
+    await page.goto("/app/");
+    await expect(
+        page.getByRole("heading", { name: "Welcome back" }),
+    ).toBeVisible();
+    await page.getByLabel("Language", { exact: true }).selectOption("tr");
+    await expect(
+        page.getByText("Language could not be saved. Please try again."),
+    ).toBeVisible();
+    language = "tr";
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(
+        page.getByRole("heading", { name: "Tekrar hoş geldiniz" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Dil", { exact: true })).toHaveValue("tr");
+    await expect(
+        page.getByText("Dil kaydedilemedi. Tekrar deneyin."),
+    ).toHaveCount(0);
+    language = "en";
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(
+        page.getByRole("heading", { name: "Welcome back" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Language", { exact: true })).toHaveValue(
+        "en",
+    );
+    await expect(
+        page.getByText("Language could not be saved. Please try again."),
+    ).toHaveCount(0);
+});
+
 test("a language changed in another tab whose catalogue cannot be loaded is reported with a reload", async ({
     page,
 }) => {
@@ -505,6 +621,154 @@ test("a language changed in another tab whose catalogue cannot be loaded is repo
         .getByRole("button", { name: "Reload page", exact: true })
         .click();
     await expect(page.getByLabel("Tahmin tarihi")).toBeVisible();
+});
+
+function languageWrites(page: Page) {
+    const written: string[] = [];
+    page.on("request", (request) => {
+        if (new URL(request.url()).pathname === "/api/session/language/")
+            written.push(request.postDataJSON().language as string);
+    });
+    return written;
+}
+
+async function endSessionElsewhere(page: Page) {
+    await page.route("**/api/session/", (route) =>
+        route.fulfill({
+            json: { user: null, csrf_token: "anonymous-token", language: "en" },
+        }),
+    );
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(
+        page.getByRole("heading", { name: "Welcome back" }),
+    ).toBeVisible();
+}
+
+test("a language whose catalogue cannot be loaded keeps the workspace in its language, saves nothing and offers a reload", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const written = languageWrites(page);
+    await interceptScript(page, turkishCatalogue, "aborted");
+    await page.goto("/app/");
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
+    await page.getByLabel("Language", { exact: true }).selectOption("tr");
+    await expect(
+        page
+            .getByRole("alert")
+            .filter({ hasText: "The language could not be loaded." }),
+    ).toHaveText(
+        "The language could not be loaded. Reload the page to try again.",
+    );
+    await expect(
+        page.getByRole("button", { name: "Reload page", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Language", { exact: true })).toHaveValue(
+        "en",
+    );
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
+    expect(written).toEqual([]);
+});
+
+test("a language save refused after the session ended reports nothing on the screen that replaced the workspace", async ({
+    context,
+    page,
+}) => {
+    await mockApi(page);
+    let ended = false;
+    await page.route("**/api/session/", (route) =>
+        route.fulfill({
+            json: ended
+                ? {
+                      user: null,
+                      csrf_token: "anonymous-token",
+                      language: "en",
+                      session_tag: "tag-b",
+                  }
+                : {
+                      user,
+                      csrf_token: "signed-token",
+                      language: "en",
+                      session_tag: "tag-a",
+                  },
+        }),
+    );
+    // Another document of the origin that only writes the observed tag, as a tab's read does.
+    const other = await context.newPage();
+    await other.route("**/blank", (route) =>
+        route.fulfill({ contentType: "text/html", body: "<html></html>" }),
+    );
+    let reach!: () => void;
+    const reached = new Promise<void>((resolve) => (reach = resolve));
+    let refuse!: () => void;
+    const refused = new Promise<void>((resolve) => (refuse = resolve));
+    await page.route("**/api/session/language/", async (route) => {
+        reach();
+        await refused;
+        await route.fulfill({
+            status: 500,
+            json: errorBody(
+                "server_error",
+                "The server could not complete this request.",
+            ),
+        });
+    });
+    await page.goto("/app/");
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
+    await other.goto("/blank");
+    await page.getByLabel("Language", { exact: true }).selectOption("tr");
+    await reached;
+    ended = true;
+    await other.evaluate(() =>
+        window.localStorage.setItem("pyracast.sessionTag", "tag-b"),
+    );
+    await expect(
+        page.getByRole("progressbar", { name: "Loading…" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Language", { exact: true })).toHaveCount(0);
+    refuse();
+    // The read that replaces the workspace is queued behind the refused save, so its screen follows it.
+    await expect(
+        page.getByRole("heading", { name: "Welcome back" }),
+    ).toBeVisible();
+    await expect(
+        page.getByText("Language could not be saved. Please try again."),
+    ).toHaveCount(0);
+    await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
+});
+
+test("a language whose catalogue fails after the session ended reports nothing on the screen that replaced the workspace and is not saved", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const written = languageWrites(page);
+    const turkish = await interceptScript(page, turkishCatalogue, "held");
+    await page.goto("/app/");
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
+    await page.getByLabel("Language", { exact: true }).selectOption("tr");
+    await turkish.reached;
+    await endSessionElsewhere(page);
+    await turkish.fail();
+    await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
+    await expect(
+        page.getByRole("button", { name: "Reload page", exact: true }),
+    ).toHaveCount(0);
+    await expect(page.getByLabel("Language", { exact: true })).toHaveValue(
+        "en",
+    );
+    await expect(
+        page.getByRole("heading", { name: "Welcome back" }),
+    ).toBeVisible();
+    expect(written).toEqual([]);
 });
 
 test("a catalogue that cannot be loaded offers a retry that loads the page again", async ({
