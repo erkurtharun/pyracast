@@ -114,10 +114,32 @@ def current_plants(system: System) -> list[SiteBinding]:
     ]
 
 
+def retried_after_a_provider_failure(plants: list[SiteBinding], moment: datetime) -> int:
+    """Forecast jobs the provider failed earlier in the UTC day that retry before it ends: the
+    failed request spent the room held for the job, and its retry is counted again."""
+    day = moment.astimezone(UTC).date()
+    return (
+        CollectionJob.objects.filter(
+            binding__in=plants,
+            endpoint="forecasts",
+            status="retry",
+            available_at__lt=datetime.combine(day + timedelta(days=1), time(), UTC),
+            requestattempt__utc_day=day,
+            requestattempt__purpose="forecast",
+            requestattempt__outcome="failed",
+        )
+        .distinct()
+        .count()
+    )
+
+
 def assert_current_plants_keep_their_forecasts(system: System, moment: datetime) -> None:
     quota = account(system).daily_quota
-    need = sum(budget.forecast_need(binding, moment, quota) for binding in current_plants(system))
-    assert used(system, moment) + need <= quota, moment
+    plants = current_plants(system)
+    need = sum(budget.forecast_need(binding, moment, quota) for binding in plants)
+    assert used(system, moment) + need <= quota + retried_after_a_provider_failure(
+        plants, moment
+    ), moment
 
 
 def dispatch_round(moment: datetime, provider: HistoricalFixture | None = None) -> None:
