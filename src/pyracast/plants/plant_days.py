@@ -15,7 +15,7 @@ from pyracast.plants.models import Plant
 from pyracast.plants.production import production_history
 from pyracast.regions.models import Region
 
-FORECAST_DAYS_BEFORE = 30
+FORECAST_DAYS_BEFORE = 7
 FORECAST_DAYS_AFTER = 14
 PRODUCTION_DAYS_BEFORE = 30
 RESOLUTION_MINUTES = 60

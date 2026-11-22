@@ -152,8 +152,8 @@ def _instant(value: str | None) -> datetime | None:
 
 
 def forecast_window(system: System) -> None:
-    """Estimated actuals for the 30 past days and a forecast for today and the 14 days after."""
-    for offset in range(-30, 0):
+    """Estimated actuals for the 7 past days and a forecast for today and the 14 days after."""
+    for offset in range(-7, 0):
         day = TODAY + timedelta(days=offset)
         _, end = local_day_bounds(day, system.binding.timezone)
         estimated_actuals(system, day, 0.3, end + timedelta(hours=1))
@@ -215,7 +215,7 @@ def test_the_window_is_counted_in_plant_days_across_midnight(
     assert body["name"] == "Plant"
     assert body["today"] == today.isoformat()
     assert [day["date"] for day in body["forecast"]] == [
-        (today + timedelta(days=offset)).isoformat() for offset in range(-30, 15)
+        (today + timedelta(days=offset)).isoformat() for offset in range(-7, 15)
     ]
     assert [day["date"] for day in body["production"]] == [
         (today - timedelta(days=offset)).isoformat() for offset in range(30, 0, -1)
@@ -263,13 +263,13 @@ def test_each_forecast_day_is_the_reduced_automatic_forecast_read(
     body = days_of(system, plant)
     client = client_for(system.member)
     days = by_date(body["forecast"])
-    for offset in (-30, -1, 0, 1, 14):
+    for offset in (-7, -1, 0, 1, 14):
         day = TODAY + timedelta(days=offset)
         assert same_instants(days[day]) == same_instants(
             reduced_forecast(forecast_read(client, system, plant, day))
         )
-    assert {day["source_kind"] for day in body["forecast"][:30]} == {"estimated_actuals"}
-    assert {day["source_kind"] for day in body["forecast"][30:]} == {"forecast"}
+    assert {day["source_kind"] for day in body["forecast"][:7]} == {"estimated_actuals"}
+    assert {day["source_kind"] for day in body["forecast"][7:]} == {"forecast"}
     assert all(day["rows"] and day["total_mwh"] is not None for day in body["forecast"])
     assert all(len(day["rows"]) == 24 for day in body["forecast"])
     assert all(day["affected"] is None for day in body["forecast"])
