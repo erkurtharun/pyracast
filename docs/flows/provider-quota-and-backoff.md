@@ -111,7 +111,7 @@ sequenceDiagram
 
 ## Rules and invariants
 
-- Lock order: `reserve_account_request` takes only the `ProviderAccount` row lock and counts the ledger inside it, so concurrent workers, validations and scripts serialize on one account budget; `validate_binding` holds the Region row while it reserves. The provider HTTP call happens after commit, never inside the lock. Open-Meteo weather calls in the same job are not ledgered.
+- Lock order: `reserve_account_request` takes only the `ProviderAccount` row lock and counts the ledger inside it, so concurrent workers, validations and scripts serialize on one account budget; `validate_binding` holds the Region row while it reserves. The provider HTTP call happens after commit, never inside the lock.
 - Quota day is UTC (`now.astimezone(UTC).date()`), with the caller's `now` advanced by the monotonic time spent waiting for the lock. Every outcome, including `uncertain`, counts against `daily_quota`.
 - `daily_quota` 1-10 is enforced at creation (`create_account`, the console setup form) and by the database; no application path changes `daily_quota` or `enabled` afterwards. An unsupported purpose raises `ValidationError` before the lock.
 - Check order: the caller's key revision, history deadline, credential block, wait, enabled/authorized, quota, then the forecast day bound or the forecast reserve.
