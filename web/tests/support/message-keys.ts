@@ -255,8 +255,10 @@ const PRODUCERS: Producers = {
     "Forecast.qualityFlags": [
         "src/pyracast/calculation.py",
         "src/pyracast/forecasts/intraday.py",
+        "src/pyracast/forecasts/sources.py",
         "src/pyracast/irradiance/__init__.py",
         "src/pyracast/plants/automatic_forecast.py",
+        "src/pyracast/plants/current_forecast.py",
         "src/pyracast/plants/forecast_sources.py",
         "src/pyracast/plants/forecasting.py",
         "src/pyracast/plants/history.py",
