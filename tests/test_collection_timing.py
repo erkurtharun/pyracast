@@ -177,9 +177,34 @@ def second_binding(system: System) -> SiteBinding:
     return binding
 
 
+def unapproved_binding(system: System) -> None:
+    """A binding of another configuration of the system's approved region, validated with the
+    current key, that the region's approval does not name."""
+    binding = SiteBinding.objects.create(
+        region=system.region,
+        provider_account=system.account,
+        region_revision=2,
+        site_id="unapproved",
+        capacity_kw=1,
+        latitude=41,
+        longitude=29,
+        timezone=system.region.timezone,
+        validated_at=NOW,
+        validated_credential_revision=1,
+    )
+    CollectionJob.objects.create(
+        binding=binding,
+        endpoint="forecasts",
+        scheduled_for=NOW,
+        target_date=NOW.date() + timedelta(days=1),
+        available_at=NOW,
+    )
+
+
 def test_the_forecast_budget_equals_its_reference_across_schedules_and_job_states() -> None:
     system = make_system(approved=True)
     second_binding(system)
+    unapproved_binding(system)
     slot = datetime(2026, 11, 9, 18, 0, tzinfo=UTC)
     planned = CollectionJob.objects.create(
         binding=system.binding,
