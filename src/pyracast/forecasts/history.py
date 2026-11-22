@@ -16,11 +16,13 @@ from pyracast.forecasts.actuals import (
     single_snapshot_actual_queryset,
 )
 from pyracast.forecasts.capacity_normalization import normalization_provenance
+from pyracast.forecasts.composition import ForecastComposition
 from pyracast.forecasts.coverage import history_day_complete
 from pyracast.forecasts.faults import FROZEN_PAYLOAD_FAULTS, stored_data
 from pyracast.forecasts.intraday import (
     VINTAGE_SCOPE,
     ActualsMode,
+    PreparedIntradaySource,
     apply_intraday_source,
     prepare_intraday_source,
 )
@@ -268,6 +270,34 @@ def _regional_saved_forecast(region: Region, target_date: date, now: datetime) -
     return outlook
 
 
+def composed_irradiance(
+    binding: SiteBinding,
+    target_date: date,
+    *,
+    snapshot: ForecastSnapshot,
+    source_kind: str,
+    snapshots: list[ForecastSnapshot],
+    composition: ForecastComposition,
+    source: PreparedIntradaySource | None,
+) -> dict[str, object]:
+    result = calculate(
+        binding,
+        target_date,
+        snapshot_data(snapshot, intervals=list(composition.intervals)),
+    )
+    result["provenance"] = {
+        "snapshot_id": snapshot.pk,
+        "binding_id": binding.pk,
+        "source_kind": source_kind,
+    }
+    cast(dict[str, object], result["vintage"])["scope"] = VINTAGE_SCOPE
+    if source is not None:
+        apply_intraday_source(result, source)
+    else:
+        apply_composition(result, snapshots, composition)
+    return result
+
+
 def regional_composed_forecast(
     region: Region,
     target_date: date,
@@ -313,22 +343,16 @@ def regional_composed_forecast(
                 if source is not None
                 else compose_snapshots(snapshots, start, end)
             )
-            result = calculate(
+            result = composed_irradiance(
                 binding,
                 target_date,
-                snapshot_data(snapshot, intervals=list(composition.intervals)),
+                snapshot=snapshot,
+                source_kind=source_kind,
+                snapshots=snapshots,
+                composition=composition,
+                source=source,
             )
             result["reference_capacity_normalization"] = normalization_provenance(snapshot)
-            result["provenance"] = {
-                "snapshot_id": snapshot.pk,
-                "binding_id": binding.pk,
-                "source_kind": source_kind,
-            }
-            cast(dict[str, object], result["vintage"])["scope"] = VINTAGE_SCOPE
-            if source is not None:
-                apply_intraday_source(result, source)
-            else:
-                apply_composition(result, snapshots, composition)
             used_snapshots = [row for row in snapshots if row.pk in composition.snapshot_ids]
     return regional_envelope(
         target_date,
