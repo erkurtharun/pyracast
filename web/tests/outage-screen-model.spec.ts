@@ -602,12 +602,12 @@ const expected: Record<StateName, Record<EventName, string>> = {
         ...same("direct:update4/sending+lost"),
         ...unchanged("direct:update4/sending+lost", true),
         sent: "direct:none",
-        fail: "direct:update4/idle+lost",
+        fail: "direct:update4/idle",
         lost: "direct:update4/idle+lost",
-        conflict: "direct:update4/idle+stale+lost",
+        conflict: "direct:update4/idle+stale",
         conflictSame: "direct:update4/saved+lost",
         conflictHeld: "direct:update4/saved+lost",
-        conflictCancelled: "direct:update4/held:cancelled+stale+lost",
+        conflictCancelled: "direct:update4/held:cancelled+stale",
         demote: "update4/sending+lost=",
     },
     "direct:update4/saved+lost": {
@@ -1013,6 +1013,11 @@ test("a direct edit refused as stale ends as saved only when an unanswered try o
     expect(ending(refuse(send(refused, edit()), edit(), written))).toEqual({
         status: "idle",
     });
+
+    const answeredAfterLoss = refuse(lostOnce(opened), edit(), null);
+    expect(
+        ending(refuse(send(answeredAfterLoss, edit()), edit(), written)),
+    ).toEqual({ status: "idle" });
 
     const changed = edit({ title: "Grid tripped" });
     const afterLoss = refuse(send(opened, edit()), edit(), null, false);

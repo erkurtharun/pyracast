@@ -168,8 +168,12 @@ async function workspace(
                     ...values,
                     revision: Number(incident?.revision) + 1,
                 };
+                const update = route.request().method() === "PUT";
                 incident = {
                     ...incident,
+                    ...(update && !incident?.ends_at
+                        ? { declared_configuration_id: configuration.id }
+                        : {}),
                     status: path.endsWith("/cancel/")
                         ? "cancelled"
                         : incident?.ends_at
@@ -482,7 +486,9 @@ test("an edit saved again after its answer was lost closes as saved, shows the o
             .filter({ hasText: "did not confirm the change" }),
     ).toBeVisible();
     await save.click();
-    await expect(save).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Edit outage" })).toHaveCount(
+        0,
+    );
     await expect(page.locator("h3[data-outage]")).toHaveCount(1);
     await expect(
         page
@@ -527,7 +533,9 @@ test("an edit that ends an active outage, saved again after its answer was lost,
             .filter({ hasText: "did not confirm the change" }),
     ).toBeVisible();
     await save.click();
-    await expect(save).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Edit outage" })).toHaveCount(
+        0,
+    );
     await expect(
         page.getByText("Someone changed this outage after you opened it."),
     ).toHaveCount(0);
@@ -564,9 +572,14 @@ test("a first save that meets an outage someone else saved with the same values 
     expect(revisions).toEqual([1]);
     expect(state.incident()?.revision).toBe(2);
     await save.click();
-    await expect(save).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Edit outage" })).toHaveCount(
+        0,
+    );
     expect(revisions).toEqual([1, 2]);
-    expect(state.incident()?.revision).toBe(3);
+    expect(state.incident()).toMatchObject({
+        revision: 3,
+        declared_configuration_id: 31,
+    });
 });
 
 test("an edit sent again after an unanswered try to an outage cancelled meanwhile shows the cancelled outage and cannot send", async ({

@@ -225,10 +225,10 @@ export function reduceOutages(
                     workflow: { ...workflow, phase: { status: "saved" } },
                 };
             const { current } = event;
-            const attempt =
-                event.answered || !workflow.attempt
-                    ? workflow.attempt
-                    : { ...workflow.attempt, unanswered: true };
+            const attempt = workflow.attempt && {
+                ...workflow.attempt,
+                unanswered: !event.answered,
+            };
             // Only a conflict about the outage the workflow sends against moves it to that outage's current version.
             if (
                 workflow.kind === "create" ||
