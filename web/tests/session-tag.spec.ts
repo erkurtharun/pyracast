@@ -1,19 +1,36 @@
 import { expect, test } from "@playwright/test";
-import { api } from "../src/lib/api/client";
-import { ApiError } from "../src/lib/api/errors";
 import { keys } from "../src/lib/api/keys";
-import { authRequest } from "../src/lib/auth-api";
-import {
+import type { Session } from "../src/lib/session-client";
+import { openDocument } from "./support/document";
+import { errorBody } from "./support/errors";
+
+let {
     adoptSession,
+    api,
+    ApiError,
+    authRequest,
     isCurrent,
     loadSession,
     observedTagKey,
     sessionOwner,
     sessionState,
     signOut,
-    type Session,
-} from "../src/lib/session-client";
-import { errorBody } from "./support/errors";
+} = openDocument();
+
+function startDocument() {
+    ({
+        adoptSession,
+        api,
+        ApiError,
+        authRequest,
+        isCurrent,
+        loadSession,
+        observedTagKey,
+        sessionOwner,
+        sessionState,
+        signOut,
+    } = openDocument());
+}
 
 type Call = { method: string; url: string; tag: string | null };
 type Answer = Response | Promise<Response>;
@@ -105,7 +122,7 @@ test.beforeEach(() => {
             },
         },
     });
-    adoptSession(signedOut);
+    startDocument();
 });
 test.afterEach(() => {
     globalThis.fetch = realFetch;
@@ -164,6 +181,7 @@ test("U3: a sign-out another document announced leaves this tab not current unti
 });
 
 test("U4: a sign-in prepared before another tab signed in leaves this tab on the session the browser holds", async () => {
+    adoptSession(signedOut);
     answer(changed, () => json(session("a")));
     const refused = await authRequest("auth/login", "POST", {
         email: "user-2@example.test",
@@ -176,6 +194,22 @@ test("U4: a sign-in prepared before another tab signed in leaves this tab on the
         "GET /api/session/ null",
     ]);
     expect(stored.get(observedTagKey)).toBe("a");
+});
+
+test("a document whose session was replaced sends nothing tagged before its reload, only session reads", async () => {
+    adoptSession(session("a"));
+    adoptSession(session("b", 2));
+    answer(() => json(session("b", 2)));
+    const refused = await api
+        .get("/api/tenants/{tenant_id}/members/", { path: { tenant_id: 1 } })
+        .catch((failure) => failure);
+    expect(refused).toMatchObject({ code: "session_changed" });
+    const signingOut = await authRequest("auth/session", "DELETE").catch(
+        (failure) => failure,
+    );
+    expect(signingOut).toMatchObject({ code: "session_changed" });
+    await loadSession();
+    expect(sent()).toEqual(["GET /api/session/ null"]);
 });
 
 test("U5: a deletion answered after the session changed is not delivered to its caller", async () => {
@@ -225,6 +259,7 @@ test("V1: a request that waited behind another one is sent for the session it wa
     ]);
 
     calls = [];
+    startDocument();
     adoptSession(session("c", 3));
     answer(
         () => json(errorBody("session_busy", "Busy.", { retry_after: 0 }), 429),

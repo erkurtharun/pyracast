@@ -1,19 +1,17 @@
 import { expect, test } from "@playwright/test";
-import {
-    api,
-    apiUrl,
-    buildUrl,
-    type RequestOptions,
-} from "../src/lib/api/client";
-import { ApiError } from "../src/lib/api/errors";
-import { authRequest } from "../src/lib/auth-api";
-import {
+import { apiUrl, buildUrl, type RequestOptions } from "../src/lib/api/client";
+import { openDocument } from "./support/document";
+import { errorBody } from "./support/errors";
+
+let {
     adoptSession,
+    api,
+    ApiError,
+    authRequest,
     loadSession,
     sessionState,
     signOut,
-} from "../src/lib/session-client";
-import { errorBody } from "./support/errors";
+} = openDocument();
 
 type Call = {
     method: string;
@@ -84,6 +82,15 @@ const anonymous = (token: string) => ({
 });
 
 test.beforeEach(() => {
+    ({
+        adoptSession,
+        api,
+        ApiError,
+        authRequest,
+        loadSession,
+        sessionState,
+        signOut,
+    } = openDocument());
     calls = [];
 });
 test.afterEach(() => {
@@ -203,6 +210,7 @@ test("unsafe requests carry the CSRF token of the current session", async () => 
 });
 
 test("a session read started before sign-out is not handed out after it", async () => {
+    adoptSession(signedIn("token"));
     let release!: () => void;
     const held = new Promise<void>((resolve) => {
         release = resolve;

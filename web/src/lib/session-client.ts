@@ -289,11 +289,18 @@ export async function signOut({ keepInvitation = false } = {}) {
     }
 }
 
+// A document whose session was replaced sends nothing tagged before its reload; the session read
+// it may still need is never tagged.
+function documentTag(): Tag {
+    if (state.replaced) throw changedSession();
+    return tagOf(state.session);
+}
+
 // Session reads queue behind the session changes of this tab sent before them, so a read started
 // after a refused answer, and shared by the answers arriving while it runs, sees any key that
 // replaced the one those requests carried.
 confirmSessionWith({
-    tag: () => tagOf(state.session),
+    tag: documentTag,
     confirm: () => {
         confirming ??= startRead()
             .promise.then(tagOf)

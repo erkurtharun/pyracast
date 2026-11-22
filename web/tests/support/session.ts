@@ -44,13 +44,14 @@ export function markDocument(page: Page) {
                 input instanceof Request ? input.url : String(input),
                 window.location.href,
             );
-            if (address.pathname === "/api/tenants/") {
+            if (address.pathname.startsWith("/api/tenants/")) {
                 const tags = JSON.parse(
-                    window.sessionStorage.getItem("markedTenantReads") ?? "[]",
+                    window.sessionStorage.getItem("markedTenantRequests") ??
+                        "[]",
                 ) as (string | null)[];
                 tags.push(new Headers(init?.headers).get("X-Session-Tag"));
                 window.sessionStorage.setItem(
-                    "markedTenantReads",
+                    "markedTenantRequests",
                     JSON.stringify(tags),
                 );
             }
@@ -59,15 +60,34 @@ export function markDocument(page: Page) {
     });
 }
 
+// Holds the next document load of the address shown now; the document showing it keeps running.
+export async function holdReload(page: Page) {
+    const shown = new URL(page.url()).pathname;
+    let reach!: () => void;
+    const reached = new Promise<void>((resolve) => (reach = resolve));
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    await page.route(
+        (url) => url.pathname === shown,
+        async (route) => {
+            if (!route.request().isNavigationRequest()) return route.fallback();
+            reach();
+            await released;
+            return route.fallback();
+        },
+    );
+    return { reached, release };
+}
+
 export function isMarked(page: Page) {
     return page.evaluate(() => "documentMarker" in window);
 }
 
-export function markedTenantReads(page: Page) {
+export function markedTenantRequests(page: Page) {
     return page.evaluate(
         () =>
             JSON.parse(
-                window.sessionStorage.getItem("markedTenantReads") ?? "[]",
+                window.sessionStorage.getItem("markedTenantRequests") ?? "[]",
             ) as (string | null)[],
     );
 }

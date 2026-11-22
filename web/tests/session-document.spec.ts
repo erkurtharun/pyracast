@@ -1,13 +1,14 @@
 import { expect, test, type Page } from "./support/test";
-import { mockApi } from "./support/workspace";
+import { answer, mockApi, paged } from "./support/workspace";
 import {
     changedNotice,
     expiredNotice,
     firstAccount,
     focusWindow,
+    holdReload,
     isMarked,
     markDocument,
-    markedTenantReads,
+    markedTenantRequests,
     navigationType,
     secondUser,
     serveSession,
@@ -32,7 +33,7 @@ async function expectFreshDocument(page: Page, loadedWith?: string) {
     const shown = new URL(page.url());
     expect(shown.pathname + shown.hash).toBe(address);
     expect(
-        (await markedTenantReads(page)).filter((tag) => tag !== loadedWith),
+        (await markedTenantRequests(page)).filter((tag) => tag !== loadedWith),
     ).toEqual([]);
 }
 
@@ -289,4 +290,111 @@ test("an expired session reloads over a staged correction without asking", async
     await expect(page.getByText(expiredNotice)).toBeVisible();
     expect(await isMarked(page)).toBe(false);
     expect(questions).toEqual([]);
+});
+
+const calibrationRun = answer("CalibrationOutput", {
+    id: 40,
+    configuration_id: 31,
+    binding_id: 7,
+    requested_by_id: 1,
+    window_start: "2026-01-01",
+    window_end: "2026-01-10",
+    cutoff_at: "2026-01-11T00:00:00Z",
+    created_at: "2026-01-11T01:00:00Z",
+    completed_at: "2026-01-11T02:00:00Z",
+    status: "ready",
+    reason: null,
+    selection_state: "active",
+    assessment: "evaluated",
+    factor: 1.1,
+    result: {},
+    dataset_sha256: "",
+    activation_blocker: null,
+    dataset_manifest: {},
+});
+
+const calibrationInForce = answer("CalibrationAutomationOutput", {
+    enabled: false,
+    authorized: false,
+    configuration_id: 31,
+    configuration_current: true,
+    next_check_at: null,
+    disabled_cause: null,
+    current_calibration: {
+        activation_id: 3,
+        calibration_id: 40,
+        factor: 1.1,
+        actor_id: 1,
+        origin: "manual",
+        created_at: "2026-01-12T09:00:00Z",
+        effective: true,
+    },
+    last_attempt: null,
+});
+
+test("an action still running when another user's session arrives sends nothing for that session", async ({
+    page,
+}) => {
+    let account: Account = firstAccount;
+    await mockApi(page);
+    await serveSession(page, () => account);
+    let reset = false;
+    let reachList!: () => void;
+    const listReached = new Promise<void>((resolve) => (reachList = resolve));
+    let releaseList!: () => void;
+    const listReleased = new Promise<void>(
+        (resolve) => (releaseList = resolve),
+    );
+    let answerList!: () => void;
+    const listAnswered = new Promise<void>((resolve) => (answerList = resolve));
+    await page.route("**/plants/21/calibrations/", async (route) => {
+        const held = reset;
+        if (held) {
+            reachList();
+            await listReleased;
+        }
+        await route.fulfill({ json: paged([calibrationRun]) });
+        if (held) answerList();
+    });
+    await page.route("**/plants/21/calibrations/40/", (route) =>
+        route.fulfill({ json: calibrationRun }),
+    );
+    await page.route("**/plants/21/calibration/reset/", (route) => {
+        reset = true;
+        return route.fulfill({ json: {} });
+    });
+    await page.route("**/plants/21/calibration/automation/", (route) =>
+        route.fulfill({ json: calibrationInForce }),
+    );
+    await page.goto("/app/");
+    await page.getByRole("button", { name: /East array/ }).click();
+    await page
+        .getByRole("button", { name: "Calibration", exact: true })
+        .click();
+    await page
+        .getByRole("row", { name: /#40/ })
+        .getByRole("button", { name: "View details" })
+        .click();
+    await expect(page.locator(".calibration-detail .tags")).toContainText(
+        "Active",
+    );
+    await markDocument(page);
+    const reload = await holdReload(page);
+    const observe = await tagObserver(page);
+    await page.getByRole("button", { name: "Reset to baseline" }).click();
+    await page.getByRole("button", { name: "Reset to baseline" }).click();
+    await listReached;
+    account = { user: secondUser, tag: "tag-b" };
+    await observe("tag-b");
+    await reload.reached;
+    releaseList();
+    await listAnswered;
+    reload.release();
+    await expect(
+        page.getByRole("heading", { name: "Calibration history" }),
+    ).toBeVisible();
+    expect(await isMarked(page)).toBe(false);
+    expect(
+        (await markedTenantRequests(page)).filter((tag) => tag !== "tag-a"),
+    ).toEqual([]);
 });
