@@ -20,7 +20,6 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
     HistoricalReferenceImport,
     ReferenceCapacityNormalization,
-    SnapshotWeatherError,
 )
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.jobs import run_epias_job
@@ -45,7 +44,6 @@ from tests.support.plant_training import actual_snapshot_for
 from tests.support.production_changes import edit, provider, write
 from tests.support.provisional_measurements import DAY, acquisition
 from tests.support.trash_operations import sibling
-from tests.support.weather_collection import WeatherFixture
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -243,8 +241,6 @@ ACQUISITION_CHANGES = [
         *ACQUISITION_CHANGES,
         {"available_at": NOW + timedelta(hours=1)},
         {"available_at": None},
-        {"weather_payload": {}},
-        {"weather_error": SnapshotWeatherError.ACQUISITION_FAILED},
     ],
 )
 def test_a_published_forecast_snapshot_is_never_rewritten(values: dict[str, Any]) -> None:
@@ -258,7 +254,7 @@ def test_a_published_forecast_snapshot_is_never_rewritten(values: dict[str, Any]
 
 
 @pytest.mark.parametrize("values", ACQUISITION_CHANGES)
-def test_an_unpublished_forecast_snapshot_takes_only_its_weather_and_publication(
+def test_an_unpublished_forecast_snapshot_takes_only_its_publication(
     values: dict[str, Any],
 ) -> None:
     rows = ForecastSnapshot.objects.filter(pk=_forecast_snapshot().pk)
@@ -266,13 +262,8 @@ def test_an_unpublished_forecast_snapshot_takes_only_its_weather_and_publication
     with pytest.raises(IntegrityError, match=IMMUTABLE), transaction.atomic():
         rows.update(**values)
 
-    rows.update(weather_error=SnapshotWeatherError.ACQUISITION_INTERRUPTED)
-    rows.update(weather_payload={"provider": "open_meteo"}, weather_error="")
     rows.update(available_at=NOW)
-    assert rows.values_list("weather_payload", "available_at").get() == (
-        {"provider": "open_meteo"},
-        NOW,
-    )
+    assert rows.values_list("available_at", flat=True).get() == NOW
 
 
 def test_a_capacity_normalization_stores_the_factor_of_its_capacities(
@@ -450,20 +441,16 @@ def test_archive_writers_append_and_never_rewrite_stored_rows(
 def test_a_collection_publishes_its_staged_snapshot_without_rewriting_the_acquisition() -> None:
     make_system(approved=True)
     job = CollectionJob.objects.get()
-    weather = WeatherFixture()
 
     def fail(binding: SiteBinding, day: object, data: ProviderData) -> dict[str, object]:
         raise ValueError("retry calculation")
 
-    assert not collect(job.pk, FakeAdapter(), fail, NOW, weather_provider=weather)
+    assert not collect(job.pk, FakeAdapter(), fail, NOW)
     staged = archived_rows()
     (acquired,) = staged["forecasts_forecastsnapshot"].values()
     assert acquired["available_at"] is None
-    assert acquired["weather_payload"] is not None
 
-    assert collect(
-        job.pk, FakeAdapter(), calculate, NOW + timedelta(minutes=2), weather_provider=weather
-    )
+    assert collect(job.pk, FakeAdapter(), calculate, NOW + timedelta(minutes=2))
 
     published = archived_rows()
     assert rewritten_archive_rows(staged, published) == {}

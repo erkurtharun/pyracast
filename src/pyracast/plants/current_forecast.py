@@ -9,7 +9,6 @@ from pyracast.forecasts.intraday import (
     ActualsMode,
     apply_intraday_source,
     prepare_intraday_source,
-    preserve_forecast_weather,
 )
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.forecasts.sources import (
@@ -101,7 +100,6 @@ def _composed_forecast(
         snapshots = current_forecast_snapshots(
             binding_id=configuration.binding_id, start=start, end=end, as_of=cutoff
         )
-        forecasts = snapshots
         with stored_data("plant", plant.pk, target_date, "actuals", FROZEN_PAYLOAD_FAULTS):
             source = (
                 prepare_intraday_source(
@@ -162,9 +160,6 @@ def _composed_forecast(
                 cast(dict[str, object], irradiance["vintage"])["scope"] = VINTAGE_SCOPE
                 if source is not None:
                     apply_intraday_source(irradiance, source)
-                    preserve_forecast_weather(
-                        irradiance, configuration.binding, target_date, forecasts
-                    )
                 else:
                     apply_composition(irradiance, snapshots, composition)
             if source is None:

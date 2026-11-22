@@ -4,8 +4,6 @@ import type { components } from "@/lib/schema";
 export type Run = components["schemas"]["CalibrationSummaryOutput"];
 export type AutomationStatus =
     components["schemas"]["CalibrationAutomationOutput"];
-export type Blocker = NonNullable<Calibration["activation_blocker"]>;
-
 export type Action =
     | { status: "idle" | "done" }
     | { status: "confirming"; kind: "reset" }

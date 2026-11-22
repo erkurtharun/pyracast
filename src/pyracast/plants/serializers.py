@@ -13,7 +13,6 @@ from pyracast.api.serializers import (
     ForecastProvenanceOutput,
     InputSerializer,
     IrradianceSummaryOutput,
-    WeatherReferenceOutput,
 )
 from pyracast.change_requests.models import ProductionChangeAction
 from pyracast.errors import ErrorCode
@@ -427,6 +426,7 @@ class ProductionIntervalOutput(serializers.Serializer[dict[str, Any]]):
     can_propose = serializers.BooleanField()
     can_propose_revert = serializers.BooleanField()
     proposal_unavailable_reason = serializers.CharField(allow_null=True)
+    pending_request_id = serializers.IntegerField(allow_null=True)
 
 
 class ProductionHistoryOutput(serializers.Serializer[dict[str, Any]]):
@@ -598,7 +598,6 @@ class PlantForecastResultOutput(serializers.Serializer[dict[str, Any]]):
     intervals = PowerIntervalOutput(many=True, required=False)
     configuration = PlantResultConfigurationOutput(required=False)
     provenance = ForecastProvenanceOutput(required=False)
-    weather_reference = WeatherReferenceOutput(required=False)
 
 
 class OutageScenarioOutput(serializers.Serializer[dict[str, Any]]):

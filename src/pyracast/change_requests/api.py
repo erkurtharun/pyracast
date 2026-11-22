@@ -72,7 +72,7 @@ class IncidentRequestsView(RequestView):
     def post(self, request: Request, tenant_id: int, region_id: int, plant_id: int) -> Response:
         data = IncidentRequestInput(data=request.data)
         data.is_valid(raise_exception=True)
-        with current_on_conflict():
+        with current_on_conflict(cast(User, request.user), tenant_id):
             return self.summary(
                 request,
                 tenant_id,

@@ -8,19 +8,28 @@ export type Interval = components["schemas"]["ProductionIntervalOutput"];
 export type Draft = {
     key: string;
     energy: string;
-    reason?: string;
     quality: Quality;
     expectedRevision: number | null;
-    error?: string;
-    implausible?: boolean;
 };
+
+type EditorIssue = "invalid_energy" | { message: string; implausible: boolean };
+
+// Why an editor can no longer act: its interval went away, holds the member's own request, or its day is not shown.
+type OrphanCause = "unavailable" | "held" | "day_left";
 
 export type Editor =
     | { status: "closed" }
-    | ({ status: "editing" | "saving" | "reloading" } & Draft)
-    | ({ status: "failed"; error: string } & Draft)
+    // An editor its reload returned to editing says so until it is changed.
+    | ({ status: "editing"; reloaded?: true } & Draft)
+    | ({ status: "saving" | "reloading" } & Draft)
+    | ({ status: "failed"; issue: EditorIssue } & Draft)
     // A write still running when its interval became unavailable keeps the controls locked until it ends.
-    | ({ status: "orphaned"; error: string; pendingWrite: boolean } & Draft);
+    | ({
+          status: "orphaned";
+          cause: OrphanCause;
+          pendingWrite: boolean;
+          error?: string;
+      } & Draft);
 
 type Window = Pick<Interval, "starts_at" | "ends_at">;
 
@@ -44,37 +53,16 @@ export function intervalKey(row: Pick<Interval, "starts_at" | "ends_at">) {
     return `${row.starts_at}/${row.ends_at}`;
 }
 
+// Energy as typed in MWh, with a comma or a point as the decimal separator; null unless finite and non-negative.
+export function energyValue(text: string) {
+    const value = Number(text.trim().replace(",", "."));
+    return text.trim() && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
 export function shiftDay(day: string, offset: number) {
     const date = new Date(`${day}T12:00:00Z`);
     date.setUTCDate(date.getUTCDate() + offset);
     return date.toISOString().slice(0, 10);
-}
-
-export function reconcileEditor(
-    editor: Editor,
-    history: History,
-    unavailableMessage: string,
-): Editor {
-    if (editor.status === "closed" || editor.status === "orphaned")
-        return editor;
-    const row = history.intervals.find(
-        (row) => intervalKey(row) === editor.key,
-    );
-    if (!row || !(row.can_edit || row.can_propose))
-        return {
-            ...editor,
-            status: "orphaned",
-            error: unavailableMessage,
-            pendingWrite: editor.status === "saving",
-        };
-    return editor.status === "reloading"
-        ? {
-              ...editor,
-              status: "editing",
-              expectedRevision: row.revision_id,
-              error: undefined,
-          }
-        : editor;
 }
 
 export function mostFrequentReason(rows: Interval[]) {

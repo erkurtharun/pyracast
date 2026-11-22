@@ -1,8 +1,6 @@
 from dataclasses import dataclass
 from math import isfinite, sqrt
 
-from pyracast.irradiance import SourceKind, Sunlight
-
 type Coefficients = tuple[float, float, float, float, float, float]
 
 
@@ -45,29 +43,6 @@ def _terms(model: QuadraticModel, temperature_c: float) -> tuple[float, float, f
     return c4, c1 + c3 * t, c0 + c2 * t + c5 * t * t
 
 
-def forward_power(
-    ghi_wm2: float,
-    *,
-    capacity_kw: float,
-    air_temp_c: float,
-    snow_loss_fraction: float,
-    model: QuadraticModel,
-) -> float:
-    if (
-        not isfinite(ghi_wm2)
-        or ghi_wm2 < 0
-        or not isfinite(capacity_kw)
-        or capacity_kw <= 0
-        or not isfinite(air_temp_c)
-        or not isfinite(snow_loss_fraction)
-        or not 0 <= snow_loss_fraction <= 1
-    ):
-        raise ValueError("Finite irradiance, temperature, capacity and snow loss are required")
-    a, b, c = _terms(model, air_temp_c)
-    g = ghi_wm2 / 1000
-    return capacity_kw * (1 - snow_loss_fraction) * max(0, a * g * g + b * g + c)
-
-
 def reconstruct_ghi(
     power_kw: float | None,
     *,
@@ -75,19 +50,10 @@ def reconstruct_ghi(
     air_temp_c: float | None,
     snow_loss_fraction: float | None,
     model: QuadraticModel,
-    power_is_capped: bool = False,
-    source_kind: SourceKind = "estimated_actuals",
-    sunlight: Sunlight = "unknown",
 ) -> InverseEstimate:
     if isinstance(capacity_kw, bool) or not isfinite(capacity_kw) or capacity_kw <= 0:
         raise ValueError("A positive finite AC reference capacity is required")
-    if source_kind not in ("forecast", "estimated_actuals"):
-        raise ValueError("Unsupported source kind")
-    if sunlight not in ("day", "night", "partial", "unknown"):
-        raise ValueError("Unsupported sunlight classification")
     flags = ["empirical_inverse", "aggregation_approximation", "historical_calibration"]
-    if source_kind == "forecast":
-        flags.append("forecast_transfer_unvalidated")
 
     def unavailable(reason: str) -> InverseEstimate:
         return InverseEstimate(None, None, (*flags, reason))
@@ -96,14 +62,8 @@ def reconstruct_ghi(
         return unavailable("missing_power")
     if isinstance(power_kw, bool) or not isfinite(power_kw) or power_kw < 0:
         return unavailable("invalid_power")
-    if sunlight == "night":
-        if power_kw != 0:
-            return unavailable("night_power_conflict")
-        return InverseEstimate(0, None, (*flags, "declared_night"))
     if power_kw == 0:
         return unavailable("zero_power_not_identifiable")
-    if power_is_capped:
-        return unavailable("capped_power_not_identifiable")
     if air_temp_c is None or snow_loss_fraction is None:
         return unavailable("weather_inputs_required")
     if (

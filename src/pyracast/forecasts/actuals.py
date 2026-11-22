@@ -67,7 +67,7 @@ class ArchivedActualSource:
         }
 
 
-def legacy_actual_queryset(
+def single_snapshot_actual_queryset(
     binding: SiteBinding,
     start: datetime,
     end: datetime,
@@ -77,7 +77,7 @@ def legacy_actual_queryset(
 ) -> QuerySet[ForecastSnapshot]:
     return (
         ForecastSnapshot.objects.select_related("job__binding__provider_account")
-        .defer("raw_payload", "weather_payload")
+        .defer("raw_payload")
         .filter(
             binding=binding,
             job__status=CollectionJobStatus.SUCCEEDED,
@@ -144,13 +144,17 @@ class ActualCandidates:
 
     binding: SiteBinding
     cutoff: datetime
-    legacy: tuple[ForecastSnapshot, ...]
+    single_snapshots: tuple[ForecastSnapshot, ...]
     native: tuple[ForecastSnapshot, ...]
 
     def select(self, target_date: date) -> ArchivedActualSource | None:
         start, end = local_day_bounds(target_date, self.binding.timezone)
-        legacy = first_complete_actuals(
-            (row for row in self.legacy if _overlaps(row, start, end) and row.collected_at >= end),
+        single_snapshot = first_complete_actuals(
+            (
+                row
+                for row in self.single_snapshots
+                if _overlaps(row, start, end) and row.collected_at >= end
+            ),
             target_date,
             self.binding.timezone,
         )
@@ -166,7 +170,7 @@ class ActualCandidates:
             self.binding,
             target_date,
             self.cutoff,
-            legacy,
+            single_snapshot,
             [row for row in overlapping if row.pk in covering],
         )
 
@@ -186,7 +190,11 @@ def actual_candidates(
     return ActualCandidates(
         binding,
         cutoff,
-        tuple(legacy_actual_queryset(binding, start, end, collected_from=first_end, as_of=cutoff)),
+        tuple(
+            single_snapshot_actual_queryset(
+                binding, start, end, collected_from=first_end, as_of=cutoff
+            )
+        ),
         tuple(native_actual_queryset(binding, start, end, cutoff)),
     )
 
@@ -195,12 +203,16 @@ def _archived_actual_source(
     binding: SiteBinding,
     target_date: date,
     cutoff: datetime,
-    legacy: ForecastSnapshot | None,
+    single_snapshot: ForecastSnapshot | None,
     snapshots: list[ForecastSnapshot],
 ) -> ArchivedActualSource | None:
     start, end = local_day_bounds(target_date, binding.timezone)
     if not snapshots:
-        return ArchivedActualSource(legacy, [legacy], None, cutoff) if legacy is not None else None
+        return (
+            ArchivedActualSource(single_snapshot, [single_snapshot], None, cutoff)
+            if single_snapshot is not None
+            else None
+        )
     source = _compose_native_source(binding, target_date, cutoff, snapshots)
     covered = (
         sum(
@@ -212,9 +224,9 @@ def _archived_actual_source(
         == (end - start).total_seconds()
     )
     if (
-        legacy is not None
-        and legacy.job.endpoint != CollectionEndpoint.ESTIMATED_ACTUALS
-        and history_day_complete(legacy, target_date, binding.timezone)
+        single_snapshot is not None
+        and single_snapshot.job.endpoint != CollectionEndpoint.ESTIMATED_ACTUALS
+        and history_day_complete(single_snapshot, target_date, binding.timezone)
         and not actual_coverage_complete(
             daylight_window(target_date, binding.timezone, binding.latitude, binding.longitude),
             start,
@@ -222,15 +234,15 @@ def _archived_actual_source(
             source.intervals,
         )
     ):
-        return ArchivedActualSource(legacy, [legacy], None, cutoff)
+        return ArchivedActualSource(single_snapshot, [single_snapshot], None, cutoff)
     if (
         len(source.snapshots) == 1
-        and legacy is not None
-        and source.snapshot.pk == legacy.pk
-        and history_day_complete(legacy, target_date, binding.timezone)
+        and single_snapshot is not None
+        and source.snapshot.pk == single_snapshot.pk
+        and history_day_complete(single_snapshot, target_date, binding.timezone)
         and covered
     ):
-        return ArchivedActualSource(legacy, [legacy], None, cutoff)
+        return ArchivedActualSource(single_snapshot, [single_snapshot], None, cutoff)
     return source
 
 
@@ -317,7 +329,7 @@ def replay_archived_actual_source(
             available_at__lte=cutoff,
         )
         .filter(Q(issued_at__isnull=True) | Q(issued_at__lte=cutoff))
-        .defer("raw_payload", "weather_payload")
+        .defer("raw_payload")
         .order_by("-collected_at", "-available_at", "-pk")
     }
     if set(indexed) != set(identifiers):

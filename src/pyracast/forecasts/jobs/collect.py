@@ -1,11 +1,12 @@
 import logging
 import math
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from django.db import DatabaseError, transaction
 
+from pyracast.background.claims import claim_unless_contended
 from pyracast.background.clock import Clock
 from pyracast.background.failures import log_failure
 from pyracast.background.lease import RELEASED, owns
@@ -30,7 +31,6 @@ from pyracast.forecasts.models import (
     RequestOutcome,
     RequestPurpose,
     SnapshotSourceKind,
-    SnapshotWeatherError,
 )
 from pyracast.forecasts.projections import prepare_daily_payloads
 from pyracast.forecasts.quota import (
@@ -45,10 +45,7 @@ from pyracast.forecasts.quota import (
     reserve_request,
 )
 from pyracast.forecasts.sources import snapshot_data
-from pyracast.irradiance import local_day_bounds
 from pyracast.provider_retry import rate_limit_retry_after
-from pyracast.weather import OpenMeteoProvider
-from pyracast.weather_data import WeatherError, serialize_weather
 
 logger = logging.getLogger(__name__)
 
@@ -142,8 +139,6 @@ def persist_snapshot(lease: Lease, data: ProviderData, now: datetime) -> Forecas
                 "collected_at": data.collected_at or now,
                 "issued_at": data.issued_at,
                 "source_kind": data.source_kind,
-                "weather_payload": serialize_weather(data.weather) if data.weather else None,
-                "weather_error": data.weather_error,
                 "coverage_start": min(
                     (interval.start for interval in data.intervals), default=None
                 ),
@@ -184,41 +179,11 @@ def fetch_history(
     )
 
 
-def _attach_weather(lease: Lease, data: ProviderData, provider: OpenMeteoProvider) -> ProviderData:
-    day_start, day_end = local_day_bounds(lease.target_date, lease.binding.timezone)
-    start = min((interval.start for interval in data.intervals), default=day_start)
-    end = max((interval.end for interval in data.intervals), default=day_end)
-    try:
-        weather = provider.fetch(lease.binding.latitude, lease.binding.longitude, start, end)
-    except WeatherError as exc:
-        return replace(data, weather=None, weather_error=SnapshotWeatherError(exc.code))
-    except Exception as exc:
-        logger.warning("Weather acquisition failed error_type=%s", type(exc).__name__)
-        return replace(data, weather=None, weather_error=SnapshotWeatherError.ACQUISITION_FAILED)
-    return replace(data, weather=weather, weather_error="")
-
-
-def _persist_weather(lease: Lease, data: ProviderData, now: datetime) -> bool:
-    clock = Clock(now)
-    with transaction.atomic():
-        job = CollectionJob.objects.select_for_update().get(pk=lease.job_id)
-        now = clock.now()
-        if not owns(job, lease.token, CollectionJobStatus.RUNNING, now):
-            return False
-        return bool(
-            ForecastSnapshot.objects.filter(job=job, available_at__isnull=True).update(
-                weather_payload=serialize_weather(data.weather) if data.weather else None,
-                weather_error=data.weather_error,
-            )
-        )
-
-
 def _acquire(
     lease: Lease,
     adapter: ProviderAdapter,
     progress: _Progress,
     history_window: tuple[datetime, datetime] | None,
-    weather_provider: OpenMeteoProvider | None,
 ) -> ForecastSnapshot | None:
     clock = progress.clock.now
     try:
@@ -275,19 +240,7 @@ def _acquire(
         ) from None
     RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=RequestOutcome.SUCCEEDED)
     logger.info("Provider request succeeded correlation_id=%s", attempt.correlation_id)
-    if weather_provider is not None:
-        data = replace(
-            data, weather=None, weather_error=SnapshotWeatherError.ACQUISITION_INTERRUPTED
-        )
-    snapshot = persist_snapshot(lease, data, clock())
-    if snapshot is None:
-        return None
-    if weather_provider is not None:
-        data = _attach_weather(lease, data, weather_provider)
-        if not _persist_weather(lease, data, clock()):
-            return None
-        snapshot.refresh_from_db(fields=("weather_payload", "weather_error"))
-    return snapshot
+    return persist_snapshot(lease, data, clock())
 
 
 def _collect_leased[Prepared](
@@ -296,7 +249,6 @@ def _collect_leased[Prepared](
     calculator: Calculator,
     hooks: PublicationHooks[Prepared],
     progress: _Progress,
-    weather_provider: OpenMeteoProvider | None,
 ) -> bool:
     clock = progress.clock.now
     actuals = lease.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
@@ -314,13 +266,7 @@ def _collect_leased[Prepared](
                 **RELEASED,
             )
             return True
-        snapshot = _acquire(
-            lease,
-            adapter,
-            progress,
-            history_window,
-            None if actuals else weather_provider,
-        )
+        snapshot = _acquire(lease, adapter, progress, history_window)
         if snapshot is None:
             return False
     expected_kind = SnapshotSourceKind.ESTIMATED_ACTUALS if actuals else SnapshotSourceKind.FORECAST
@@ -358,14 +304,13 @@ def collect[Prepared](
     now: datetime,
     *,
     hooks: PublicationHooks[Prepared],
-    weather_provider: OpenMeteoProvider | None = None,
 ) -> bool:
     progress = _Progress(Clock(now))
-    lease = claim(job_id, now)
+    lease = claim_unless_contended("collect_forecast", job_id, lambda: claim(job_id, now))
     if lease is None:
         return False
     try:
-        return _collect_leased(lease, adapter, calculator, hooks, progress, weather_provider)
+        return _collect_leased(lease, adapter, calculator, hooks, progress)
     except CollectionFailureError as exc:
         failure = exc.failure
     except DatabaseError as exc:

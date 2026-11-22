@@ -23,12 +23,10 @@ from pyracast.plants.models import CalibrationActivation
 from pyracast.plants.transfer import transfer_model
 from pyracast.regions.models import Region
 from pyracast.solar import daylight_window
-from pyracast.weather_data import serialize_weather
 from tests.support.domain import System
 from tests.support.errors import raises_code
 from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
-from tests.support.weather_collection import WeatherFixture
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 11)
@@ -472,44 +470,6 @@ def test_mixed_native_means_are_limited_before_hourly_aggregation_and_replay(
     assert replayed is not None
     assert replayed[0].intervals[0]["source_snapshot_id"] != actual.pk
     assert any("original_start" in row for row in replayed[0].intervals)
-
-
-@pytest.mark.parametrize("weather", ["available", "failed", "absent"])
-def test_today_actuals_keep_independent_archived_forecast_weather(
-    monkeypatch: pytest.MonkeyPatch, weather: str
-) -> None:
-    system, plant = make_plant(monkeypatch)
-    start, _ = local_day_bounds(DAY, system.binding.timezone)
-    now = start + timedelta(hours=12)
-    forecast = publish_snapshot(snapshot_for(system, DAY, power_kw=0.2))
-    if weather == "available":
-        forecast.weather_payload = serialize_weather(
-            WeatherFixture().fetch(40, 29, start, start + timedelta(days=1))
-        )
-    elif weather == "failed":
-        forecast.weather_error = "weather_request_failed"
-    stored_again(forecast)
-    intraday_actuals(system, now)
-    monkeypatch.setattr(timezone, "now", lambda: now)
-    outlook = plant_outlook(
-        system.member,
-        system.tenant.pk,
-        system.region.pk,
-        plant.pk,
-        target_date=DAY,
-        resolution_minutes=60,
-        source="auto",
-    )
-    regional = cast(dict[str, Any], outlook["regional_irradiance"])
-    assert regional["vintage"]["scope"] == "primary_source"
-    if weather == "available":
-        assert regional["weather_reference"]["energy_kwh_m2"] == pytest.approx(14.4)
-        assert regional["weather_reference"]["intervals"][0]["ghi_wm2"] == 600
-    elif weather == "failed":
-        assert regional["weather_reference"]["status"] == "unavailable"
-        assert "weather_request_failed" in regional["weather_reference"]["quality_flags"]
-    else:
-        assert "weather_reference" not in regional
 
 
 @pytest.mark.parametrize("before_configuration", [False, True])

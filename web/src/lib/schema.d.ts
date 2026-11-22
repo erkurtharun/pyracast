@@ -1748,7 +1748,7 @@ export interface components {
         IncidentConflict: {
             code: components["schemas"]["ErrorCode"];
             message: string;
-            current: components["schemas"]["IncidentOutput"];
+            current: components["schemas"]["IncidentListOutput"];
         };
         IncidentInput: {
             kind: components["schemas"]["IncidentKindEnum"];
@@ -1775,6 +1775,30 @@ export interface components {
          * @enum {string}
          */
         IncidentKindEnum: "inverter" | "panels" | "grid" | "other" | "multiple";
+        IncidentListOutput: {
+            readonly id: number;
+            readonly revision: number;
+            readonly kind: components["schemas"]["IncidentKindEnum"];
+            readonly title: string;
+            readonly notes: string;
+            /** Format: date-time */
+            readonly starts_at: string;
+            /** Format: date-time */
+            readonly ends_at: string | null;
+            /** Format: double */
+            readonly available_dc_mw: number | null;
+            /** Format: double */
+            readonly available_inverter_mw: number | null;
+            /** Format: double */
+            readonly available_export_mw: number | null;
+            declared_configuration_id: number;
+            readonly status: components["schemas"]["IncidentStatusEnum"];
+            /** Format: date-time */
+            readonly created_at: string;
+            /** Format: date-time */
+            readonly updated_at: string;
+            readonly pending_request_id: number | null;
+        };
         IncidentOutput: {
             readonly id: number;
             readonly revision: number;
@@ -1797,6 +1821,16 @@ export interface components {
             readonly created_at: string;
             /** Format: date-time */
             readonly updated_at: string;
+        };
+        IncidentPage: {
+            count: number;
+            /** Format: uri */
+            next: string | null;
+            /** Format: uri */
+            previous: string | null;
+            can_propose: boolean;
+            proposal_unavailable_reason: string | null;
+            results: components["schemas"]["IncidentListOutput"][];
         };
         IncidentRequestInput: {
             action: components["schemas"]["IncidentChangeActionEnum"];
@@ -1948,7 +1982,6 @@ export interface components {
             reference_capacity_normalization?: {
                 [key: string]: unknown;
             } | null;
-            weather_reference?: components["schemas"]["WeatherReferenceOutput"];
         };
         /** @description Global horizontal irradiation in kWh/m2 for the local day. */
         IrradianceSummaryOutput: {
@@ -2192,21 +2225,6 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["ChangeRequestSummaryOutput"][];
-        };
-        PaginatedIncidentOutputList: {
-            /** @example 123 */
-            count: number;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?page=4
-             */
-            next?: string | null;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?page=2
-             */
-            previous?: string | null;
-            results: components["schemas"]["IncidentOutput"][];
         };
         PaginatedLocationChangeOutputList: {
             /** @example 123 */
@@ -2523,7 +2541,6 @@ export interface components {
             intervals?: components["schemas"]["PowerIntervalOutput"][];
             configuration?: components["schemas"]["PlantResultConfigurationOutput"];
             provenance?: components["schemas"]["ForecastProvenanceOutput"];
-            weather_reference?: components["schemas"]["WeatherReferenceOutput"];
         };
         PlantInput: {
             name: string;
@@ -2742,6 +2759,7 @@ export interface components {
             can_propose: boolean;
             can_propose_revert: boolean;
             proposal_unavailable_reason: string | null;
+            pending_request_id: number | null;
         };
         ProductionItemOutput: {
             id: number;
@@ -3126,36 +3144,6 @@ export interface components {
          * @enum {string}
          */
         SnapshotSourceKindEnum: "forecast" | "estimated_actuals";
-        /**
-         * @description * `invalid_weather_number` - Invalid weather number
-         *     * `invalid_weather_coordinates` - Invalid weather coordinates
-         *     * `invalid_weather_schema` - Invalid weather schema
-         *     * `invalid_weather_timezone` - Invalid weather timezone
-         *     * `invalid_weather_units` - Invalid weather units
-         *     * `empty_weather_response` - Empty weather response
-         *     * `invalid_weather_interval` - Invalid weather interval
-         *     * `invalid_weather_window` - Invalid weather window
-         *     * `unsafe_weather_response` - Unsafe weather response
-         *     * `invalid_weather_collection_time` - Invalid weather collection time
-         *     * `weather_request_failed` - Weather request failed
-         *     * `weather_acquisition_failed` - Weather acquisition failed
-         *     * `weather_acquisition_interrupted` - Weather acquisition interrupted
-         * @enum {string}
-         */
-        SnapshotWeatherErrorEnum:
-            | "invalid_weather_number"
-            | "invalid_weather_coordinates"
-            | "invalid_weather_schema"
-            | "invalid_weather_timezone"
-            | "invalid_weather_units"
-            | "empty_weather_response"
-            | "invalid_weather_interval"
-            | "invalid_weather_window"
-            | "unsafe_weather_response"
-            | "invalid_weather_collection_time"
-            | "weather_request_failed"
-            | "weather_acquisition_failed"
-            | "weather_acquisition_interrupted";
         SourceSnapshotOutput: {
             snapshot_id: number;
             /** Format: date-time */
@@ -3231,23 +3219,6 @@ export interface components {
             issued_at?: string | null;
             binding_revision?: string | null;
         };
-        WeatherReferenceOutput: {
-            status: components["schemas"]["WeatherReferenceStatusEnum"];
-            /** Format: double */
-            energy_kwh_m2?: number | null;
-            /** Format: double */
-            partial_energy_kwh_m2?: number | null;
-            /** Format: double */
-            coverage_fraction?: number | null;
-            quality_flags?: string[];
-        };
-        /**
-         * @description * `ready` - ready
-         *     * `partial` - partial
-         *     * `unavailable` - unavailable
-         * @enum {string}
-         */
-        WeatherReferenceStatusEnum: "ready" | "partial" | "unavailable";
         WorkspaceInvitationsOutput: {
             invitations: components["schemas"]["InvitationOutput"][];
         };
@@ -5915,7 +5886,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PaginatedIncidentOutputList"];
+                    "application/json": components["schemas"]["IncidentPage"];
                 };
             };
             /** @description Sign-in is required. */

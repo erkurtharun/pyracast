@@ -848,7 +848,6 @@ def test_solcast_export_copies_each_solcast_snapshot_with_its_job_binding_and_pl
                     available_at=collected + timedelta(minutes=1)
                     if endpoint == "forecasts"
                     else None,
-                    weather_payload={"source": "open-meteo"} if endpoint == "forecasts" else None,
                 )
             )
     selection = reset_database.SOLCAST_COUNT_SQL.removeprefix("SELECT count(*) ")
@@ -884,7 +883,6 @@ def test_solcast_export_copies_each_solcast_snapshot_with_its_job_binding_and_pl
             "coverage_end": "2026-11-12T13:00:00+00:00",
             "raw_payload": payload,
             "normalized_intervals": intervals,
-            "weather_payload": {"source": "open-meteo"},
             "plant_ids": [plants[0].pk],
         },
         {
@@ -899,7 +897,6 @@ def test_solcast_export_copies_each_solcast_snapshot_with_its_job_binding_and_pl
             "coverage_end": "2026-11-12T13:00:00+00:00",
             "raw_payload": payload,
             "normalized_intervals": intervals,
-            "weather_payload": None,
             "plant_ids": [plants[0].pk],
         },
     ]

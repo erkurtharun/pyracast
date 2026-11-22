@@ -64,7 +64,7 @@ function refusedAsChanged({ status, data }: Exchange) {
     );
 }
 
-export function exchange(request: LaneRequest, tag: Tag): Promise<Exchange> {
+function exchange(request: LaneRequest, tag: Tag): Promise<Exchange> {
     if (unsafe(request.method)) epoch++;
     if (!changesSession(request.url)) return attempt(request, tag);
     const result = serial.then(() => attempt(request, tag));

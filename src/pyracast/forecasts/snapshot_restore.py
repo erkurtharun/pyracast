@@ -117,7 +117,6 @@ class Acquisition:
     coverage: tuple[datetime, datetime] | None
     raw_payload: dict[str, Any]
     intervals: list[Any]
-    weather_payload: dict[str, Any] | None
     job: ExportedJob
 
 
@@ -304,14 +303,12 @@ def _acquisition(row: ExportRow, now: datetime) -> Acquisition:
         issued_at = _optional_instant(values["issued_at"])
         coverage = _coverage(values["coverage_start"], values["coverage_end"])
         raw_payload, intervals = values["raw_payload"], values["normalized_intervals"]
-        weather_payload = values["weather_payload"]
         if (
             row.source_kind != LIVE_KINDS[row.endpoint]
             or collected_at > now
             or not isinstance(raw_payload, dict)
             or not isinstance(intervals, list)
             or not all(_valid_interval(interval) for interval in intervals)
-            or not isinstance(weather_payload, dict | None)
         ):
             raise ValueError("The row is not a restorable live acquisition")
     except (KeyError, TypeError, ValueError, OverflowError) as error:
@@ -326,7 +323,6 @@ def _acquisition(row: ExportRow, now: datetime) -> Acquisition:
         coverage,
         raw_payload,
         intervals,
-        weather_payload,
         _exported_job(row, collected_at),
     )
 
@@ -448,7 +444,6 @@ def _store(
         coverage_start=coverage_start,
         coverage_end=coverage_end,
         available_at=acquisition.available_at,
-        weather_payload=acquisition.weather_payload,
     )
     if row.endpoint == CollectionEndpoint.FORECASTS:
         # A live forecast's result and its snapshot are published at the same moment.

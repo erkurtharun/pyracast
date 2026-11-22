@@ -22,6 +22,7 @@ test("every application screen has one address built in one place", () => {
     expect(routes.portfolio(5)).toBe("/app/w/5/");
     expect(routes.members(5)).toBe("/app/w/5/members/");
     expect(routes.inbox(5)).toBe("/app/w/5/inbox/");
+    expect(routes.inbox(5, 7)).toBe("/app/w/5/inbox/?request=7");
     expect(routes.trash(5)).toBe("/app/w/5/trash/");
     expect(routes.plant(5, 11)).toBe("/app/w/5/plants/11/forecast/");
     expect(routes.plant(5, 11, "settings")).toBe(

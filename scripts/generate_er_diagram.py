@@ -23,7 +23,7 @@ OUTPUT = Path(__file__).resolve().parents[1] / "docs" / "DATA_MODEL.md"
 COMMAND = "uv run python scripts/generate_er_diagram.py"
 _TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _MIGRATION_DDL = re.compile(
-    r"\b(?:ADD CONSTRAINT\b|(?:CREATE|DROP) (?!FUNCTION\b)\w)", re.IGNORECASE
+    r"\b(?:ADD CONSTRAINT\b|(?:CREATE|DROP) (?!(?:OR REPLACE )?FUNCTION\b)\w)", re.IGNORECASE
 )
 _MIGRATION_FOREIGN_KEY = re.compile(
     r"ALTER TABLE (\w+) ADD CONSTRAINT (\w+) (FOREIGN KEY [^;]+?)( NOT VALID)?\s*(?:;|$)",

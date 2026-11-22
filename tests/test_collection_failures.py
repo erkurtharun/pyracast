@@ -21,8 +21,6 @@ from pyracast.forecasts.models import (
 from pyracast.forecasts.quota import RequestDeferredError, reserve_request
 from pyracast.orchestration.kinds import COLLECTION
 from pyracast.providers import SolcastProvider
-from pyracast.weather import OpenMeteoProvider
-from pyracast.weather_data import WeatherError
 from tests.support.domain import NOW, FakeAdapter, System, make_system
 from tests.support.jobs import calculate, collect
 from tests.support.providers import TARGET, binding_for
@@ -353,14 +351,3 @@ def test_slow_provider_answer_ends_at_the_read_deadline(monkeypatch: pytest.Monk
         provider.fetch(binding_for(), TARGET)
     assert caught.value.code == "provider_request_failed"
     assert caught.value.retryable is True
-
-
-def test_oversized_weather_answer_is_rejected() -> None:
-    weather = OpenMeteoProvider(
-        httpx.MockTransport(
-            lambda request: httpx.Response(200, stream=Stream(dripping(64, 64 * 1024)))
-        )
-    )
-    with pytest.raises(WeatherError) as caught:
-        weather.fetch(40, 29, NOW, NOW + timedelta(hours=1))
-    assert caught.value.code == "weather_request_failed"
