@@ -1960,6 +1960,7 @@ test("a draft stays with its day when Back shows another day", async ({
     await serveDays(page, () => [{}, {}]);
     await openPlant(page, "Production");
     const day = page.getByLabel("Day", { exact: true });
+    await expect(day).toHaveValue("2026-11-09");
     await showDay(page, "2026-11-08");
     await expect(day).toHaveValue("2026-11-08");
     await stage(page, "08:00", "0,5");
@@ -2056,7 +2057,9 @@ async function memberOnClock(
 async function readOnFocus(page: Page) {
     await page.clock.runFor(5_000);
     await page.evaluate(() =>
-        document.dispatchEvent(new Event("visibilitychange")),
+        document.dispatchEvent(
+            new Event("visibilitychange", { bubbles: true }),
+        ),
     );
 }
 
@@ -2328,7 +2331,9 @@ test("an editor closes when a link shows a day whose read fails, and refresh rea
     await expect(page.getByLabel("Day", { exact: true })).toHaveValue(
         "2026-11-07",
     );
-    await expect(page.getByRole("alert")).toHaveText("Production is busy.");
+    await expect(page.getByRole("main").getByRole("alert")).toHaveText(
+        "Production is busy.",
+    );
     await expect(editor).toHaveCount(0);
     const refresh = page.locator(".production-refresh");
     await expect(refresh).toBeEnabled();
