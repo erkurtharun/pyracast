@@ -32,25 +32,37 @@ def register_account(user: User, *, language: str, workspace_name: str | None) -
     UserLanguagePreference.objects.create(user=user, language=language)
 
 
-@transaction.atomic
-def remove_workspace_member(
-    actor: User, tenant_id: int, user_id: int, *, platform: bool = False
-) -> bool:
-    # A refused caller locks nothing. Then the member's account rows before the workspace, the
-    # order of the account processes: an acceptance or an address verified meanwhile is among
-    # what is read below.
-    authorize_workspace_admin(actor, tenant_id, platform=platform, lock=False)
-    lock_account(user_id)
-    authorize_workspace_admin(actor, tenant_id, platform=platform)
-    membership = (
+def _membership(tenant_id: int, user_id: int) -> Membership | None:
+    return (
         Membership.objects.filter(tenant_id=tenant_id, user_id=user_id)
         .select_related("user")
         .first()
     )
+
+
+def _refuse_administrator(actor: User, membership: Membership | None) -> None:
+    if membership is not None and (
+        membership.role == WorkspaceRole.ADMIN or membership.user_id == actor.pk
+    ):
+        raise DomainError(ErrorCode.WORKSPACE_ADMIN_NOT_REMOVABLE)
+
+
+@transaction.atomic
+def remove_workspace_member(
+    actor: User, tenant_id: int, user_id: int, *, platform: bool = False
+) -> bool:
+    # A refused caller or target locks nothing: workspace-first writers lock the administrator's
+    # account under the workspace. Then the member's account rows before the workspace, the
+    # order of the account processes: an acceptance or an address verified meanwhile is among
+    # what is read below, and the target is checked again under those locks.
+    authorize_workspace_admin(actor, tenant_id, platform=platform, lock=False)
+    _refuse_administrator(actor, _membership(tenant_id, user_id))
+    lock_account(user_id)
+    authorize_workspace_admin(actor, tenant_id, platform=platform)
+    membership = _membership(tenant_id, user_id)
     if membership is None:
         return False
-    if membership.role == WorkspaceRole.ADMIN or user_id == actor.pk:
-        raise DomainError(ErrorCode.WORKSPACE_ADMIN_NOT_REMOVABLE)
+    _refuse_administrator(actor, membership)
     addresses = list(EmailAddress.objects.filter(user_id=user_id).values_list("email", "verified"))
     primary = membership.user.email
     from pyracast.notifications.recipients import remove_member_recipients
