@@ -62,10 +62,12 @@ export function RecycleBin({ tenant }: { tenant: number }) {
                 </div>
             </div>
             {restore.kind === "failed" && (
-                <Notice error>{restore.message}</Notice>
+                <Notice error focus>
+                    {restore.message}
+                </Notice>
             )}
             {restore.kind === "restored" && (
-                <Notice>
+                <Notice focus>
                     <p>{t("restored", { name: restore.row.plant_name })}</p>
                     <button
                         className="button secondary"

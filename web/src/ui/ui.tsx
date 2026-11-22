@@ -1,6 +1,6 @@
 "use client";
 import { useTranslations } from "next-intl";
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import type { Loaded } from "@/lib/api/query";
 import { deviceZone } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
@@ -31,17 +31,27 @@ export function RefreshFailed({ resource }: { resource: Loaded<unknown> }) {
         </div>
     );
 }
+// `focus` takes the focus when the notice appears, for an outcome whose control was disabled or
+// removed while it worked.
 export function Notice({
     children,
     error = false,
+    focus = false,
 }: {
     children: ReactNode;
     error?: boolean;
+    focus?: boolean;
 }) {
+    const notice = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        if (focus) notice.current?.focus();
+    }, [focus]);
     return (
         <div
+            ref={notice}
             className={`notice ${error ? "error" : ""}`}
             role={error ? "alert" : "status"}
+            tabIndex={focus ? -1 : undefined}
         >
             {children}
         </div>

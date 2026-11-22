@@ -1,6 +1,7 @@
 "use client";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { RegionScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { useErrorMessage } from "@/ui/form";
@@ -27,6 +28,7 @@ export function MoveToRecycleBin({
     const remember = useRememberDeletion();
     const [step, setStep] = useState<Step>({ kind: "idle" });
     const heading = useRef<HTMLHeadingElement>(null);
+    const opener = useRef<HTMLButtonElement>(null);
     const confirming = step.kind === "confirming";
     useEffect(() => {
         if (confirming) heading.current?.focus();
@@ -34,6 +36,7 @@ export function MoveToRecycleBin({
     if (step.kind === "idle")
         return (
             <button
+                ref={opener}
                 className="button secondary"
                 onClick={() => setStep({ kind: "confirming" })}
             >
@@ -47,12 +50,19 @@ export function MoveToRecycleBin({
                 {t("confirmMove", { name })}
             </h2>
             <p>{t("deletionHelp")}</p>
-            {step.kind === "failed" && <Notice error>{step.message}</Notice>}
+            {step.kind === "failed" && (
+                <Notice error focus>
+                    {step.message}
+                </Notice>
+            )}
             <div className="button-group">
                 <button
                     className="button secondary"
                     disabled={working}
-                    onClick={() => setStep({ kind: "idle" })}
+                    onClick={() => {
+                        flushSync(() => setStep({ kind: "idle" }));
+                        opener.current?.focus();
+                    }}
                 >
                     {t("cancel")}
                 </button>
