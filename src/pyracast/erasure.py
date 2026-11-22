@@ -126,10 +126,10 @@ def is_erased(account: User) -> bool:
     )
 
 
-def _locked(rows: models.QuerySet[Any], field: str = "pk") -> dict[int, Any]:
+def _locked(
+    rows: models.QuerySet[Any], field: str = "pk", *, no_key: bool = False
+) -> dict[int, Any]:
     """Locks the rows in id order; maps the id of each locked row to its `field`."""
-    # Erasure never deletes or rekeys these: a foreign-key check on one must not wait for it.
-    no_key = rows.model in {Tenant, Region}
     return dict(
         rows.select_for_update(of=("self",), no_key=no_key).order_by("pk").values_list("pk", field)
     )
@@ -435,15 +435,19 @@ def _erase(account_id: int) -> Erasure:
     ).values("pk")
     # Workspaces before their regions, the order of administrator changes, member removals
     # and reminder writers: an administrator assignment that commits first is seen below. A
-    # region is locked only with its workspace.
+    # region is locked only with its workspace. Erasure never deletes or rekeys either, so
+    # both are locked without the key: a foreign-key check on one must not wait for it.
     workspaces = _locked(
         Tenant.objects.filter(
             Q(pk__in=Membership.objects.filter(user_id=account_id).values("tenant_id"))
             | Q(pk__in=Region.objects.filter(pk__in=regions).values("tenant_id"))
-        )
+        ),
+        no_key=True,
     )
     _refuse_administrator(account_id)
-    locked_regions = _locked(Region.objects.filter(pk__in=regions, tenant_id__in=list(workspaces)))
+    locked_regions = _locked(
+        Region.objects.filter(pk__in=regions, tenant_id__in=list(workspaces)), no_key=True
+    )
     changes: Counter[str] = Counter()
     _forget_recipients(account_id, addresses, list(locked_regions), changes)
     _forget_mail(account_id, addresses, changes)

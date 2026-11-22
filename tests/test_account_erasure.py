@@ -1064,8 +1064,10 @@ def test_a_row_committed_after_erasure_locked_its_table_is_not_deleted(
     locking = erasure._locked
     later: list[int] = []
 
-    def lock_then_another_client_commits(rows: models.QuerySet[Any], *fields: str) -> Any:
-        locked = locking(rows, *fields)
+    def lock_then_another_client_commits(
+        rows: models.QuerySet[Any], *fields: str, no_key: bool = False
+    ) -> Any:
+        locked = locking(rows, *fields, no_key=no_key)
         if rows.model is model and not later:
             later.append(committed_elsewhere(add))
         return locked
@@ -1170,8 +1172,10 @@ def test_a_reminder_entry_committed_in_another_workspace_after_the_workspace_loc
     later: list[int] = []
     locked_regions: list[int] = []
 
-    def commit_after_the_workspace_lock(rows: models.QuerySet[Any], *fields: str) -> Any:
-        locked = locking(rows, *fields)
+    def commit_after_the_workspace_lock(
+        rows: models.QuerySet[Any], *fields: str, no_key: bool = False
+    ) -> Any:
+        locked = locking(rows, *fields, no_key=no_key)
         if rows.model is Tenant and not later:
             later.append(
                 committed_elsewhere(
