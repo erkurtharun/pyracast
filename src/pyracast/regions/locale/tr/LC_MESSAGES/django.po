@@ -1408,12 +1408,6 @@ msgstr "Doğrulama"
 msgid "Wait for provider recovery; preserve the shared daily quota."
 msgstr "Sağlayıcının düzelmesini bekleyin; paylaşılan günlük kotayı koruyun."
 
-msgid "Weather acquisition failed"
-msgstr "Hava durumu verileri alınamadı"
-
-msgid "Weather acquisition interrupted"
-msgstr "Hava durumu verisi alımı kesintiye uğradı"
-
 msgid "Workspace"
 msgstr "Çalışma alanı"
 

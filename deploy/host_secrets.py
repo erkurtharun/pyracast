@@ -105,7 +105,6 @@ def create(directory: Path) -> None:
         "RABBITMQ_DEFAULT_PASS": secrets.token_urlsafe(32),
         "PGUSER": host_contract.RUNTIME_ROLE,
         "PGPASSWORD": secrets.token_urlsafe(32),
-        "PYRACAST_WEATHER_ENABLED": "0",
         **mail_configuration(),
     }
     migration = {"PGUSER": host_contract.OWNER_ROLE, "PGPASSWORD": secrets.token_urlsafe(32)}

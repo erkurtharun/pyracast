@@ -9,7 +9,6 @@ from pyracast.forecasts.jobs import publish as publication
 from pyracast.forecasts.jobs.claim import Lease
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.plants.publication import PUBLICATION, Prepared
-from pyracast.weather import OpenMeteoProvider
 
 
 def calculate(binding: SiteBinding, target_date: object, data: ProviderData) -> dict[str, object]:
@@ -23,13 +22,9 @@ def collect(
     adapter: ProviderAdapter,
     calculator: Calculator,
     now: datetime,
-    *,
-    weather_provider: OpenMeteoProvider | None = None,
 ) -> bool:
     """Collects with the plant publication the collection actor uses."""
-    return collection.collect(
-        job_id, adapter, calculator, now, hooks=PUBLICATION, weather_provider=weather_provider
-    )
+    return collection.collect(job_id, adapter, calculator, now, hooks=PUBLICATION)
 
 
 def publish(

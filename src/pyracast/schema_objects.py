@@ -49,6 +49,12 @@ class CompositeForeignKey:
 
 
 @dataclass(frozen=True)
+class BodyRevision:
+    created_with: str
+    migration: MigrationKey
+
+
+@dataclass(frozen=True)
 class RowTrigger:
     name: str
     table: str
@@ -56,11 +62,15 @@ class RowTrigger:
     function: str
     body: str
     migration: MigrationKey
+    revision: BodyRevision | None = None
+
+    def function_sql(self, body: str, *, replace: bool = False) -> str:
+        create = "CREATE OR REPLACE" if replace else "CREATE"
+        return f"{create} FUNCTION {self.function}() RETURNS trigger LANGUAGE plpgsql AS $${body}$$"
 
     def create_sql(self) -> list[str]:
         return [
-            f"CREATE FUNCTION {self.function}() RETURNS trigger LANGUAGE plpgsql "
-            f"AS $${self.body}$$",
+            self.function_sql(self.revision.created_with if self.revision else self.body),
             f"CREATE TRIGGER {self.name} {self.timing} ON {self.table} "
             f"FOR EACH ROW EXECUTE FUNCTION {self.function}()",
         ]
@@ -177,9 +187,20 @@ _OBSERVATION_GUARD = """
             """
 
 
-# The collection stores a snapshot, then attaches its weather and publishes it by setting
-# available_at (forecasts/jobs.py); every other column is the acquisition and never changes.
+# The collection stores a snapshot and publishes it by setting available_at
+# (forecasts/jobs/publish.py); every other column is the acquisition and never changes.
 _SNAPSHOT_GUARD = """
+            BEGIN
+                IF OLD.available_at IS NOT NULL
+                    OR to_jsonb(NEW) - 'available_at' <> to_jsonb(OLD) - 'available_at' THEN
+                    RAISE EXCEPTION 'Forecast snapshot acquisitions are immutable'
+                        USING ERRCODE = '23514';
+                END IF;
+                RETURN NEW;
+            END;
+            """
+# The body forecasts 0003 created, while the collection still attached a weather reference.
+_SNAPSHOT_GUARD_WITH_WEATHER = """
             BEGIN
                 IF OLD.available_at IS NOT NULL
                     OR to_jsonb(NEW) - 'available_at' - 'weather_payload' - 'weather_error'
@@ -430,6 +451,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "guard_forecastsnapshot_publication",
         _SNAPSHOT_GUARD,
         ("forecasts", "0003_lease_import_and_archive_checks"),
+        BodyRevision(_SNAPSHOT_GUARD_WITH_WEATHER, ("forecasts", "0007_remove_weather_reference")),
     ),
     _immutable(
         "metering_epiassnapshot",
@@ -480,6 +502,23 @@ def operations(app_label: str, migration: str) -> list[Operation]:
             RunSQL(
                 [sql for item in renamed for sql in item.rename_sql(item.created_as, item.name)],
                 [sql for item in renamed for sql in item.rename_sql(item.name, item.created_as)],
+            )
+        )
+    revised = [
+        (item, item.revision)
+        for item in SCHEMA_OBJECTS
+        if isinstance(item, RowTrigger)
+        and item.revision
+        and item.revision.migration == (app_label, migration)
+    ]
+    if revised:
+        created.append(
+            RunSQL(
+                [item.function_sql(item.body, replace=True) for item, _ in revised],
+                [
+                    item.function_sql(revision.created_with, replace=True)
+                    for item, revision in revised
+                ],
             )
         )
     return created

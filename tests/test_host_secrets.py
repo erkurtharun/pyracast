@@ -342,7 +342,7 @@ def test_set_and_rotate_need_the_files_create_wrote(
         (
             ("set", "EPIAS_USERNAME"),
             "runtime.json",
-            {"PYRACAST_WEATHER_ENABLED": 0},
+            {"PYRACAST_LOG_LEVEL": 0},
             "runtime.json: Secret contains an invalid environment entry.",
         ),
     ],

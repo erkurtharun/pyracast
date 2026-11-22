@@ -28,7 +28,6 @@ PGPASSWORD=broker-rollback-unused
 PYRACAST_RABBITMQ_URL=amqp://pyracast:rollback-broker@rabbitmq/%2F
 PYRACAST_EMAIL_HOST=smtp.example.com
 PYRACAST_FROM_EMAIL=rollback@example.com
-PYRACAST_WEATHER_ENABLED=0
 ENV
 printf 'RABBITMQ_DEFAULT_USER=pyracast\nRABBITMQ_DEFAULT_PASS=rollback-broker\n' > "$BROKER_ENV_FILE"
 start_broker() {

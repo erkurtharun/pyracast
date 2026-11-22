@@ -22,8 +22,6 @@ _cutoff = os.environ.get("PYRACAST_CUTOFF_LOCAL", "16:00")
 if not CLOCK_PATTERN.fullmatch(_cutoff):
     raise ImproperlyConfigured("PYRACAST_CUTOFF_LOCAL must be a valid HH:MM time.")
 PYRACAST_CUTOFF_LOCAL = time(int(_cutoff[:2]), int(_cutoff[3:]))
-PYRACAST_WEATHER_ENABLED = os.environ.get("PYRACAST_WEATHER_ENABLED", "1") == "1"
-PYRACAST_OPEN_METEO_API_KEY = os.environ.get("PYRACAST_OPEN_METEO_API_KEY", "")
 PYRACAST_EPIAS_USERNAME = os.environ.get("EPIAS_USERNAME", "")
 PYRACAST_EPIAS_PASSWORD = os.environ.get("EPIAS_PASSWORD", "")
 PYRACAST_RABBITMQ_URL = os.environ.get("PYRACAST_RABBITMQ_URL", "")
@@ -280,7 +278,6 @@ SPECTACULAR_SETTINGS = {
         "CollectionJobErrorEnum": "pyracast.forecasts.models.CollectionJobError",
         "CollectionStateEnum": "pyracast.forecasts.models.CollectionState",
         "CollectionInactiveReasonEnum": "pyracast.forecasts.models.CollectionInactiveReason",
-        "SnapshotWeatherErrorEnum": "pyracast.forecasts.models.SnapshotWeatherError",
         "ForecastSourceKindEnum": ["forecast", "estimated_actuals", "mixed"],
         "EpiasSourceKindEnum": "pyracast.metering.models.EpiasSourceKind",
         "EpiasJobStatusEnum": "pyracast.metering.models.EpiasJobStatus",
@@ -313,7 +310,6 @@ SPECTACULAR_SETTINGS = {
         "PerformanceDayReasonEnum": "pyracast.plants.performance.DayReason",
         "PerformanceSelectionPolicyEnum": "pyracast.plants.performance.SelectionPolicy",
         "DaylightStatusEnum": ["normal", "polar_day", "polar_night"],
-        "WeatherReferenceStatusEnum": ["ready", "partial", "unavailable"],
         "OutageScenarioStatusEnum": ["estimated", "unknown_impact"],
         "DiagnosticStatusEnum": ["suspected", "normal", "insufficient"],
         "DiagnosticDayStatusEnum": ["shortfall", "within_threshold"],

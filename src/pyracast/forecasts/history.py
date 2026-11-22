@@ -23,7 +23,6 @@ from pyracast.forecasts.intraday import (
     ActualsMode,
     apply_intraday_source,
     prepare_intraday_source,
-    preserve_forecast_weather,
 )
 from pyracast.forecasts.models import (
     CollectionJobStatus,
@@ -188,7 +187,7 @@ def saved_region_forecast(region: Region, target_date: date, now: datetime) -> d
         )
     saved = (
         ForecastResult.objects.select_related("snapshot__binding")
-        .defer("snapshot__raw_payload", "snapshot__weather_payload")
+        .defer("snapshot__raw_payload")
         .filter(
             eligible,
             snapshot__source_kind=SnapshotSourceKind.FORECAST,
@@ -285,7 +284,6 @@ def regional_composed_forecast(
         snapshots = current_forecast_snapshots(
             binding_id=binding.pk, start=start, end=end, as_of=cutoff
         )
-    forecasts = snapshots
     with stored_data("region", region.pk, target_date, "actuals", FROZEN_PAYLOAD_FAULTS):
         source = (
             prepare_intraday_source(
@@ -329,7 +327,6 @@ def regional_composed_forecast(
             cast(dict[str, object], result["vintage"])["scope"] = VINTAGE_SCOPE
             if source is not None:
                 apply_intraday_source(result, source)
-                preserve_forecast_weather(result, binding, target_date, forecasts)
             else:
                 apply_composition(result, snapshots, composition)
             used_snapshots = [row for row in snapshots if row.pk in composition.snapshot_ids]

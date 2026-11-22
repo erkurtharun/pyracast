@@ -15,11 +15,8 @@ from pyracast.plants.operations import create_plant
 from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import Region
 from pyracast.regions.operations import submit_region
-from pyracast.weather_data import serialize_weather
 from tests.support.domain import NOW, System
-from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, publish_snapshot, snapshot_for
-from tests.support.weather_collection import WeatherFixture
 
 pytestmark = pytest.mark.django_db(transaction=True)
 OPENAPI = Path(__file__).resolve().parents[1] / "web" / "openapi.json"
@@ -157,11 +154,7 @@ def test_region_reads_explicit_estimated_actuals_for_today(
     system, _ = make_plant(monkeypatch)
     start, _ = local_day_bounds(DAY, system.binding.timezone)
     now = start + timedelta(hours=12, minutes=15)
-    forecast = publish_snapshot(snapshot_for(system, DAY))
-    forecast.weather_payload = serialize_weather(
-        WeatherFixture().fetch(40, 29, start, start + timedelta(days=1))
-    )
-    stored_again(forecast)
+    publish_snapshot(snapshot_for(system, DAY))
     actual = snapshot_for(
         system,
         DAY,
@@ -181,9 +174,6 @@ def test_region_reads_explicit_estimated_actuals_for_today(
     assert body["unavailable_reason"] is None
     assert body["result"]["provenance"]["source_kind"] == "estimated_actuals"
     assert body["result"]["provenance"]["snapshot_id"] == actual.pk
-    weather = body["result"]["weather_reference"]
-    assert weather["energy_kwh_m2"] == pytest.approx(14.4)
-    assert weather["intervals"][0]["ghi_wm2"] == 600
 
 
 ENVELOPE = {

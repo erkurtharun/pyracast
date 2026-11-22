@@ -77,7 +77,7 @@ def single_snapshot_actual_queryset(
 ) -> QuerySet[ForecastSnapshot]:
     return (
         ForecastSnapshot.objects.select_related("job__binding__provider_account")
-        .defer("raw_payload", "weather_payload")
+        .defer("raw_payload")
         .filter(
             binding=binding,
             job__status=CollectionJobStatus.SUCCEEDED,
@@ -329,7 +329,7 @@ def replay_archived_actual_source(
             available_at__lte=cutoff,
         )
         .filter(Q(issued_at__isnull=True) | Q(issued_at__lte=cutoff))
-        .defer("raw_payload", "weather_payload")
+        .defer("raw_payload")
         .order_by("-collected_at", "-available_at", "-pk")
     }
     if set(indexed) != set(identifiers):
