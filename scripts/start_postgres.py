@@ -205,6 +205,19 @@ def database_exists(binary: Path, port: str, env: dict[str, str]) -> bool:
     return found.strip() == "1"
 
 
+def running_port(binary: Path, data: Path, env: dict[str, str]) -> str | None:
+    status = execute(
+        [str(binary / "pg_ctl.exe"), "status", "-D", str(data)],
+        env=env,
+        check=False,
+        capture_output=True,
+    )
+    if status.returncode:
+        return None
+    # The fourth line of a running server's postmaster.pid is its port.
+    return (data / "postmaster.pid").read_text(encoding="utf-8").splitlines()[3].strip()
+
+
 def provision_windows(root: Path, port: str, options: tuple[str, ...]) -> str:
     data = root / "data"
     cluster = (data / "PG_VERSION").is_file()
@@ -216,6 +229,13 @@ def provision_windows(root: Path, port: str, options: tuple[str, ...]) -> str:
     env["PATH"] = os.pathsep.join((str(binary), str(binary.parent / "lib"), env.get("PATH", "")))
     if reused:
         require_archive_version(binary, env)
+    running = running_port(binary, data, env) if cluster else None
+    if running not in (None, port):
+        raise RuntimeError(
+            f"The cluster in {data} is running on port {running}, not {port}; nothing was "
+            f"changed. Set PGPORT={running} for this command and the application, or stop it "
+            f'with "{binary / "pg_ctl.exe"}" stop -D "{data}" and rerun to start it on {port}.'
+        )
     if cluster and accepts_connections(port):
         status = "running"
     else:
@@ -369,6 +389,14 @@ def provision_docker(
             "changed. Move its data or remove it, then rerun."
         )
     if existing is not None and existing.ports != frozenset({("127.0.0.1", port)}):
+        loopback = [published for host, published in existing.ports if host == "127.0.0.1"]
+        if len(existing.ports) == 1 and loopback:
+            raise RuntimeError(
+                f"Container {name} publishes loopback port {loopback[0]}, not {port}; nothing "
+                f"was changed. Set PGPORT={loopback[0]} for this command and the application, "
+                f"or run docker stop {name} and docker rm {name} (volume {volume} keeps the "
+                f"data) and rerun to publish port {port}."
+            )
         raise RuntimeError(
             f"Container {name} does not publish only loopback port {port}; nothing was changed."
         )

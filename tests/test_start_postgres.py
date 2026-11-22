@@ -163,6 +163,7 @@ def windows_cluster(
         "database": False,
         "createdb_fails": False,
         "version": start_postgres.ARCHIVE_VERSION,
+        "port": "55432",
     }
     root = tmp_path / "pyracast" / "postgres"
 
@@ -180,6 +181,12 @@ def windows_cluster(
     def execute(command: list[str], **options: object) -> subprocess.CompletedProcess[str]:
         if Path(command[0]).name == "pg_isready.exe":
             return subprocess.CompletedProcess(command, 0, stdout="")
+        if Path(command[0]).name == "pg_ctl.exe" and command[1] == "status":
+            if not server["running"]:
+                return subprocess.CompletedProcess(command, 3, stdout="")
+            pid = ["4242", str(root / "data"), "1700000000", server["port"], "", "127.0.0.1"]
+            (root / "data" / "postmaster.pid").write_text("\n".join(pid), encoding="utf-8")
+            return subprocess.CompletedProcess(command, 0, stdout="")
         if Path(command[0]).name == "pg_ctl.exe":
             assert command[1:] == ["--version"]
             version = f"pg_ctl (PostgreSQL) {server['version']}\n"
@@ -196,7 +203,11 @@ def windows_cluster(
     monkeypatch.setattr(start_postgres, "run", run)
     monkeypatch.setattr(start_postgres, "execute", execute)
     monkeypatch.setattr(start_postgres, "start_server", lambda *args: run(*args[0]))
-    monkeypatch.setattr(start_postgres, "accepts_connections", lambda port: server["running"])
+    monkeypatch.setattr(
+        start_postgres,
+        "accepts_connections",
+        lambda port: server["running"] and port == server["port"],
+    )
     monkeypatch.setattr(start_postgres, "windows_preflight", lambda binary, env: None)
     monkeypatch.setattr(
         start_postgres, "ARCHIVE_SHA256", hashlib.sha256(archive.read_bytes()).hexdigest()
@@ -251,6 +262,27 @@ def test_windows_provisioning_creates_the_database_an_interrupted_initialization
 
     assert [Path(command[0]).name for command in commands] == names
     assert server["database"]
+
+
+def test_a_bare_rerun_names_the_port_of_a_windows_cluster_running_on_another_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root, commands, server = windows_cluster(monkeypatch, tmp_path)
+    start_postgres.provision_windows(root, "55432", ())
+    server["running"] = True
+    commands.clear()
+    monkeypatch.delenv("PGPORT", raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(start_postgres, "durable_root", lambda: root.parent)
+    monkeypatch.setattr(start_postgres, "require_durable", lambda path: None)
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"running on port 55432, not 5432; nothing was changed\. Set PGPORT=55432",
+    ):
+        start_postgres.main([])
+
+    assert commands == []
 
 
 def test_windows_provisioning_refuses_a_directory_that_is_not_a_cluster(
@@ -402,17 +434,37 @@ def test_durable_container_requires_a_writable_volume_at_the_data_location(
 
 
 @pytest.mark.parametrize("running", [False, True])
+@pytest.mark.parametrize(("host", "published"), [("127.0.0.1", "55433"), ("192.0.2.1", "55432")])
 def test_existing_container_requires_the_requested_loopback_port(
-    monkeypatch: pytest.MonkeyPatch, running: bool
+    monkeypatch: pytest.MonkeyPatch, running: bool, host: str, published: str
 ) -> None:
     details = json.loads(inspected(running, ["data"], ["postgres"]))
     details[0]["HostConfig"] = {
-        "PortBindings": {"5432/tcp": [{"HostIp": "127.0.0.1", "HostPort": "55433"}]}
+        "PortBindings": {"5432/tcp": [{"HostIp": host, "HostPort": published}]}
     }
     commands = fake_docker(monkeypatch, {"pyracast-postgres": json.dumps(details)})
 
     with pytest.raises(RuntimeError, match="port"):
         start_postgres.provision_docker("docker", "55432", (), volume="data")
+
+    assert commands == []
+
+
+@pytest.mark.parametrize("running", [False, True])
+def test_a_bare_rerun_names_the_port_of_a_durable_container_published_on_another_one(
+    monkeypatch: pytest.MonkeyPatch, running: bool
+) -> None:
+    durable = inspected(running, [start_postgres.VOLUME], ["postgres"])
+    commands = fake_docker(monkeypatch, {start_postgres.CONTAINER: durable})
+    monkeypatch.delenv("PGPORT", raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(shutil, "which", lambda name: "docker")
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"publishes loopback port 55432, not 5432; nothing was changed\. Set PGPORT=55432",
+    ):
+        start_postgres.main([])
 
     assert commands == []
 
@@ -455,7 +507,10 @@ def test_windows_server_identity_is_checked_before_creating_a_database(
     server["running"] = True
 
     def execute(command: list[str], **options: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(command, 0, stdout=str(tmp_path / "foreign"))
+        stopped = Path(command[0]).name == "pg_ctl.exe" and command[1] == "status"
+        return subprocess.CompletedProcess(
+            command, 3 if stopped else 0, stdout=str(tmp_path / "foreign")
+        )
 
     monkeypatch.setattr(start_postgres, "execute", execute)
     with pytest.raises(RuntimeError, match="different PostgreSQL cluster"):
