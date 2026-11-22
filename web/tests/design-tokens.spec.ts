@@ -6,9 +6,11 @@ import { brand, brandProperties } from "../src/styles/tokens";
 
 const web = path.resolve();
 const eslint = new ESLint({ cwd: web });
-const rule = "pyracast/design-tokens";
-
-async function findings(file: string, source: string) {
+async function findings(
+    file: string,
+    source: string,
+    rule = "pyracast/design-tokens",
+) {
     const [result] = await eslint.lintText(source, {
         filePath: path.join(web, file),
     });
@@ -16,6 +18,47 @@ async function findings(file: string, source: string) {
         .filter((message) => message.ruleId === rule)
         .map((message) => message.line);
 }
+
+test("a brand property is declared only in the tokens module", async () => {
+    const declared = (file: string, source: string) =>
+        findings(file, source, "pyracast/brand-source");
+    expect(
+        await declared(
+            "src/styles/tokens.css",
+            ":root {\n    --forest : rgb(9 56 58) !important;\n}\n",
+        ),
+    ).toEqual([2]);
+    expect(
+        await declared(
+            "src/app/globals.css",
+            ".site {\n    --forest: var(--teal);\n}\n",
+        ),
+    ).toEqual([2]);
+    expect(
+        await declared(
+            "src/features/public-site/public-site.module.css",
+            ".probe{--amber-61:#fff;--cream/**/:var(--line)}\n",
+        ),
+    ).toEqual([1, 1]);
+    expect(
+        await declared(
+            "src/app/globals.css",
+            ".probe {\n    --forestry: var(--line);\n    --ink: var(--forest);\n    color: var(--amber);\n}\n",
+        ),
+    ).toEqual([]);
+    expect(
+        await declared(
+            "src/features/auth/steps/auth-story.tsx",
+            'export const style = { "--cream": "var(--line)" };\n',
+        ),
+    ).toEqual([1]);
+    expect(
+        await declared(
+            "src/styles/tokens.ts",
+            'export const style = { "--cream": "var(--line)" };\n',
+        ),
+    ).toEqual([]);
+});
 
 test("stylesheets take colours and spacing only from the tokens", async () => {
     for (const file of [

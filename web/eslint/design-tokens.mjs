@@ -102,7 +102,33 @@ const designTokens = {
     },
 };
 
+const BRAND_PROPERTY = /^--(?:forest|amber|cream)(?:-|$)/;
+
+const brandSource = {
+    meta: {
+        type: "problem",
+        messages: {
+            brand: "Declare a brand colour only in src/styles/tokens.ts.",
+        },
+        schema: [],
+    },
+    create(context) {
+        const brandName = (name) =>
+            typeof name === "string" && BRAND_PROPERTY.test(name);
+        return {
+            Declaration(node) {
+                if (brandName(node.property))
+                    context.report({ node, messageId: "brand" });
+            },
+            Property(node) {
+                if (node.key.type === "Literal" && brandName(node.key.value))
+                    context.report({ node, messageId: "brand" });
+            },
+        };
+    },
+};
+
 export default {
     meta: { name: "pyracast" },
-    rules: { "design-tokens": designTokens },
+    rules: { "design-tokens": designTokens, "brand-source": brandSource },
 };
