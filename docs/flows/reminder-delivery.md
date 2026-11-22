@@ -110,7 +110,7 @@ No user acts in this flow; authority is the state of the plant at each step and 
 | Claimed or transmitted after 2 h | `skipped`, `missed_schedule` (claim) or `delivery_deadline_exceeded` (transmit) |
 | Slot collection pending, or due but not yet created, before the 15 min deadline | Status unchanged; `available_at` moved to `min(now + 30 s, deadline)` |
 | Preparation or rendering raises a non-database error | Plain-text "forecast unavailable" notice frozen and sent, `forecast_kind` `unavailable`, `forecast_complete` null, `prepared_at` kept from an earlier freeze, else now; it names the plant, links to it and gives the reminder time in plant time |
-| Lock timeout or deadlock during claim or preparation | Transaction rolls back; the delivery ends normally with `job_claim_contended` (`worker-runtime`); row stays ready for the next cycle |
+| Lock timeout or deadlock during claim or preparation | Transaction rolls back; the delivery ends normally with `job_claim_contended` (`worker-runtime`); the row is left as it was for a later cycle |
 | Other database error during claim or preparation | Transaction rolls back; the actor fails without a Dramatiq retry; row stays ready for the next cycle |
 | Lease expired before transmission marker | `retry`, `interrupted_connection` (or `failed` after 8 attempts or past 2 h) |
 | Lease expired after the transmit marker | `uncertain`, `interrupted_send`; never retried |
