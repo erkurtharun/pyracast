@@ -80,7 +80,10 @@ export function ProductionHistory({
           ? "direct"
           : "propose";
     const [screen, setScreen] = useState(() => initialScreen(date, access));
-    const [message, setMessage] = useState("");
+    // Each message replaces the spoken node, so a message said again is announced again.
+    const [message, setSaid] = useState({ text: "", count: 0 });
+    const setMessage = (text: string) =>
+        setSaid((said) => ({ text, count: said.count + 1 }));
     // Saves whose reload of these rows is still running; no export is built from rows being reloaded.
     const [reloads, setReloads] = useState(0);
     const editButtons = useRef(new Map<string, HTMLButtonElement>());
@@ -102,8 +105,11 @@ export function ProductionHistory({
         const shownDay = reduceScreen(screen, { type: "dayShown", day: date });
         const next = reduceScreen(shownDay, { type: "accessChanged", access });
         setScreen(next);
-        if (dropped(shownDay, next))
-            setMessage(t("access_dropped", { access }));
+        // An access change replaces the notice of an earlier one, or clears it when it dropped nothing.
+        if (screen.access !== access)
+            setMessage(
+                dropped(shownDay, next) ? t("access_dropped", { access }) : "",
+            );
     }
     if (reading.data && reading.data !== reconciled) {
         const fresh = reading.data;
@@ -320,7 +326,11 @@ export function ProductionHistory({
                 />
                 {!history && refreshButton}
             </div>
-            {message && <Notice>{message}</Notice>}
+            {message.text && (
+                <Notice>
+                    <span key={message.count}>{message.text}</span>
+                </Notice>
+            )}
             {editor.status === "editing" && editor.reloaded && (
                 <Notice>{t("reloaded_draft_preserved")}</Notice>
             )}
