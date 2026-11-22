@@ -9,7 +9,7 @@ export default function AppError({
 }) {
     return (
         <main className="auth-page">
-            <RouteError retry={retry} />
+            <RouteError retry={retry} startLink />
         </main>
     );
 }

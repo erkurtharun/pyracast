@@ -211,6 +211,31 @@ test("a section whose code cannot be loaded shows the page error and loads it on
     );
 });
 
+test("a plant screen failure keeps the workspace navigation and offers a reload", async ({
+    page,
+}) => {
+    await openForecast(page);
+    await page.route(chunks, (route) => route.abort("internetdisconnected"));
+    await tab(page, "Calibration").click();
+    await expect(
+        page.getByRole("heading", { name: "This page could not be displayed" }),
+    ).toBeVisible();
+    await expect(
+        page
+            .getByRole("navigation", { name: "Main navigation" })
+            .getByRole("button", { name: "Plants" }),
+    ).toBeVisible();
+    await page.evaluate(() => Object.assign(window, { failedDocument: true }));
+    await page.unroute(chunks);
+    await page
+        .getByRole("button", { name: "Reload page", exact: true })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Calibration history" }),
+    ).toBeVisible();
+    expect(await page.evaluate(() => "failedDocument" in window)).toBe(false);
+});
+
 test("a link into an on-demand section opens it on the first load", async ({
     page,
 }) => {
