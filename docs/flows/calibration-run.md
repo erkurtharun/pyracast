@@ -124,7 +124,7 @@ sequenceDiagram
 | Promotion or preparation raises in the follow-up | The terminal status stays; a promotion failure is logged and recorded as skip `promotion_failed`; a preparation failure keeps the request, retried after one hour |
 | Fewer than 7 matched days or too little training support; fit misses acceptance guards | `insufficient`; `rejected` with `result.reasons` |
 | Lock timeout or deadlock in the claim (`_claim`) | The delivery ends normally (`job_claim_contended`, `worker-runtime`), nothing written; the run is resent while it stays eligible |
-| Other exception in the worker, a lock timeout after the claim included (outside the promotion handled above) | Actor raises, no Dramatiq retry; a pending run is resent next tick, a claimed run after its lease expires |
+| Other exception in the worker, a lock timeout after the claim included (outside the promotion handled above) | Actor raises, no Dramatiq retry; a pending run stays eligible for a later dispatch, a claimed run once its lease expires |
 
 ## Rules and invariants
 
