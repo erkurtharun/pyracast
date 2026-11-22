@@ -9,6 +9,7 @@ from typing import Literal, cast
 from zoneinfo import ZoneInfo
 
 import httpx
+from django.conf import settings
 from django.views.decorators.debug import sensitive_variables
 
 from pyracast.connections.contracts import (
@@ -258,6 +259,8 @@ def solcast_get(
 
 def adapter_for(binding: SiteBinding) -> ProviderAdapter:
     if binding.provider_account.provider == "fixture":
+        if not settings.PYRACAST_FIXTURE_PROVIDER:
+            raise ProviderError("fixture_provider_disabled")
         return FixtureProvider()
     if binding.provider_account.provider == "solcast":
         return SolcastProvider()

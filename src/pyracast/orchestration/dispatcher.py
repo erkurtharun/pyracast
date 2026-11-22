@@ -18,6 +18,7 @@ from pyracast.background.failures import (
     log_failure,
 )
 from pyracast.forecasts.models import DispatcherStatus
+from pyracast.forecasts.revalidation import dispatch_revalidations
 from pyracast.forecasts.runtime import dispatch_collections
 from pyracast.metering.runtime import dispatch_epias
 from pyracast.notifications.runtime import dispatch_notifications, publish_outbound_mail
@@ -27,6 +28,7 @@ from pyracast.orchestration.kinds import (
     METERING,
     OUTBOUND_MAIL,
     REMINDER,
+    REVALIDATION,
     register_actors,
 )
 from pyracast.plants.runtime import dispatch_calibrations
@@ -64,6 +66,19 @@ def _published(operation: Callable[[], int]) -> Callable[[], PhaseOutcome]:
     return lambda: PhaseOutcome(published=operation())
 
 
+def _collection(actor: Actor[[int], None], revalidation_actor: Actor[[int], None]) -> PhaseOutcome:
+    outcome = dispatch_collections(actor)
+    try:
+        published = dispatch_revalidations(revalidation_actor)
+    except Exception as error:
+        log_failure(logger, "revalidation_publish_failed", error)
+        close_old_connections()
+        return PhaseOutcome(
+            published=outcome.published, error=outcome.error or type(error).__name__
+        )
+    return PhaseOutcome(published=(outcome.published or 0) + published, error=outcome.error)
+
+
 def _retention() -> PhaseOutcome:
     # Item failures of one step do not skip the others; a step that fails as a whole outranks
     # them because its items are already logged one by one.
@@ -88,7 +103,10 @@ def phases(actors: Mapping[str, Actor[[int], None]]) -> tuple[Phase, ...]:
                 partial(dispatch_notifications, actors[REMINDER.actor], actors[OUTBOUND_MAIL.actor])
             ),
         ),
-        ("collection", partial(dispatch_collections, actors[COLLECTION.actor])),
+        (
+            "collection",
+            partial(_collection, actors[COLLECTION.actor], actors[REVALIDATION.actor]),
+        ),
         ("calibration", _published(partial(dispatch_calibrations, actors[CALIBRATION.actor]))),
         ("retention", _retention),
         ("metering", _published(partial(dispatch_epias, actors[METERING.actor]))),

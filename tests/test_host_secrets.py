@@ -147,6 +147,11 @@ def test_check_accepts_a_complete_set_without_printing_a_value(
     [
         ("runtime.json", {"PGPASSWORD": None}, "runtime.json: PGPASSWORD is missing."),
         ("runtime.json", {"PYRACAST_WEATHER": "1"}, "runtime.json: PYRACAST_WEATHER is not"),
+        (
+            "runtime.json",
+            {"PYRACAST_FIXTURE_PROVIDER": "1"},
+            "runtime.json: PYRACAST_FIXTURE_PROVIDER is not",
+        ),
         ("runtime.json", {"PGUSER": "postgres"}, "runtime.json: PGUSER must be pyracast_app."),
         (
             "runtime.json",
@@ -275,6 +280,11 @@ def test_set_stores_a_value_typed_without_echo_and_prints_only_the_key(
     ("key", "value", "refusal"),
     [
         ("PYRACAST_WEATHER", "1", "PYRACAST_WEATHER is not a setting the application reads."),
+        (
+            "PYRACAST_FIXTURE_PROVIDER",
+            "1",
+            "PYRACAST_FIXTURE_PROVIDER is not a setting the application reads.",
+        ),
         ("PGPASSWORD", "x", "PGPASSWORD is managed by rotate."),
         ("PYRACAST_SECRET_KEY", "x", "PYRACAST_SECRET_KEY is managed by rotate."),
         ("EPIAS_USERNAME", "", "Enter a value of one line."),

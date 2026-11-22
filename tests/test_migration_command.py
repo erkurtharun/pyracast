@@ -77,6 +77,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
         "connections": (
             "0003_provider_account_and_binding_checks",
             "0004_schema_naming_convention",
+            "0005_provider_account_key_fingerprint",
         ),
         "forecasts": (
             "0002_collection_endpoint_and_request_purpose_checks",

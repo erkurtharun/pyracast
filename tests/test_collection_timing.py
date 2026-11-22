@@ -83,7 +83,7 @@ def second_binding(system: System) -> SiteBinding:
     return binding
 
 
-def test_the_forecast_budget_equals_the_budget_before_one_timing_function() -> None:
+def test_the_forecast_budget_equals_its_reference_across_schedules_and_job_states() -> None:
     system = make_system(approved=True)
     second_binding(system)
     slot = datetime(2026, 11, 9, 18, 0, tzinfo=UTC)

@@ -11,7 +11,6 @@ from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.background.retry_policy import PROVIDER_JOB
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.connections.operations import rotate_secret
 from pyracast.forecasts.jobs.claim import claim
 from pyracast.forecasts.jobs.ready import pending_job_ids
 from pyracast.forecasts.models import CollectionJob, RequestAttempt, RequestPurpose
@@ -23,6 +22,7 @@ from pyracast.trash import restore_region, trash_region
 from tests.support.collection_schedule import HistoricalFixture, no_calculation
 from tests.support.domain import NOW, System, make_system
 from tests.support.jobs import collect
+from tests.support.providers import replace_key
 
 pytestmark = pytest.mark.django_db(transaction=True)
 # Europe/Istanbul is UTC+3: its nightly history window of local day D runs from 21:00 UTC on
@@ -97,7 +97,7 @@ def test_a_plant_the_scheduler_skips_says_why_and_has_no_next_collection(
             validated_at=None, validated_credential_revision=None
         )
     elif setup == "rotated":
-        rotate_secret(system.admin, system.account.pk, "test-only-rotated-state-key")
+        replace_key(system.admin, system.account.pk, "test-only-rotated-state-key")
     elif setup == "disabled":
         configure_schedule(
             system.member, system.tenant.pk, system.region.pk, enabled=False, times=[], now=NOW
