@@ -147,7 +147,7 @@ PINS: dict[str, list[Text | ActionInput]] = {
         Text("deploy/postgres/Dockerfile", r"FROM postgres:(\d+\.\d+)-"),
         Text("scripts/start_postgres.py", r'^ARCHIVE_VERSION = "(\d+\.\d+)"$'),
         Text("docs/DEPLOYMENT.md", r"PostgreSQL (\d+\.\d+) on Alpine"),
-        Text("docs/STACK.md", r"PostgreSQL (\d+\.\d+) \(production image and CI tests\)"),
+        Text("docs/STACK.md", r"PostgreSQL (\d+\.\d+) in every cluster"),
     ],
     "RabbitMQ": [
         Text("deploy/rabbitmq/Dockerfile", rf"^FROM rabbitmq:{VERSION}@"),
@@ -308,18 +308,28 @@ def test_ci_clusters_run_the_production_postgresql_image() -> None:
     assert start_postgres.PRODUCTION_DOCKERFILE == ROOT / "deploy/postgres/Dockerfile"
 
 
-def test_no_image_source_names_another_postgresql_minor() -> None:
+def test_no_image_source_or_stack_reference_names_another_postgresql_minor() -> None:
     production = single("PostgreSQL in production and CI")
 
     assert {
         (found.relative_to(ROOT).as_posix(), version)
-        for path in IMAGE_SOURCES
+        for path in (*IMAGE_SOURCES, "docs/STACK.md")
         for found in ROOT.glob(path)
         for version in re.findall(
             r"postgres(?:ql)?:? ?(\d+\.\d+)\b", found.read_text(encoding="utf-8"), re.I
         )
         if version != production
     } == set()
+
+
+def test_the_stack_reference_names_only_the_production_postgresql_minor() -> None:
+    stack = (ROOT / "docs/STACK.md").read_text(encoding="utf-8").splitlines()
+    (row,) = (line for line in stack if line.startswith("| PostgreSQL |"))
+    server = row.split("|")[2].split("; psycopg")[0]
+
+    assert set(re.findall(r"(?<![\d.])(\d+\.\d+)(?:\.\d+)?(?![\d.])", server)) == {
+        single("PostgreSQL in production and CI")
+    }
 
 
 def test_the_build_backend_range_admits_the_pinned_uv() -> None:
