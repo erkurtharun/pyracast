@@ -19,7 +19,7 @@ sequenceDiagram
     participant X as PostgreSQL and RabbitMQ
     participant R as Role processes
     Dev->>L: "start.cmd: uv sync, then scripts.dev start"
-    L->>F: "command_lock launcher.lock (wait up to 600 s), read_state"
+    L->>F: "command_lock .dev/launcher.lock (wait up to 600 s), read_state"
     L->>R: "discover roles, check stop markers and ports 3000 and 8000"
     alt "stop marker pending, duplicate role or foreign port owner"
         L-->>Dev: "RuntimeError, exit 1, nothing started"

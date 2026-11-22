@@ -70,23 +70,32 @@ PLACEHOLDER = re.compile(r"<[^<>/]+>")
 DOTTED = re.compile(r"^pyracast(?:\.[A-Za-z_]\w*)+")
 
 
-def _lines(document: str) -> Iterator[tuple[int, str]]:
-    fenced = False
+def _lines(document: str, *, fenced: bool = False) -> Iterator[tuple[int, str]]:
+    """Prose lines, or with `fenced` the lines inside code fences."""
+    inside = False
     for number, line in enumerate((ROOT / document).read_text(encoding="utf-8").splitlines(), 1):
         if FENCE.match(line):
-            fenced = not fenced
-        elif not fenced:
+            inside = not inside
+        elif inside == fenced:
             yield number, line
+
+
+def _clean(word: str) -> str:
+    word = word.lstrip("(\"'").rstrip(".,;\"'")
+    return word.rstrip(")") if word.count(")") > word.count("(") else word
 
 
 def _words(document: str) -> Iterator[tuple[int, str]]:
     for number, line in _lines(document):
         for span in CODE_SPAN.finditer(line):
             for word in span.group(2).split():
-                word = word.lstrip("(\"'").rstrip(".,;\"'")
-                if word.count(")") > word.count("("):
-                    word = word.rstrip(")")
-                yield number, word
+                yield number, _clean(word)
+
+
+def _fenced_words(document: str) -> Iterator[tuple[int, str]]:
+    for number, line in _lines(document, fenced=True):
+        for word in line.split():
+            yield number, _clean(word)
 
 
 @cache
@@ -202,7 +211,7 @@ def _short_path(path: str) -> bool:
     )
 
 
-def _word_problem(word: str) -> str | None:
+def _word_problem(word: str, *, names: bool = True) -> str | None:
     path = _location(word)
     if path.split("/")[0] in TOP_DIRECTORIES and "/" in path:
         return _path_problem(word)
@@ -212,7 +221,7 @@ def _word_problem(word: str) -> str | None:
         return None
     if ROOT_FILE.fullmatch(path):
         return _path_problem(word)
-    if DOTTED.match(word):
+    if names and DOTTED.match(word):
         return _name_problem(word)
     return None
 
@@ -363,6 +372,9 @@ def _problems(document: str) -> list[str]:
     for number, word in _words(document):
         if problem := _word_problem(word):
             found.append(f"{document}:{number}: `{word}`: {problem}")
+    for number, word in _fenced_words(document):
+        if problem := _word_problem(word, names=False):
+            found.append(f"{document}:{number}: fenced `{word}`: {problem}")
     return found
 
 
@@ -441,6 +453,18 @@ def test_short_paths_and_root_file_names_must_name_a_file(word: str, problem: st
     found = _word_problem(word)
 
     assert found == problem if problem is None else (found or "").startswith(problem)
+
+
+def test_fenced_code_is_checked_for_paths_but_not_for_names(tmp_path: Path) -> None:
+    document = tmp_path / "fenced.md"
+    document.write_text(
+        "Run it:\n\n```bash\nuv run python scripts/absent.py --name pyracast.absent\n```\n",
+        encoding="utf-8",
+    )
+
+    assert _problems(str(document)) == [
+        f"{document}:4: fenced `scripts/absent.py`: scripts/absent.py does not exist"
+    ]
 
 
 @pytest.mark.parametrize(
