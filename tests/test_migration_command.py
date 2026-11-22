@@ -45,11 +45,9 @@ def test_standard_migrate_command_remains_idempotent() -> None:
 def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
     loader = MigrationLoader(None)
     disk = loader.disk_migrations
-    project = {
-        config.label
-        for config in apps.get_app_configs()
-        if config.name.startswith("pyracast.") and any(config.get_models())
-    }
+    configs = [config for config in apps.get_app_configs() if config.name.startswith("pyracast.")]
+    project = {config.label for config in configs if any(config.get_models())}
+    assert {label for label, _ in disk} & {config.label for config in configs} == project
     baseline = {app: {"0001_initial"} for app in project}
     # Regions and connections reference each other; Django breaks that cycle in a second file.
     baseline["connections"].add("0002_initial")
