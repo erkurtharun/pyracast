@@ -8,7 +8,8 @@ from django.utils import timezone
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.db import read_snapshot
-from pyracast.errors import DomainError
+from pyracast.errors import DomainError, ErrorCode
+from pyracast.forecasts.faults import FROZEN_PAYLOAD_FAULTS, stored_data
 from pyracast.plants.history import automatic_outlook
 from pyracast.plants.models import Plant
 from pyracast.plants.production import NativeSlot, native_production_days
@@ -100,9 +101,12 @@ def plant_days(actor: User, tenant_id: int, region_id: int, plant_id: int) -> Pl
 
 def _forecast_day(plant: Plant, day: date, today: date) -> ForecastDay:
     try:
-        outlook = cast(dict[str, Any], automatic_outlook(plant, day, RESOLUTION_MINUTES))
+        with stored_data("plant", plant.pk, day, "days", FROZEN_PAYLOAD_FAULTS):
+            outlook = cast(dict[str, Any], automatic_outlook(plant, day, RESOLUTION_MINUTES))
     except DomainError as refusal:
-        return _refused_day(plant, day, today, refusal)
+        if refusal.code != ErrorCode.CALCULATION_OUT_OF_RANGE:
+            raise
+        return _refused_day(plant, day, today)
     result: dict[str, Any] | None = outlook["result"]
     scenario: dict[str, Any] | None = outlook["outage_scenario"]
     total, partial = _energy(result)
@@ -121,14 +125,14 @@ def _forecast_day(plant: Plant, day: date, today: date) -> ForecastDay:
     )
 
 
-def _refused_day(plant: Plant, day: date, today: date, refusal: DomainError) -> ForecastDay:
+def _refused_day(plant: Plant, day: date, today: date) -> ForecastDay:
     return ForecastDay(
         date=day,
         timezone=plant.region.timezone,
         source_kind="estimated_actuals" if day < today else "forecast",
         freshness="missing",
         stale_reason=None,
-        unavailable_reason=refusal.code,
+        unavailable_reason=ErrorCode.CALCULATION_OUT_OF_RANGE,
         collected_at=None,
         total_mwh=None,
         partial=False,

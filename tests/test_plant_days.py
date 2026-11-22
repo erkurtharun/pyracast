@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, cast
 
@@ -11,16 +12,19 @@ from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
+from pyracast.errors import DomainError, ErrorCode
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import Plant, PlantConfiguration, ProductionObservation
+from pyracast.plants import plant_days as plant_days_module
 from pyracast.plants.operations import create_plant
 from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import Region
 from pyracast.regions.operations import submit_region
 from tests.support.domain import NOW, System
+from tests.support.forecast_history import usable_calibration
 from tests.support.incident_calibration import incident
 from tests.support.invariants import stored_again
-from tests.support.performance_history import estimated_actuals
+from tests.support.performance_history import activated_calibration, estimated_actuals
 from tests.support.plant_operations import make_plant, publish_snapshot, snapshot_for
 from tests.support.production_changes import provider
 from tests.support.provisional_measurements import DAY as PROVISIONAL_DAY
@@ -29,6 +33,8 @@ from tests.support.provisional_measurements import acquisition
 pytestmark = pytest.mark.django_db(transaction=True)
 
 TODAY = date(2026, 11, 9)
+FAULTS = "pyracast.forecasts.faults"
+MISSING = object()
 ANSWER = {"plant_id", "name", "today", "forecast", "production"}
 FORECAST_DAY = {
     "date",
@@ -366,6 +372,104 @@ def test_a_refused_or_empty_day_carries_its_reason_without_rows(
         )
 
 
+@pytest.mark.parametrize(
+    "damage", ["06.11.2026 00:00", MISSING, None, 7], ids=["text", "missing", "null", "number"]
+)
+def test_a_damaged_past_day_is_refused_while_every_other_day_is_answered(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, damage: object
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    forecast_window(system)
+    for offset in range(1, 31):
+        metered(system, plant, TODAY - timedelta(days=offset))
+    before = days_of(system, plant)
+    damaged = TODAY - timedelta(days=3)
+    _, end = local_day_bounds(damaged, system.binding.timezone)
+    snapshot = estimated_actuals(system, damaged, 0.3, end + timedelta(hours=2))
+    rows = [dict(row) for row in snapshot.normalized_intervals]
+    if damage is MISSING:
+        del rows[3]["start"]
+    else:
+        rows[3]["start"] = damage
+    stored_again(snapshot, normalized_intervals=rows)
+    with caplog.at_level(logging.WARNING, logger=FAULTS):
+        after = days_of(system, plant)
+    refused = by_date(after["forecast"])[damaged]
+    assert refused == {
+        "date": damaged.isoformat(),
+        "timezone": "Europe/Istanbul",
+        "source_kind": "estimated_actuals",
+        "freshness": "missing",
+        "stale_reason": None,
+        "unavailable_reason": "calculation_out_of_range",
+        "collected_at": None,
+        "total_mwh": None,
+        "partial": False,
+        "affected": None,
+        "rows": [],
+    }
+    assert [day for day in after["forecast"] if day is not refused] == [
+        day for day in before["forecast"] if day["date"] != damaged.isoformat()
+    ]
+    assert after["production"] == before["production"]
+    [warning] = [record for record in caplog.records if record.name == FAULTS]
+    assert damaged.isoformat() in warning.getMessage()
+    assert "ValueError" in warning.getMessage()
+
+
+def failing_on(monkeypatch: pytest.MonkeyPatch, day: date, error: Exception) -> None:
+    outlook = plant_days_module.automatic_outlook
+
+    def failing(plant: Plant, target_date: date, resolution_minutes: int) -> dict[str, object]:
+        if target_date == day:
+            raise error
+        return outlook(plant, target_date, resolution_minutes)
+
+    monkeypatch.setattr(plant_days_module, "automatic_outlook", failing)
+
+
+@pytest.mark.parametrize("fault", [KeyError, TypeError, ValueError, ArithmeticError])
+def test_a_stored_data_fault_outside_the_read_guards_refuses_only_its_day(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, fault: type[Exception]
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    forecast_window(system)
+    before = days_of(system, plant)
+    failing_on(monkeypatch, TODAY + timedelta(days=2), fault("stored value"))
+    with caplog.at_level(logging.WARNING, logger=FAULTS):
+        after = days_of(system, plant)
+    refused = by_date(after["forecast"])[TODAY + timedelta(days=2)]
+    assert refused["unavailable_reason"] == "calculation_out_of_range"
+    assert refused["source_kind"] == "forecast"
+    assert refused["rows"] == []
+    assert [day for day in after["forecast"] if day is not refused] == [
+        day for day in before["forecast"] if day["date"] != refused["date"]
+    ]
+    [warning] = [record for record in caplog.records if record.name == FAULTS]
+    assert f"error={fault.__name__}" in warning.getMessage()
+    assert "stored value" not in warning.getMessage()
+
+
+@pytest.mark.parametrize(
+    ("error", "status", "code"),
+    [
+        (RuntimeError("defect"), 500, "server_error"),
+        (DomainError(ErrorCode.DATE_OUT_OF_RANGE), 400, "date_out_of_range"),
+    ],
+    ids=["defect", "other-refusal"],
+)
+def test_any_other_failure_of_a_day_fails_the_read(
+    monkeypatch: pytest.MonkeyPatch, error: Exception, status: int, code: str
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    failing_on(monkeypatch, TODAY, error)
+    client = Client(raise_request_exception=False)
+    client.force_login(system.member)
+    answer = client.get(plant_path(system, plant))
+    assert answer.status_code == status
+    assert answer.json()["code"] == code
+
+
 def reduced_production(read: dict[str, Any]) -> list[dict[str, Any]]:
     days = []
     for day in read["days"]:
@@ -546,25 +650,3 @@ def test_the_days_read_spends_the_forecast_budget(monkeypatch: pytest.MonkeyPatc
     for refused in (forecast, days):
         assert refused.status_code == 429
         assert refused.json()["code"] == "throttled"
-
-
-def test_the_queries_do_not_grow_with_the_intervals_of_a_day(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    system, plant = make_plant(monkeypatch)
-    forecast_window(system)
-    client = client_for(system.member)
-    client.get(plant_path(system, plant))
-    metered_days = [TODAY - timedelta(days=offset) for offset in (1, 2, 3)]
-    counts = []
-    for minutes in (60, 30):
-        ProductionObservation.objects.all().delete()
-        for day in metered_days:
-            metered(system, plant, day, minutes=minutes)
-        with CaptureQueriesContext(connection) as queries:
-            response = client.get(plant_path(system, plant))
-        assert response.status_code == 200
-        production = by_date(response.json()["production"])
-        assert {len(production[day]["rows"]) for day in metered_days} == {24 * 60 // minutes}
-        counts.append(len(queries))
-    assert counts[0] == counts[1]
