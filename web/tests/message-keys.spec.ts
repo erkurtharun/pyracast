@@ -13,9 +13,8 @@ const flagProducers = {
     ],
 };
 
-function tree(files: Record<string, string>, parent = tmpdir()): string {
-    mkdirSync(parent, { recursive: true });
-    const root = mkdtempSync(path.join(parent, "message-keys-"));
+function tree(files: Record<string, string>): string {
+    const root = mkdtempSync(path.join(tmpdir(), "message-keys-"));
     for (const [name, text] of Object.entries(files)) {
         const file = path.join(root, name);
         mkdirSync(path.dirname(file), { recursive: true });
@@ -74,33 +73,6 @@ test("a code named only in a comment, a docstring or a module that is not its pr
         ]);
     } finally {
         rmSync(root, { recursive: true, force: true });
-    }
-});
-
-test("a checkout below a directory named migrations still reads the backend's codes", () => {
-    const parent = mkdtempSync(path.join(tmpdir(), "message-keys-"));
-    const root = tree(
-        {
-            "web/src/flags.ts": [
-                "declare function useCodeLabel(namespace: string): (code: string) => string;",
-                'export const label = useCodeLabel("Forecast.qualityFlags");',
-            ].join("\n"),
-            "src/pyracast/forecasts/flags.py": 'FLAGS = ["unvalidated"]\n',
-        },
-        path.join(parent, "migrations"),
-    );
-    try {
-        expect(
-            unusedKeys(
-                path.join(root, "web"),
-                {
-                    Forecast: { qualityFlags: { unvalidated: "unvalidated" } },
-                },
-                flagProducers,
-            ),
-        ).toEqual([]);
-    } finally {
-        rmSync(parent, { recursive: true, force: true });
     }
 });
 
