@@ -85,6 +85,7 @@ sequenceDiagram
 | Queue holds 1,000 or more messages | Publication is skipped with a `publication_skipped` warning; ids stay in the database |
 | Settlement lookup fails with `EpiasError` | `settlement_plant_id` stays null, the failure is logged (`epias_settlement_lookup_failed`) and the check is retried after 1 hour; finding nothing or an ambiguous EIC stamps `settlement_checked_at` = now and retries after 1 day, inside the window |
 | Job or a parent row missing, job not due, leased or terminal | `claim_epias_job` returns None, nothing written |
+| Lock timeout or deadlock in `claim_epias_job` | The delivery ends normally with `job_claim_contended` (`worker-runtime`); the job stays `pending` for the next metering phase |
 | Connection disabled or changed, configuration replaced, location trashed, region binding not current, schedule disabled (windowed jobs) | `superseded`, terminal |
 | Past `retry_until` at claim, before the request or in `pending_epias_ids` | `failed`, `retry_window_expired` (a credential error stays the job's error) |
 | Job claimed again after three attempts, for example after its third lease expired (yesterday's nightly job is exempt) | `failed`, `attempts_exhausted` |
@@ -115,6 +116,7 @@ sequenceDiagram
 
 ## Tests
 
+- `tests/test_claim_contention.py`: a delivery behind a held region lock ends without claiming.
 - `tests/test_metering.py`: scope, duplicate workers, lease expiry, failure redaction, identity mismatch, supersession, partial data, purge during claim or scheduling. `tests/test_metering_nightly.py`: window, deadlines, 30-minute retries, schedule disable. `tests/test_metering_repair.py`: repair horizon, nightly cap, three repair nights.
 - `tests/test_metering_settlement.py`, `tests/test_metering_history_backfill.py`: monthly split, unpublished settlement, EIC lookup outside locks, 90-day and 12-month backfill idempotency, backfill after a configuration revision, publication standing while preparation raises.
 - `tests/test_epias.py`, `tests/test_epias_settlement.py`, `tests/test_epias_credentials.py`, `tests/test_epias_deadline.py`, `tests/test_collection_window.py`: client parsing, pagination, TGT reuse, redaction, credential outcomes, request and body deadlines, window edges. `tests/test_metering_runtime.py`: credentials cache, duplicate dispatch through the stub broker, opt-in RabbitMQ delivery (`PYRACAST_LIVE_QUEUE=1`). `tests/test_epias_live.py`: captured-fixture replay and opt-in live check (`PYRACAST_EPIAS_LIVE=1`).
