@@ -260,13 +260,12 @@ export function ProductionHistory({
                 },
             );
             pendingFocus.current = attempt.key;
-            apply({ type: "saved", key: attempt.key });
+            apply({ type: "saved" });
             setMessage(action === "revert" ? t("reverted") : t("saved"));
             await reloadAfterSave();
         } catch (error) {
             apply({
                 type: "saveFailed",
-                key: attempt.key,
                 message: errorMessage(error),
                 implausible: saveFailure(error).implausible,
             });

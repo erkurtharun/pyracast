@@ -55,8 +55,8 @@ export type ScreenEvent =
           fields: FieldRefusals;
       }
     | { type: "save"; row: Interval; action: "set" | "revert" }
-    | { type: "saved"; key: string }
-    | { type: "saveFailed"; key: string; message: string; implausible: boolean }
+    | { type: "saved" }
+    | { type: "saveFailed"; message: string; implausible: boolean }
     | { type: "reload" }
     | { type: "reloadFailed"; key: string; message: string }
     | { type: "dayShown"; day: string }
@@ -246,14 +246,7 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
             return { ...screen, editor: CLOSED };
         case "stage": {
             const open = editingOn(editor, event.row);
-            if (
-                screen.access !== "propose" ||
-                !open ||
-                sending(screen) ||
-                away(screen) ||
-                !canStage(event.row, event.action)
-            )
-                return screen;
+            if (!open || !canStage(event.row, event.action)) return screen;
             const energy = energyValue(open.energy);
             if (event.action === "set" && energy === null)
                 return {
@@ -361,7 +354,6 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
             if (
                 screen.access !== "direct" ||
                 !open ||
-                !event.row.can_edit ||
                 (event.action === "revert" && !event.row.can_revert)
             )
                 return screen;
@@ -376,12 +368,13 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
                 };
             return { ...screen, editor: { ...values(open), status: "saving" } };
         }
+        // A running write locks its editor, so its answer always belongs to the editor that runs it.
         case "saved":
-            if (runningWrite(editor)?.key !== event.key) return screen;
+            if (!runningWrite(editor)) return screen;
             return { ...screen, editor: CLOSED };
         case "saveFailed": {
             const write = runningWrite(editor);
-            if (write?.key !== event.key) return screen;
+            if (!write) return screen;
             return {
                 ...screen,
                 editor:

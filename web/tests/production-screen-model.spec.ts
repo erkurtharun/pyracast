@@ -149,11 +149,10 @@ const events = {
         apply(step, { type: "save", row: editorRow(step), action: "set" }),
     saveRevert: (step: Step) =>
         apply(step, { type: "save", row: editorRow(step), action: "revert" }),
-    saved: (step: Step) => apply(step, { type: "saved", key: editorKey(step) }),
+    saved: (step: Step) => apply(step, { type: "saved" }),
     saveFailed: (step: Step) =>
         apply(step, {
             type: "saveFailed",
-            key: editorKey(step),
             message: "Production changed.",
             implausible: false,
         }),
@@ -894,14 +893,12 @@ test("a repeated send without a reason is refused again as a new refusal", () =>
 
 test("an administrator's write ends its editor, also once it was orphaned", () => {
     const saving = states["direct:none/saving"];
-    const key = intervalKey(adminRows(DAY)[1]!);
-    expect(apply(saving, { type: "saved", key }).screen.editor.status).toBe(
+    expect(apply(saving, { type: "saved" }).screen.editor.status).toBe(
         "closed",
     );
     expect(
         apply(saving, {
             type: "saveFailed",
-            key,
             message: "Above capacity.",
             implausible: true,
         }).screen.editor,
@@ -913,7 +910,6 @@ test("an administrator's write ends its editor, also once it was orphaned", () =
     expect(controls(left.screen, left.rows).refresh).toBe(false);
     const ended = apply(left, {
         type: "saveFailed",
-        key,
         message: "Offline.",
         implausible: false,
     });
@@ -922,9 +918,7 @@ test("an administrator's write ends its editor, also once it was orphaned", () =
         pendingWrite: false,
     });
     expect(controls(ended.screen, ended.rows).dayNav).toBe(true);
-    expect(apply(left, { type: "saved", key }).screen.editor.status).toBe(
-        "closed",
-    );
+    expect(apply(left, { type: "saved" }).screen.editor.status).toBe("closed");
 });
 
 test("an editor's reload follows the current revision or fails with its message", () => {
@@ -932,7 +926,6 @@ test("an editor's reload follows the current revision or fails with its message"
         states["direct:none/saving"],
         {
             type: "saveFailed",
-            key: intervalKey(adminRows(DAY)[1]!),
             message: "Changed.",
             implausible: false,
         },
