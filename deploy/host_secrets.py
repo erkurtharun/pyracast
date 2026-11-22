@@ -105,7 +105,6 @@ def create(directory: Path) -> None:
         "RABBITMQ_DEFAULT_PASS": secrets.token_urlsafe(32),
         "PGUSER": host_contract.RUNTIME_ROLE,
         "PGPASSWORD": secrets.token_urlsafe(32),
-        "PYRACAST_WEATHER_ENABLED": "0",
         **mail_configuration(),
     }
     migration = {"PGUSER": host_contract.OWNER_ROLE, "PGPASSWORD": secrets.token_urlsafe(32)}
@@ -237,6 +236,16 @@ def store(directory: Path, key: str) -> None:
     print(f"Stored {key} in {RUNTIME}.")
 
 
+def unset(directory: Path, key: str) -> None:
+    if key in host_contract.RUNTIME_SETTINGS | host_contract.RUNTIME_REQUIRED:
+        raise RefusedError(f"{key} is a setting the application reads; unset keeps it.")
+    values = environment(directory, RUNTIME)
+    if values.pop(key, None) is None:
+        raise RefusedError(f"{RUNTIME} has no {key} to remove.")
+    replace(directory / RUNTIME, values)
+    print(f"Removed {key} from {RUNTIME}.")
+
+
 def main(arguments: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Create, check and rotate the host secret files; no value is ever printed."
@@ -256,6 +265,10 @@ def main(arguments: Sequence[str] | None = None) -> int:
     )
     setting = commands.add_parser("set", help="store one runtime setting typed without echo")
     setting.add_argument("key")
+    removal = commands.add_parser(
+        "unset", help="remove one runtime key the application no longer reads"
+    )
+    removal.add_argument("key")
     options = parser.parse_args(arguments)
     try:
         if options.command == "create":
@@ -271,6 +284,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
             rotate(options.directory, options.target)
         elif options.command == "drop-fallbacks":
             drop_fallbacks(options.directory)
+        elif options.command == "unset":
+            unset(options.directory, options.key)
         else:
             store(options.directory, options.key)
     except RefusedError as refused:

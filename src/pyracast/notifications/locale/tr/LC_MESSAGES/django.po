@@ -39,48 +39,6 @@ msgstr ""
 "hatırlatmalarına eklediği için alıyorsunuz. Durdurmak için o yöneticiden "
 "adresinizi çıkarmasını isteyin."
 
-msgid "ambiguous_zero_power"
-msgstr "sıfır güçten ışınım belirlenemiyor"
-
-msgid "incomplete_day"
-msgstr "eksik gün"
-
-msgid "missing_power"
-msgstr "güç verisi eksik"
-
-msgid "negative_power"
-msgstr "negatif güç"
-
-msgid "night_power_conflict"
-msgstr "gece güç verisi çelişkisi"
-
-msgid "nonfinite_irradiance"
-msgstr "ışınım değeri sonlu değil"
-
-msgid "nonfinite_power"
-msgstr "güç değeri sonlu değil"
-
-msgid "partial_sunlight"
-msgstr "kısmi gün ışığı"
-
-msgid "prorated_interval_mean"
-msgstr "orantılanmış aralık ortalaması"
-
-msgid "sunlight_unknown"
-msgstr "gün ışığı bilinmiyor"
-
-msgid "synthetic_fixture"
-msgstr "sentetik örnek veri"
-
-msgid "unavailable"
-msgstr "mevcut değil"
-
-msgid "uniform_mean_proration"
-msgstr "sabit ortalama ile orantılama"
-
-msgid "unvalidated"
-msgstr "doğrulanmamış"
-
 msgid "Forecast"
 msgstr "Tahmin"
 
@@ -107,12 +65,6 @@ msgstr "Başlangıç"
 
 msgid "To"
 msgstr "Bitiş"
-
-msgid "From UTC offset"
-msgstr "Başlangıç UTC farkı"
-
-msgid "To UTC offset"
-msgstr "Bitiş UTC farkı"
 
 #, python-format
 msgid "Normal operation (%(unit)s)"

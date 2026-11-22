@@ -45,7 +45,7 @@ def replay_composition(
         return replay_intraday_composition(provenance, configuration.binding_id)
     snapshots = ForecastSnapshot.objects.filter(
         pk__in=identifiers, job__binding_id=configuration.binding_id, source_kind="forecast"
-    ).defer("raw_payload", "weather_payload")
+    ).defer("raw_payload")
     indexed = {snapshot.pk: snapshot for snapshot in snapshots}
     ordered = [indexed[identifier] for identifier in identifiers]
     return compose_snapshots(ordered, start, end), ordered

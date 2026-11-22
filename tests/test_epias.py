@@ -64,7 +64,6 @@ def test_documented_shape_fixture_preserves_bounds_missingness_and_provenance() 
     ]
     assert result.readings[0].timestamp.isoformat() == "2026-11-09T00:00:00+03:00"
     assert result.readings[0].hour == "00:00"
-    assert result.unit == "MWh"
     assert "ignored" not in result.raw_payload
     assert json.loads(result.raw_payload)["items"][2]["total"] == 7.125
     with pytest.raises(FrozenInstanceError):

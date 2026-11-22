@@ -14,7 +14,7 @@ from django.http import QueryDict
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext as _
-from django.utils.translation import gettext_lazy
+from django.utils.translation import gettext_lazy, gettext_noop
 
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.budget import OPEN as OPEN_COLLECTIONS
@@ -182,26 +182,26 @@ def summarize_plant(
     region: WithAnnotations[Region, WorkspaceAnnotations], issue: str = ""
 ) -> PlantSummary:
     issue_reason, issue_time = listed_because(issue, region) if issue else ("", None)
-    connection = "Healthy"
+    connection = gettext_noop("Healthy")
     if region.workspace_binding_id is None:
-        connection = "Not configured"
+        connection = gettext_noop("Not configured")
     elif (
         not region.workspace_account_enabled
         or region.workspace_authorized_at is None
         or region.workspace_binding_health == "error"
         or region.workspace_authentication_failed_revision == region.workspace_credential_revision
     ):
-        connection = "Needs attention"
+        connection = gettext_noop("Needs attention")
     elif (
         region.workspace_request_blocked_until is not None
         and region.workspace_request_blocked_until > timezone.now()
     ):
-        connection = "Provider delay"
+        connection = gettext_noop("Provider delay")
     elif (
         region.workspace_validated_at is None
         or region.workspace_validated_revision != region.workspace_credential_revision
     ):
-        connection = "Needs validation"
+        connection = gettext_noop("Needs validation")
     return PlantSummary(
         id=region.pk,
         name=region.name,

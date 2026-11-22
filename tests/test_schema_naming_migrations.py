@@ -327,4 +327,6 @@ def test_upgrade_keeps_every_row_and_builds_the_fresh_catalog(
         (row["id"], 1, row["provider_plant_id"], row["eic"])
         for row in before["metering_epiasconnection"]
     ]
+    for row in before["forecasts_forecastsnapshot"]:
+        del row["weather_payload"], row["weather_error"]
     assert after == renamed(before)

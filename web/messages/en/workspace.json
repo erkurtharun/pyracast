@@ -143,7 +143,6 @@
         "siteUnavailable": "This plant is not available."
     },
     "Reminders": {
-        "remove": "Remove",
         "addTime": "Add time",
         "emailRecipients": "Email recipients",
         "emailLanguage": "Email language",
@@ -396,7 +395,6 @@
         "proposed": "Proposed",
         "atSubmission": "At submission",
         "noReading": "No reading",
-        "quality": "Quality",
         "revert": "Restore current provider reading",
         "approve": "Approve and apply",
         "reject": "Reject",

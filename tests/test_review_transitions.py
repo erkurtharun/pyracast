@@ -19,12 +19,11 @@ from pyracast.plants.approval import (
     approve_region,
     decide_review,
     declaration_fingerprint,
-    review_snapshot,
 )
 from pyracast.plants.models import PlantConfiguration, PlantSubmission
 from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
 from pyracast.regions.review import TRANSITIONS, set_review_status
-from tests.support.admin_setup import submitted_plant
+from tests.support.admin_setup import review_snapshot, submitted_plant
 from tests.support.domain import NOW, FakeAdapter, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)

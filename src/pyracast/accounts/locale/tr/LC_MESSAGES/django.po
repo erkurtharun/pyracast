@@ -109,9 +109,6 @@ msgstr "Talep zaten farklı bir sonuçla kapatıldı."
 msgid "The review context changed. Refresh and review again."
 msgstr "İnceleme verileri değişti. Sayfayı yenileyip yeniden inceleyin."
 
-msgid "The incident request target is incomplete."
-msgstr "Kesinti talebinin hedef bilgileri eksik."
-
 msgid "Unknown incident request action."
 msgstr "Bilinmeyen kesinti talebi işlemi."
 

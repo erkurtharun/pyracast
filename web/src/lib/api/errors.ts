@@ -159,7 +159,7 @@ type ContractBody = Record<string, unknown> & {
     message: string;
 };
 
-export function isContractBody(data: unknown): data is ContractBody {
+function isContractBody(data: unknown): data is ContractBody {
     return (
         isRecord(data) &&
         typeof data.code === "string" &&

@@ -70,7 +70,7 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
             Q(forecastresult__daily_payloads__has_key=tomorrow.isoformat())
             | Q(forecastresult__payload__local_date=tomorrow.isoformat())
         )
-        .defer("raw_payload", "normalized_intervals", "weather_payload")
+        .defer("raw_payload", "normalized_intervals")
     ):
         result = saved_day_payload(candidate, tomorrow)
         if result is None:

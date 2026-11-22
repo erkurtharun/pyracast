@@ -3,8 +3,20 @@ from datetime import datetime, timedelta
 from django.utils import timezone
 
 
+def pending_mail_ids(now: datetime) -> list[int]:
+    from pyracast.accounts.models import OutboundMail
+    from pyracast.background.deadlines import PUBLISH_BATCH
+    from pyracast.notifications.outbox import _due
+
+    return list(
+        OutboundMail.objects.filter(_due(now))
+        .order_by("available_at", "pk")
+        .values_list("pk", flat=True)[:PUBLISH_BATCH]
+    )
+
+
 def deliver_mail(now: datetime | None = None) -> int:
-    from pyracast.notifications.outbox import pending_mail_ids, send_outbound_mail
+    from pyracast.notifications.outbox import send_outbound_mail
 
     moment = now or timezone.now()
     sent = 0

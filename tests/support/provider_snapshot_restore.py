@@ -107,7 +107,6 @@ def acquisition(
     attempts: int = 1,
     last_error: str = "",
     rows: list[dict[str, Any]] | None = None,
-    weather_payload: dict[str, Any] | None = None,
     note: str | None = None,
 ) -> ForecastSnapshot:
     """A succeeded job at `slot` and its snapshot; without explicit values the job takes
@@ -172,7 +171,6 @@ def acquisition(
         coverage_start=start,
         coverage_end=end,
         available_at=collected_at + timedelta(minutes=1),
-        weather_payload=weather_payload,
     )
 
 
@@ -289,7 +287,6 @@ def collections_before_reset(system: System) -> BeforeReset:
             local(date(2026, 11, 5), 8),
             datetime(2026, 11, 4, 21, tzinfo=UTC),
             datetime(2026, 11, 7, 21, tzinfo=UTC),
-            weather_payload={"source": "open-meteo"},
         ),
         acquisition(
             before,
