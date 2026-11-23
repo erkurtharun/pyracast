@@ -41,6 +41,7 @@ def test_production_rates_cover_every_endpoint_kind() -> None:
     rates = cast(dict[str, str], settings.REST_FRAMEWORK.get("DEFAULT_THROTTLE_RATES", {}))
     assert set(rates) == {
         "forecast",
+        "days",
         "calibration",
         "production_import",
         "submission",
