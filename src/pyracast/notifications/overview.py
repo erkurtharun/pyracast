@@ -41,7 +41,7 @@ class MemberKind(StrEnum):
 
 @dataclass(frozen=True)
 class MemberAddress:
-    membership: int
+    memberships: list[int]
     address: str
     kind: MemberKind
     role: RecipientRole | None
@@ -209,7 +209,7 @@ def _addresses(
         list(members.addresses),
         [
             MemberAddress(
-                member.memberships[0],
+                list(member.memberships),
                 member.address,
                 MemberKind.ADMINISTRATOR if member.administrator else MemberKind.MEMBER,
                 choices.of(member),

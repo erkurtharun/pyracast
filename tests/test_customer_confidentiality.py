@@ -223,7 +223,6 @@ CUSTOMER_FIELDS = {
     "measurement_policy",
     "member_roles",
     "members",
-    "membership",
     "memberships",
     "message",
     "metric_scope",

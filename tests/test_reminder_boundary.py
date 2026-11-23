@@ -118,13 +118,13 @@ def test_the_administrator_reads_the_addresses() -> None:
         "workspace_recipients": ["admin@example.com", "viewer@example.com"],
         "members": [
             {
-                "membership": memberships["admin@example.com"],
+                "memberships": [memberships["admin@example.com"]],
                 "address": "admin@example.com",
                 "kind": "administrator",
                 "role": None,
             },
             {
-                "membership": memberships["viewer@example.com"],
+                "memberships": [memberships["viewer@example.com"]],
                 "address": "viewer@example.com",
                 "kind": "member",
                 "role": None,

@@ -184,9 +184,9 @@ class AddressChoice:
 
 @dataclass(frozen=True)
 class MemberChoice:
-    """`address` is the member's address the form showed; `None` deletes the choice."""
+    """`memberships` and `address` are a member row the form showed; `None` deletes the choice."""
 
-    membership: int
+    memberships: frozenset[int]
     address: str
     role: RecipientRole | None
 
@@ -264,14 +264,11 @@ def _check_recipient_limit(count: int, current: int, limit: int, unchanged_pause
 def _member_choices(
     choices: Sequence[MemberChoice], members: Workspace
 ) -> dict[int, RecipientRole | None]:
-    """Each entry decides for every member of the address it names, while its membership is one
-    of them."""
     decided: dict[int, RecipientRole | None] = {}
     for choice in choices:
-        present = members.memberships(choice.address)
-        if choice.membership not in present:
+        if not members.are_members(choice.address, choice.memberships):
             raise ConflictError(ErrorCode.REMINDER_SCHEDULE_CHANGED)
-        decided.update(dict.fromkeys(present, choice.role))
+        decided.update(dict.fromkeys(choice.memberships, choice.role))
     return decided
 
 

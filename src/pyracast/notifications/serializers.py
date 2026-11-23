@@ -42,7 +42,9 @@ class AddressRoleInput(InputSerializer):
 
 
 class MemberRoleInput(InputSerializer):
-    membership = serializers.IntegerField(min_value=1)
+    memberships = serializers.ListField(
+        child=serializers.IntegerField(min_value=1), max_length=MAX_RECIPIENT_LIMIT
+    )
     address = serializers.EmailField(max_length=RECIPIENT_MAX_LENGTH)
     role = serializers.ChoiceField(choices=RecipientRole.choices, allow_null=True)
 
@@ -71,11 +73,12 @@ class ReminderInput(InputSerializer):
 
     def validate_member_roles(self, value: list[dict[str, Any]]) -> list[MemberChoice]:
         keys = {mailbox_key(entry["address"]) for entry in value}
-        if len({entry["membership"] for entry in value}) != len(value) or len(keys) != len(value):
+        memberships = [pk for entry in value for pk in set(entry["memberships"])]
+        if len(set(memberships)) != len(memberships) or len(keys) != len(value):
             raise serializers.ValidationError(gettext("Choose each member's role once."))
         return [
             MemberChoice(
-                entry["membership"],
+                frozenset(entry["memberships"]),
                 entry["address"],
                 None if entry["role"] is None else RecipientRole(entry["role"]),
             )
@@ -126,7 +129,7 @@ class ReminderDeliveryOutput(serializers.Serializer[ReminderDelivery]):
 
 
 class MemberAddressOutput(serializers.Serializer[MemberAddress]):
-    membership = serializers.IntegerField()
+    memberships = serializers.ListField(child=serializers.IntegerField())
     address = serializers.EmailField()
     kind = serializers.ChoiceField(choices=[kind.value for kind in MemberKind])
     role = serializers.ChoiceField(choices=RecipientRole.choices, allow_null=True)

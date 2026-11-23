@@ -139,8 +139,8 @@ def visible_save(system: System, alice: User, bob: User, **changes: Any) -> Any:
             "hide_recipients": False,
             "address_roles": [{"address": "boss@example.com", "role": "to", "memberships": []}],
             "member_roles": [
-                {"membership": membership(alice), "address": alice.email, "role": "bcc"},
-                {"membership": membership(bob), "address": bob.email, "role": "cc"},
+                {"memberships": [membership(alice)], "address": alice.email, "role": "bcc"},
+                {"memberships": [membership(bob)], "address": bob.email, "role": "cc"},
             ],
         }
         | changes,
@@ -170,13 +170,18 @@ def test_a_save_with_roles_stores_them_and_answers_them_to_the_administrator() -
     assert body["hide_recipients"] is False
     assert body["addresses"]["members"] == [
         {
-            "membership": membership(system.member),
+            "memberships": [membership(system.member)],
             "address": ADMIN,
             "kind": "administrator",
             "role": None,
         },
-        {"membership": membership(alice), "address": alice.email, "kind": "member", "role": "bcc"},
-        {"membership": membership(bob), "address": bob.email, "kind": "member", "role": "cc"},
+        {
+            "memberships": [membership(alice)],
+            "address": alice.email,
+            "kind": "member",
+            "role": "bcc",
+        },
+        {"memberships": [membership(bob)], "address": bob.email, "kind": "member", "role": "cc"},
     ]
     assert body["addresses"]["added"] == [
         {"address": "boss@example.com", "role": "to", "eligible": True, "memberships": []},
@@ -218,7 +223,7 @@ def test_a_save_replaces_typed_choices_and_the_named_members_and_preserves_the_o
         system,
         hide_recipients=False,
         address_roles=[{"address": "OUTSIDE@example.com", "role": "cc", "memberships": []}],
-        member_roles=[{"membership": membership(alice), "address": alice.email, "role": None}],
+        member_roles=[{"memberships": [membership(alice)], "address": alice.email, "role": None}],
     )
 
     assert response.status_code == 200, response.content
@@ -264,7 +269,7 @@ def test_an_unchanged_save_writes_nothing() -> None:
             "address_roles",
         ),
         (
-            {"member_roles": [{"membership": 1, "address": ADMIN, "role": "to", "extra": 1}]},
+            {"member_roles": [{"memberships": [1], "address": ADMIN, "role": "to", "extra": 1}]},
             "member_roles",
         ),
     ],
@@ -284,9 +289,9 @@ def test_malformed_role_entries_are_refused_on_their_field(
 
 def test_two_entries_for_one_member_are_refused() -> None:
     system, alice, _ = workspace()
-    entry = {"membership": membership(alice), "address": alice.email, "role": "cc"}
+    entry = {"memberships": [membership(alice)], "address": alice.email, "role": "cc"}
 
-    response = put(system, member_roles=[entry, entry | {"role": "to"}])
+    response = put(system, member_roles=[entry, entry | {"address": ADMIN, "role": "to"}])
 
     assert response.status_code == 400
     assert list(response.json()["fields"]) == ["member_roles"]
@@ -312,7 +317,7 @@ def other_workspace_membership() -> int:
 def test_a_member_entry_that_no_longer_matches_refuses_the_whole_save(case: str) -> None:
     system, alice, bob = workspace()
     visible_save(system, alice, bob)
-    entry = {"membership": membership(bob), "address": bob.email, "role": "to"}
+    entry = {"memberships": [membership(bob)], "address": bob.email, "role": "to"}
     if case == "outdated address":
         EmailAddress.objects.filter(user=bob).update(email="bob.new@example.com")
         User.objects.filter(pk=bob.pk).update(email="bob.new@example.com")
@@ -324,7 +329,7 @@ def test_a_member_entry_that_no_longer_matches_refuses_the_whole_save(case: str)
         remove_workspace_member(system.member, system.tenant.pk, bob.pk)
     else:
         entry = {
-            "membership": other_workspace_membership(),
+            "memberships": [other_workspace_membership()],
             "address": "outsider@example.com",
             "role": "to",
         }
@@ -379,7 +384,7 @@ def test_a_viewer_reads_the_mode_and_no_address_membership_kind_or_role() -> Non
     assert [delivery["recipient_roles"] for delivery in body["deliveries"]] == [None]
     text = json.dumps(body)
     assert "@" not in text
-    assert all(word not in text for word in ('"membership"', '"kind"', '"role"'))
+    assert all(word not in text for word in ('"memberships"', '"kind"', '"role"'))
 
 
 def test_the_history_answers_each_address_with_its_header_after_the_marker() -> None:
@@ -459,7 +464,7 @@ def save_naming(system: System, user: User) -> str:
             language="en",
             now=NOW,
             hide_recipients=False,
-            member_roles=[MemberChoice(membership(user), user.email, BCC)],
+            member_roles=[MemberChoice(frozenset({membership(user)}), user.email, BCC)],
         )
     except ConflictError as error:
         return error.code
@@ -547,7 +552,7 @@ def test_an_address_confirmed_after_a_saves_read_of_people_leaves_the_save_one_p
             now=NOW,
             hide_recipients=False,
             address_roles=[AddressChoice("bob@example.com", TO, frozenset({membership(bob)}))],
-            member_roles=[MemberChoice(membership(bob), "bob@example.com", CC)],
+            member_roles=[MemberChoice(frozenset({membership(bob)}), "bob@example.com", CC)],
         )
 
     assert hook.fired
@@ -649,9 +654,27 @@ def folded_members() -> tuple[System, User, User]:
 
 
 @pytest.mark.parametrize("named", [0, 1])
-def test_an_entry_naming_either_member_of_a_folded_address_stores_the_choice_for_both(
+def test_an_entry_naming_both_members_of_a_folded_address_stores_the_choice_for_both(
     named: int,
 ) -> None:
+    system, lower, higher = folded_members()
+    both = [membership(lower), membership(higher)]
+
+    response = put(
+        system,
+        recipients=["boss@example.com"],
+        hide_recipients=False,
+        member_roles=[{"memberships": both, "address": FOLDED[named], "role": "cc"}],
+    )
+
+    assert response.status_code == 200, response.content
+    assert stored_roles(system)[1] == {FOLDED[0]: "cc", FOLDED[1]: "cc"}
+    (row,) = [row for row in response.json()["addresses"]["members"] if row["address"] == FOLDED[0]]
+    assert row == {"memberships": both, "address": FOLDED[0], "kind": "member", "role": "cc"}
+
+
+@pytest.mark.parametrize("named", [0, 1])
+def test_an_entry_naming_one_member_of_a_folded_address_refuses_the_save(named: int) -> None:
     system, lower, higher = folded_members()
     choosing = (lower, higher)[named]
 
@@ -659,18 +682,14 @@ def test_an_entry_naming_either_member_of_a_folded_address_stores_the_choice_for
         system,
         recipients=["boss@example.com"],
         hide_recipients=False,
-        member_roles=[{"membership": membership(choosing), "address": FOLDED[named], "role": "cc"}],
+        member_roles=[
+            {"memberships": [membership(choosing)], "address": FOLDED[named], "role": "cc"}
+        ],
     )
 
-    assert response.status_code == 200, response.content
-    assert stored_roles(system)[1] == {FOLDED[0]: "cc", FOLDED[1]: "cc"}
-    (row,) = [row for row in response.json()["addresses"]["members"] if row["address"] == FOLDED[0]]
-    assert row == {
-        "membership": membership(lower),
-        "address": FOLDED[0],
-        "kind": "member",
-        "role": "cc",
-    }
+    assert response.status_code == 409, response.content
+    assert response.json()["code"] == "reminder_schedule_changed"
+    assert not ReminderSchedule.objects.exists()
 
 
 def test_the_answer_combines_the_choices_and_kinds_of_a_folded_address() -> None:
@@ -687,7 +706,7 @@ def test_the_answer_combines_the_choices_and_kinds_of_a_folded_address() -> None
 
     assert [row for row in rows if row["address"] == FOLDED[0]] == [
         {
-            "membership": membership(lower),
+            "memberships": [membership(lower), membership(higher)],
             "address": FOLDED[0],
             "kind": "administrator",
             "role": "bcc",
@@ -702,8 +721,8 @@ def test_two_entries_for_one_folded_address_are_refused() -> None:
         system,
         recipients=["boss@example.com"],
         member_roles=[
-            {"membership": membership(lower), "address": FOLDED[0], "role": "cc"},
-            {"membership": membership(higher), "address": FOLDED[1], "role": "to"},
+            {"memberships": [membership(lower)], "address": FOLDED[0], "role": "cc"},
+            {"memberships": [membership(higher)], "address": FOLDED[1], "role": "to"},
         ],
     )
 
@@ -921,7 +940,8 @@ def test_the_published_role_lists_carry_their_bounds() -> None:
         MAX_RECIPIENT_LIMIT,
     ]
     assert (entry.get("maxItems"), entry["items"].get("minimum")) == (MAX_RECIPIENT_LIMIT, 1)
-    assert schemas["MemberRoleInput"]["properties"]["membership"].get("minimum") == 1
+    member = schemas["MemberRoleInput"]["properties"]["memberships"]
+    assert (member.get("maxItems"), member["items"].get("minimum")) == (MAX_RECIPIENT_LIMIT, 1)
 
 
 def test_a_delivery_row_erasure_keeps_for_another_verified_holder_keeps_its_visible_role() -> None:
@@ -1028,3 +1048,76 @@ def test_a_departure_leaves_the_other_spelling_of_the_address_on_the_list_hidden
         (ACE_MAILBOX, "to", [held])
     ]
     assert sent_headers(1) == ([ADMIN], ["alice@example.com", "bob@example.com"], [ACE_MAILBOX])
+
+
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+def test_a_member_entry_naming_the_earlier_members_of_an_address_refuses_the_save() -> None:
+    system, _, bob = workspace()
+    ops = member(system, FOLDED[0])
+    confirm = pending_address_change(bob, FOLDED[1])
+    saved = put(
+        system,
+        recipients=["boss@example.com"],
+        hide_recipients=False,
+        member_roles=[
+            {"memberships": [membership(ops)], "address": FOLDED[0], "role": "cc"},
+            {"memberships": [membership(bob)], "address": bob.email, "role": "bcc"},
+        ],
+    )
+    assert saved.status_code == 200, saved.content
+    (shown,) = [row for row in saved.json()["addresses"]["members"] if row["address"] == FOLDED[0]]
+    assert shown["memberships"] == [membership(ops)]
+    confirm()
+    assert User.objects.get(pk=bob.pk).email == FOLDED[1]
+    before = (revision(system), stored_roles(system), len(events(system)))
+
+    for role in (None, "to"):
+        stale = put(
+            system,
+            recipients=["boss@example.com"],
+            hide_recipients=False,
+            member_roles=[
+                {"memberships": shown["memberships"], "address": FOLDED[0], "role": role}
+            ],
+        )
+        assert stale.status_code == 409, stale.content
+        assert stale.json()["code"] == "reminder_schedule_changed"
+        assert (revision(system), stored_roles(system), len(events(system))) == before
+
+    assert FOLDED[1] in sent_headers(0)[2]
+
+    both = sorted([membership(ops), membership(bob)])
+    honoured = put(
+        system,
+        recipients=["boss@example.com"],
+        hide_recipients=False,
+        member_roles=[{"memberships": both, "address": FOLDED[0], "role": None}],
+    )
+    assert honoured.status_code == 200, honoured.content
+    assert stored_roles(system)[1] == {}
+    assert FOLDED[1] in sent_headers(1)[1]
+
+
+def test_member_entries_that_share_a_membership_or_a_mailbox_are_refused() -> None:
+    system, alice, bob = workspace()
+    unicode_holder, ace_holder = member(system, UNICODE_MAILBOX), member(system, "x@example.com")
+
+    for entries in (
+        [
+            {"memberships": [membership(alice)], "address": alice.email, "role": "cc"},
+            {
+                "memberships": [membership(bob), membership(alice)],
+                "address": bob.email,
+                "role": "to",
+            },
+        ],
+        [
+            {"memberships": [membership(unicode_holder)], "address": UNICODE_MAILBOX, "role": "cc"},
+            {"memberships": [membership(ace_holder)], "address": ACE_MAILBOX, "role": "to"},
+        ],
+    ):
+        response = put(system, member_roles=entries)
+
+        assert response.status_code == 400
+        assert list(response.json()["fields"]) == ["member_roles"]
+    assert not ReminderSchedule.objects.exists()

@@ -221,7 +221,7 @@ def reminder_save(system: System) -> Callable[[], object]:
         language="en",
         now=NOW,
         hide_recipients=False,
-        member_roles=[MemberChoice(membership, system.member.email, RecipientRole.CC)],
+        member_roles=[MemberChoice(frozenset({membership}), system.member.email, RecipientRole.CC)],
     )
 
 

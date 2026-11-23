@@ -2098,7 +2098,7 @@ export interface components {
          */
         MeasurementBasisEnum: "net_export" | "ac_generation";
         MemberAddressOutput: {
-            membership: number;
+            memberships: number[];
             /** Format: email */
             address: string;
             kind: components["schemas"]["ReminderMemberKindEnum"];
@@ -2110,7 +2110,7 @@ export interface components {
                 | null;
         };
         MemberRoleInput: {
-            membership: number;
+            memberships: number[];
             /** Format: email */
             address: string;
             role:

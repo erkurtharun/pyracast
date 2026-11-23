@@ -8451,8 +8451,11 @@
             "MemberAddressOutput": {
                 "type": "object",
                 "properties": {
-                    "membership": {
-                        "type": "integer"
+                    "memberships": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
                     },
                     "address": {
                         "type": "string",
@@ -8473,14 +8476,18 @@
                         ]
                     }
                 },
-                "required": ["address", "kind", "membership", "role"]
+                "required": ["address", "kind", "memberships", "role"]
             },
             "MemberRoleInput": {
                 "type": "object",
                 "properties": {
-                    "membership": {
-                        "type": "integer",
-                        "minimum": 1
+                    "memberships": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer",
+                            "minimum": 1
+                        },
+                        "maxItems": 32767
                     },
                     "address": {
                         "type": "string",
@@ -8499,7 +8506,7 @@
                         ]
                     }
                 },
-                "required": ["address", "membership", "role"]
+                "required": ["address", "memberships", "role"]
             },
             "MetricScopeEnum": {
                 "enum": ["daylight_intervals", "full_day"],
