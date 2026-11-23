@@ -1,4 +1,11 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+    existsSync,
+    mkdirSync,
+    readdirSync,
+    readFileSync,
+    writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { CoverageReport } from "monocart-coverage-reports";
@@ -49,7 +56,7 @@ export function convertedText(text: string): string {
 
 // Both comment forms of the source map specification; `@` is their deprecated variant.
 const directive =
-    /\/(?:\/[#@][ \t]+sourceMappingURL=([^\s'"`]+)|\*[#@][ \t]+sourceMappingURL=([^\s'"`*]+)[ \t]*\*\/)[ \t]*$/gm;
+    /^(?:\/\/[#@][ \t]+sourceMappingURL=([^\s'"`]+)|\/\*[#@][ \t]+sourceMappingURL=([^\s'"`*]+)[ \t]*\*\/)[ \t]*$/;
 const digits =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 const values = new Map([...digits].map((digit, value) => [digit, value]));
@@ -294,12 +301,24 @@ function inlineMap(url: string): string {
         : decodeURIComponent(data);
 }
 
+// A directive-shaped line elsewhere may be text, such as a line of a template literal.
+function mapReference(source: string): string | undefined {
+    const text = source.trimEnd();
+    const lineStart =
+        Math.max(
+            ...["\n", "\r", "\u{2028}", "\u{2029}"].map((end) =>
+                text.lastIndexOf(end),
+            ),
+        ) + 1;
+    const match = directive.exec(text.slice(lineStart));
+    return match?.[1] ?? match?.[2];
+}
+
 function preparation<T extends Script>(
     entry: T,
     load: MapLoader,
 ): Preparation<T> | undefined {
-    const reference = [...(entry.source ?? "").matchAll(directive)].at(-1);
-    const target = reference?.[1] ?? reference?.[2];
+    const target = mapReference(entry.source ?? "");
     if (!target) return undefined;
     const inline = target.startsWith("data:");
     let mapUrl = entry.url;
@@ -341,9 +360,20 @@ const observed = new Map<
     { source: string; sourceMap: PreparedMap | undefined }
 >();
 
-export async function addBrowserCoverage<T extends Script>(
+type Observation = Script & { functions: { ranges: { count: number }[] }[] };
+type UnbuiltScript = {
+    url: string;
+    observed: number | null;
+    built: number;
+    prefix: boolean;
+    executed: boolean;
+};
+const unbuiltDirectory = path.join("coverage", "unbuilt");
+
+export async function addBrowserCoverage<T extends Observation>(
     entries: T[],
 ): Promise<void> {
+    const unbuilt: UnbuiltScript[] = [];
     const prepared = entries
         .filter((entry) => browserEntry(entry.url))
         .flatMap((entry) => {
@@ -354,10 +384,20 @@ export async function addBrowserCoverage<T extends Script>(
                     builtFile(entry.url, "static"),
                     "utf8",
                 );
-                if (entry.source !== built)
-                    throw new Error(
-                        `Browser script ${entry.url} is not this run's build output`,
-                    );
+                if (entry.source !== built) {
+                    unbuilt.push({
+                        url: entry.url,
+                        observed: entry.source?.length ?? null,
+                        built: built.length,
+                        prefix:
+                            entry.source !== undefined &&
+                            built.startsWith(entry.source),
+                        executed: entry.functions.some(({ ranges }) =>
+                            ranges.some(({ count }) => count > 0),
+                        ),
+                    });
+                    return [];
+                }
                 known = {
                     source: built,
                     sourceMap: preparedEntry(entry, browserMap)?.sourceMap,
@@ -368,8 +408,27 @@ export async function addBrowserCoverage<T extends Script>(
                 ? [{ ...entry, sourceMap: known.sourceMap }]
                 : [];
         });
+    if (unbuilt.length) {
+        mkdirSync(unbuiltDirectory, { recursive: true });
+        writeFileSync(
+            path.join(unbuiltDirectory, `${randomUUID()}.json`),
+            JSON.stringify(unbuilt),
+        );
+    }
     if (prepared.length)
         await new CoverageReport(browserCoverage()).add(prepared);
+}
+
+export function unbuiltScripts(): UnbuiltScript[] {
+    if (!existsSync(unbuiltDirectory)) return [];
+    return readdirSync(unbuiltDirectory)
+        .flatMap(
+            (file) =>
+                JSON.parse(
+                    readFileSync(path.join(unbuiltDirectory, file), "utf8"),
+                ) as UnbuiltScript[],
+        )
+        .sort((a, b) => byCodeUnit(JSON.stringify(a), JSON.stringify(b)));
 }
 
 export function authoredSources(): string[] {

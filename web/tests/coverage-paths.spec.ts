@@ -10,16 +10,16 @@ import {
     symlinkSync,
     writeFileSync,
 } from "node:fs";
-import { createServer, type AddressInfo, type Server } from "node:net";
+import { connect, createServer, type AddressInfo, type Server } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { CoverageReport } from "monocart-coverage-reports";
 import { config as proxyConfig } from "@/proxy";
 import {
-    branchEvidence,
     byCodeUnit,
     combineCoverage,
+    differingArms,
     executed,
     type FileCoverage,
     type ScriptRecords,
@@ -116,7 +116,14 @@ function file(
         statementMap: Object.fromEntries(statements.map(([s], i) => [i, s])),
         s: Object.fromEntries(statements.map(([, count], i) => [i, count])),
         fnMap: Object.fromEntries(
-            functions.map((_, i) => [i, { name: `f${i}` }]),
+            functions.map((_, i) => [
+                i,
+                {
+                    name: `f${i}`,
+                    decl: span(20 + i, 0, 20 + i, 9),
+                    loc: span(20 + i, 9, 20 + i, 30),
+                },
+            ]),
         ),
         f: Object.fromEntries(functions.map((count, i) => [i, count])),
         branchMap: Object.fromEntries(
@@ -124,6 +131,7 @@ function file(
                 i,
                 {
                     type: "switch",
+                    loc: span(40 + i, 0, 40 + i, 50),
                     locations: arms.map(([line]) => span(line, 4, line, 11)),
                 },
             ]),
@@ -311,46 +319,153 @@ test("coverage mode refuses to start without the wrapper's run identifier", () =
 });
 
 const name = "web/src/lib/pick.ts";
-
-test("compilations whose tables differ are never combined and the first executed one by script is kept", () => {
-    const caseOne = (count: number) => [2, count] as [number, number];
-    const caseTwo = (count: number) => [4, count] as [number, number];
-    const forward = file(
-        name,
-        [[span(2, 4, 2, 11), 1]],
-        [1],
-        [[caseOne(1), caseTwo(0)]],
-    );
-    const reversed = file(
-        name,
-        [[span(2, 4, 2, 11), 1]],
-        [1],
-        [[caseTwo(0), caseOne(1)]],
-    );
-    for (const server of [
-        { "file:///a.js": forward, "file:///b.js": reversed },
-        { "file:///a.js": reversed, "file:///b.js": forward },
-    ]) {
-        const combined = combineCoverage({
-            sources: [name],
-            browser: {},
-            server: { [name]: server },
-            baseline: [],
-        })[name]!;
-        expect(armHits(combined)).toEqual({ 2: 1, 4: 0 });
-        expect(Object.keys(combined.b)).toHaveLength(1);
-    }
-    const combined = combineCoverage({
+const first = (count: number): [number, number] => [2, count];
+const second = (count: number): [number, number] => [4, count];
+const third = (count: number): [number, number] => [6, count];
+const ranSwitch = (...arms: [number, number][]) =>
+    file(name, [[span(1, 0, 5, 1), 1]], [1], [arms]);
+const united = (
+    sides: Partial<Omit<Parameters<typeof combineCoverage>[0], "sources">>,
+) =>
+    combineCoverage({
         sources: [name],
         browser: {},
-        server: {
-            [name]: { "file:///a.js": forward, "file:///b.js": forward },
-        },
-        baseline: [],
+        server: {},
+        baseline: {},
+        ...sides,
     })[name]!;
-    expect(armHits(combined)).toEqual({ 2: 2, 4: 0 });
-    expect(combined.f).toEqual({ 0: 2 });
-    expect(lineHits(combined)).toEqual({ 2: 2 });
+const bothOrders = (one: FileCoverage, other: FileCoverage) => [
+    { "a.js": one, "b.js": other },
+    { "a.js": other, "b.js": one },
+];
+
+test("a switch compiled in opposite arm order keeps each authored arm's count in either script order", () => {
+    for (const [forward, reversed] of [
+        [ranSwitch(first(0), second(0)), ranSwitch(second(0), first(1))],
+        [ranSwitch(first(1), second(0)), ranSwitch(second(0), first(0))],
+    ])
+        for (const scripts of bothOrders(forward!, reversed!)) {
+            const coverage = united({ server: { [name]: scripts } });
+            expect(armHits(coverage)).toEqual({ 2: 1, 4: 0 });
+            expect(coverage.b).toEqual({ 0: [1, 0] });
+        }
+});
+
+test("an arm taken only in a script after the first executed one is credited", () => {
+    const untaken = file(
+        name,
+        [[span(1, 0, 5, 1), 1]],
+        [1],
+        [
+            [first(0), second(0)],
+            [
+                [8, 0],
+                [9, 0],
+            ],
+        ],
+    );
+    const taken = ranSwitch(first(0), second(1));
+    expect(
+        armHits(united({ browser: { [name]: { a: untaken, b: taken } } })),
+    ).toEqual({ 2: 0, 4: 1, 8: 0, 9: 0 });
+    expect(
+        armHits(
+            united({
+                browser: { [name]: { a: untaken } },
+                server: { [name]: { b: taken } },
+            }),
+        ),
+    ).toEqual({ 2: 0, 4: 1, 8: 0, 9: 0 });
+});
+
+test("an arm one compilation lacks is counted once and taken when the compilation that has it took it", () => {
+    for (const scripts of bothOrders(
+        ranSwitch(first(1), second(0)),
+        ranSwitch(first(0), second(0), third(1)),
+    )) {
+        const coverage = united({ browser: { [name]: scripts } });
+        expect(coverage.b).toEqual({ 0: [1, 0, 1] });
+        expect(armHits(coverage)).toEqual({ 2: 1, 4: 0, 6: 1 });
+    }
+});
+
+test("a function only the server executed is executed although the browser's record has it unexecuted", () => {
+    const coverage = united({
+        browser: { [name]: { a: file(name, [[span(1, 0, 1, 9), 1]], [0, 1]) } },
+        server: { [name]: { b: file(name, [[span(1, 0, 1, 9), 1]], [1, 0]) } },
+    });
+    expect(coverage.f).toEqual({ 0: 1, 1: 1 });
+    expect(Object.keys(coverage.fnMap)).toHaveLength(2);
+});
+
+test("records with equal tables add their counts and a zero baseline record adds only what is counted", () => {
+    const measured = file(
+        name,
+        [[span(1, 0, 1, 9), 1]],
+        [1],
+        [[first(1), second(0)]],
+    );
+    const coverage = united({
+        browser: { [name]: { a: measured, b: measured } },
+        baseline: {
+            [name]: {
+                c: file(
+                    name,
+                    [
+                        [span(1, 0, 1, 9), 5],
+                        [span(3, 0, 3, 9), 5],
+                    ],
+                    [5, 5],
+                    [
+                        [first(5), second(5)],
+                        [
+                            [8, 5],
+                            [9, 5],
+                        ],
+                    ],
+                ),
+            },
+        },
+    });
+    expect(coverage.f).toEqual({ 0: 2, 1: 0 });
+    expect(coverage.b).toEqual({ 0: [2, 0], 1: [0, 0] });
+    expect(lineHits(coverage)).toEqual({ 1: 2, 3: 0 });
+    expect(united({})).toEqual(file(name, []));
+});
+
+test("branch groups whose arms differ between compilations are counted with their arms never taken", () => {
+    const one = file(
+        name,
+        [],
+        [],
+        [
+            [first(1), second(0)],
+            [
+                [8, 0],
+                [9, 1],
+            ],
+        ],
+    );
+    const other = file(
+        name,
+        [],
+        [],
+        [
+            [first(0), [5, 0]],
+            [
+                [8, 1],
+                [9, 0],
+            ],
+        ],
+    );
+    expect(
+        differingArms({
+            sources: [name],
+            browser: { [name]: { a: one } },
+            server: { [name]: { b: other } },
+            baseline: {},
+        }),
+    ).toEqual({ groups: 1, untaken: 2 });
 });
 
 test("lines are the union of the baseline and every measured record", () => {
@@ -367,222 +482,17 @@ test("lines are the union of the baseline and every measured record", () => {
         sources: [name],
         browser: { [name]: { a: file(name, [[span(1, 0, 1, 9), 3]], [3]) } },
         server: { [name]: { b: file(name, [[span(2, 0, 2, 9), 1]], [1]) } },
-        baseline: [baseline],
+        baseline,
     })[name]!;
     expect(lineHits(combined)).toEqual({ 1: 3, 2: 1, 3: 0 });
     const functionsOnly = combineCoverage({
         sources: [name],
         browser: { [name]: { a: file(name, [], [1]) } },
         server: {},
-        baseline: [baseline],
+        baseline,
     })[name]!;
     expect(lineHits(functionsOnly)).toEqual({ 1: 0, 2: 0, 3: 0 });
     expect(functionsOnly.f).toEqual({ 0: 1 });
-});
-
-test("a source takes the browser's tables when it ran, else the server's, else the zero baseline", () => {
-    const sources = ["web/src/a.ts", "web/src/b.ts", "web/src/c.ts"];
-    const ran = (source: string) =>
-        file(
-            source,
-            [[span(1, 0, 1, 5), 1]],
-            [1],
-            [
-                [
-                    [1, 1],
-                    [2, 0],
-                ],
-            ],
-        );
-    const idle = (source: string) =>
-        file(source, [[span(1, 0, 1, 7), 0]], [0, 0], [[[1, 0]]]);
-    const baseline: ScriptRecords = Object.fromEntries(
-        sources.map((source) => [
-            source,
-            {
-                [source]: file(
-                    source,
-                    [[span(1, 0, 1, 6), 1]],
-                    [1],
-                    [[[3, 1]]],
-                ),
-            },
-        ]),
-    );
-    const combined = combineCoverage({
-        sources,
-        browser: {
-            "web/src/a.ts": { x: ran("web/src/a.ts") },
-            "web/src/b.ts": { x: idle("web/src/b.ts") },
-            "web/src/c.ts": { x: idle("web/src/c.ts") },
-        },
-        server: {
-            "web/src/a.ts": { y: idle("web/src/a.ts") },
-            "web/src/b.ts": { y: ran("web/src/b.ts") },
-        },
-        baseline: [baseline],
-    });
-    expect(Object.keys(combined)).toEqual(sources);
-    expect(combined["web/src/a.ts"]!.b).toEqual({ 0: [1, 0] });
-    expect(combined["web/src/b.ts"]!.b).toEqual({ 0: [1, 0] });
-    expect(combined["web/src/c.ts"]!.b).toEqual({ 0: [0] });
-    expect(combined["web/src/c.ts"]!.f).toEqual({ 0: 0 });
-    expect(lineHits(combined["web/src/c.ts"]!)).toEqual({ 1: 0 });
-    expect(
-        combineCoverage({
-            sources: ["web/src/d.ts"],
-            browser: {},
-            server: {},
-            baseline: [],
-        })["web/src/d.ts"],
-    ).toEqual(file("web/src/d.ts", []));
-});
-
-test("when both sides ran a source its functions and branches are the browser's in full, whichever records each side holds", () => {
-    const one = file(
-        name,
-        [[span(1, 0, 1, 9), 2]],
-        [2, 0],
-        [
-            [
-                [2, 1],
-                [4, 0],
-            ],
-        ],
-    );
-    const other = file(
-        name,
-        [[span(1, 0, 1, 9), 1]],
-        [0, 1, 1],
-        [
-            [
-                [2, 0],
-                [3, 1],
-                [4, 0],
-            ],
-        ],
-    );
-    for (const [browser, server] of [
-        [one, other],
-        [other, one],
-    ]) {
-        const combined = combineCoverage({
-            sources: [name],
-            browser: { [name]: { a: browser! } },
-            server: { [name]: { b: server! } },
-            baseline: [],
-        })[name]!;
-        const { fnMap, f, branchMap, b } = browser!;
-        expect({
-            fnMap: combined.fnMap,
-            f: combined.f,
-            branchMap: combined.branchMap,
-            b: combined.b,
-        }).toEqual({ fnMap, f, branchMap, b });
-    }
-});
-
-test("a source no side ran takes the zero tables of the browser build, else the server build, else the TypeScript transpile", () => {
-    const [browserBuild, serverBuild, transpile] = [1, 2, 3].map(
-        (functions): ScriptRecords => ({
-            [name]: {
-                [`s${functions}`]: file(
-                    name,
-                    [[span(1, 0, 1, 5), 0]],
-                    Array<number>(functions).fill(0),
-                ),
-            },
-        }),
-    );
-    const tables = (baseline: ScriptRecords[]) =>
-        Object.keys(
-            combineCoverage({
-                sources: [name],
-                browser: {},
-                server: {},
-                baseline,
-            })[name]!.fnMap,
-        ).length;
-    expect(tables([browserBuild!, serverBuild!, transpile!])).toBe(1);
-    expect(tables([{}, serverBuild!, transpile!])).toBe(2);
-    expect(tables([{}, {}, transpile!])).toBe(3);
-});
-
-test("branch evidence counts the measured groups outside the selected tables of executed sources", () => {
-    const selected = file(
-        name,
-        [[span(1, 0, 1, 5), 1]],
-        [1],
-        [
-            [
-                [2, 1],
-                [4, 0],
-            ],
-        ],
-    );
-    const unselected = file(
-        name,
-        [[span(1, 0, 1, 5), 1]],
-        [1],
-        [
-            [
-                [2, 1],
-                [4, 0],
-            ],
-            [
-                [6, 0],
-                [7, 1],
-            ],
-        ],
-    );
-    const serverOnly = file(
-        name,
-        [[span(1, 0, 1, 5), 0]],
-        [0],
-        [
-            [
-                [2, 0],
-                [4, 0],
-            ],
-            [
-                [9, 0],
-                [10, 0],
-                [11, 0],
-            ],
-        ],
-    );
-    const idle = "web/src/lib/idle.ts";
-    const sides = {
-        browser: { [name]: { a: selected, b: unselected } },
-        server: {
-            [name]: { c: serverOnly },
-            [idle]: {
-                c: file(
-                    idle,
-                    [],
-                    [0],
-                    [
-                        [
-                            [1, 0],
-                            [2, 0],
-                        ],
-                    ],
-                ),
-            },
-        },
-    };
-    const combined = combineCoverage({
-        sources: [name, idle],
-        ...sides,
-        baseline: [],
-    });
-    expect(combined[name]!.b).toEqual(selected.b);
-    expect(branchEvidence(sides, combined)).toEqual({
-        groups: 2,
-        arms: 5,
-        taken: 1,
-        sources: 1,
-    });
 });
 
 const chunk =
@@ -655,7 +565,7 @@ function browserScript(
     map: object,
     count = 1,
     directive = lineDirective,
-): { url: string; source: string; functions: unknown[] } {
+): { url: string; source: string; functions: ReturnType<typeof wholeScript> } {
     const directory = path.join(distDir(), "static", "chunks");
     mkdirSync(directory, { recursive: true });
     const source = `${text}${directive(`${script}.js.map`)}`;
@@ -671,14 +581,20 @@ function browserScript(
     };
 }
 
-async function quietly(run: () => Promise<void>): Promise<void> {
+async function logged(run: () => Promise<void>): Promise<string[]> {
+    const lines: string[] = [];
     const log = console.log;
-    console.log = () => undefined;
+    console.log = (...parts: unknown[]) => void lines.push(parts.join(" "));
     try {
         await run();
     } finally {
         console.log = log;
     }
+    return lines;
+}
+
+async function quietly(run: () => Promise<void>): Promise<void> {
+    await logged(run);
 }
 
 const sharedScript = (
@@ -713,6 +629,91 @@ test("the report adds each side's mapped execution and keeps the baseline for wh
     });
 });
 
+test("a browser script that is not the build's output is listed and never counted, and fails the report only when it ran", async () => {
+    await inCheckout(authored, async (web) => {
+        await ingestServerSnapshot(serverBuild(web));
+        const ordinary = sharedScript();
+        const cut = ordinary.source.slice(0, 10);
+        await addBrowserCoverage([
+            ordinary,
+            { url: ordinary.url, source: cut, functions: wholeScript(cut, 0) },
+            { url: ordinary.url, functions: wholeScript(cut, 0) },
+        ]);
+        const printed = await logged(() => new CoverageReporter().onEnd());
+        expect(
+            lcovRecords(readFileSync("coverage/lcov.info", "utf8")).get(
+                "web/src/lib/shared.ts",
+            ),
+        ).toMatch(/^DA:1,2$/m);
+        const listed = (observed: number | null, prefix: boolean) =>
+            `Browser script that is not this build's output, not counted: ${JSON.stringify(
+                {
+                    url: ordinary.url,
+                    observed,
+                    built: ordinary.source.length,
+                    prefix,
+                    executed: false,
+                },
+            )}`;
+        expect(
+            printed.filter((line) => line.startsWith("Browser script")),
+        ).toEqual([listed(10, true), listed(null, false)]);
+    });
+    await inCheckout(authored, async (web) => {
+        await ingestServerSnapshot(serverBuild(web));
+        const ordinary = sharedScript();
+        const other = "globalThis.other = 1;\n";
+        await addBrowserCoverage([ordinary]);
+        await addBrowserCoverage([
+            { url: ordinary.url, source: other, functions: wholeScript(other) },
+        ]);
+        await expect(
+            quietly(() => new CoverageReporter().onEnd()),
+        ).rejects.toThrow(
+            `Code that is not this build's output ran in the browser: ${ordinary.url}`,
+        );
+    });
+});
+
+test("only a script's last line is its map directive, so a directive-shaped line in a later template literal credits nothing", async () => {
+    const text = "go();\n";
+    await inCheckout(
+        { "src/lib/go.ts": text, "src/lib/idle.ts": text },
+        async () => {
+            const map = (source: string) => ({
+                sources: [`turbopack:///[project]/src/lib/${source}.ts`],
+                sourcesContent: [text],
+                mappings: "AAAA",
+            });
+            browserScript("idle", text, map("idle"));
+            const shadowed = browserScript(
+                "go",
+                text,
+                map("go"),
+                4,
+                (file) =>
+                    `${lineDirective(file)}const later = \`\n${lineDirective("idle.js.map")}\`;\n`,
+            );
+            const last = browserScript(
+                "last",
+                text,
+                map("go"),
+                2,
+                (file) => `${lineDirective(file)}\n\n`,
+            );
+            await addBrowserCoverage([shadowed, last]);
+            const records = await scriptRecords(browserCoverage());
+            expect(Object.keys(records)).toEqual(["web/src/lib/go.ts"]);
+            expect(
+                Object.keys(records["web/src/lib/go.ts"]!).map(identityUrl),
+            ).toEqual([last.url]);
+            expect(lineHits(only(records["web/src/lib/go.ts"]))).toEqual({
+                1: 2,
+            });
+        },
+    );
+});
+
 test("the zero baseline comes from the build's own scripts, and the TypeScript transpile only from sources no build script maps", async () => {
     const layout = [
         ...Array.from({ length: 20 }, (_, line) => `// ${line + 1}`),
@@ -723,11 +724,12 @@ test("the zero baseline comes from the build's own scripts, and the TypeScript t
         "stop();",
         "",
     ].join("\n");
+    const idle = "const ready = 1;\nidle();\n";
     await inCheckout(
         {
             ...authored,
             "src/app/layout.tsx": layout,
-            "src/lib/idle.ts": "idle();\n",
+            "src/lib/idle.ts": idle,
         },
         async (web) => {
             const chunks = path.join(serverOutput(), "chunks", "ssr");
@@ -768,8 +770,8 @@ test("the zero baseline comes from the build's own scripts, and the TypeScript t
             await addBrowserCoverage([sharedScript()]);
             browserScript("idle", "idle();\n", {
                 sources: ["turbopack:///[project]/src/lib/idle.ts"],
-                sourcesContent: ["idle();\n"],
-                mappings: "AAAA",
+                sourcesContent: [idle],
+                mappings: "AACA",
             });
             await quietly(() => new CoverageReporter().onEnd());
             const records = lcovRecords(
@@ -780,7 +782,7 @@ test("the zero baseline comes from the build's own scripts, and the TypeScript t
                 "DA:25,1",
             ]);
             expect(lineRecords(records.get("web/src/lib/idle.ts"))).toEqual([
-                "DA:1,0",
+                "DA:2,0",
             ]);
             expect(lineRecords(records.get("web/src/app/page.tsx"))).toEqual([
                 "DA:1,0",
@@ -895,14 +897,14 @@ test("two scripts of one authored source stay two records and add their counts",
                 sources: ["web/src/lib/shared.ts"],
                 browser: records,
                 server: {},
-                baseline: [],
+                baseline: {},
             })["web/src/lib/shared.ts"]!;
             expect(lineHits(combined)).toEqual({ 1: 3 });
         },
     );
 });
 
-test("two compilations of a switch in opposite arm order count only the arm each ran, at one script address or two", async () => {
+test("two compilations of a switch in opposite arm order count each authored arm by what ran, at one script address or two", async () => {
     const lines = [
         "switch (globalThis.x) {",
         "    case 1: globalThis.one = 1; break;",
@@ -915,10 +917,10 @@ test("two compilations of a switch in opposite arm order count only the arm each
             order: number[],
             mappings: string,
             url: string,
+            idle: string[],
         ) => {
             const generated = order.map((line) => lines[line]!).join("\n");
             const source = `${generated}\n${inlineReference(flatMap("turbopack:///[project]/src/lib/pick.ts", text, mappings))}\n`;
-            const idle = generated.indexOf("case 2");
             return preparedEntry(
                 {
                     url,
@@ -933,11 +935,14 @@ test("two compilations of a switch in opposite arm order count only the arm each
                                     endOffset: source.length,
                                     count: 1,
                                 },
-                                {
-                                    startOffset: idle,
-                                    endOffset: generated.indexOf("\n", idle),
+                                ...idle.map((arm) => ({
+                                    startOffset: generated.indexOf(arm),
+                                    endOffset: generated.indexOf(
+                                        "\n",
+                                        generated.indexOf(arm),
+                                    ),
                                     count: 0,
-                                },
+                                })),
                             ],
                         },
                     ],
@@ -950,6 +955,7 @@ test("two compilations of a switch in opposite arm order count only the arm each
         for (const [first, second] of [
             [url("a"), url("a")],
             [url("a"), url("b")],
+            [url("b"), url("a")],
         ])
             for (const reversedFirst of [false, true]) {
                 rmSync("coverage", { recursive: true, force: true });
@@ -957,11 +963,13 @@ test("two compilations of a switch in opposite arm order count only the arm each
                     [0, 1, 2, 3],
                     "AAAA;AACA;AACA;AACA",
                     first!,
+                    ["case 2"],
                 );
                 const reversed = compilation(
                     [0, 2, 1, 3],
                     "AAAA;AAEA;AADA;AAEA",
                     second!,
+                    ["case 1", "case 2"],
                 );
                 await new CoverageReport(browserCoverage()).add(
                     reversedFirst ? [reversed, forward] : [forward, reversed],
@@ -972,7 +980,7 @@ test("two compilations of a switch in opposite arm order count only the arm each
                     sources: [name],
                     browser: records,
                     server: {},
-                    baseline: [],
+                    baseline: {},
                 })[name]!;
                 expect(armHits(combined), `${second} ${reversedFirst}`).toEqual(
                     {
@@ -1445,7 +1453,7 @@ test("the coverage wrapper refuses to run while its port is held and leaves no l
     });
 });
 
-test("the system frees the coverage lock of a process that was killed", async () => {
+function lockHolder() {
     const child = spawn(
         process.execPath,
         [
@@ -1456,17 +1464,40 @@ test("the system frees the coverage lock of a process that was killed", async ()
         { stdio: ["ignore", "pipe", "inherit"] },
     );
     const exited = new Promise((resolve) => child.once("exit", resolve));
-    const port = await new Promise<number>((resolve, reject) => {
+    const port = new Promise<number>((resolve, reject) => {
         let output = "";
         child.stdout.on("data", (data: Buffer) => {
             output += data.toString();
-            const held = /held (\d+)/.exec(output);
+            const held = /^held (\d+)\r?\n/.exec(output);
             if (held) resolve(Number(held[1]));
         });
         child.once("exit", () => reject(new Error("The lock holder ended")));
     });
-    await expect(listening(port)).rejects.toThrow("EADDRINUSE");
-    child.kill();
-    await exited;
-    await closed(await listening(port));
+    return { child, exited, port };
+}
+
+test("the system frees the coverage lock of a process that was killed", async () => {
+    const holder = lockHolder();
+    try {
+        const port = await holder.port;
+        await expect(listening(port)).rejects.toThrow("EADDRINUSE");
+        holder.child.kill();
+        await holder.exited;
+        await closed(await listening(port));
+    } finally {
+        holder.child.kill();
+    }
+});
+
+test("the coverage lock closes every connection it accepts", async () => {
+    const holder = lockHolder();
+    try {
+        const client = connect({ host: "127.0.0.1", port: await holder.port });
+        await new Promise<void>((resolve, reject) => {
+            client.once("close", () => resolve());
+            client.once("error", reject);
+        });
+    } finally {
+        holder.child.kill();
+    }
 });

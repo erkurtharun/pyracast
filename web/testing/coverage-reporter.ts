@@ -7,8 +7,8 @@ import {
     type CoverageReportOptions,
 } from "monocart-coverage-reports";
 import {
-    branchEvidence,
     combineCoverage,
+    differingArms,
     executed,
     withoutFallback,
     type CoverageMap,
@@ -23,17 +23,15 @@ import {
     authoredSources,
     baselineEntries,
     convertedText,
+    unbuiltScripts,
 } from "./coverage-maps";
 import {
     authoredText,
     baselineCoverage,
     browserCoverage,
-    browserEntry,
     combinedCoverage,
-    identityUrl,
     scriptRecordKey,
     serverCoverage,
-    serverEntry,
 } from "./coverage-options";
 
 export async function scriptRecords(
@@ -61,20 +59,11 @@ function ran(records: ScriptRecords): boolean {
     );
 }
 
-async function baselineRecords(sources: string[]): Promise<ScriptRecords[]> {
+async function baselineRecords(sources: string[]): Promise<ScriptRecords> {
     const options = baselineCoverage();
     const entries = baselineEntries(sources);
     if (entries.length) await new CoverageReport(options).add(entries);
-    const kinds: ScriptRecords[] = [{}, {}, {}];
-    for (const [source, scripts] of Object.entries(
-        await scriptRecords(options),
-    ))
-        for (const [script, record] of Object.entries(scripts)) {
-            const url = identityUrl(script);
-            const kind = browserEntry(url) ? 0 : serverEntry(url) ? 1 : 2;
-            (kinds[kind]![source] ??= {})[script] = record;
-        }
-    return kinds;
+    return scriptRecords(options);
 }
 
 export default class CoverageReporter implements Reporter {
@@ -90,14 +79,9 @@ export default class CoverageReporter implements Reporter {
             );
         const sources = authoredSources();
         const baseline = await baselineRecords(sources);
-        const combined = combineCoverage({
-            sources,
-            browser,
-            server,
-            baseline,
-        });
+        const sides = { sources, browser, server, baseline };
         const report = new CoverageReport(combinedCoverage());
-        await report.add(combined);
+        await report.add(combineCoverage(sides));
         await report.generate();
         const lcov = (await readFile("coverage/lcov.info", "utf8")).replace(
             /^SF:(.+)$/gm,
@@ -122,8 +106,20 @@ export default class CoverageReporter implements Reporter {
             `Measured frontend coverage: ${JSON.stringify(coverageFigures(lcov))}`,
         );
         console.log(
-            `Branch evidence outside the selected tables: ${JSON.stringify(branchEvidence({ browser, server }, combined))}`,
+            `Branch groups whose arms differ between compilations: ${JSON.stringify(differingArms(sides))}`,
         );
+        const unbuilt = unbuiltScripts();
+        for (const script of unbuilt)
+            console.log(
+                `Browser script that is not this build's output, not counted: ${JSON.stringify(script)}`,
+            );
+        const foreign = new Set(
+            unbuilt.filter((script) => script.executed).map(({ url }) => url),
+        );
+        if (foreign.size)
+            throw new Error(
+                `Code that is not this build's output ran in the browser: ${[...foreign].join(", ")}`,
+            );
         const floor = JSON.parse(
             await readFile("coverage-floor.json", "utf8"),
         ) as Floor;
