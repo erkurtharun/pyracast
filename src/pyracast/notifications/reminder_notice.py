@@ -12,7 +12,7 @@ from pyracast.notifications.models import NotificationDelivery
 
 
 def unsubscribe_header() -> dict[str, str]:
-    """The sender's mailbox only: one message reaches every recipient and shows no address."""
+    """It names the sender's mailbox only, never a recipient's: one message reaches them all."""
     address = parseaddr(settings.DEFAULT_FROM_EMAIL)[1]
     return {"List-Unsubscribe": f"<mailto:{address}?subject=unsubscribe>"}
 
