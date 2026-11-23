@@ -242,12 +242,6 @@ def fresh_throttle_counters() -> None:
     caches["throttle"].clear()
 
 
-@pytest.fixture(autouse=True)
-def visible_reminder_mode_released(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Release 2 removes the gate; `tests/test_reminder_release_gate.py` closes it again.
-    monkeypatch.setattr("pyracast.notifications.addressing.VISIBLE_MODE_RELEASED", True)
-
-
 @pytest.fixture
 def restored_logging() -> Iterator[None]:
     # Request it before `capsys`: the handlers it rebuilds must bind the streams capsys restores.
