@@ -1,5 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
-import { coverage, serverOrigin, webServer } from "./tests/support/server";
+import { coverageRun, serverOrigin, webServer } from "./tests/support/server";
+
+const run = coverageRun();
+const coverage = !!run;
 export default defineConfig({
     testDir: "./tests",
     fullyParallel: true,
@@ -15,5 +18,5 @@ export default defineConfig({
     outputDir: coverage ? "coverage/test-results" : "test-results",
     use: { baseURL: serverOrigin(coverage), trace: "retain-on-failure" },
     projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-    webServer: webServer(coverage),
+    webServer: webServer(run),
 });

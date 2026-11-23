@@ -12,6 +12,22 @@ export type FileCoverage = {
 };
 export type CoverageMap = Record<string, FileCoverage>;
 export type ScriptRecords = Record<string, Record<string, FileCoverage>>;
+export type BranchEvidence = {
+    groups: number;
+    arms: number;
+    taken: number;
+    sources: number;
+};
+
+export function byCodeUnit(a: string, b: string): number {
+    if (a === b) return 0;
+    return a < b ? -1 : 1;
+}
+
+// The line terminators of monocart-locator (lib/line-parser.js), which places the converter's positions.
+export function lineCount(text: string): number {
+    return text.split(/\r\n|[\r\n\u{2028}\u{2029}]/u).length;
+}
 
 function statementsOf(file: FileCoverage): [Span, number][] {
     return Object.entries(file.statementMap).map(([key, span]) => [
@@ -45,19 +61,17 @@ function statementTables(
     };
 }
 
-// The converter got the text, a break and a marker line; a mapped end reaches at most the start of the marker line.
+// `converted` is the text the converter received; its statement for an unmapped source ends inside the last line.
 export function withoutFallback(
     file: FileCoverage,
-    text: string,
+    converted: string,
 ): FileCoverage {
-    const lines = text.split(/\r\n|[\r\n\u2028\u2029]/).length;
+    const last = lineCount(converted);
     return {
         ...file,
         ...statementTables(
             statementsOf(file).filter(
-                ([{ end }]) =>
-                    end.line <= lines ||
-                    (end.line === lines + 1 && end.column === 0),
+                ([{ end }]) => end.line !== last || end.column === 0,
             ),
         ),
     };
@@ -113,7 +127,7 @@ function compilations(
     records: Record<string, FileCoverage> | undefined,
 ): FileCoverage[] {
     const groups = new Map<string, FileCoverage>();
-    for (const script of Object.keys(records ?? {}).sort()) {
+    for (const script of Object.keys(records ?? {}).sort(byCodeUnit)) {
         const record = records![script]!;
         const tables = JSON.stringify([
             Object.values(record.fnMap),
@@ -139,18 +153,18 @@ export function combineCoverage(sides: {
     sources: string[];
     browser: ScriptRecords;
     server: ScriptRecords;
-    baseline: ScriptRecords;
+    baseline: ScriptRecords[];
 }): CoverageMap {
     return Object.fromEntries(
-        sides.sources.toSorted().map((name) => {
-            const baseline = Object.values(sides.baseline[name] ?? {}).map(
-                zeroed,
+        sides.sources.toSorted(byCodeUnit).map((name) => {
+            const baseline = sides.baseline.map((records) =>
+                compilations(records[name]).map(zeroed),
             );
             const measured = [sides.browser[name], sides.server[name]];
             const tables =
                 compilations(sides.browser[name]).find(executed) ??
                 compilations(sides.server[name]).find(executed) ??
-                baseline[0] ??
+                baseline.flat()[0] ??
                 noRecord(name);
             return [
                 name,
@@ -162,7 +176,7 @@ export function combineCoverage(sides: {
                     b: tables.b,
                     ...statementTables(
                         [
-                            ...baseline,
+                            ...baseline.flat(),
                             ...measured.flatMap((records) =>
                                 Object.values(records ?? {}),
                             ),
@@ -172,4 +186,47 @@ export function combineCoverage(sides: {
             ];
         }),
     );
+}
+
+function branchIdentity(branch: unknown): string {
+    const { type, loc, locations } = branch as Record<string, unknown>;
+    return JSON.stringify([type, loc, locations]);
+}
+
+export function branchEvidence(
+    sides: { browser: ScriptRecords; server: ScriptRecords },
+    combined: CoverageMap,
+): BranchEvidence {
+    const evidence = { groups: 0, arms: 0, taken: 0, sources: 0 };
+    for (const [name, file] of Object.entries(combined)) {
+        const records = [sides.browser[name], sides.server[name]].flatMap(
+            (scripts) => Object.values(scripts ?? {}),
+        );
+        if (!records.some(executed)) continue;
+        const selected = new Set(
+            Object.values(file.branchMap).map(branchIdentity),
+        );
+        const absent = new Map<string, number[]>();
+        for (const record of records)
+            for (const [key, branch] of Object.entries(record.branchMap)) {
+                const identity = branchIdentity(branch);
+                if (selected.has(identity)) continue;
+                const counts = record.b[key] ?? [];
+                const known = absent.get(identity);
+                absent.set(
+                    identity,
+                    known
+                        ? known.map((count, arm) => count + (counts[arm] ?? 0))
+                        : [...counts],
+                );
+            }
+        if (!absent.size) continue;
+        evidence.sources += 1;
+        evidence.groups += absent.size;
+        for (const arms of absent.values()) {
+            evidence.arms += arms.length;
+            evidence.taken += arms.filter((count) => count > 0).length;
+        }
+    }
+    return evidence;
 }

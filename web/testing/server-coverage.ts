@@ -1,21 +1,21 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { CDPClient, CoverageReport } from "monocart-coverage-reports";
-import { serverInspector, serverSnapshots } from "../tests/support/server";
-import { fileMap, preparedEntry } from "./coverage-maps";
-import { serverCoverage, serverEntry, serverOutput } from "./coverage-options";
+import {
+    coverageRun,
+    serverInspector,
+    serverSnapshots,
+} from "../tests/support/server";
+import { preparedEntry, serverMap } from "./coverage-maps";
+import {
+    builtFile,
+    serverCoverage,
+    serverEntry,
+    serverOutput,
+} from "./coverage-options";
 
 type ServerProcess = { pid: number; threadId: number };
 type ScriptCoverage = { url: string; functions: unknown[] };
-
-function snapshots(directory: string): Set<string> {
-    try {
-        return new Set(readdirSync(directory));
-    } catch {
-        return new Set();
-    }
-}
 
 function samePath(a: string, b: string): boolean {
     const [left, right] = [path.resolve(a), path.resolve(b)];
@@ -24,21 +24,36 @@ function samePath(a: string, b: string): boolean {
         : left === right;
 }
 
+export function serverProcess(answer: unknown): ServerProcess {
+    const { pid, threadId } = (answer ?? {}) as Record<string, unknown>;
+    if (
+        !Number.isInteger(pid) ||
+        (pid as number) <= 0 ||
+        !Number.isInteger(threadId) ||
+        (threadId as number) < 0
+    )
+        throw new Error(
+            `The Next server inspector answered no process identity: ${JSON.stringify(answer)}`,
+        );
+    return { pid: pid as number, threadId: threadId as number };
+}
+
 // Node names a snapshot coverage-<pid>-<milliseconds>-<thread id>.json (src/inspector_profiler.cc, GetFilename).
-export function newSnapshot(
-    directory: string,
-    before: ReadonlySet<string>,
-    server: ServerProcess,
-): string {
+export function runSnapshot(directory: string, server: ServerProcess): string {
+    let files: string[];
+    try {
+        files = readdirSync(directory);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        files = [];
+    }
     const name = new RegExp(
         `^coverage-${server.pid}-\\d+-${server.threadId}\\.json$`,
     );
-    const written = [...snapshots(directory)].filter(
-        (file) => !before.has(file) && name.test(file),
-    );
+    const written = files.filter((file) => name.test(file));
     if (written.length !== 1)
         throw new Error(
-            `The Next server (process ${server.pid}) wrote ${written.length ? `${written.length} new coverage snapshots` : "no new coverage snapshot"} to ${directory}`,
+            `The Next server (process ${server.pid}) wrote ${written.length ? `${written.length} coverage snapshots` : "no coverage snapshot"} to ${directory}`,
         );
     return path.join(directory, written[0]!);
 }
@@ -58,9 +73,9 @@ export async function ingestServerSnapshot(file: string): Promise<void> {
         const script = preparedEntry(
             {
                 ...entry,
-                source: readFileSync(fileURLToPath(entry.url), "utf8"),
+                source: readFileSync(builtFile(entry.url, "server"), "utf8"),
             },
-            fileMap,
+            serverMap,
         );
         return script ? [script] : [];
     });
@@ -80,6 +95,7 @@ async function evaluated(
 
 // Playwright force-stops the server, so flush V8 coverage before shutdown.
 export default async function collectServerCoverage(): Promise<void> {
+    const directory = serverSnapshots(coverageRun()!);
     const { host, port } = serverInspector;
     const client = await CDPClient(serverInspector);
     if (!client) throw new Error(`No Next server inspector at ${host}:${port}`);
@@ -88,22 +104,18 @@ export default async function collectServerCoverage(): Promise<void> {
             client,
             "process.env.NODE_V8_COVERAGE",
         );
-        if (
-            typeof recorded !== "string" ||
-            !samePath(recorded, serverSnapshots)
-        )
+        if (typeof recorded !== "string" || !samePath(recorded, directory))
             throw new Error(
-                `The inspector at ${host}:${port} is not this run's Next server: it records coverage in ${String(recorded)}, not ${serverSnapshots}`,
+                `The inspector at ${host}:${port} is not this run's Next server: it records coverage in ${String(recorded)}, not ${directory}`,
             );
-        const server = (await evaluated(
-            client,
-            '({ pid: process.pid, threadId: process.getBuiltinModule("node:worker_threads").threadId })',
-        )) as ServerProcess;
-        const before = snapshots(serverSnapshots);
-        await client.writeCoverage();
-        await ingestServerSnapshot(
-            newSnapshot(serverSnapshots, before, server),
+        const server = serverProcess(
+            await evaluated(
+                client,
+                '({ pid: process.pid, threadId: process.getBuiltinModule("node:worker_threads").threadId })',
+            ),
         );
+        await client.writeCoverage();
+        await ingestServerSnapshot(runSnapshot(directory, server));
     } finally {
         await client.close();
     }

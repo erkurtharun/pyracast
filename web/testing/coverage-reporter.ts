@@ -7,6 +7,7 @@ import {
     type CoverageReportOptions,
 } from "monocart-coverage-reports";
 import {
+    branchEvidence,
     combineCoverage,
     executed,
     withoutFallback,
@@ -18,14 +19,21 @@ import {
     coverageShortfalls,
     type Floor,
 } from "./coverage-floor";
-import { authoredSources, baselineEntries } from "./coverage-maps";
+import {
+    authoredSources,
+    baselineEntries,
+    convertedText,
+} from "./coverage-maps";
 import {
     authoredText,
     baselineCoverage,
     browserCoverage,
+    browserEntry,
     combinedCoverage,
+    identityUrl,
     scriptRecordKey,
     serverCoverage,
+    serverEntry,
 } from "./coverage-options";
 
 export async function scriptRecords(
@@ -41,7 +49,7 @@ export async function scriptRecords(
         const [source, script] = scriptRecordKey(key)!;
         (records[source] ??= {})[script] = withoutFallback(
             coverage,
-            authoredText(source)!,
+            convertedText(authoredText(source)!),
         );
     }
     return records;
@@ -53,11 +61,20 @@ function ran(records: ScriptRecords): boolean {
     );
 }
 
-async function baselineRecords(): Promise<ScriptRecords> {
+async function baselineRecords(sources: string[]): Promise<ScriptRecords[]> {
     const options = baselineCoverage();
-    const entries = baselineEntries();
+    const entries = baselineEntries(sources);
     if (entries.length) await new CoverageReport(options).add(entries);
-    return scriptRecords(options);
+    const kinds: ScriptRecords[] = [{}, {}, {}];
+    for (const [source, scripts] of Object.entries(
+        await scriptRecords(options),
+    ))
+        for (const [script, record] of Object.entries(scripts)) {
+            const url = identityUrl(script);
+            const kind = browserEntry(url) ? 0 : serverEntry(url) ? 1 : 2;
+            (kinds[kind]![source] ??= {})[script] = record;
+        }
+    return kinds;
 }
 
 export default class CoverageReporter implements Reporter {
@@ -72,11 +89,15 @@ export default class CoverageReporter implements Reporter {
                 `No mapped execution of an authored source in the coverage of: ${idle.join(", ")}`,
             );
         const sources = authoredSources();
-        const baseline = await baselineRecords();
+        const baseline = await baselineRecords(sources);
+        const combined = combineCoverage({
+            sources,
+            browser,
+            server,
+            baseline,
+        });
         const report = new CoverageReport(combinedCoverage());
-        await report.add(
-            combineCoverage({ sources, browser, server, baseline }),
-        );
+        await report.add(combined);
         await report.generate();
         const lcov = (await readFile("coverage/lcov.info", "utf8")).replace(
             /^SF:(.+)$/gm,
@@ -87,10 +108,11 @@ export default class CoverageReporter implements Reporter {
             .split("\n")
             .filter((line) => line.startsWith("SF:"))
             .map((line) => line.slice(3).trim());
+        const unique = new Set(measured);
         if (
-            measured.length !== new Set(measured).size ||
+            measured.length !== unique.size ||
             measured.length !== sources.length ||
-            sources.some((file) => !measured.includes(file))
+            sources.some((file) => !unique.has(file))
         ) {
             throw new Error(
                 "LCOV must contain every authored TypeScript source exactly once",
@@ -98,6 +120,9 @@ export default class CoverageReporter implements Reporter {
         }
         console.log(
             `Measured frontend coverage: ${JSON.stringify(coverageFigures(lcov))}`,
+        );
+        console.log(
+            `Branch evidence outside the selected tables: ${JSON.stringify(branchEvidence({ browser, server }, combined))}`,
         );
         const floor = JSON.parse(
             await readFile("coverage-floor.json", "utf8"),

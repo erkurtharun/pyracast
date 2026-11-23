@@ -51,7 +51,6 @@ node_modules/
 out/
 *.tsbuildinfo
 /web/coverage/
-/web/coverage.lock
 /web/playwright-report/
 /web/test-results/
 /web/AGENTS.md
