@@ -588,8 +588,9 @@ test("duplicate recipient addresses are refused by the server and kept on screen
     ).toHaveValue("first@example.test");
 });
 
-const CONFLICT =
-    "Nothing of this save was stored: the reminder settings or the people in this workspace changed. Check them and save again.";
+const CHANGED =
+    "Nothing of this save was stored: the reminder settings or the people in this workspace changed.";
+const CONFLICT = `${CHANGED} Your edits are kept; check them and save again.`;
 
 async function changeElsewhere(page: Page, recipients: string[]) {
     await expect(
@@ -662,7 +663,7 @@ test("a read that fails after a refused save leaves the reader's one Try again a
     const read = page.waitForRequest(isRead);
     await page.getByRole("button", { name: "Save reminders" }).click();
     expect((await (await read).response())!.status()).toBe(503);
-    await expect(page.getByText(CONFLICT, { exact: true })).toBeVisible();
+    await expect(page.getByText(CHANGED, { exact: true })).toBeVisible();
     const panel = page.getByRole("region", { name: "Email reminders" });
     await expect(panel.getByRole("alert")).toHaveText(
         "The service is unavailable.Try again",

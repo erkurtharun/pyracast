@@ -18,7 +18,7 @@ export type Target = {
     address: string;
     memberships: number[];
 };
-export type Decision = Target & { role: Choice };
+type Decision = Target & { role: Choice };
 
 export type Draft = {
     enabled?: boolean;
@@ -28,10 +28,22 @@ export type Draft = {
     include?: boolean;
     rows?: Row[];
     decisions: ReadonlyMap<string, Decision>;
+    base?: number;
 };
 export const EMPTY: Draft = { decisions: new Map() };
 
-export type Outcome = "none" | "saved" | "conflict" | "unknown" | "lost";
+export const edited = ({ decisions, ...fields }: Draft) =>
+    decisions.size > 0 ||
+    Object.entries(fields).some(
+        ([name, value]) => name !== "base" && value !== undefined,
+    );
+
+export type Outcome =
+    "none" | "saved" | "changed" | "refused" | "lost" | "unknown";
+export type Ending = {
+    outcome: Exclude<Outcome, "none">;
+    path: "saved" | "conflict" | "refusal" | "unknown";
+};
 export type Panel = {
     draft: Draft;
     outcome: Outcome;
@@ -40,5 +52,5 @@ export type Panel = {
 export type Desk = {
     panel: Panel;
     change: (change: (now: Panel) => Panel) => void;
-    finish: (outcome: Exclude<Outcome, "none">, close: () => void) => void;
+    finish: (ending: Ending, sent: Draft) => void;
 };

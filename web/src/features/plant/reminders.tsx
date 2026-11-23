@@ -23,6 +23,7 @@ import { useCanManageWorkspace } from "@/ui/workspace-access";
 import { sectionUnavailable } from "@/lib/on-demand";
 import {
     EMPTY,
+    edited,
     type Answer,
     type Desk,
     type Outcome,
@@ -236,9 +237,11 @@ function DeliveryHistory({
 
 function OutcomeLine({
     outcome,
+    kept,
     line,
 }: {
     outcome: Outcome;
+    kept: boolean;
     line: RefObject<HTMLParagraphElement | null>;
 }) {
     const t = useTranslations("Reminders");
@@ -250,15 +253,11 @@ function OutcomeLine({
             tabIndex={-1}
             ref={line}
         >
-            {outcome === "saved"
-                ? common("saved")
-                : t(
-                      outcome === "conflict"
-                          ? "conflict"
-                          : outcome === "unknown"
-                            ? "saveUnconfirmed"
-                            : "accessLost",
-                  )}
+            {outcome === "saved" ? common("saved") : t(`outcomes.${outcome}`)}
+            {kept &&
+                outcome !== "saved" &&
+                outcome !== "lost" &&
+                ` ${t("editsKept", { outcome })}`}
         </p>
     );
 }
@@ -274,10 +273,8 @@ function ReminderSettings({ scope, region }: ReminderProps) {
     const line = useRef<HTMLParagraphElement>(null);
     const focused = useRef<EventTarget | null>(null);
     const answer = resource.data;
-    const access =
-        !canManage || resource.denied
-            ? false
-            : answer && answer.addresses !== null;
+    const carried = !!answer?.addresses;
+    const access = !canManage || resource.denied ? false : answer && carried;
     const was = useRef<boolean | undefined>(undefined);
     const lose = useEffectEvent(() => {
         setPanel((now) => ({ ...now, draft: EMPTY, dropped: [] }));
@@ -285,9 +282,10 @@ function ReminderSettings({ scope, region }: ReminderProps) {
     });
     useEffect(() => {
         if (access === undefined) return;
-        if (was.current && !access) lose();
+        if (!access && (was.current || (was.current === undefined && carried)))
+            lose();
         was.current = access;
-    }, [access]);
+    }, [access, carried]);
     useEffect(() => {
         if (
             focused.current instanceof Node &&
@@ -299,24 +297,30 @@ function ReminderSettings({ scope, region }: ReminderProps) {
     const desk: Desk = {
         panel,
         change: setPanel,
-        finish: (outcome, close) => {
-            focused.current = null;
-            flushSync(() => {
-                close();
-                setPanel((now) => ({
-                    draft:
-                        outcome === "saved" || outcome === "lost"
-                            ? EMPTY
-                            : now.draft,
-                    outcome,
-                    dropped: [],
-                }));
-            });
-            line.current?.focus();
-            if (outcome === "lost") was.current = false;
+        finish: ({ outcome, path }, sent) => {
             resource.discard();
-            if (outcome === "lost") void refresh.tenants();
-            if (outcome === "saved")
+            let own = false;
+            flushSync(() =>
+                setPanel((now) => {
+                    if (now.draft !== sent) return now;
+                    own = true;
+                    focused.current = null;
+                    return {
+                        draft:
+                            path === "conflict" || path === "unknown"
+                                ? { ...now.draft, base: undefined }
+                                : EMPTY,
+                        outcome,
+                        dropped: [],
+                    };
+                }),
+            );
+            if (own) line.current?.focus();
+            if (path === "refusal") {
+                was.current = false;
+                void refresh.tenants();
+            }
+            if (path === "saved")
                 void refresh.workspace(scope.tenant_id, {
                     path: PATH,
                     options: { path: scope },
@@ -324,14 +328,13 @@ function ReminderSettings({ scope, region }: ReminderProps) {
         },
     };
     return (
-        <>
-            <section
-                className="panel"
-                aria-labelledby={headingId}
-                onFocus={(event) => {
-                    focused.current = event.target;
-                }}
-            >
+        <div
+            className={styles.panel}
+            onFocus={(event) => {
+                focused.current = event.target;
+            }}
+        >
+            <section className="panel" aria-labelledby={headingId}>
                 <div className="section-heading">
                     <div>
                         <h2
@@ -348,17 +351,22 @@ function ReminderSettings({ scope, region }: ReminderProps) {
                     )}
                 </div>
                 <div aria-live="polite">
-                    <OutcomeLine outcome={panel.outcome} line={line} />
-                    {panel.dropped.map(({ address, role }, index) => (
-                        <p key={index} className="fine">
-                            {t("choiceRemoved", {
-                                address,
-                                role: role
-                                    ? t(`roles.${role}`)
-                                    : t("defaultRole"),
-                            })}
-                        </p>
-                    ))}
+                    <OutcomeLine
+                        outcome={panel.outcome}
+                        kept={edited(panel.draft)}
+                        line={line}
+                    />
+                    {access &&
+                        panel.dropped.map(({ address, role }, index) => (
+                            <p key={index} className="fine">
+                                {t("choiceRemoved", {
+                                    address,
+                                    role: role
+                                        ? t(`roles.${role}`)
+                                        : t("defaultRole"),
+                                })}
+                            </p>
+                        ))}
                 </div>
                 <Resource
                     resource={resource}
@@ -378,10 +386,10 @@ function ReminderSettings({ scope, region }: ReminderProps) {
                 <DeliveryHistory
                     deliveries={answer.deliveries}
                     timezone={region.timezone}
-                    addresses={canManage && answer.addresses !== null}
+                    addresses={access === true}
                 />
             )}
-        </>
+        </div>
     );
 }
 

@@ -16,17 +16,15 @@ import { ActionForm, CheckboxField, useErrorMessage } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import {
     bodyOf,
+    controlsOf,
     formOf,
     identity,
-    keyOf,
-    memberTarget,
-    stale,
-    typedRows,
-    typedTarget,
+    type Control,
     type Form,
 } from "./reminder-body";
 import {
     DISCLOSURE_CHANGED,
+    edited,
     type Addresses,
     type Answer,
     type Body,
@@ -34,10 +32,9 @@ import {
     type Confirmed,
     type Desk,
     type Draft,
-    type Outcome,
+    type Ending,
     type Previewed,
     type Role,
-    type Target,
 } from "./reminder-draft";
 import { ReminderFields, type Row } from "./reminder-fields";
 import styles from "./reminder-recipients.module.css";
@@ -47,28 +44,38 @@ const PATH = "/api/tenants/{tenant_id}/regions/{region_id}/reminders/";
 const PREVIEW =
     "/api/tenants/{tenant_id}/regions/{region_id}/reminders/preview/";
 
+type Reviewed = { body: Body; answer: Previewed; draft: Draft };
 type Review =
     | { status: "closed" | "previewing" | "saving" }
-    | { status: "open" | "confirming"; body: Body; answer: Previewed }
-    | { status: "failed"; body: Body; answer: Previewed; message: string };
+    | ({ status: "open" | "confirming" } & Reviewed)
+    | ({ status: "failed"; message: string } & Reviewed);
 const CLOSED: Review = { status: "closed" };
-type Ending = Exclude<Outcome, "none">;
+const UNKNOWN: Ending = { outcome: "unknown", path: "unknown" };
+const SAVED: Ending = { outcome: "saved", path: "saved" };
 
 function endingOf(error: unknown, write: boolean): Ending | null {
-    if (!(error instanceof ApiError)) return write ? "unknown" : null;
-    if (error.status === 403) return "lost";
-    if (
-        error.status === 409 &&
-        (error.code === "reminder_schedule_changed" ||
-            (error.body as { code?: unknown } | null)?.code ===
-                DISCLOSURE_CHANGED)
-    )
-        return "conflict";
+    if (!(error instanceof ApiError)) return write ? UNKNOWN : null;
+    if (error.status === 403)
+        return {
+            outcome:
+                error.code === "workspace_admin_required" ? "lost" : "refused",
+            path: "refusal",
+        };
+    if (error.status === 409)
+        return {
+            outcome:
+                error.code === "reminder_schedule_changed" ||
+                (error.body as { code?: unknown } | null)?.code ===
+                    DISCLOSURE_CHANGED
+                    ? "changed"
+                    : "refused",
+            path: "conflict",
+        };
     const unanswered =
         answerLost(error) ||
         error.status >= 500 ||
         (error.status >= 200 && error.status < 300);
-    return write && unanswered ? "unknown" : null;
+    return write && unanswered ? UNKNOWN : null;
 }
 
 const OPTIONS = [null, "to", "cc", "bcc"] as const satisfies readonly Choice[];
@@ -307,22 +314,25 @@ function RoleControl({
     );
 }
 
-const decided = (draft: Draft, target: Target, role: Choice): Draft => ({
+const decided = (
+    draft: Draft,
+    { target, key }: Control,
+    role: Choice,
+): Draft => ({
     ...draft,
-    decisions: new Map(draft.decisions).set(keyOf(target), {
-        ...target,
-        role,
-    }),
+    decisions: new Map(draft.decisions).set(key, { ...target, role }),
 });
 
 function RecipientSection({
     addresses,
     form,
+    controls,
     draft,
     update,
 }: {
     addresses: Addresses;
     form: Form;
+    controls: Map<string, Control>;
     draft: Draft;
     update: (change: (draft: Draft) => Draft) => void;
 }) {
@@ -335,25 +345,21 @@ function RecipientSection({
     const members = new Map(
         addresses.members.map((member) => [identity(member.address), member]),
     );
-    const typed = typedRows(addresses, form);
-    const choiceOf = (target: Target, stored: Choice) => {
-        const decision = draft.decisions.get(keyOf(target));
+    const choiceOf = (control: Control, stored: Choice) => {
+        const decision = draft.decisions.get(control.key);
         return decision ? decision.role : stored;
     };
-    const choose = (target: Target) => (role: Choice) =>
-        update((now) => decided(now, target, role));
+    const choose = (control: Control) => (role: Choice) =>
+        update((now) => decided(now, control, role));
     const setRows = (change: (rows: Row[]) => Row[]) =>
         update((now) => ({ ...now, rows: change(now.rows ?? form.rows) }));
 
     const shownMembers = visible && form.include;
-    const controls: Target[] = [
-        ...(shownMembers ? addresses.members : [])
-            .filter((member) => !typed.has(identity(member.address)))
-            .map(memberTarget),
-        ...(visible ? addresses.added : [])
-            .filter((item) => typed.has(identity(item.address)))
-            .map(typedTarget),
-    ];
+    const shown = [...controls.values()].filter((control) =>
+        control.target.kind === "member"
+            ? shownMembers
+            : visible && control.sent,
+    );
     return (
         <fieldset className="reminder-recipients">
             <legend>{t("emailRecipients")}</legend>
@@ -391,6 +397,9 @@ function RecipientSection({
                         <ul className={styles.members}>
                             {addresses.members.map((member) => {
                                 const id = member.memberships.join();
+                                const control = controls.get(
+                                    identity(member.address),
+                                );
                                 return (
                                     <li key={id} className={styles.member}>
                                         <span className={styles.identity}>
@@ -399,22 +408,24 @@ function RecipientSection({
                                                 {t(`kinds.${member.kind}`)}
                                             </span>
                                         </span>
-                                        {typed.has(identity(member.address)) ? (
-                                            <span className={styles.state}>
-                                                {t("setUnderOtherAddresses")}
-                                            </span>
-                                        ) : (
+                                        {control?.target.kind === "member" ? (
                                             <RoleControl
                                                 name={`${prefix}-m-${id}`}
                                                 address={member.address}
                                                 checked={choiceOf(
-                                                    memberTarget(member),
+                                                    control,
                                                     member.role,
                                                 )}
-                                                choose={choose(
-                                                    memberTarget(member),
-                                                )}
+                                                choose={choose(control)}
                                             />
+                                        ) : (
+                                            control?.sent && (
+                                                <span className={styles.state}>
+                                                    {t(
+                                                        "setUnderOtherAddresses",
+                                                    )}
+                                                </span>
+                                            )
                                         )}
                                     </li>
                                 );
@@ -449,6 +460,7 @@ function RecipientSection({
                 const key = identity(row.text);
                 const item = added.get(key);
                 const member = members.get(key);
+                const control = controls.get(key);
                 const pending = visible && !!key && !item;
                 return (
                     <div className={styles.entry} key={row.id}>
@@ -505,24 +517,23 @@ function RecipientSection({
                                 </button>
                             )}
                         </div>
-                        {visible && item?.eligible && (
-                            <div className={styles.placement}>
-                                <RoleControl
-                                    name={`${prefix}-t-${row.id}`}
-                                    address={item.address}
-                                    checked={choiceOf(
-                                        typedTarget(item),
-                                        item.role,
+                        {visible &&
+                            item &&
+                            control?.target.kind === "typed" && (
+                                <div className={styles.placement}>
+                                    <RoleControl
+                                        name={`${prefix}-t-${row.id}`}
+                                        address={item.address}
+                                        checked={choiceOf(control, item.role)}
+                                        choose={choose(control)}
+                                    />
+                                    {member && (
+                                        <span className="field-hint">
+                                            {t(`kinds.${member.kind}`)}
+                                        </span>
                                     )}
-                                    choose={choose(typedTarget(item))}
-                                />
-                                {member && (
-                                    <span className="field-hint">
-                                        {t(`kinds.${member.kind}`)}
-                                    </span>
-                                )}
-                            </div>
-                        )}
+                                </div>
+                            )}
                         {pending && (
                             <p className="fine" id={`${prefix}-${row.id}-role`}>
                                 {t("roleOnceSaved")}
@@ -543,14 +554,15 @@ function RecipientSection({
             >
                 {t("addAddress")}
             </button>
-            {controls.length > 0 && (
+            {shown.length > 0 && (
                 <button
                     type="button"
                     className="button secondary"
                     onClick={() =>
                         update((now) =>
-                            controls.reduce(
-                                (draft, target) => decided(draft, target, null),
+                            shown.reduce(
+                                (draft, control) =>
+                                    decided(draft, control, null),
                                 now,
                             ),
                         )
@@ -583,9 +595,33 @@ export function ReminderEditor({
     const { draft } = desk.panel;
     const form = formOf(answer, draft);
     const update = (change: (draft: Draft) => Draft) =>
-        desk.change((now) => ({ ...now, draft: change(now.draft) }));
+        desk.change((now) => ({
+            ...now,
+            draft: {
+                ...change(now.draft),
+                base: edited(now.draft)
+                    ? (now.draft.base ?? answer.revision)
+                    : answer.revision,
+            },
+        }));
+    const rebase = useEffectEvent(() =>
+        desk.change((now) =>
+            now.draft.base === undefined && edited(now.draft)
+                ? { ...now, draft: { ...now.draft, base: answer.revision } }
+                : now,
+        ),
+    );
+    useEffect(() => {
+        rebase();
+    }, []);
 
-    const dropped = stale(addresses, draft.decisions).join("\n");
+    const controls = controlsOf(addresses, form);
+    const offered = new Set(
+        [...controls.values()].map((control) => control.key),
+    );
+    const dropped = [...draft.decisions.keys()]
+        .filter((key) => !offered.has(key))
+        .join("\n");
     const drop = useEffectEvent((keys: string[]) =>
         desk.change((now) => {
             const removed = keys.flatMap((key) => {
@@ -609,9 +645,6 @@ export function ReminderEditor({
         if (dropped) drop(dropped.split("\n"));
     }, [dropped]);
 
-    const end = (ending: Ending) =>
-        desk.finish(ending, () => setReview(CLOSED));
-
     const submit = async () => {
         const body = bodyOf(answer, addresses, draft);
         desk.change((now) => ({ ...now, outcome: "none", dropped: [] }));
@@ -631,33 +664,36 @@ export function ReminderEditor({
                 setReview(CLOSED);
                 throw error;
             }
-            return end(ending);
+            return desk.finish(ending, draft);
         }
-        if (!previewed) return end("saved");
-        setReview({ status: "open", body, answer: previewed });
+        if (!previewed) return desk.finish(SAVED, draft);
+        setReview({ status: "open", body, answer: previewed, draft });
     };
 
     const confirm = async () => {
         if (review.status !== "open" && review.status !== "failed") return;
-        const { body, answer: previewed } = review;
-        setReview({ status: "confirming", body, answer: previewed });
+        const reviewed = {
+            body: review.body,
+            answer: review.answer,
+            draft: review.draft,
+        };
+        setReview({ status: "confirming", ...reviewed });
         const confirmed: Confirmed = {
-            ...body,
-            disclosure: previewed.disclosure,
+            ...reviewed.body,
+            disclosure: reviewed.answer.disclosure,
         };
         try {
             await api.put(PATH, { path: scope, body: confirmed });
         } catch (error) {
             const ending = endingOf(error, true);
-            if (ending) return end(ending);
+            if (ending) return desk.finish(ending, reviewed.draft);
             return setReview({
                 status: "failed",
-                body,
-                answer: previewed,
+                ...reviewed,
                 message: errorMessage(error),
             });
         }
-        end("saved");
+        desk.finish(SAVED, reviewed.draft);
     };
 
     const cancel = () => {
@@ -694,6 +730,7 @@ export function ReminderEditor({
                         <RecipientSection
                             addresses={addresses}
                             form={form}
+                            controls={controls}
                             draft={draft}
                             update={update}
                         />

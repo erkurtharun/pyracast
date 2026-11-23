@@ -219,12 +219,16 @@
         "reviewSentence": "Every recipient of these reminders will see the To and Copy addresses below.",
         "confirmSave": "Save and show addresses",
         "backToEditing": "Back to editing",
-        "conflict": "Nothing of this save was stored: the reminder settings or the people in this workspace changed. Check them and save again.",
         "roleOnceSaved": "You can choose a role once this address is saved.",
         "choiceRemoved": "Your choice “{role}” for {address} was removed: the saved recipients or the people in this workspace changed.",
         "noAddressShown": "No address will appear in To or Copy.",
-        "saveUnconfirmed": "The save could not be confirmed. “Who sees what” shows what is stored once it has loaded; your edits are still in the form.",
-        "accessLost": "Nothing was saved: you can no longer change these reminders."
+        "outcomes": {
+            "changed": "Nothing of this save was stored: the reminder settings or the people in this workspace changed.",
+            "refused": "The request was refused and nothing was saved. The page reads the saved settings again.",
+            "unknown": "The save could not be confirmed. The page reads the saved settings again.",
+            "lost": "Nothing was saved: you were no longer an administrator of this workspace."
+        },
+        "editsKept": "{outcome, select, changed {Your edits are kept; check them and save again.} other {Your edits are kept.}}"
     },
     "Outages": {
         "plantOutages": "Plant outages",

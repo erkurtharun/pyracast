@@ -219,12 +219,16 @@
         "reviewSentence": "Bu hatırlatıcıların her alıcısı aşağıdaki Kime ve Bilgi adreslerini görecek.",
         "confirmSave": "Kaydet ve adresleri göster",
         "backToEditing": "Düzenlemeye dön",
-        "conflict": "Bu kaydetmeden hiçbir şey saklanmadı: hatırlatıcı ayarları veya bu çalışma alanındaki kişiler değişti. Kontrol edip yeniden kaydedin.",
         "roleOnceSaved": "Bu adres kaydedildikten sonra rol seçebilirsiniz.",
         "choiceRemoved": "{address} için “{role}” seçiminiz kaldırıldı: kayıtlı alıcılar veya bu çalışma alanındaki kişiler değişti.",
         "noAddressShown": "Kime veya Bilgi satırında hiçbir adres görünmeyecek.",
-        "saveUnconfirmed": "Kaydetme doğrulanamadı. “Kim neyi görür” yüklendiğinde kayıtlı olanı gösterir; düzenlemeleriniz formda duruyor.",
-        "accessLost": "Hiçbir şey kaydedilmedi: bu hatırlatıcıları artık değiştiremezsiniz."
+        "outcomes": {
+            "changed": "Bu kaydetme işlemindeki değişiklikler kaydedilmedi: hatırlatıcı ayarları veya bu çalışma alanındaki kişiler değişti.",
+            "refused": "İstek reddedildi ve hiçbir şey kaydedilmedi. Sayfa kayıtlı ayarları yeniden okuyor.",
+            "unknown": "Kaydetme doğrulanamadı. Sayfa kayıtlı ayarları yeniden okuyor.",
+            "lost": "Hiçbir şey kaydedilmedi: artık bu çalışma alanının yöneticisi değildiniz."
+        },
+        "editsKept": "{outcome, select, changed {Düzenlemeleriniz duruyor; kontrol edip yeniden kaydedin.} other {Düzenlemeleriniz duruyor.}}"
     },
     "Outages": {
         "plantOutages": "Santral kesintileri",
