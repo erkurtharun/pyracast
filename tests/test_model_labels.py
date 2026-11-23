@@ -18,6 +18,7 @@ from pyracast.notifications.models import (
     DeliveryRecipient,
     NotificationDelivery,
     NotificationSettings,
+    ReminderMemberRole,
     ReminderRecipient,
     ReminderRecipientTie,
     ReminderSchedule,
@@ -95,6 +96,10 @@ def test_every_model_the_console_shows_has_its_own_label() -> None:
         (
             ReminderRecipientTie(recipient_id=5, membership_id=2),
             "Recipient 5 tied to membership 2",
+        ),
+        (
+            ReminderMemberRole(schedule_id=7, membership_id=2),
+            "Role of membership 2 in schedule 7",
         ),
         (DeliveryRecipient(pk=6, delivery_id=12), "Recipient 6 of delivery 12"),
         (
