@@ -1,13 +1,21 @@
 import { expect, test } from "@playwright/test";
-import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import {
+    focusManager,
+    QueryClient,
+    QueryObserver,
+    type QueryKey,
+} from "@tanstack/react-query";
 import { ApiError } from "../src/lib/api/errors";
 import { keys } from "../src/lib/api/keys";
 import {
+    answered,
+    changed,
+    createQueryClient,
     fetchList,
-    invalidate,
-    languagePlaceholder,
     pollInterval,
-    sameRequest,
+    readAgain,
+    reload,
+    shownAnswer,
 } from "../src/lib/api/query";
 
 const sites = "/api/tenants/{tenant_id}/sites/";
@@ -28,11 +36,11 @@ function cached(client: QueryClient, key: readonly unknown[]) {
 test("the same request of two accounts or two workspaces never shares a key", () => {
     const client = new QueryClient();
     const requests = [
-        keys.request("1:a", sites, { path: { tenant_id: 5 } }, "en"),
-        keys.request("2:b", sites, { path: { tenant_id: 5 } }, "en"),
-        keys.request("1:a", sites, { path: { tenant_id: 6 } }, "en"),
-        keys.request("1:a", "/api/tenants/", {}, "en"),
-        keys.request("2:b", "/api/tenants/", {}, "en"),
+        keys.request("1:a", sites, { path: { tenant_id: 5 } }),
+        keys.request("2:b", sites, { path: { tenant_id: 5 } }),
+        keys.request("1:a", sites, { path: { tenant_id: 6 } }),
+        keys.request("1:a", "/api/tenants/", {}),
+        keys.request("2:b", "/api/tenants/", {}),
     ];
     for (const key of requests) client.setQueryData(key, key);
     expect(new Set(requests.map((key) => JSON.stringify(key))).size).toBe(5);
@@ -52,24 +60,24 @@ test("the same request of two accounts or two workspaces never shares a key", ()
     ]);
 });
 
-test("a request key carries its path parameters, query and language", () => {
+test("a request key carries its path parameters and query and is the same in every language", () => {
     const scope = { tenant_id: 5, region_id: 11, plant_id: 21 };
-    const day = (date: string, locale = "en") =>
+    const day = (date: string) =>
         JSON.stringify(
-            keys.request(
-                "1:a",
-                forecast,
-                { path: scope, query: { date, data_source: "auto" } },
-                locale,
-            ),
+            keys.request("1:a", forecast, {
+                path: scope,
+                query: { date, data_source: "auto" },
+            }),
         );
     expect(day("2026-11-20")).not.toBe(day("2026-11-21"));
-    expect(day("2026-11-20")).not.toBe(day("2026-11-20", "tr"));
     expect(
         JSON.stringify(
             keys.request("1:a", forecast, { path: { ...scope, plant_id: 22 } }),
         ),
     ).not.toBe(JSON.stringify(keys.request("1:a", forecast, { path: scope })));
+    expect(
+        keys.request("1:a", sites, { path: { tenant_id: 5 } }).at(-1),
+    ).toEqual({});
     const client = new QueryClient();
     client.setQueryData(
         keys.request("1:a", forecast, { path: scope, query: { date: "x" } }),
@@ -82,71 +90,312 @@ test("a request key carries its path parameters, query and language", () => {
     expect(cached(client, keys.path("1:a", forecast, scope))).toHaveLength(1);
 });
 
-test("a request read in another language is the same request, one for another plant or day is not", () => {
-    const scope = { tenant_id: 5, region_id: 11, plant_id: 21 };
-    const read = (plant: number, date: string, locale: string) =>
-        keys.request(
-            "1:a",
-            forecast,
-            { path: { ...scope, plant_id: plant }, query: { date } },
-            locale,
-        );
-    const english = read(21, "2026-11-20", "en");
-    expect(sameRequest(english, read(21, "2026-11-20", "tr"))).toBe(true);
-    expect(sameRequest(english, read(22, "2026-11-20", "tr"))).toBe(false);
-    expect(sameRequest(english, read(21, "2026-11-21", "tr"))).toBe(false);
-    expect(
-        sameRequest(
-            keys.request("1:a", sites, { path: { tenant_id: 5 } }, "en"),
-            keys.request("2:b", sites, { path: { tenant_id: 5 } }, "tr"),
+const sitesKey = keys.request("1:a", sites, { path: { tenant_id: 5 } });
+
+// Reads of one request whose answers the test delivers, in any order.
+function heldReads() {
+    const reads: {
+        resolve: (rows: string) => void;
+        reject: (error: unknown) => void;
+    }[] = [];
+    return {
+        queryFn: answered(
+            () =>
+                new Promise<{ value: string; requests: number }>(
+                    (resolve, reject) =>
+                        reads.push({
+                            resolve: (rows) =>
+                                resolve({ value: rows, requests: 1 }),
+                            reject,
+                        }),
+                ),
         ),
-    ).toBe(false);
+        read: (index: number) => reads[index]!,
+        count: () => reads.length,
+    };
+}
+
+type Server = ReturnType<typeof heldReads>;
+type Result = Parameters<typeof shownAnswer<string>>[0];
+
+function watch(client: QueryClient, server: Server, queryKey = sitesKey) {
+    const observer = new QueryObserver(client, {
+        queryKey,
+        queryFn: server.queryFn,
+    });
+    const delivered: ReturnType<typeof shownAnswer<string>>[] = [];
+    const stop = observer.subscribe((result) =>
+        delivered.push(shownAnswer(result as Result)),
+    );
+    return {
+        observer,
+        stop,
+        now: () => shownAnswer(observer.getCurrentResult() as Result),
+        retry: () => observer.refetch({ cancelRefetch: false }),
+        // Consecutive equal results are one state on the screen.
+        history: () =>
+            delivered.filter(
+                (shown, index) =>
+                    index === 0 ||
+                    JSON.stringify(shown) !==
+                        JSON.stringify(delivered[index - 1]),
+            ),
+    };
+}
+
+const refusal = (status: number, message = "Refused.") =>
+    new ApiError(message, { status });
+const offline = () => new ApiError("Unreachable.", { status: 0 });
+const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
+const rows = (value: string, error?: string) => ({
+    data: value,
+    error,
+    denied: false,
+});
+const refused = (error = "Refused.") => ({
+    data: undefined,
+    error,
+    denied: true,
+});
+const pending = { data: undefined, error: undefined, denied: false };
+
+async function shownWithRows(client: QueryClient, server: Server) {
+    const shown = watch(client, server);
+    server.read(0).resolve("rows");
+    await expect.poll(() => shown.now().data).toBe("rows");
+    return shown;
+}
+
+test("no delivery carries rows after a refusal, through failed reads, a Retry and a language change, until an authorized read answers", async () => {
+    const client = createQueryClient();
+    const server = heldReads();
+    const shown = await shownWithRows(client, server);
+    try {
+        void shown.retry();
+        server.read(1).reject(refusal(403));
+        await expect.poll(() => shown.now()).toEqual(refused());
+        void shown.retry();
+        server.read(2).reject(offline());
+        await expect.poll(() => shown.now()).toEqual(refused("Unreachable."));
+        void readAgain(client);
+        await expect.poll(() => server.count()).toBe(4);
+        server.read(3).reject(offline());
+        await settled();
+        expect(shown.now()).toEqual(refused("Unreachable."));
+        void shown.retry();
+        server.read(4).resolve("rows allowed again");
+        await expect
+            .poll(() => shown.now())
+            .toEqual(rows("rows allowed again"));
+        expect(shown.history()).toEqual([
+            pending,
+            rows("rows"),
+            refused(),
+            refused("Unreachable."),
+            rows("rows allowed again"),
+        ]);
+    } finally {
+        shown.stop();
+    }
 });
 
-for (const status of [403, 404])
-    test(`rows whose request was refused with ${status} are not shown again in another language, rows still allowed are`, async () => {
-        const client = new QueryClient({
-            defaultOptions: { queries: { retry: false } },
-        });
-        const read = (locale: string) =>
-            keys.request("1:a", sites, { path: { tenant_id: 5 } }, locale);
-        const english = read("en");
-        const observer = new QueryObserver(client, {
-            queryKey: english,
-            queryFn: () => Promise.resolve("English rows"),
-        });
-        const unsubscribe = observer.subscribe(() => {});
-        const speak = (locale: string) => {
-            const queryKey = read(locale);
-            observer.setOptions({
-                queryKey,
-                queryFn: () => new Promise<string>(() => {}),
-                placeholderData: languagePlaceholder(queryKey),
-            });
-            return observer.getCurrentResult();
-        };
-        try {
-            await expect
-                .poll(() => observer.getCurrentResult().data)
-                .toBe("English rows");
-            const allowed = speak("tr");
-            expect(allowed.data).toBe("English rows");
-            expect(allowed.isPlaceholderData).toBe(true);
+test("a Retry joins a running read, so that read's refusal is the answer shown", async () => {
+    const client = createQueryClient();
+    client.mount();
+    const server = heldReads();
+    const shown = await shownWithRows(client, server);
+    try {
+        void shown.retry();
+        server.read(1).reject(offline());
+        await expect
+            .poll(() => shown.now())
+            .toEqual(rows("rows", "Unreachable."));
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+        await expect.poll(() => server.count()).toBe(3);
+        const retry = shown.retry();
+        await settled();
+        expect(server.count()).toBe(3);
+        server.read(2).reject(refusal(403));
+        await retry;
+        expect(shown.now()).toEqual(refused());
+        expect(server.count()).toBe(3);
+    } finally {
+        shown.stop();
+        focusManager.setFocused(undefined);
+        client.unmount();
+    }
+});
 
-            observer.setOptions({
-                queryKey: english,
-                queryFn: () =>
-                    Promise.reject(new ApiError("Refused.", { status })),
-            });
-            await observer.refetch();
-            expect(observer.getCurrentResult().error).toBeInstanceOf(ApiError);
-            const denied = speak("de");
-            expect(denied.data).toBeUndefined();
-            expect(denied.isPlaceholderData).toBe(false);
+test("reading again after a change ends every shown query with a read sent after it and leaves an unshown one invalidated", async () => {
+    const client = createQueryClient();
+    const workspace = keys.workspace("1:a", 5);
+    const initialKey = keys.request("1:a", sites, {
+        path: { tenant_id: 5 },
+        query: { page: 2 },
+    });
+    const unshownKey = keys.request("1:a", sites, {
+        path: { tenant_id: 5 },
+        query: { page: 3 },
+    });
+    const populatedServer = heldReads();
+    const populated = await shownWithRows(client, populatedServer);
+    const initialServer = heldReads();
+    const initial = watch(client, initialServer, initialKey);
+    const unshownServer = heldReads();
+    client.setQueryData(unshownKey, { value: "unshown rows", requests: 1 });
+    const unshown = client.getQueryCache().find({
+        queryKey: unshownKey,
+        exact: true,
+    })!;
+    try {
+        void populated.retry();
+        await expect.poll(() => initialServer.count()).toBe(1);
+        void unshown
+            .fetch({ queryKey: unshownKey, queryFn: unshownServer.queryFn })
+            .catch(() => undefined);
+        expect(populatedServer.count()).toBe(2);
+        expect(unshown.state.fetchStatus).toBe("fetching");
+
+        const refreshed = readAgain(client, changed(workspace));
+        await settled();
+        expect(populatedServer.count()).toBe(3);
+        expect(initialServer.count()).toBe(2);
+        expect(unshownServer.count()).toBe(1);
+        populatedServer.read(1).resolve("rows sent before the change");
+        initialServer.read(0).resolve("rows sent before the change");
+        unshownServer.read(0).resolve("rows sent before the change");
+        await settled();
+        populatedServer.read(2).resolve("rows after the change");
+        initialServer.read(1).resolve("rows after the change");
+        await refreshed;
+
+        expect(populated.history()).toEqual([
+            pending,
+            rows("rows"),
+            rows("rows after the change"),
+        ]);
+        expect(initial.history()).toEqual([
+            pending,
+            rows("rows after the change"),
+        ]);
+        expect(unshown.state.isInvalidated).toBe(true);
+        expect(unshown.state.fetchStatus).toBe("idle");
+        expect(unshown.state.data).toEqual({
+            value: "unshown rows",
+            requests: 1,
+        });
+    } finally {
+        populated.stop();
+        initial.stop();
+    }
+});
+
+test("a change's read cancels a held read whose answer would be a refusal; when the read after the change fails the earlier rows stay with the failure", async () => {
+    const client = createQueryClient();
+    const server = heldReads();
+    const shown = await shownWithRows(client, server);
+    const answeredAt = shown.observer.getCurrentResult().dataUpdatedAt;
+    try {
+        void shown.retry();
+        const refreshed = readAgain(client, changed(keys.workspace("1:a", 5)));
+        await settled();
+        expect(server.count()).toBe(3);
+        server.read(1).reject(refusal(403));
+        server.read(2).reject(offline());
+        await refreshed;
+        await settled();
+        expect(shown.now()).toEqual(rows("rows", "Unreachable."));
+        expect(shown.observer.getCurrentResult().dataUpdatedAt).toBe(
+            answeredAt,
+        );
+        expect(shown.history()).toEqual([
+            pending,
+            rows("rows"),
+            rows("rows", "Unreachable."),
+        ]);
+    } finally {
+        shown.stop();
+    }
+});
+
+async function outcome(promise: Promise<unknown>) {
+    return promise.then(
+        (value) => ({ value }),
+        (error: unknown) => ({
+            status: error instanceof ApiError ? error.status : "other",
+        }),
+    );
+}
+
+for (const [answer, expected] of [
+    ["rows", { value: "newer rows" }],
+    ["refusal", { status: 403 }],
+    ["failure", { status: 0 }],
+] as const)
+    test(`a reload resolves only with a value read after it started (${answer})`, async () => {
+        const client = createQueryClient();
+        const server = heldReads();
+        const shown = await shownWithRows(client, server);
+        try {
+            const reloaded = outcome(reload<string>(client, sitesKey));
+            await settled();
+            expect(server.count()).toBe(2);
+            if (answer === "rows") server.read(1).resolve("newer rows");
+            else if (answer === "refusal") server.read(1).reject(refusal(403));
+            else server.read(1).reject(offline());
+            expect(await reloaded).toEqual(expected);
         } finally {
-            unsubscribe();
+            shown.stop();
         }
     });
+
+test("a reload rejects when its query is removed while it reads or was never read", async () => {
+    const client = createQueryClient();
+    const server = heldReads();
+    const shown = await shownWithRows(client, server);
+    try {
+        const reloaded = outcome(reload<string>(client, sitesKey));
+        await settled();
+        client.removeQueries({ queryKey: sitesKey, exact: true });
+        server.read(1).resolve("rows of a removed query");
+        expect(await reloaded).toEqual({ status: "other" });
+        const absent: QueryKey = keys.request("1:a", sites, {
+            path: { tenant_id: 9 },
+        });
+        expect(await outcome(reload<string>(client, absent))).toEqual({
+            status: 0,
+        });
+        expect(server.count()).toBe(2);
+    } finally {
+        shown.stop();
+    }
+});
+
+test("a reload whose key the screen left meanwhile answers with that key's own read, never the shown key's", async () => {
+    const client = createQueryClient();
+    const server = heldReads();
+    const shown = await shownWithRows(client, server);
+    const otherKey = keys.request("1:a", sites, {
+        path: { tenant_id: 5 },
+        query: { page: 2 },
+    });
+    try {
+        const reloaded = outcome(reload<string>(client, sitesKey));
+        await settled();
+        shown.observer.setOptions({
+            queryKey: otherKey,
+            queryFn: server.queryFn,
+        });
+        await expect.poll(() => server.count()).toBe(3);
+        server.read(2).resolve("rows of the shown key");
+        server.read(1).resolve("rows of the left key");
+        expect(await reloaded).toEqual({ value: "rows of the left key" });
+        await expect.poll(() => shown.now().data).toBe("rows of the shown key");
+    } finally {
+        shown.stop();
+    }
+});
 
 function json(body: unknown, status = 200) {
     return new Response(JSON.stringify(body), {
@@ -209,7 +458,6 @@ test("a refresh after a change reuses the read a just-mounted page started and s
         "1:a",
         "/api/tenants/{tenant_id}/change-requests/",
         { path: { tenant_id: 5 }, query: { scope: "pending", page: 1 } },
-        "en",
     );
     let reads = 0;
     client.setQueryData(pageOne, 0, { updatedAt: 0 });
@@ -224,10 +472,10 @@ test("a refresh after a change reuses the read a just-mounted page started and s
     const unsubscribe = observer.subscribe(() => {});
     try {
         await expect.poll(() => reads).toBe(1);
-        await invalidate(client, keys.workspace("1:a", 5), pageOne);
+        await readAgain(client, changed(keys.workspace("1:a", 5), pageOne));
         expect(reads).toBe(1);
         await expect.poll(() => observer.getCurrentResult().data).toBe(1);
-        await invalidate(client, keys.workspace("1:a", 5), pageOne);
+        await readAgain(client, changed(keys.workspace("1:a", 5), pageOne));
         expect(reads).toBe(2);
     } finally {
         unsubscribe();

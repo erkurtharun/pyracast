@@ -2390,9 +2390,9 @@ test("an editor closes when a link shows a day whose read fails, and refresh rea
     await expect(page.getByLabel("Day", { exact: true })).toHaveValue(
         "2026-11-07",
     );
-    await expect(page.getByRole("main").getByRole("alert")).toHaveText(
-        "Production is busy.",
-    );
+    const failure = page.getByRole("main").getByRole("alert");
+    await expect(failure.locator("p")).toHaveText("Production is busy.");
+    await expect(failure.getByRole("button")).toHaveText("Try again");
     await expect(editor).toHaveCount(0);
     const refresh = page.locator(".production-refresh");
     await expect(refresh).toBeEnabled();

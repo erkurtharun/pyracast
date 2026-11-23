@@ -1,14 +1,12 @@
 "use client";
 import {
-    hashKey,
     partialMatchKey,
     QueryClient,
     useQuery,
     useQueryClient,
-    type DefaultError,
+    type QueryFilters,
     type QueryKey,
 } from "@tanstack/react-query";
-import { useLocale } from "next-intl";
 import { createContext, useContext, useMemo } from "react";
 import { browserErrors } from "@/i18n/browser";
 import {
@@ -18,7 +16,7 @@ import {
     type PathFor,
     type RequestOptions,
 } from "./client";
-import { ApiError, displayMessage } from "./errors";
+import { ApiError, displayMessage, type ErrorCode } from "./errors";
 import { keys } from "./keys";
 import { send } from "./lane";
 
@@ -36,7 +34,15 @@ export function pollInterval(poll: number | false, requests = 1) {
 
 export function createQueryClient() {
     return new QueryClient({
-        defaultOptions: { queries: { retry: false, staleTime: 2_000 } },
+        defaultOptions: {
+            queries: {
+                retry: false,
+                staleTime: 2_000,
+                // The library's default mode pauses every read after an offline event, so no read would report the failure.
+                networkMode: "always",
+                refetchOnReconnect: true,
+            },
+        },
     });
 }
 
@@ -44,6 +50,8 @@ export const QueryOwner = createContext<string | undefined>(undefined);
 
 type Page<T> = { results: T[]; next: string | null };
 type Fetched<T> = { value: T; requests: number };
+type Refusal = { status: number; code: ErrorCode | null; message: string };
+type Stored<T> = Fetched<T> | { refusal: Refusal };
 
 export async function fetchList<T>(url: string): Promise<Fetched<Page<T>>> {
     const first = await send<Page<T>>({ method: "GET", url });
@@ -79,39 +87,74 @@ export async function fetchList<T>(url: string): Promise<Fetched<Page<T>>> {
 export type Loaded<T> = {
     data?: T;
     error?: string;
+    denied: boolean;
     loading: boolean;
     updatedAt: number;
     retry: () => void;
     reload: () => Promise<T>;
-    replace(value: T): void;
 };
 
 type Polling = { poll?: number | false };
 
-// The same request in another language: every part of the key but the last, the locale, matches.
-export function sameRequest(before: QueryKey, after: QueryKey) {
-    return hashKey(before.slice(0, -1)) === hashKey(after.slice(0, -1));
+export function answered<T>(read: () => Promise<Fetched<T>>) {
+    return async (): Promise<Stored<T>> => {
+        try {
+            return await read();
+        } catch (error) {
+            if (
+                error instanceof ApiError &&
+                (error.status === 403 || error.status === 404)
+            )
+                return {
+                    refusal: {
+                        status: error.status,
+                        code: error.code,
+                        message: error.message,
+                    },
+                };
+            throw error;
+        }
+    };
 }
 
-// A refusal of the reader or a missing resource: rows read before it are no longer shown.
-function isDenied(error: unknown) {
-    return (
-        error instanceof ApiError &&
-        (error.status === 403 || error.status === 404)
-    );
+function refusalOf<T>(stored: Stored<T> | undefined) {
+    return stored && "refusal" in stored ? stored.refusal : undefined;
 }
 
-type Previous = { queryKey: QueryKey; state: { error: DefaultError | null } };
+export function shownAnswer<T>({
+    data,
+    error,
+}: {
+    data: Stored<T> | undefined;
+    error: unknown;
+}): Pick<Loaded<T>, "data" | "error" | "denied"> {
+    const refusal = refusalOf(data);
+    return {
+        data: refusal ? undefined : (data as Fetched<T> | undefined)?.value,
+        error: error
+            ? displayMessage(error, browserErrors()("unexpected"))
+            : refusal?.message,
+        denied: !!refusal,
+    };
+}
 
-// A language change shows the rows already read until they arrive in the new language, so the screen showing them
-// is not mounted again and keeps what was typed into it and its focus; rows of a refused request stay hidden.
-export function languagePlaceholder(queryKey: QueryKey) {
-    return <T>(previous: T | undefined, previousQuery?: Previous) =>
-        previousQuery &&
-        !isDenied(previousQuery.state.error) &&
-        sameRequest(previousQuery.queryKey, queryKey)
-            ? previous
-            : undefined;
+export async function reload<T>(
+    client: QueryClient,
+    queryKey: QueryKey,
+): Promise<T> {
+    const filters = { queryKey, exact: true };
+    const query = client.getQueryCache().find<Stored<T>>(filters);
+    const written = query?.state.dataUpdateCount;
+    await client.refetchQueries(filters, { throwOnError: true });
+    if (
+        !query ||
+        client.getQueryCache().find(filters) !== query ||
+        query.state.dataUpdateCount === written
+    )
+        throw new ApiError(browserErrors()("unexpected"));
+    const refusal = refusalOf(query.state.data);
+    if (refusal) throw new ApiError(refusal.message, refusal);
+    return (query.state.data as Fetched<T>).value;
 }
 
 function useOwner() {
@@ -128,34 +171,26 @@ function useLoaded<T>(
     read: (url: string) => Promise<Fetched<T>>,
 ): Loaded<T> {
     const owner = useOwner();
-    const locale = useLocale();
     const client = useQueryClient();
     const url = buildUrl(path, options);
-    const queryKey = keys.request(owner, path, options, locale);
-    const query = useQuery({
+    const queryKey = keys.request(owner, path, options);
+    const query = useQuery<Stored<T>>({
         queryKey,
-        queryFn: () => read(url),
-        select: (fetched) => fetched.value,
-        placeholderData: languagePlaceholder(queryKey),
-        refetchInterval: (query) =>
-            pollInterval(poll, query.state.data?.requests),
+        queryFn: answered(() => read(url)),
+        refetchInterval: (query) => {
+            const stored = query.state.data;
+            return pollInterval(
+                poll,
+                stored && "requests" in stored ? stored.requests : 1,
+            );
+        },
     });
-    const denied = isDenied(query.error);
     return {
-        data: denied ? undefined : query.data,
-        error: query.error
-            ? displayMessage(query.error, browserErrors()("unexpected"))
-            : undefined,
+        ...shownAnswer<T>(query),
         loading: query.isPending,
         updatedAt: query.dataUpdatedAt,
-        retry: () => void query.refetch(),
-        reload: async () => {
-            const result = await query.refetch();
-            if (result.error) throw result.error;
-            return result.data as T;
-        },
-        replace: (value) =>
-            client.setQueryData<Fetched<T>>(queryKey, { value, requests: 1 }),
+        retry: () => void query.refetch({ cancelRefetch: false }),
+        reload: () => reload<T>(client, queryKey),
     };
 }
 
@@ -183,19 +218,20 @@ export function useApiList<P extends ListPath>(
     );
 }
 
+export function readAgain(client: QueryClient, filters: QueryFilters = {}) {
+    void client.cancelQueries(filters);
+    return client.invalidateQueries(filters);
+}
+
 // Pass `mounted` only when no read of it was running as the change was answered: a read running now started afterwards and stands instead of being cancelled and repeated.
-export function invalidate(
-    client: QueryClient,
-    queryKey: QueryKey,
-    mounted?: QueryKey,
-) {
-    return client.invalidateQueries({
+export function changed(queryKey: QueryKey, mounted?: QueryKey): QueryFilters {
+    return {
         queryKey,
         predicate: (query) =>
             !mounted ||
             query.state.fetchStatus !== "fetching" ||
             !partialMatchKey(query.queryKey, mounted),
-    });
+    };
 }
 
 type Request = { path: string; options: Parameters<typeof keys.request>[2] };
@@ -203,21 +239,22 @@ type Request = { path: string; options: Parameters<typeof keys.request>[2] };
 export function useRefresh() {
     const client = useQueryClient();
     const owner = useOwner();
-    const locale = useLocale();
     return useMemo(() => {
         const refresh = (queryKey: QueryKey) =>
-            client.invalidateQueries({ queryKey });
+            readAgain(client, changed(queryKey));
         const key = (request: Request) =>
-            keys.request(owner, request.path, request.options, locale);
+            keys.request(owner, request.path, request.options);
         return {
             reading: (request: Request) =>
                 client.isFetching({ queryKey: key(request) }) > 0,
             workspace: (tenant: number, mounted?: Request) =>
                 Promise.all([
-                    invalidate(
+                    readAgain(
                         client,
-                        keys.workspace(owner, tenant),
-                        mounted && key(mounted),
+                        changed(
+                            keys.workspace(owner, tenant),
+                            mounted && key(mounted),
+                        ),
                     ),
                     refresh(keys.path(owner, "/api/tenants/")),
                 ]),
@@ -236,5 +273,5 @@ export function useRefresh() {
                 ]),
             tenants: () => refresh(keys.path(owner, "/api/tenants/")),
         };
-    }, [client, owner, locale]);
+    }, [client, owner]);
 }
