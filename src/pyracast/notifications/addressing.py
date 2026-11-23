@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from pyracast.notifications.models import RecipientRole
@@ -11,11 +11,20 @@ def sent_hidden(hide_recipients: bool) -> bool:
     return hide_recipients or not VISIBLE_MODE_RELEASED
 
 
+def members_choice(choices: Iterable[RecipientRole]) -> RecipientRole | None:
+    """The choice of an address's members: Hidden if any of them chose it or if those who chose
+    disagree, otherwise the role they agree on."""
+    found = set(choices)
+    if RecipientRole.BCC in found or len(found) > 1:
+        return RecipientRole.BCC
+    return next(iter(found), None)
+
+
 @dataclass(frozen=True)
 class Candidate:
-    """One address of a reminder's list. `member` and `administrator` describe the active member
-    whose verified primary address it is; `chosen` is that member's stored choice and `typed`
-    the choice of the typed row that holds the address, which counts only while `settled`."""
+    """One address of a reminder's list. `member` and `administrator` describe the active members
+    whose verified primary address it is; `chosen` is their combined choice and `typed` the
+    choice of the typed row that holds the address, which counts only while `settled`."""
 
     address: str
     member: bool = False

@@ -436,3 +436,40 @@ def test_an_address_confirmed_after_the_markers_read_of_people_leaves_that_attem
     assert parsed(transaction.data)["To"] == ADMIN
     assert b"alice@example.com" not in transaction.data
     assert ("alice@example.com", BCC) in delivered_roles(delivery_id)
+
+
+def test_a_hidden_choice_of_the_higher_member_of_a_folded_address_keeps_it_off_the_wire(
+    smtp_wire: Script,
+) -> None:
+    system, (_, higher) = workspace_with_members("ops@strasse.de", "ops@straße.de")
+    schedule = visible(group(system, ["ops@straße.de"]), {"ops@strasse.de": TO})
+    chosen(schedule, higher, BCC)
+
+    delivery_id = send_on()
+
+    (transaction,) = smtp_wire.transactions
+    assert len(transaction.recipients) == 2
+    message = parsed(transaction.data)
+    assert (message["To"], message["Cc"]) == (ADMIN, None)
+    assert b"ops@" not in transaction.data
+    assert delivered_roles(delivery_id) == [("ops@straße.de", BCC), (ADMIN, TO)]
+
+
+def test_members_of_one_address_who_disagree_send_it_hidden() -> None:
+    system, (lower, higher) = workspace_with_members("ops@strasse.de", "ops@straße.de")
+    schedule = visible(group(system))
+    chosen(schedule, lower, CC)
+    chosen(schedule, higher, TO)
+
+    assert headers(sent_on()) == ([ADMIN], [], ["ops@strasse.de"])
+
+
+def test_an_address_whose_higher_member_administers_the_workspace_defaults_to_to() -> None:
+    system, (lower, higher) = workspace_with_members("ops@strasse.de", "ops@straße.de")
+    visible(group(system))
+    reassign_workspace_admin(
+        system.admin, system.tenant.pk, higher.pk, expected_admin_id=system.member.pk
+    )
+
+    assert headers(sent_on()) == (["ops@strasse.de"], [ADMIN], [])
+    assert lower.pk < higher.pk

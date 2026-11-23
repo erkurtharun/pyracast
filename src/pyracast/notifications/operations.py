@@ -247,10 +247,18 @@ def _check_recipient_limit(count: int, current: int, limit: int, unchanged_pause
         )
 
 
-def _check_member_choices(choices: Sequence[MemberChoice], members: Workspace) -> None:
-    present = {member.membership: recipient_key(member.address) for member in members.members}
-    if any(present.get(choice.membership) != recipient_key(choice.address) for choice in choices):
-        raise ConflictError(ErrorCode.REMINDER_SCHEDULE_CHANGED)
+def _member_choices(
+    choices: Sequence[MemberChoice], members: Workspace
+) -> dict[int, RecipientRole | None]:
+    """Each entry decides for every member of the address it names, while its membership is one
+    of them."""
+    decided: dict[int, RecipientRole | None] = {}
+    for choice in choices:
+        present = members.memberships(choice.address)
+        if choice.membership not in present:
+            raise ConflictError(ErrorCode.REMINDER_SCHEDULE_CHANGED)
+        decided.update(dict.fromkeys(present, choice.role))
+    return decided
 
 
 def _typed_roles(
@@ -342,7 +350,7 @@ def configure_reminders(
         if enabled and (created or not stored.enabled):
             _check_enabling(region)
         members = workspace(tenant_id)
-        _check_member_choices(member_roles or (), members)
+        decided = _member_choices(member_roles or (), members)
         current = len(effective(stored.include_workspace_members, explicit, members))
         planned = planned_recipients(members, explicit, submitted.recipients)
         schedule.include_workspace_members = include_workspace_members
@@ -352,9 +360,7 @@ def configure_reminders(
         stored_roles = recipient_roles(schedule)
         roles = _typed_roles(planned, stored_roles, address_roles)
         store_recipients(schedule, explicit, planned, roles=roles, stored_roles=stored_roles)
-        chosen = store_member_choices(
-            schedule, {choice.membership: choice.role for choice in member_roles or ()}
-        )
+        chosen = store_member_choices(schedule, decided)
         mode = schedule.hide_recipients != hide_recipients
         schedule.enabled, schedule.times, schedule.language, schedule.hide_recipients = (
             enabled,

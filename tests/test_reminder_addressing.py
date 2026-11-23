@@ -1,6 +1,6 @@
 import pytest
 
-from pyracast.notifications.addressing import Candidate, explicit_role, roles
+from pyracast.notifications.addressing import Candidate, explicit_role, members_choice, roles
 from pyracast.notifications.models import RecipientRole
 
 TO, CC, BCC = RecipientRole.TO, RecipientRole.CC, RecipientRole.BCC
@@ -112,3 +112,20 @@ def test_an_address_no_step_attributes_is_hidden() -> None:
 
 def test_an_empty_list_places_nobody() -> None:
     assert placed() == []
+
+
+@pytest.mark.parametrize(
+    ("choices", "combined"),
+    [
+        ((), None),
+        ((CC,), CC),
+        ((TO, TO), TO),
+        ((TO, CC), BCC),
+        ((CC, BCC), BCC),
+        ((TO, BCC, TO), BCC),
+    ],
+)
+def test_the_members_of_an_address_choose_hidden_if_any_does_or_if_they_disagree(
+    choices: tuple[RecipientRole, ...], combined: RecipientRole | None
+) -> None:
+    assert members_choice(choices) == combined

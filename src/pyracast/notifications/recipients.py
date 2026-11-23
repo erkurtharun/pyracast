@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from django.db.models import Case, F, Q, Value, When
 
 from pyracast.accounts.models import Membership, WorkspaceRole
-from pyracast.notifications.addressing import Candidate, roles, sent_hidden
+from pyracast.notifications.addressing import Candidate, members_choice, roles, sent_hidden
 from pyracast.notifications.models import (
     DeliveryRecipient,
     NotificationDelivery,
@@ -213,6 +213,9 @@ class Choices:
     typed: dict[str, RecipientRole]
     chosen: dict[int, RecipientRole]
 
+    def of(self, member: Member) -> RecipientRole | None:
+        return members_choice(self.chosen[pk] for pk in member.memberships if pk in self.chosen)
+
 
 def stored_choices(schedule: ReminderSchedule) -> Choices:
     """The typed rows' choices by key and the members' choices by membership."""
@@ -239,7 +242,7 @@ def candidates(
                 address,
                 member=member is not None,
                 administrator=member is not None and member.administrator,
-                chosen=choices.chosen.get(member.membership) if member else None,
+                chosen=choices.of(member) if member else None,
                 typed=choices.typed.get(key) if row else None,
                 settled=row is None
                 or not row.ties

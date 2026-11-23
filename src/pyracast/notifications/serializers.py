@@ -65,7 +65,8 @@ class ReminderInput(InputSerializer):
     )
 
     def validate_member_roles(self, value: list[dict[str, Any]]) -> list[MemberChoice]:
-        if len({entry["membership"] for entry in value}) != len(value):
+        keys = {recipient_key(entry["address"]) for entry in value}
+        if len({entry["membership"] for entry in value}) != len(value) or len(keys) != len(value):
             raise serializers.ValidationError(gettext("Choose each member's role once."))
         return [
             MemberChoice(

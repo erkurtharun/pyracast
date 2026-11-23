@@ -595,3 +595,75 @@ def test_a_member_who_joins_during_a_get_is_wholly_in_its_answer_or_wholly_absen
         assert body["workspace_member_count"] == len(listed)
 
     assert passed >= 2
+
+
+FOLDED = ("ops@strasse.de", "ops@straße.de")
+
+
+def folded_members() -> tuple[System, User, User]:
+    system, _, _ = workspace()
+    return system, member(system, FOLDED[0]), member(system, FOLDED[1])
+
+
+@pytest.mark.parametrize("named", [0, 1])
+def test_an_entry_naming_either_member_of_a_folded_address_stores_the_choice_for_both(
+    named: int,
+) -> None:
+    system, lower, higher = folded_members()
+    choosing = (lower, higher)[named]
+
+    response = put(
+        system,
+        recipients=["boss@example.com"],
+        hide_recipients=False,
+        member_roles=[{"membership": membership(choosing), "address": FOLDED[named], "role": "cc"}],
+    )
+
+    assert response.status_code == 200, response.content
+    assert stored_roles(system)[1] == {FOLDED[0]: "cc", FOLDED[1]: "cc"}
+    (row,) = [row for row in response.json()["addresses"]["members"] if row["address"] == FOLDED[0]]
+    assert row == {
+        "membership": membership(lower),
+        "address": FOLDED[0],
+        "kind": "member",
+        "role": "cc",
+    }
+
+
+def test_the_answer_combines_the_choices_and_kinds_of_a_folded_address() -> None:
+    system, lower, higher = folded_members()
+    put(system, recipients=["boss@example.com"])
+    schedule = ReminderSchedule.objects.get(region=system.region)
+    chosen(schedule, lower, CC)
+    chosen(schedule, higher, TO)
+    reassign_workspace_admin(
+        system.admin, system.tenant.pk, higher.pk, expected_admin_id=system.member.pk
+    )
+
+    rows = client_for(higher).get(url(system)).json()["addresses"]["members"]
+
+    assert [row for row in rows if row["address"] == FOLDED[0]] == [
+        {
+            "membership": membership(lower),
+            "address": FOLDED[0],
+            "kind": "administrator",
+            "role": "bcc",
+        }
+    ]
+
+
+def test_two_entries_for_one_folded_address_are_refused() -> None:
+    system, lower, higher = folded_members()
+
+    response = put(
+        system,
+        recipients=["boss@example.com"],
+        member_roles=[
+            {"membership": membership(lower), "address": FOLDED[0], "role": "cc"},
+            {"membership": membership(higher), "address": FOLDED[1], "role": "to"},
+        ],
+    )
+
+    assert response.status_code == 400
+    assert list(response.json()["fields"]) == ["member_roles"]
+    assert not ReminderSchedule.objects.exists()

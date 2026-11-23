@@ -214,7 +214,7 @@ def _addresses(
                 member.membership,
                 member.address,
                 MemberKind.ADMINISTRATOR if member.administrator else MemberKind.MEMBER,
-                choices.chosen.get(member.membership),
+                choices.of(member),
             )
             for member in members.members
         ],
