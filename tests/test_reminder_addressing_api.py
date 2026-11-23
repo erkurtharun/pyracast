@@ -1188,3 +1188,102 @@ def test_a_respelled_typed_address_keeps_its_choice() -> None:
     assert put(system, **body, recipients=[ACE_MAILBOX]).status_code == 200
 
     assert typed_rows(system) == {ACE_MAILBOX: ("cc", [])}
+
+
+SHARED = "alice@example.com"
+
+
+def hidden_for_alice(system: System, alice: User, *, include: bool) -> ReminderSchedule:
+    response = put(
+        system,
+        include_workspace_members=include,
+        recipients=[SHARED],
+        hide_recipients=False,
+        address_roles=[{"address": SHARED, "role": "bcc", "memberships": [membership(alice)]}],
+    )
+    assert response.status_code == 200, response.content
+    schedule = ReminderSchedule.objects.get(region=system.region)
+    assert ties(schedule) == {SHARED: [membership(alice)]}
+    return schedule
+
+
+@pytest.mark.parametrize("departure", [remove, erase])
+@pytest.mark.parametrize("case", ["member holds it", "inclusion off", "holder outside"])
+def test_a_former_holders_departure_keeps_a_hidden_typed_row_the_member_holding_it_needs(
+    departure: Any, case: str
+) -> None:
+    system, alice, bob = workspace()
+    schedule = hidden_for_alice(system, alice, include=case != "inclusion off")
+    moved(alice, "alice.new@example.com")
+    if case == "holder outside":
+        outsider = User.objects.create(username="outsider", email="outsider@example.com")
+        EmailAddress.objects.create(user=outsider, email=outsider.email, verified=True)
+        moved(outsider, SHARED)
+    else:
+        moved(bob, SHARED)
+    (queued,) = enqueue_due(SLOT)
+    before = revision(system)
+
+    assert departure(system, alice)
+
+    if case != "member holds it":
+        assert typed_rows(system) == {}
+        return
+    assert typed_rows(system) == {SHARED: ("bcc", [])}
+    assert ties(schedule) == {}
+    assert revision(system) == before + 1
+    with replying(lambda message: None) as sent:
+        assert process_notification(queued, SLOT)
+    (message,) = sent
+    for to, cc, bcc in ((message.to, message.cc, message.bcc), sent_headers(1)):
+        assert (to, SHARED in cc, SHARED in bcc) == ([ADMIN], False, True)
+
+
+@pytest.mark.parametrize(
+    ("deletion", "owner", "step"),
+    [
+        (remove, recipient_rows, "remove_member_recipients"),
+        (erase, erasure, "_forget_identity"),
+    ],
+)
+@pytest.mark.parametrize("save_first", [True, False])
+def test_a_save_racing_a_former_holders_departure_keeps_the_hidden_row_for_the_member(
+    monkeypatch: pytest.MonkeyPatch,
+    deletion: Any,
+    owner: object,
+    step: str,
+    save_first: bool,
+) -> None:
+    system, alice, bob = workspace()
+    schedule = hidden_for_alice(system, alice, include=True)
+    moved(alice, "alice.new@example.com")
+    moved(bob, SHARED)
+
+    def saving() -> str:
+        configure_reminders(
+            system.member,
+            system.tenant.pk,
+            system.region.pk,
+            enabled=True,
+            recipients=[SHARED],
+            include_workspace_members=True,
+            times=["10:00"],
+            language="en",
+            now=NOW,
+            hide_recipients=False,
+        )
+        return "saved"
+
+    def deleting() -> str:
+        return str(deletion(system, alice))
+
+    if save_first:
+        saved, deleted = paused_in(
+            monkeypatch, operations, "store_member_choices", saving, deleting
+        )
+    else:
+        deleted, saved = paused_in(monkeypatch, owner, step, deleting, saving)
+
+    assert (saved, deleted in {"removed", "erased"}) == ("saved", True)
+    assert typed_rows(system) == {SHARED: ("bcc", [])}
+    assert ties(schedule) == {SHARED: [membership(bob)]}

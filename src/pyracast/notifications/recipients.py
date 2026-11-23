@@ -4,6 +4,7 @@ from collections import defaultdict
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
+from allauth.account.models import EmailAddress
 from django.db.models import Case, F, Q, Value, When
 
 from pyracast.accounts.models import Membership, WorkspaceRole
@@ -462,15 +463,36 @@ def remove_member_recipients(tenant_id: int, membership_id: int, emails: set[str
     rows = ReminderRecipient.objects.filter(schedule__region__tenant_id=tenant_id)
     keys = {key for address in emails if (key := recipient_key(address))}
     keys.update(rows.filter(ties__membership_id=membership_id).values_list("key", flat=True))
-    removed = rows.filter(
-        Q(ties__membership_id=membership_id) | Q(ties__isnull=True, key__in=keys)
-    ).values("pk")
-    changed = set(
-        ReminderRecipient.objects.filter(pk__in=removed).values_list("schedule_id", flat=True)
+    departing = set(
+        rows.filter(
+            Q(ties__membership_id=membership_id) | Q(ties__isnull=True, key__in=keys)
+        ).values_list("pk", flat=True)
     )
-    ReminderRecipient.objects.filter(pk__in=removed).delete()
+    # A row keeps its choice for another member who holds its address while members are included.
+    kept = set(
+        rows.filter(
+            pk__in=departing,
+            schedule__include_workspace_members=True,
+            key__in=_verified_by_others(tenant_id, membership_id),
+        ).values_list("pk", flat=True)
+    )
+    untied = ReminderRecipientTie.objects.filter(recipient_id__in=kept, membership_id=membership_id)
+    changed = set(rows.filter(pk__in=departing - kept).values_list("schedule_id", flat=True))
+    changed.update(untied.values_list("recipient__schedule_id", flat=True))
+    ReminderRecipient.objects.filter(pk__in=departing - kept).delete()
+    untied.delete()
     ReminderSchedule.objects.filter(pk__in=changed).update(revision=F("revision") + 1)
     _revoke_unauthorized(tenant_id, membership_id, keys)
+
+
+def _verified_by_others(tenant_id: int, leaving: int) -> set[str]:
+    others = Membership.objects.filter(tenant_id=tenant_id).exclude(pk=leaving)
+    return {
+        recipient_key(address)
+        for address in EmailAddress.objects.filter(
+            verified=True, user_id__in=others.values("user_id")
+        ).values_list("email", flat=True)
+    }
 
 
 def _revoke_unauthorized(tenant_id: int, leaving: int, keys: set[str]) -> None:
