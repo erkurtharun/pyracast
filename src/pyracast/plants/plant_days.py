@@ -103,11 +103,16 @@ def plant_days(actor: User, tenant_id: int, region_id: int, plant_id: int) -> Pl
 def _forecast_day(plant: Plant, day: date, today: date, now: datetime) -> ForecastDay:
     try:
         with stored_data("plant", plant.pk, day, "days", FROZEN_PAYLOAD_FAULTS):
-            outlook = cast(dict[str, Any], automatic_outlook(plant, day, RESOLUTION_MINUTES, now))
+            return _projected(
+                day, cast(dict[str, Any], automatic_outlook(plant, day, RESOLUTION_MINUTES, now))
+            )
     except DomainError as refusal:
         if refusal.code != ErrorCode.CALCULATION_OUT_OF_RANGE:
             raise
         return _refused_day(plant, day, today)
+
+
+def _projected(day: date, outlook: dict[str, Any]) -> ForecastDay:
     result: dict[str, Any] | None = outlook["result"]
     scenario: dict[str, Any] | None = outlook["outage_scenario"]
     total, partial = _energy(result)

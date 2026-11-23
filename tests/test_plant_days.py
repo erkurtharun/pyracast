@@ -2,6 +2,7 @@ import logging
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager
+from copy import deepcopy
 from datetime import UTC, date, datetime, timedelta
 from threading import Event
 from time import perf_counter
@@ -22,12 +23,19 @@ from pyracast.connections.models import SiteBinding
 from pyracast.errors import DomainError, ErrorCode
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.history import automatic_outlook
-from pyracast.plants.models import Plant, PlantConfiguration, ProductionObservation
+from pyracast.plants.models import (
+    ForecastIssuance,
+    Plant,
+    PlantConfiguration,
+    ProductionObservation,
+)
 from pyracast.plants.operations import create_plant
 from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.plant_days import plant_days
 from pyracast.regions.models import Region
 from pyracast.regions.operations import submit_region
+from tests.support.automatic_forecast_selection import DAY as REFERENCE_DAY
+from tests.support.automatic_forecast_selection import reference_transition
 from tests.support.domain import NOW, System
 from tests.support.forecast_history import usable_calibration
 from tests.support.incident_calibration import incident
@@ -474,26 +482,63 @@ def failing_on(monkeypatch: pytest.MonkeyPatch, day: date, error: Exception) -> 
     monkeypatch.setattr("pyracast.plants.plant_days.automatic_outlook", failing)
 
 
-@pytest.mark.parametrize("fault", [KeyError, TypeError, ValueError, ArithmeticError])
-def test_a_stored_data_fault_outside_the_read_guards_refuses_only_its_day(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, fault: type[Exception]
+@pytest.mark.parametrize(
+    ("field", "damage", "fault"),
+    [
+        ("collected_at", "11.11.2026 08:00", "ValueError"),
+        ("collected_at", 7, "TypeError"),
+        ("start", MISSING, "KeyError"),
+        ("start", "11.11.2026 03:00", "ValueError"),
+    ],
+    ids=["collected-at-text", "collected-at-number", "interval-without-start", "interval-start-text"],
+)
+def test_an_archived_field_the_days_read_cannot_project_refuses_only_its_day(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    field: str,
+    damage: object,
+    fault: str,
 ) -> None:
-    system, plant = make_plant(monkeypatch)
-    forecast_window(system)
+    system, plant, old_id = reference_transition(monkeypatch)
+    publish_snapshot(
+        snapshot_for(system, REFERENCE_DAY + timedelta(days=1), collected_at=timezone.now())
+    )
     before = days_of(system, plant)
-    failing_on(monkeypatch, TODAY + timedelta(days=2), fault("stored value"))
+    issuance = ForecastIssuance.objects.get(snapshot_id=old_id)
+    payloads = deepcopy(issuance.payloads)
+    result = payloads["60"]
+    stored = result["provenance"] if field == "collected_at" else result["intervals"][3]
+    if damage is MISSING:
+        del stored[field]
+    else:
+        stored[field] = damage
+    stored_again(issuance, payloads=payloads)
+    read = forecast_read(client_for(system.member), system, plant, REFERENCE_DAY)
+    assert read["result"]["provenance"]["snapshot_id"] == old_id
     with caplog.at_level(logging.WARNING, logger=FAULTS):
         after = days_of(system, plant)
-    refused = by_date(after["forecast"])[TODAY + timedelta(days=2)]
-    assert refused["unavailable_reason"] == "calculation_out_of_range"
-    assert refused["source_kind"] == "forecast"
-    assert refused["rows"] == []
+    refused = by_date(after["forecast"])[REFERENCE_DAY]
+    assert refused == {
+        "date": REFERENCE_DAY.isoformat(),
+        "timezone": "Europe/Istanbul",
+        "source_kind": "forecast",
+        "freshness": "missing",
+        "stale_reason": None,
+        "unavailable_reason": "calculation_out_of_range",
+        "collected_at": None,
+        "total_mwh": None,
+        "partial": False,
+        "affected": None,
+        "rows": [],
+    }
     assert [day for day in after["forecast"] if day is not refused] == [
-        day for day in before["forecast"] if day["date"] != refused["date"]
+        day for day in before["forecast"] if day["date"] != REFERENCE_DAY.isoformat()
     ]
+    assert by_date(after["forecast"])[REFERENCE_DAY + timedelta(days=1)]["rows"]
+    assert after["production"] == before["production"]
     [warning] = [record for record in caplog.records if record.name == FAULTS]
-    assert f"error={fault.__name__}" in warning.getMessage()
-    assert "stored value" not in warning.getMessage()
+    assert REFERENCE_DAY.isoformat() in warning.getMessage()
+    assert f"error={fault}" in warning.getMessage()
 
 
 @pytest.mark.parametrize(
