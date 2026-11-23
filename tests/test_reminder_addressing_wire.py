@@ -2,6 +2,7 @@ import base64
 import json
 from collections.abc import Iterator
 from datetime import timedelta
+from email.headerregistry import AddressHeader
 from typing import Any
 
 import httpx
@@ -21,20 +22,24 @@ from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.models import (
     DeliveryRecipient,
     NotificationDelivery,
+    NotificationDeliveryError,
     NotificationDeliveryStatus,
     NotificationSettings,
     RecipientRole,
     ReminderRecipient,
     ReminderSchedule,
 )
-from pyracast.notifications.operations import configure_reminders
+from pyracast.notifications.operations import configure_reminders, invalid_recipient_region_ids
 from pyracast.notifications.recipients import mailbox_key, prepared, recipient_key
 from pyracast.notifications.scheduler import enqueue_due
+from pyracast.regions.models import AuditEvent
 from tests.support.domain import NOW, System, make_system
 from tests.support.notification_groups import member
 from tests.support.notifications import (
     SENDER,
     SLOT,
+    freeze,
+    mailboxes,
     parsed,
     pending_address_change,
     smtp_wire,
@@ -47,6 +52,15 @@ SOFT_HYPHEN, QUOTED = "ops@soft\u00admail.de", '"ops"@example.com'
 UNICODE, ACE = "ops@b\u00fccher.de", "ops@xn--bcher-kva.de"
 DISTINCT = ("ops@xn--strae-oqa8r.de", "ops@xn--strasse-t2a.de")
 REFUSED = "ops@a\ufffdb.de"
+PARENTHESES = "ops@example.com\uff08x\uff09"
+UNSTABLE = [
+    PARENTHESES,
+    "ops@exa\uff0cmple.com",
+    "ops@example.com\u3002",
+    "ops@stra\u1e9ee.de",
+    "ops@\u1c90\u1c91.ge",
+]
+WITHOUT_WIRE_FORM = [REFUSED, *UNSTABLE]
 
 ONE_KEY = [
     (SOFT_HYPHEN, "ops@softmail.de"),
@@ -89,6 +103,31 @@ def test_an_address_the_library_refuses_raises_and_has_a_key_no_prepared_form_ha
         prepared(REFUSED)
     assert mailbox_key(REFUSED) not in {recipient_key(prepared(address)) for address in SPELLINGS}
     assert mailbox_key(REFUSED) == mailbox_key(REFUSED.upper())
+
+
+@pytest.mark.parametrize("address", UNSTABLE)
+def test_an_address_the_library_prepares_to_another_mailbox_has_no_wire_form(address: str) -> None:
+    validate_email(address)
+    with pytest.raises(ValueError, match="no stable wire form"):
+        prepared(address)
+    assert mailbox_key(address) not in {recipient_key(prepared(other)) for other in SPELLINGS}
+
+
+ORDINARY = [
+    *SPELLINGS,
+    "ops@İstanbul.com",
+    "ops@ışç.com",
+    "ops@σοφος.gr",
+    "ops@straße.de",
+]
+
+
+@pytest.mark.parametrize("address", ORDINARY)
+def test_an_ordinary_spelling_is_one_mailbox_in_a_stable_wire_form(address: str) -> None:
+    wire = prepared(address)
+    assert prepared(wire) == wire
+    assert [found.addr_spec for found in AddressHeader.value_parser(wire).all_mailboxes] == [wire]
+    assert mailbox_key(recipient_key(address)) == mailbox_key(address)
 
 
 pytestdb = pytest.mark.django_db(transaction=True)
@@ -173,14 +212,19 @@ def test_two_distinct_ace_domains_are_two_recipients() -> None:
 
 
 @pytestdb
-def test_an_address_the_mail_library_refuses_is_refused_at_the_save() -> None:
+@pytest.mark.parametrize("address", WITHOUT_WIRE_FORM)
+def test_an_address_without_a_stable_wire_form_is_refused_by_the_preview_and_the_save(
+    address: str,
+) -> None:
     system = workspace()
 
-    response = request(system, recipients=[REFUSED])
+    answers = [request(system, suffix, recipients=[address]) for suffix in ("preview/", "")]
 
-    assert response.status_code == 400, response.content
-    assert list(response.json()["fields"]) == ["recipients"]
+    for response in answers:
+        assert response.status_code == 400, response.content
+        assert list(response.json()["fields"]) == ["recipients"]
     assert not ReminderSchedule.objects.exists()
+    assert not AuditEvent.objects.filter(action="reminder_schedule_updated").exists()
 
 
 @pytestdb
@@ -210,6 +254,7 @@ def test_stored_spellings_of_one_key_combine_and_are_sent_once_in_their_prepared
     (transaction,) = script.transactions
     message = parsed(transaction.data)
     assert (message["To"], message["Cc"]) == (None, None)
+    assert (mailboxes(message, "To"), mailboxes(message, "Cc")) == ([], [])
     assert transaction.recipients == [prepared(spelling)]
 
 
@@ -259,6 +304,10 @@ def test_the_smtp_headers_and_envelope_carry_each_prepared_form(eight_bit: bool)
     assert message["To"] == ", ".join(prepared_of(TO))
     assert message["Cc"] == ", ".join(prepared_of(CC))
     assert message["Bcc"] is None
+    assert (mailboxes(message, "To"), mailboxes(message, "Cc")) == (
+        prepared_of(TO),
+        prepared_of(CC),
+    )
     assert transaction.recipients == prepared_of(TO) + prepared_of(CC) + prepared_of(BCC)
     assert transaction.data.isascii()
 
@@ -302,6 +351,11 @@ def test_the_gmail_request_carries_each_prepared_form_and_a_unicode_bcc_domain_s
     assert message["To"] == ", ".join(prepared_of(TO))
     assert message["Cc"] == ", ".join(prepared_of(CC))
     assert message["Bcc"] == ", ".join(prepared_of(BCC)) == ACE
+    assert [mailboxes(message, name) for name in ("To", "Cc", "Bcc")] == [
+        prepared_of(TO),
+        prepared_of(CC),
+        [ACE],
+    ]
 
 
 @pytestdb
@@ -329,9 +383,10 @@ def test_a_typed_to_of_a_hidden_members_address_in_another_spelling_is_in_no_hea
     (transaction,) = script.transactions
     message = parsed(transaction.data)
     assert (message["To"], message["Cc"]) == (ADMIN, None)
+    assert (mailboxes(message, "To"), mailboxes(message, "Cc")) == ([ADMIN], [])
     assert b"ops@" not in transaction.data
     assert transaction.recipients.count(held) == 1
-    assert sorted(transaction.recipients) == sorted([held, ADMIN])
+    assert transaction.recipients == [ADMIN, held]
 
 
 @pytestdb
@@ -356,6 +411,7 @@ def test_a_visible_choice_does_not_pass_to_a_distinct_ace_domain() -> None:
         send_on()
     message = parsed(script.transactions[0].data)
     assert (message["To"], message["Cc"]) == (None, None)
+    assert (mailboxes(message, "To"), mailboxes(message, "Cc")) == ([], [])
     assert script.transactions[0].recipients == [second]
 
 
@@ -371,16 +427,147 @@ def test_an_account_cannot_confirm_an_address_the_mail_library_refuses() -> None
     assert not EmailAddress.objects.filter(email=REFUSED, verified=True).exists()
 
 
+def skipped_as_invalid(delivery_id: int) -> bool:
+    delivery = NotificationDelivery.objects.get(pk=delivery_id)
+    return (delivery.status, delivery.last_error) == (
+        NotificationDeliveryStatus.SKIPPED,
+        NotificationDeliveryError.INVALID_RECIPIENT,
+    )
+
+
 @pytestdb
-def test_a_member_address_the_library_refuses_is_sent_as_stored_and_the_message_refused() -> None:
+@pytest.mark.parametrize("address", WITHOUT_WIRE_FORM)
+def test_a_member_address_without_a_stable_wire_form_skips_the_delivery_before_any_transport(
+    gmail_requests: list[bytes], address: str
+) -> None:
     system = workspace()
-    member(system, REFUSED)
+    member(system, address)
     assert request(system).status_code == 200
+
+    with smtp_wire() as script:
+        over_smtp = send_on()
+    over_gmail = send_on(1)
+
+    assert (script.transactions, gmail_requests) == ([], [])
+    assert skipped_as_invalid(over_smtp)
+    assert skipped_as_invalid(over_gmail)
+    assert not DeliveryRecipient.objects.exists()
+    assert invalid_recipient_region_ids() == {system.region.pk}
+
+
+def hidden_member_beside_the_administrator() -> tuple[System, ReminderSchedule]:
+    system = workspace()
+    holder = member(system, "ops@example.com")
+    response = request(
+        system,
+        member_roles=[
+            {"memberships": [membership(holder)], "address": "ops@example.com", "role": "bcc"}
+        ],
+    )
+    assert response.status_code == 200, response.content
+    return system, ReminderSchedule.objects.get(region=system.region)
+
+
+@pytestdb
+def test_a_typed_to_the_library_would_prepare_to_a_hidden_members_mailbox_is_refused() -> None:
+    system, schedule = hidden_member_beside_the_administrator()
+
+    response = request(
+        system,
+        recipients=[PARENTHESES],
+        address_roles=[{"address": PARENTHESES, "role": "to", "memberships": []}],
+    )
+
+    assert response.status_code == 400, response.content
+    assert list(response.json()["fields"]) == ["recipients"]
+    assert not ReminderRecipient.objects.exists()
+    assert revision(system) == schedule.revision
+    with smtp_wire() as script:
+        send_on()
+    message = parsed(script.transactions[0].data)
+    assert (mailboxes(message, "To"), mailboxes(message, "Cc")) == ([ADMIN], [])
+    assert script.transactions[0].recipients == [ADMIN, "ops@example.com"]
+
+
+@pytestdb
+def test_a_stored_typed_to_prepared_to_a_hidden_members_mailbox_skips_the_send() -> None:
+    _, schedule = hidden_member_beside_the_administrator()
+    store(schedule, [PARENTHESES])
+    ReminderRecipient.objects.filter(schedule=schedule).update(role=TO)
 
     with smtp_wire() as script:
         delivery_id = send_on()
 
     assert script.transactions == []
-    delivery = NotificationDelivery.objects.get(pk=delivery_id)
-    assert delivery.status == NotificationDeliveryStatus.FAILED
-    assert set(DeliveryRecipient.objects.values_list("address", flat=True)) == {ADMIN, REFUSED}
+    assert skipped_as_invalid(delivery_id)
+
+
+@pytestdb
+def test_two_spellings_sharing_a_storage_key_with_one_without_a_wire_form_are_refused() -> None:
+    system = workspace()
+
+    response = request(system, recipients=["ops@straẞe.de", "ops@strasse.de"])
+
+    assert response.status_code == 400, response.content
+    assert list(response.json()["fields"]) == ["recipients"]
+    assert not ReminderSchedule.objects.exists()
+
+
+@pytestdb
+def test_a_queued_delivery_reaches_its_mailbox_after_the_list_respells_it() -> None:
+    system = workspace()
+    first = request(system, include_workspace_members=False, recipients=[UNICODE])
+    assert first.status_code == 200, first.content
+    (queued,) = enqueue_due(SLOT)
+    respelled = request(system, include_workspace_members=False, recipients=[ACE])
+    assert respelled.status_code == 200, respelled.content
+
+    with smtp_wire() as script:
+        process_notification(queued, SLOT)
+
+    (transaction,) = script.transactions
+    message = parsed(transaction.data)
+    assert (mailboxes(message, "To"), mailboxes(message, "Cc")) == ([], [])
+    assert transaction.recipients == [ACE]
+
+
+@pytestdb
+def test_a_frozen_row_of_another_mailbox_with_the_same_storage_key_is_dropped() -> None:
+    system = workspace()
+    saved = request(system, recipients=["ops@strasse.de"])
+    assert saved.status_code == 200, saved.content
+    (queued,) = enqueue_due(SLOT)
+    freeze(NotificationDelivery.objects.get(pk=queued), ["ops@straẞe.de", ADMIN])
+
+    with smtp_wire() as script:
+        process_notification(queued, SLOT)
+
+    (transaction,) = script.transactions
+    message = parsed(transaction.data)
+    assert (mailboxes(message, "To"), mailboxes(message, "Cc")) == ([ADMIN], [])
+    assert transaction.recipients == [ADMIN]
+    assert b"strae" not in transaction.data
+
+
+@pytestdb
+def test_a_typed_spelling_of_a_members_mailbox_is_one_recipient_counted_once() -> None:
+    system = workspace()
+    member(system, ACE)
+
+    response = request(system, recipients=[UNICODE])
+
+    assert response.status_code == 200, response.content
+    event = AuditEvent.objects.get(action="reminder_schedule_updated")
+    assert (event.details["visible_recipients"], event.details["visible_outside"]) == (2, 0)
+    NotificationSettings.objects.filter(pk=1).update(max_recipients=2)
+    with smtp_wire() as script:
+        delivery_id = send_on()
+    (transaction,) = script.transactions
+    message = parsed(transaction.data)
+    assert (mailboxes(message, "To"), mailboxes(message, "Cc")) == ([ADMIN], [ACE])
+    assert transaction.recipients == [ADMIN, ACE]
+    assert list(
+        DeliveryRecipient.objects.filter(delivery_id=delivery_id)
+        .order_by("pk")
+        .values_list("address", "role")
+    ) == [(UNICODE, CC), (ADMIN, TO)]

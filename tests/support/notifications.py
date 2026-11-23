@@ -236,6 +236,12 @@ def parsed(raw: bytes) -> ParsedMessage:
     return message
 
 
+def mailboxes(message: ParsedMessage, name: str) -> list[str]:
+    """The addr-spec of every mailbox the standard library's parser reads in the header."""
+    header = message[name]
+    return [] if header is None else [address.addr_spec for address in header.addresses]
+
+
 LOCAL_MAIL = {"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
 
 

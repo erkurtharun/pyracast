@@ -40,6 +40,7 @@ from tests.support.notifications import (
     StatementHook,
     after_statement,
     chosen,
+    mailboxes,
     moved,
     parsed,
     pending_address_change,
@@ -185,6 +186,17 @@ def test_a_visible_schedule_sends_to_and_cc_headers_and_keeps_bcc_off_the_smtp_c
     assert message["To"] == f"boss@example.com, {ADMIN}"
     assert message["Cc"] == "alice@example.com"
     assert message["Bcc"] is None
+    assert (mailboxes(message, "To"), mailboxes(message, "Cc")) == (
+        ["boss@example.com", ADMIN],
+        ["alice@example.com"],
+    )
+    assert transaction.recipients == [
+        "boss@example.com",
+        ADMIN,
+        "alice@example.com",
+        "outside@example.com",
+        "bob@example.com",
+    ]
     assert b"outside@example.com" not in transaction.data
     assert b"bob@example.com" not in transaction.data
     assert delivered_roles(delivery_id) == [
@@ -209,6 +221,11 @@ def test_the_gmail_request_carries_to_cc_and_bcc_headers(gmail_requests: list[by
     assert message["To"] == f"boss@example.com, {ADMIN}"
     assert message["Cc"] == "alice@example.com, bob@example.com"
     assert message["Bcc"] == "outside@example.com"
+    assert [mailboxes(message, name) for name in ("To", "Cc", "Bcc")] == [
+        ["boss@example.com", ADMIN],
+        ["alice@example.com", "bob@example.com"],
+        ["outside@example.com"],
+    ]
 
 
 def test_a_mail_with_copy_addresses_and_nobody_in_to_is_sent(smtp_wire: Script) -> None:
@@ -222,7 +239,11 @@ def test_a_mail_with_copy_addresses_and_nobody_in_to_is_sent(smtp_wire: Script) 
     message = parsed(transaction.data)
     assert message["To"] is None
     assert message["Cc"] == "first@example.com, second@example.com"
-    assert sorted(transaction.recipients) == ["first@example.com", "second@example.com"]
+    assert (mailboxes(message, "To"), mailboxes(message, "Cc")) == (
+        [],
+        ["first@example.com", "second@example.com"],
+    )
+    assert transaction.recipients == ["first@example.com", "second@example.com"]
 
 
 def test_a_recipient_narrowed_away_at_the_marker_is_in_no_header_and_defaults_follow() -> None:
@@ -512,9 +533,10 @@ def test_a_hidden_choice_of_the_higher_member_of_a_folded_address_keeps_it_off_t
     delivery_id = send_on()
 
     (transaction,) = smtp_wire.transactions
-    assert len(transaction.recipients) == 2
+    assert transaction.recipients == [ADMIN, "ops@strasse.de"]
     message = parsed(transaction.data)
     assert (message["To"], message["Cc"]) == (ADMIN, None)
+    assert (mailboxes(message, "To"), mailboxes(message, "Cc")) == ([ADMIN], [])
     assert b"ops@" not in transaction.data
     assert delivered_roles(delivery_id) == [("ops@straße.de", BCC), (ADMIN, TO)]
 
@@ -564,12 +586,16 @@ def test_a_members_hidden_mailbox_is_in_no_header_in_any_spelling(
     (transaction,) = smtp_wire.transactions
     message = parsed(transaction.data)
     assert (message["To"], message["Cc"]) == (ADMIN, None)
+    assert (mailboxes(message, "To"), mailboxes(message, "Cc")) == ([ADMIN], [])
+    assert transaction.recipients == [ADMIN, ACE_MAILBOX]
     for spelling in (b"ops@", b"xn--bcher", "b\u00fccher".encode()):
         assert spelling not in transaction.data
-    assert sorted(delivered_roles(delivery_id)) == sorted([(typed, BCC), (held, BCC), (ADMIN, TO)])
+    assert delivered_roles(delivery_id) == [(typed, BCC), (ADMIN, TO)]
 
 
-def test_two_stored_spellings_of_one_mailbox_with_differing_choices_are_both_hidden() -> None:
+def test_two_stored_spellings_of_one_mailbox_with_differing_choices_are_one_hidden_recipient() -> (
+    None
+):
     system, _ = workspace_with_members()
     schedule = visible(typed_schedule(system, ["first@example.com"]))
     store(schedule, [UNICODE_MAILBOX, ACE_MAILBOX])
@@ -578,7 +604,6 @@ def test_two_stored_spellings_of_one_mailbox_with_differing_choices_are_both_hid
     )
 
     assert headers(sent_on()) == ([], [], [ACE_MAILBOX])
-    assert set(DeliveryRecipient.objects.values_list("address", "role")) == {
-        (UNICODE_MAILBOX, BCC),
-        (ACE_MAILBOX, BCC),
-    }
+    assert list(DeliveryRecipient.objects.values_list("address", "role")) == [
+        (UNICODE_MAILBOX, BCC)
+    ]
