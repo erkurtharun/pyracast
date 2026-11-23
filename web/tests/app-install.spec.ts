@@ -5,6 +5,7 @@ import { accessibilityViolations } from "./support/accessibility";
 import { standInDisplayMode } from "./support/display-mode";
 import { mockApi, user } from "./support/workspace";
 
+const manifestAddress = "/app/manifest.webmanifest";
 const manifest = JSON.parse(
     readFileSync(
         path.resolve(__dirname, "../public/app/manifest.webmanifest"),
@@ -17,6 +18,7 @@ function installLinks(page: Page) {
     return {
         manifest: head.locator('link[rel="manifest"]'),
         touchIcon: head.locator('link[rel="apple-touch-icon"]'),
+        favicon: head.locator('link[rel="icon"]'),
         themeColour: head.locator('meta[name="theme-color"]'),
         applicationName: head.locator('meta[name="application-name"]'),
         homeScreenTitle: head.locator(
@@ -28,63 +30,134 @@ function installLinks(page: Page) {
     };
 }
 
-test("workspace pages link the manifest, the touch icon, the theme colour and the app's name", async ({
-    page,
-}) => {
-    await mockApi(page);
-    await page.goto("/app/");
-    await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
+async function expectInstallHead(page: Page) {
     const links = installLinks(page);
     await expect(links.manifest).toHaveCount(1);
-    await expect(links.manifest).toHaveAttribute(
-        "href",
-        "/app/manifest.webmanifest",
-    );
+    await expect(links.manifest).toHaveAttribute("href", manifestAddress);
     await expect(links.manifest).not.toHaveAttribute("crossorigin");
+    await expect(links.touchIcon).toHaveCount(1);
     await expect(links.touchIcon).toHaveAttribute(
         "href",
         "/app/icons/apple-touch-icon.png",
-    );
-    await expect(links.themeColour).toHaveAttribute(
-        "content",
-        manifest.theme_color,
     );
     for (const name of [links.applicationName, links.homeScreenTitle]) {
         await expect(name).toHaveCount(1);
         await expect(name).toHaveAttribute("content", manifest.name);
     }
     await expect(links.launchCapability).toHaveCount(0);
-    await expect(page.locator('head link[rel="icon"]')).toHaveAttribute(
-        "href",
-        /^\/icon\.svg/,
-    );
-    const browser = await page.context().newCDPSession(page);
-    const found = await browser.send("Page.getAppManifest", {});
-    expect(new URL(found.url).pathname).toBe("/app/manifest.webmanifest");
-    expect(found.errors).toEqual([]);
-});
+    await expect(links.favicon).toHaveCount(1);
+    await expect(links.favicon).toHaveAttribute("href", "/icon.svg");
+}
 
-for (const address of [
+const publicAddresses = [
     "/",
     "/tr/",
     "/privacy/",
     "/tr/privacy/",
     "/terms/",
     "/tr/terms/",
-]) {
-    test(`public ${address} links no manifest, touch icon, theme colour or app name`, async ({
+];
+
+type Opener = (page: Page) => Promise<void>;
+
+function openPublic(address: string): Opener {
+    return async (page) => {
+        await page.goto(address);
+        await expect(page.locator("h1")).toBeVisible();
+    };
+}
+
+function notFound(page: Page) {
+    return page.getByRole("heading", { name: "Page not found", exact: true });
+}
+
+function openNotFound(address: string): Opener {
+    return async (page) => {
+        await mockApi(page);
+        await page.goto(address);
+        await expect(notFound(page)).toBeVisible();
+    };
+}
+
+async function openSignIn(page: Page) {
+    await mockApi(page, { anonymous: true });
+    await page.goto("/app/");
+    await expect(
+        page.locator("form").getByRole("button", { name: "Sign in" }),
+    ).toBeVisible();
+}
+
+const openWorkspacePage: Opener = (page) => openWorkspace(page);
+
+// An address no route matches, under /app/ too, gets the root not-found document outside the /app/ layout.
+const publicPages: [string, Opener][] = [
+    ...publicAddresses.map((address): [string, Opener] => [
+        `public ${address}`,
+        openPublic(address),
+    ]),
+    ["an unknown public address", openNotFound("/no-such-page/")],
+    ["an unknown address under /app/", openNotFound("/app/no-such-page/")],
+];
+
+const appPages: [string, Opener][] = [
+    ["the sign-in screen", openSignIn],
+    ["a workspace page", openWorkspacePage],
+    ["a missing workspace page", openNotFound("/app/w/1/plants/11/unknown/")],
+];
+
+for (const [name, open] of publicPages)
+    test(`${name} links the app manifest, the touch icon and the app's name without the theme colour`, async ({
         page,
     }) => {
-        await page.goto(address);
-        const links = installLinks(page);
-        await expect(page.locator("h1")).toBeVisible();
-        await expect(links.manifest).toHaveCount(0);
-        await expect(links.touchIcon).toHaveCount(0);
-        await expect(links.themeColour).toHaveCount(0);
-        await expect(links.applicationName).toHaveCount(0);
-        await expect(links.homeScreenTitle).toHaveCount(0);
+        await open(page);
+        await expectInstallHead(page);
+        await expect(installLinks(page).themeColour).toHaveCount(0);
     });
-}
+
+for (const [name, open] of appPages)
+    test(`${name} links the app manifest, the touch icon, the app's name and the theme colour`, async ({
+        page,
+    }) => {
+        await open(page);
+        await expectInstallHead(page);
+        await expect(installLinks(page).themeColour).toHaveAttribute(
+            "content",
+            manifest.theme_color,
+        );
+    });
+
+for (const [name, open] of [
+    ["public /", openPublic("/")],
+    ["public /tr/", openPublic("/tr/")],
+    ["a workspace page", openWorkspacePage],
+] as const)
+    test(`the browser finds the app manifest on ${name}`, async ({ page }) => {
+        await open(page);
+        const browser = await page.context().newCDPSession(page);
+        const found = await browser.send("Page.getAppManifest", {});
+        expect(found.url && new URL(found.url).pathname).toBe(manifestAddress);
+        expect(found.errors).toEqual([]);
+    });
+
+test("the served head of every public page carries the install head without JavaScript", async ({
+    browser,
+    baseURL,
+}) => {
+    const context = await browser.newContext({
+        baseURL,
+        javaScriptEnabled: false,
+    });
+    try {
+        const page = await context.newPage();
+        for (const address of publicAddresses) {
+            await page.goto(address);
+            await expect(page.locator("h1")).toBeVisible();
+            await expectInstallHead(page);
+        }
+    } finally {
+        await context.close();
+    }
+});
 
 type Engine = "webkit" | "gecko";
 
