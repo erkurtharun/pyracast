@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo
 
@@ -156,12 +156,25 @@ def _energy(result: dict[str, Any] | None) -> tuple[float | None, bool]:
     partial = summary.get("complete") is not True and not no_daylight
     if partial and summary.get("coverage_fraction") == 0:
         return None, partial
-    return summary.get("partial_energy_mwh" if partial else "energy_mwh"), partial
+    return _figure(summary.get("partial_energy_mwh" if partial else "energy_mwh")), partial
+
+
+def _figure(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise TypeError(type(value).__name__)
+    return float(value)
+
+
+def _instant(stamp: str) -> datetime:
+    parsed = datetime.fromisoformat(stamp)
+    return parsed.astimezone(UTC) if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
 def _collected_at(result: dict[str, Any] | None) -> datetime | None:
     stamp = (result or {}).get("provenance", {}).get("collected_at")
-    return datetime.fromisoformat(stamp) if stamp is not None else None
+    return _instant(stamp) if stamp is not None else None
 
 
 def _affected(scenario: dict[str, Any] | None) -> Affected | None:
@@ -177,15 +190,15 @@ def _forecast_rows(
     if result is None:
         return ()
     affected = (
-        {row["start"]: row.get("energy_mwh") for row in scenario["result"]["intervals"]}
+        {row["start"]: _figure(row.get("energy_mwh")) for row in scenario["result"]["intervals"]}
         if scenario is not None
         else {}
     )
     rows = tuple(
         ForecastRow(
-            start=datetime.fromisoformat(row["start"]),
-            end=datetime.fromisoformat(row["end"]),
-            mwh=row.get("energy_mwh"),
+            start=_instant(row["start"]),
+            end=_instant(row["end"]),
+            mwh=_figure(row.get("energy_mwh")),
             affected_mwh=affected.get(row["start"]),
             sources=_sources(row) if mixed else None,
         )

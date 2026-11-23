@@ -568,12 +568,18 @@ def failing_on(monkeypatch: pytest.MonkeyPatch, day: date, error: Exception) -> 
         ("collected_at", 7, "TypeError"),
         ("start", MISSING, "KeyError"),
         ("start", "11.11.2026 03:00", "ValueError"),
+        ("collected_at", "0001-01-01T00:00:00+01:00", "OverflowError"),
+        ("energy_mwh", "broken", "TypeError"),
+        ("energy_mwh", 10**400, "OverflowError"),
     ],
     ids=[
         "collected-at-text",
         "collected-at-number",
         "interval-without-start",
         "interval-start-text",
+        "collected-at-before-the-first-utc-instant",
+        "interval-energy-text",
+        "interval-energy-beyond-a-float",
     ],
 )
 def test_an_archived_field_the_days_read_cannot_project_refuses_only_its_day(
