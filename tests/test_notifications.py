@@ -485,10 +485,12 @@ def test_missing_snapshot_delivery_response_is_shared_and_read_only() -> None:
     viewed = reminder_schedule_payload(shared, SLOT, administrator=False)
     assert viewed["addresses"] is None
     assert [delivery["recipients"] for delivery in viewed["deliveries"]] == [None]
+    assert (viewed["hidden_by_departure"], payload["hidden_by_departure"]) == (None, False)
     assert {
         **viewed,
         "addresses": payload["addresses"],
         "deliveries": payload["deliveries"],
+        "hidden_by_departure": payload["hidden_by_departure"],
     } == payload
     assert ReminderSchedule.objects.count() == before
 
