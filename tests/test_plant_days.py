@@ -1,6 +1,7 @@
 import logging
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import AbstractContextManager
 from datetime import UTC, date, datetime, timedelta
 from threading import Event
 from time import perf_counter
@@ -238,6 +239,44 @@ def test_the_window_is_counted_in_plant_days_across_midnight(
     assert all(set(day) == PRODUCTION_DAY for day in body["production"])
 
 
+def clock_passing_midnight_at_the_first_forecast_query(
+    monkeypatch: pytest.MonkeyPatch, before: datetime, after: datetime
+) -> tuple[list[datetime], AbstractContextManager[None]]:
+    moment = [before]
+
+    def advance(execute: Callable[..., Any], sql: str, *args: Any) -> Any:
+        if "forecasts_" in sql:
+            moment[0] = after
+        return execute(sql, *args)
+
+    monkeypatch.setattr(timezone, "now", lambda: moment[0])
+    return moment, connection.execute_wrapper(advance)
+
+
+def test_a_read_during_which_local_midnight_passes_answers_every_day_as_at_its_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    forecast_window(system)
+    estimated_actuals(system, TODAY, 0.35, NOW - timedelta(minutes=30), hours=(0, 10))
+    start, _ = local_day_bounds(TODAY, system.binding.timezone)
+    incident(system, plant, start + timedelta(hours=9), None)
+    for offset in range(1, 31):
+        metered(system, plant, TODAY - timedelta(days=offset))
+    before = datetime(2026, 11, 9, 20, 59, 59, tzinfo=UTC)
+    monkeypatch.setattr(timezone, "now", lambda: before)
+    at_start = days_of(system, plant)
+    moment, passing = clock_passing_midnight_at_the_first_forecast_query(
+        monkeypatch, before, before + timedelta(seconds=2)
+    )
+    with passing:
+        during = days_of(system, plant)
+    assert moment == [before + timedelta(seconds=2)]
+    assert during["today"] == TODAY.isoformat()
+    assert by_date(during["forecast"])[TODAY]["source_kind"] == "mixed"
+    assert during == at_start
+
+
 @pytest.mark.parametrize(("day", "hours"), [(date(2026, 3, 29), 23), (date(2026, 10, 25), 25)])
 def test_a_daylight_saving_day_has_one_row_per_local_hour(
     monkeypatch: pytest.MonkeyPatch, day: date, hours: int
@@ -425,10 +464,12 @@ def test_a_damaged_past_day_is_refused_while_every_other_day_is_answered(
 
 
 def failing_on(monkeypatch: pytest.MonkeyPatch, day: date, error: Exception) -> None:
-    def failing(plant: Plant, target_date: date, resolution_minutes: int) -> dict[str, object]:
+    def failing(
+        plant: Plant, target_date: date, resolution_minutes: int, now: datetime
+    ) -> dict[str, object]:
         if target_date == day:
             raise error
-        return automatic_outlook(plant, target_date, resolution_minutes)
+        return automatic_outlook(plant, target_date, resolution_minutes, now)
 
     monkeypatch.setattr("pyracast.plants.plant_days.automatic_outlook", failing)
 

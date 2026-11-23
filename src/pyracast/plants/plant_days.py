@@ -86,23 +86,24 @@ def plant_days(actor: User, tenant_id: int, region_id: int, plant_id: int) -> Pl
         region = Region.objects.active().get(pk=region_id, tenant_id=tenant_id)
         plant = Plant.objects.get(pk=plant_id, region=region)
         plant.region = region
-        today = timezone.now().astimezone(ZoneInfo(region.timezone)).date()
+        now = timezone.now()
+        today = now.astimezone(ZoneInfo(region.timezone)).date()
         return PlantDays(
             plant_id=plant.pk,
             name=plant.name,
             today=today,
             forecast=tuple(
-                _forecast_day(plant, today + timedelta(days=offset), today)
+                _forecast_day(plant, today + timedelta(days=offset), today, now)
                 for offset in range(-FORECAST_DAYS_BEFORE, FORECAST_DAYS_AFTER + 1)
             ),
-            production=_production_days(plant, today),
+            production=_production_days(plant, today, now),
         )
 
 
-def _forecast_day(plant: Plant, day: date, today: date) -> ForecastDay:
+def _forecast_day(plant: Plant, day: date, today: date, now: datetime) -> ForecastDay:
     try:
         with stored_data("plant", plant.pk, day, "days", FROZEN_PAYLOAD_FAULTS):
-            outlook = cast(dict[str, Any], automatic_outlook(plant, day, RESOLUTION_MINUTES))
+            outlook = cast(dict[str, Any], automatic_outlook(plant, day, RESOLUTION_MINUTES, now))
     except DomainError as refusal:
         if refusal.code != ErrorCode.CALCULATION_OUT_OF_RANGE:
             raise
@@ -193,9 +194,9 @@ def _sources(row: dict[str, Any]) -> tuple[str, ...] | None:
     return tuple(kinds) if kinds is not None else None
 
 
-def _production_days(plant: Plant, today: date) -> tuple[ProductionDay, ...]:
+def _production_days(plant: Plant, today: date, now: datetime) -> tuple[ProductionDay, ...]:
     production = native_production_days(
-        plant, today - timedelta(days=PRODUCTION_DAYS_BEFORE), today - timedelta(days=1)
+        plant, today - timedelta(days=PRODUCTION_DAYS_BEFORE), today - timedelta(days=1), now
     )
     return tuple(
         ProductionDay(

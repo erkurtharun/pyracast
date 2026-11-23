@@ -144,7 +144,9 @@ class NativeProduction:
     days: tuple[NativeProductionDay, ...]
 
 
-def native_production_days(plant: Plant, start_date: date, end_date: date) -> NativeProduction:
+def native_production_days(
+    plant: Plant, start_date: date, end_date: date, now: datetime
+) -> NativeProduction:
     configuration = (
         PlantConfiguration.objects.select_related("binding__provider_account").get(
             pk=plant.current_configuration_id
@@ -157,7 +159,7 @@ def native_production_days(plant: Plant, start_date: date, end_date: date) -> Na
     range_start, _ = local_day_bounds(start_date, zone)
     _, range_end = local_day_bounds(end_date, zone)
     effective = select_production_measurements(
-        plant, configuration, range_start, range_end, timezone.now()
+        plant, configuration, range_start, range_end, now
     ).selection.effective
     days = []
     day = start_date

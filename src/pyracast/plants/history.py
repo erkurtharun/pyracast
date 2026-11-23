@@ -84,7 +84,7 @@ def plant_outlook(
 
 
 def automatic_outlook(
-    plant: Plant, target_date: date, resolution_minutes: int
+    plant: Plant, target_date: date, resolution_minutes: int, now: datetime
 ) -> dict[str, object]:
     result = _plant_outlook(
         plant,
@@ -92,8 +92,9 @@ def automatic_outlook(
         resolution_minutes=resolution_minutes,
         as_of=None,
         source="auto",
+        now=now,
     )
-    _evaluate_outage_scenario(result, target_date, resolution_minutes, timezone.now())
+    _evaluate_outage_scenario(result, target_date, resolution_minutes, now)
     return result
 
 
@@ -240,11 +241,12 @@ def _plant_outlook(
     resolution_minutes: int,
     as_of: datetime | None,
     source: str,
+    now: datetime | None = None,
 ) -> dict[str, object]:
     if not is_source(source):
         raise ValidationError(gettext("Unsupported data source."))
     require_resolution(resolution_minutes)
-    now = timezone.now()
+    now = now or timezone.now()
     today = now.astimezone(ZoneInfo(plant.region.timezone)).date()
     policy = plant_policy(source, target_date, today, as_of=as_of is not None)
     if not plant_days_include(policy, target_date, today):
