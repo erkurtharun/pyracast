@@ -781,7 +781,12 @@ export interface components {
         AddressRoleInput: {
             /** Format: email */
             address: string;
-            role: components["schemas"]["RecipientRoleEnum"];
+            role:
+                | (
+                      | components["schemas"]["RecipientRoleEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
             memberships: number[];
         };
         AddressRoleOutput: {

@@ -175,10 +175,10 @@ def set_recipient_limit(actor: User, value: int, *, expected: int) -> RecipientL
 
 @dataclass(frozen=True)
 class AddressChoice:
-    """`memberships` are the members of the address the form showed."""
+    """`memberships` are the members of the address the form showed; `None` clears the choice."""
 
     address: str
-    role: RecipientRole
+    role: RecipientRole | None
     memberships: frozenset[int]
 
 
@@ -272,28 +272,27 @@ def _member_choices(
     return decided
 
 
+def _typed_choice(entry: AddressChoice, members: Workspace) -> TypedChoice:
+    if entry.role == RecipientRole.BCC:
+        return HIDDEN
+    if entry.role is not None and members.are_members(entry.address, entry.memberships):
+        return TypedChoice(entry.role, entry.memberships)
+    return NO_CHOICE
+
+
 def _typed_choices(
     planned: Sequence[Explicit],
     stored: Choices,
-    address_roles: Sequence[AddressChoice] | None,
+    changes: Sequence[AddressChoice],
     members: Workspace,
 ) -> list[TypedChoice]:
-    """Without `address_roles` an address that stays keeps its stored choice. Otherwise a To or
-    Cc is kept only while the members the form saw are the address's members, so a choice made
-    for other members is dropped rather than bound to new ones; Hidden is always kept."""
-    if address_roles is None:
-        return [stored.typed(row.address) or NO_CHOICE for row in planned]
-    entries = {mailbox_key(entry.address): entry for entry in address_roles}
-    chosen = []
-    for row in planned:
-        entry = entries.get(mailbox_key(row.address))
-        if entry is not None and entry.role == RecipientRole.BCC:
-            chosen.append(HIDDEN)
-        elif entry is not None and members.are_members(entry.address, entry.memberships):
-            chosen.append(TypedChoice(entry.role, entry.memberships))
-        else:
-            chosen.append(NO_CHOICE)
-    return chosen
+    named = {mailbox_key(entry.address): entry for entry in changes}
+    return [
+        _typed_choice(entry, members)
+        if (entry := named.get(mailbox_key(row.address)))
+        else stored.typed(row.address) or NO_CHOICE
+        for row in planned
+    ]
 
 
 def _audit_details(schedule: ReminderSchedule, resolved: Resolved) -> dict[str, int]:
@@ -378,7 +377,7 @@ def configure_reminders(
         _check_recipient_limit(len(addresses), current, limit, unchanged_pause)
         stored_typed = typed_choices(schedule)
         stored_roles = [choice for _, choice in stored_typed]
-        roles = _typed_choices(planned, choices(stored_typed, {}), address_roles, members)
+        roles = _typed_choices(planned, choices(stored_typed, {}), address_roles or (), members)
         store_recipients(schedule, explicit, planned, roles=roles, stored_roles=stored_roles)
         chosen = store_member_choices(schedule, decided)
         mode = schedule.hide_recipients != hide_recipients

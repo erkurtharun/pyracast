@@ -228,7 +228,7 @@ def test_a_save_replaces_typed_choices_and_the_named_members_and_preserves_the_o
 
     assert response.status_code == 200, response.content
     assert stored_roles(system) == (
-        {"boss@example.com": "", "outside@example.com": "cc"},
+        {"boss@example.com": "to", "outside@example.com": "cc"},
         {bob.email: "cc"},
     )
 
@@ -1121,3 +1121,70 @@ def test_member_entries_that_share_a_membership_or_a_mailbox_are_refused() -> No
         assert response.status_code == 400
         assert list(response.json()["fields"]) == ["member_roles"]
     assert not ReminderSchedule.objects.exists()
+
+
+def typed_rows(system: System) -> dict[str, tuple[str, list[int]]]:
+    return {
+        address: (role, members)
+        for address, role, members in ReminderRecipient.objects.filter(
+            schedule__region=system.region
+        ).values_list("address", "role", "role_members")
+    }
+
+
+def test_a_save_changes_only_the_typed_choices_it_names() -> None:
+    system, alice, _ = workspace()
+    recipients = ["boss@example.com", "outside@example.com", alice.email]
+    body = {"include_workspace_members": False, "hide_recipients": False}
+    put(
+        system,
+        **body,
+        recipients=recipients,
+        address_roles=[
+            {"address": "outside@example.com", "role": "bcc", "memberships": []},
+            *to_for(alice.email, alice),
+        ],
+    )
+    kept = {"outside@example.com": ("bcc", []), alice.email: ("to", [membership(alice)])}
+    assert typed_rows(system) == {"boss@example.com": ("", [])} | kept
+
+    def moved_by(**changes: Any) -> tuple[int, int]:
+        before = (revision(system), len(events(system)))
+        assert put(system, **body, **changes).status_code == 200
+        return revision(system) - before[0], len(events(system)) - before[1]
+
+    copy = [{"address": "Boss@example.com", "role": "cc", "memberships": []}]
+    assert moved_by(recipients=recipients, address_roles=copy) == (1, 1)
+    assert typed_rows(system) == {"boss@example.com": ("cc", [])} | kept
+
+    assert moved_by(recipients=recipients, address_roles=copy) == (0, 0)
+    assert moved_by(recipients=recipients) == (0, 0)
+
+    cleared: list[dict[str, Any]] = [
+        {"address": "boss@example.com", "role": None, "memberships": []}
+    ]
+    assert moved_by(recipients=recipients, address_roles=cleared) == (1, 1)
+    assert typed_rows(system) == {"boss@example.com": ("", [])} | kept
+
+    assert moved_by(recipients=[*recipients, "new@example.com"]) == (1, 1)
+    assert typed_rows(system) == {"boss@example.com": ("", []), "new@example.com": ("", [])} | kept
+    assert sent_headers(0) == (
+        [alice.email],
+        [],
+        ["boss@example.com", "outside@example.com", "new@example.com"],
+    )
+
+
+def test_a_respelled_typed_address_keeps_its_choice() -> None:
+    system, _, _ = workspace()
+    body = {"include_workspace_members": False, "hide_recipients": False}
+    put(
+        system,
+        **body,
+        recipients=[UNICODE_MAILBOX],
+        address_roles=[{"address": UNICODE_MAILBOX, "role": "cc", "memberships": []}],
+    )
+
+    assert put(system, **body, recipients=[ACE_MAILBOX]).status_code == 200
+
+    assert typed_rows(system) == {ACE_MAILBOX: ("cc", [])}

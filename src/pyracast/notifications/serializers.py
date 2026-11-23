@@ -35,7 +35,7 @@ from pyracast.notifications.recipients import mailbox_key
 
 class AddressRoleInput(InputSerializer):
     address = serializers.EmailField(max_length=RECIPIENT_MAX_LENGTH)
-    role = serializers.ChoiceField(choices=RecipientRole.choices)
+    role = serializers.ChoiceField(choices=RecipientRole.choices, allow_null=True)
     memberships = serializers.ListField(
         child=serializers.IntegerField(min_value=1), max_length=MAX_RECIPIENT_LIMIT
     )
@@ -97,7 +97,9 @@ class ReminderInput(InputSerializer):
             )
         attrs["address_roles"] = [
             AddressChoice(
-                entry["address"], RecipientRole(entry["role"]), frozenset(entry["memberships"])
+                entry["address"],
+                None if entry["role"] is None else RecipientRole(entry["role"]),
+                frozenset(entry["memberships"]),
             )
             for entry in entries
         ]

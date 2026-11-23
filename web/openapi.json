@@ -5683,7 +5683,15 @@
                         "maxLength": 254
                     },
                     "role": {
-                        "$ref": "#/components/schemas/RecipientRoleEnum"
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/RecipientRoleEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
                     },
                     "memberships": {
                         "type": "array",
