@@ -218,7 +218,8 @@ def test_the_requested_identity_given_the_key_during_recovery_is_returned(
 
     def move_the_key() -> ProviderAccount:
         ProviderAccount.objects.filter(pk=holder[0].pk).update(
-            api_key_fingerprint=api_key_fingerprints(provider_key("OTHER"))[0]
+            encrypted_api_key=encrypt_secret(provider_key("OTHER")),
+            api_key_fingerprint=api_key_fingerprints(provider_key("OTHER"))[0],
         )
         return account("strasse", provider_key())
 
