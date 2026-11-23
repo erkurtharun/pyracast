@@ -38,6 +38,7 @@ from pyracast.notifications.operations import (
 )
 from pyracast.notifications.recipients import addressable, mailbox_key, prepared, recipient_key
 from pyracast.notifications.scheduler import enqueue_due
+from pyracast.notifications.serializers import ReminderInput
 from pyracast.regions.models import AuditEvent
 from tests.support.domain import NOW, System, make_system
 from tests.support.notification_groups import member
@@ -700,6 +701,36 @@ def test_a_stored_typed_to_prepared_to_a_hidden_members_mailbox_skips_the_send()
 
     assert script.transactions == []
     assert skipped_as_invalid(delivery_id)
+
+
+def mixed_request() -> dict[str, Any]:
+    entry = {"address": "ops@example.com", "role": "to", "memberships": []}
+    return {"recipients": ["ops@example.com", PARENTHESES], "address_roles": [entry, entry]}
+
+
+@pytestdb
+def test_an_unaddressable_recipient_is_refused_before_the_role_entries_are_checked() -> None:
+    system = workspace()
+
+    answers = [request(system, suffix, **mixed_request()) for suffix in ("preview/", "")]
+
+    for response in answers:
+        assert response.status_code == 400, response.content
+        assert list(response.json()["fields"]) == ["recipients"]
+    assert not ReminderSchedule.objects.exists()
+    serializer = ReminderInput(
+        data={
+            "enabled": True,
+            "include_workspace_members": False,
+            "times": ["10:00"],
+            "language": "en",
+            "expected_revision": 0,
+        }
+        | mixed_request()
+    )
+    assert not serializer.is_valid()
+    assert list(serializer.errors) == ["recipients"]
+    assert [error.code for error in serializer.errors["recipients"]] == [validate_email.code]
 
 
 @pytestdb
