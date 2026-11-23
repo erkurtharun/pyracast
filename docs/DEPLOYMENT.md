@@ -394,12 +394,12 @@ release a failed one falls back to serves it as well, since every release from t
 app on does. The address answers `text/javascript` with `no-store` and its own policy; the
 container smoke pins those headers, the manifest and the icons.
 
-- **Withdrawal:** a release whose change is exactly these edits in `web/`:
-  1. `git mv public/app/sw.js testing/sw-previous.js` keeps the worker that browsers hold, which
+- **Withdrawal:** a release whose change is exactly these edits:
+  1. move `web/public/app/sw.js` with `git mv` to `sw-previous.js` in `web/testing/`; it keeps the worker that browsers hold, which
      the proof installs first;
-  2. `cp testing/sw-withdraw.js public/app/sw.js` serves the script that unregisters itself;
-  3. `git rm src/lib/worker-registration.tsx`, and remove its import and `<WorkerRegistration />`
-     from `src/app/app/layout.tsx`.
+  2. `cp web/testing/sw-withdraw.js web/public/app/sw.js` serves the script that unregisters itself;
+  3. `git rm web/src/lib/worker-registration.tsx`, and remove its import and `<WorkerRegistration />`
+     from `web/src/app/app/layout.tsx`.
 
   `web/tests/support/worker-state.ts` reads an address serving `sw-withdraw.js` as the withdrawn
   state, and the model test and `npm run test:production` then prove it: a fresh visit registers
