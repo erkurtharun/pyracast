@@ -1,5 +1,6 @@
-import { spawnSync } from "node:child_process";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { rmSync, writeFileSync } from "node:fs";
+import { constants } from "node:os";
 import path from "node:path";
 
 const webDir = path.resolve(import.meta.dirname, "..");
@@ -9,24 +10,7 @@ if (path.dirname(outputDir) !== webDir)
 const lock = path.join(webDir, "coverage.lock");
 const args = process.argv.slice(2);
 
-function alive(pid) {
-    try {
-        process.kill(pid, 0);
-        return true;
-    } catch (error) {
-        return error.code === "EPERM";
-    }
-}
-
-function holderOf() {
-    try {
-        return Number(readFileSync(lock, "utf8"));
-    } catch {
-        return 0;
-    }
-}
-
-function claim() {
+function claimed() {
     try {
         writeFileSync(lock, String(process.pid), { flag: "wx" });
         return true;
@@ -39,14 +23,8 @@ function claim() {
 function refusal() {
     if (args.some((arg) => /^--ui($|=|-)/.test(arg)))
         return "The coverage run refuses Playwright UI mode: it collects the server's coverage and reports once, after the whole run.";
-    if (claim()) return undefined;
-    const holder = holderOf();
-    if (holder > 0 && alive(holder))
-        return `A coverage run (process ${holder}) holds this checkout; ${lock} is released when it ends.`;
-    rmSync(lock, { force: true });
-    return claim()
-        ? undefined
-        : `Another coverage run claimed this checkout first (${lock}).`;
+    if (claimed()) return undefined;
+    return `${lock} exists, so another coverage run may hold this checkout. Delete it by hand only after making sure that no coverage run of this checkout (this wrapper, its build, Playwright or the coverage server) is running.`;
 }
 
 const env = {
@@ -56,14 +34,19 @@ const env = {
 };
 delete env.NODE_V8_COVERAGE;
 
+let interrupted;
+
 function run(script, scriptArgs) {
-    const result = spawnSync(process.execPath, [script, ...scriptArgs], {
-        cwd: webDir,
-        stdio: "inherit",
-        env,
+    if (interrupted) return Promise.resolve(1);
+    return new Promise((resolve, reject) => {
+        spawn(process.execPath, [script, ...scriptArgs], {
+            cwd: webDir,
+            stdio: "inherit",
+            env,
+        })
+            .on("error", reject)
+            .on("exit", (code) => resolve(code ?? 1));
     });
-    if (result.error) throw result.error;
-    return result.status ?? 1;
 }
 
 const refused = refusal();
@@ -71,12 +54,22 @@ if (refused) {
     console.error(refused);
     process.exitCode = 2;
 } else {
+    // The terminal delivers an interrupt to the running child itself; the wrapper waits for it and releases the lock.
+    for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
+        process.on(signal, () => {
+            interrupted ??= signal;
+        });
     try {
         rmSync(outputDir, { recursive: true, force: true });
-        const built = run("node_modules/next/dist/bin/next", ["build"]);
+        const built = await run("node_modules/next/dist/bin/next", ["build"]);
         process.exitCode = built
             ? built
-            : run("node_modules/@playwright/test/cli.js", ["test", ...args]);
+            : await run("node_modules/@playwright/test/cli.js", [
+                  "test",
+                  ...args,
+              ]);
+        if (interrupted)
+            process.exitCode = 128 + constants.signals[interrupted];
     } finally {
         rmSync(lock, { force: true });
     }

@@ -1,19 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import {
-    coverage,
-    coveragePort,
-    coverageReadinessPath,
-    productionServer,
-    serverInspector,
-    serverSnapshots,
-} from "./tests/support/server";
-const port = coverage ? coveragePort : 3100;
-const origin = `http://127.0.0.1:${port}`;
-const startCommand = `npm start -- --port ${port}`;
-const normalCommand = productionServer
-    ? startCommand
-    : `npm run dev -- --port ${port}`;
-const coverageCommand = `${startCommand} --inspect=${serverInspector.host}:${serverInspector.port}`;
+import { coverage, serverOrigin, webServer } from "./tests/support/server";
 export default defineConfig({
     testDir: "./tests",
     fullyParallel: true,
@@ -27,13 +13,7 @@ export default defineConfig({
         ? [["list"], ["./testing/coverage-reporter.ts"]]
         : "list",
     outputDir: coverage ? "coverage/test-results" : "test-results",
-    use: { baseURL: origin, trace: "retain-on-failure" },
+    use: { baseURL: serverOrigin(coverage), trace: "retain-on-failure" },
     projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-    webServer: {
-        command: coverage ? coverageCommand : normalCommand,
-        env: coverage ? { NODE_V8_COVERAGE: serverSnapshots } : {},
-        url: coverage ? `${origin}${coverageReadinessPath}` : origin,
-        reuseExistingServer: !coverage && !process.env.CI,
-        timeout: 120_000,
-    },
+    webServer: webServer(coverage),
 });

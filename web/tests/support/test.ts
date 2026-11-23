@@ -1,6 +1,5 @@
 import { test as base } from "@playwright/test";
-import { CoverageReport } from "monocart-coverage-reports";
-import { browserCoverage } from "../../testing/coverage-options";
+import { addBrowserCoverage } from "../../testing/coverage-maps";
 
 export { expect, type Page } from "@playwright/test";
 
@@ -18,10 +17,7 @@ export const test = base.extend<{ coverage: void }>({
             try {
                 await runTest();
             } finally {
-                const coverage = await page.coverage.stopJSCoverage();
-                if (coverage.length) {
-                    await new CoverageReport(browserCoverage()).add(coverage);
-                }
+                await addBrowserCoverage(await page.coverage.stopJSCoverage());
             }
         },
         { auto: true },

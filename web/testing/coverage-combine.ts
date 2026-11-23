@@ -11,6 +11,7 @@ export type FileCoverage = {
     b: Record<string, number[]>;
 };
 export type CoverageMap = Record<string, FileCoverage>;
+export type ScriptRecords = Record<string, Record<string, FileCoverage>>;
 
 function statementsOf(file: FileCoverage): [Span, number][] {
     return Object.entries(file.statementMap).map(([key, span]) => [
@@ -44,21 +45,20 @@ function statementTables(
     };
 }
 
-// Monocart gives a source that no generated statement maps to one statement over its whole text, counted as run.
-export function withoutInventedStatements(
+// The converter got the text, a break and a marker line; a mapped end reaches at most the start of the marker line.
+export function withoutFallback(
     file: FileCoverage,
     text: string,
 ): FileCoverage {
-    const lines = text.split("\n");
-    const invented = (span: Span) =>
-        span.start.line === 1 &&
-        span.start.column === 0 &&
-        span.end.line === lines.length &&
-        span.end.column === lines.at(-1)!.length;
+    const lines = text.split(/\r\n|[\r\n\u2028\u2029]/).length;
     return {
         ...file,
         ...statementTables(
-            statementsOf(file).filter(([span]) => !invented(span)),
+            statementsOf(file).filter(
+                ([{ end }]) =>
+                    end.line <= lines ||
+                    (end.line === lines + 1 && end.column === 0),
+            ),
         ),
     };
 }
@@ -90,31 +90,86 @@ function zeroed(file: FileCoverage): FileCoverage {
     };
 }
 
-// Functions and branches of two compilations cannot be matched, so one side's tables are kept whole.
+function added(first: FileCoverage, second: FileCoverage): FileCoverage {
+    return {
+        ...first,
+        ...statementTables([...statementsOf(first), ...statementsOf(second)]),
+        f: Object.fromEntries(
+            Object.entries(first.f).map(([key, count]) => [
+                key,
+                count + (second.f[key] ?? 0),
+            ]),
+        ),
+        b: Object.fromEntries(
+            Object.entries(first.b).map(([key, arms]) => [
+                key,
+                arms.map((count, arm) => count + (second.b[key]?.[arm] ?? 0)),
+            ]),
+        ),
+    };
+}
+
+function compilations(
+    records: Record<string, FileCoverage> | undefined,
+): FileCoverage[] {
+    const groups = new Map<string, FileCoverage>();
+    for (const script of Object.keys(records ?? {}).sort()) {
+        const record = records![script]!;
+        const tables = JSON.stringify([
+            Object.values(record.fnMap),
+            Object.values(record.branchMap),
+        ]);
+        const group = groups.get(tables);
+        groups.set(tables, group ? added(group, record) : record);
+    }
+    return [...groups.values()];
+}
+
+const noRecord = (name: string): FileCoverage => ({
+    path: name,
+    statementMap: {},
+    s: {},
+    fnMap: {},
+    f: {},
+    branchMap: {},
+    b: {},
+});
+
 export function combineCoverage(sides: {
-    browser: CoverageMap;
-    server: CoverageMap;
-    baseline: CoverageMap;
+    sources: string[];
+    browser: ScriptRecords;
+    server: ScriptRecords;
+    baseline: ScriptRecords;
 }): CoverageMap {
     return Object.fromEntries(
-        Object.keys(sides.baseline)
-            .sort()
-            .map((name) => {
-                const measured = [sides.browser[name], sides.server[name]];
-                const tables = measured.find(executed);
-                if (!tables) return [name, zeroed(sides.baseline[name]!)];
-                return [
-                    name,
-                    {
-                        ...tables,
-                        path: name,
-                        ...statementTables(
-                            measured.flatMap((file) =>
-                                file ? statementsOf(file) : [],
+        sides.sources.toSorted().map((name) => {
+            const baseline = Object.values(sides.baseline[name] ?? {}).map(
+                zeroed,
+            );
+            const measured = [sides.browser[name], sides.server[name]];
+            const tables =
+                compilations(sides.browser[name]).find(executed) ??
+                compilations(sides.server[name]).find(executed) ??
+                baseline[0] ??
+                noRecord(name);
+            return [
+                name,
+                {
+                    path: name,
+                    fnMap: tables.fnMap,
+                    f: tables.f,
+                    branchMap: tables.branchMap,
+                    b: tables.b,
+                    ...statementTables(
+                        [
+                            ...baseline,
+                            ...measured.flatMap((records) =>
+                                Object.values(records ?? {}),
                             ),
-                        ),
-                    },
-                ];
-            }),
+                        ].flatMap(statementsOf),
+                    ),
+                },
+            ];
+        }),
     );
 }
