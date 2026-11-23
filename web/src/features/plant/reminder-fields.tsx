@@ -13,7 +13,7 @@ export type Row = { id: number; text: string };
 export const rowsOf = (values: string[]): Row[] =>
     (values.length ? values : [""]).map((text, id) => ({ id, text }));
 
-export type Fields = { enabled: boolean; times: Row[]; language: Language };
+type Fields = { enabled: boolean; times: Row[]; language: Language };
 export type Change = {
     enabled: (enabled: boolean) => void;
     times: (apply: (rows: Row[]) => Row[]) => void;
