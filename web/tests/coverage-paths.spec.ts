@@ -468,6 +468,170 @@ test("branch groups whose arms differ between compilations are counted with thei
     ).toEqual({ groups: 1, untaken: 2 });
 });
 
+type Range = ReturnType<typeof span>;
+const compiled = (
+    functions: [string, Range, Range, number][],
+    branches: [string, Range, [Range, number][]][] = [],
+): FileCoverage => ({
+    path: name,
+    statementMap: {},
+    s: {},
+    fnMap: Object.fromEntries(
+        functions.map(([fn, decl, loc], i) => [i, { name: fn, decl, loc }]),
+    ),
+    f: Object.fromEntries(functions.map(([, , , count], i) => [i, count])),
+    branchMap: Object.fromEntries(
+        branches.map(([type, loc, arms], i) => [
+            i,
+            { type, loc, locations: arms.map(([location]) => location) },
+        ]),
+    ),
+    b: Object.fromEntries(
+        branches.map(([, , arms], i) => [i, arms.map(([, count]) => count)]),
+    ),
+});
+const counted = (coverage: FileCoverage) =>
+    Object.entries(coverage.fnMap).map(([key, fn]) => [
+        fn.name,
+        coverage.f[key],
+    ]);
+
+test("a function whose start differs between compilations while its body's end agrees is one function", () => {
+    for (const scripts of bothOrders(
+        compiled([["isLanguage", span(4, 7, 4, 7), span(4, 7, 6, 1), 1]]),
+        compiled([["isLanguage", span(4, 7, 4, 62), span(4, 62, 6, 1), 2]]),
+    ))
+        expect(counted(united({ browser: { [name]: scripts } }))).toEqual([
+            ["isLanguage", 3],
+        ]);
+});
+
+test("two functions sharing an end stay two and pair outer with outer and inner with inner", () => {
+    const inner: [string, Range, Range, number] = [
+        "inner",
+        span(3, 23, 3, 23),
+        span(3, 23, 3, 40),
+        2,
+    ];
+    const listedOuterFirst = compiled([
+        ["outer", span(3, 17, 3, 17), span(3, 17, 3, 40), 1],
+        ["inner", span(3, 23, 3, 23), span(3, 23, 3, 40), 0],
+    ]);
+    for (const other of [
+        compiled([inner, ["outer", span(3, 17, 3, 17), span(3, 17, 3, 40), 3]]),
+        compiled([inner, ["outer", span(3, 16, 3, 16), span(3, 16, 3, 40), 3]]),
+    ])
+        for (const scripts of bothOrders(listedOuterFirst, other))
+            expect(counted(united({ browser: { [name]: scripts } }))).toEqual([
+                ["outer", 4],
+                ["inner", 2],
+            ]);
+});
+
+test("a record with only one of two functions sharing an end credits the outer one only", () => {
+    const both = (inner: number) =>
+        compiled([
+            ["outer", span(3, 17, 3, 17), span(3, 17, 3, 40), 0],
+            ["inner", span(3, 23, 3, 23), span(3, 23, 3, 40), inner],
+        ]);
+    const single = compiled([
+        ["inner", span(3, 23, 3, 23), span(3, 23, 3, 40), 5],
+    ]);
+    expect(
+        counted(
+            united({
+                browser: { [name]: { a: both(0) } },
+                server: { [name]: { b: single } },
+            }),
+        ),
+    ).toEqual([
+        ["outer", 5],
+        ["inner", 0],
+    ]);
+    expect(
+        counted(
+            united({
+                browser: { [name]: { a: both(1) } },
+                server: { [name]: { b: single } },
+            }),
+        ),
+    ).toEqual([
+        ["outer", 5],
+        ["inner", 1],
+    ]);
+});
+
+test("a branch group whose start differs between compilations while type and end agree is one group with its arms united by end", () => {
+    const one = compiled(
+        [],
+        [
+            [
+                "switch",
+                span(7, 4, 10, 1),
+                [
+                    [span(8, 4, 8, 20), 1],
+                    [span(9, 4, 9, 20), 0],
+                ],
+            ],
+        ],
+    );
+    const other = compiled(
+        [],
+        [
+            [
+                "switch",
+                span(7, 0, 10, 1),
+                [
+                    [span(8, 8, 8, 20), 2],
+                    [span(9, 9, 9, 20), 0],
+                    [span(9, 22, 9, 30), 1],
+                ],
+            ],
+        ],
+    );
+    for (const scripts of bothOrders(one, other)) {
+        const sides = { browser: { [name]: scripts } };
+        expect(united(sides).b).toEqual({ 0: [3, 0, 1] });
+        expect(
+            differingArms({
+                sources: [name],
+                server: {},
+                baseline: {},
+                ...sides,
+            }),
+        ).toEqual({ groups: 1, untaken: 0 });
+    }
+});
+
+test("two branch groups of one type sharing an end stay two and pair from the outside in", () => {
+    const outer = (start: number, counts: [number, number]) =>
+        [
+            "cond-expr",
+            span(5, start, 5, 20),
+            [
+                [span(5, 4, 5, 5), counts[0]],
+                [span(5, 8, 5, 20), counts[1]],
+            ],
+        ] as [string, Range, [Range, number][]];
+    const inner = (counts: [number, number]) =>
+        [
+            "cond-expr",
+            span(5, 8, 5, 20),
+            [
+                [span(5, 12, 5, 13), counts[0]],
+                [span(5, 16, 5, 20), counts[1]],
+            ],
+        ] as [string, Range, [Range, number][]];
+    for (const scripts of bothOrders(
+        compiled([], [outer(0, [1, 2]), inner([1, 1])]),
+        compiled([], [inner([0, 3]), outer(1, [2, 0])]),
+    )) {
+        const coverage = united({ browser: { [name]: scripts } });
+        expect(coverage.b).toEqual({ 0: [3, 2], 1: [1, 4] });
+        expect(coverage.branchMap[1]!.loc!.start.column).toBe(8);
+    }
+});
+
 test("lines are the union of the baseline and every measured record", () => {
     const baseline: ScriptRecords = {
         [name]: {

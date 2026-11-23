@@ -1,10 +1,11 @@
 type Location = { line: number; column: number };
 type Span = { start: Location; end: Location };
+type Place = { start?: Partial<Location>; end?: Partial<Location> };
 type FunctionMeta = { name?: string; decl?: Span; loc?: Span; line?: number };
 type BranchMeta = {
     type?: string;
     loc?: Span;
-    locations?: Partial<Span>[];
+    locations?: Place[];
     line?: number;
 };
 
@@ -123,20 +124,36 @@ function recordsOf(sides: Sides, name: string): FileCoverage[] {
     ];
 }
 
-// Equal locations within one record stay distinct items: merged, one would be credited by the other.
-function located<T>(items: T[], location: (item: T) => unknown): [string, T][] {
+const point = (at: Partial<Location> | undefined) =>
+    at?.line === undefined ? "none" : `${at.line}:${at.column}`;
+
+// Compilations place one construct's start differently; same-end ranges of one compiled record are nested.
+function numbered<T>(
+    items: T[],
+    kind: (item: T) => string,
+    range: (item: T) => Place | undefined,
+): [string, T][] {
+    const start = (item: T) => range(item)?.start;
     const seen = new Map<string, number>();
-    return items.map((item) => {
-        const identity = JSON.stringify(location(item));
-        const occurrence = seen.get(identity) ?? 0;
-        seen.set(identity, occurrence + 1);
-        return [`${identity}#${occurrence}`, item];
-    });
+    return items
+        .toSorted(
+            (a, b) =>
+                (start(a)?.line ?? Number.MAX_SAFE_INTEGER) -
+                    (start(b)?.line ?? Number.MAX_SAFE_INTEGER) ||
+                (start(a)?.column ?? Number.MAX_SAFE_INTEGER) -
+                    (start(b)?.column ?? Number.MAX_SAFE_INTEGER),
+        )
+        .map((item) => {
+            const identity = `${kind(item)}@${point(range(item)?.end)}`;
+            const occurrence = seen.get(identity) ?? 0;
+            seen.set(identity, occurrence + 1);
+            return [`${identity}#${occurrence}`, item];
+        });
 }
 
 function byPosition<T>(
     items: Map<string, T>,
-    location: (item: T) => Partial<Span> | undefined,
+    location: (item: T) => Place | undefined,
 ): T[] {
     const start = (item: T) => location(item)?.start;
     return [...items]
@@ -150,16 +167,17 @@ function byPosition<T>(
         .map(([, item]) => item);
 }
 
-type Arm = { location: Partial<Span>; count: number; records: number };
+type Arm = { location: Place; count: number; records: number };
 type Group = { branch: BranchMeta; records: number; arms: Map<string, Arm> };
 
 function united(records: FileCoverage[]) {
     const functions = new Map<string, { fn: FunctionMeta; count: number }>();
     const groups = new Map<string, Group>();
     for (const record of records) {
-        for (const [identity, [key, fn]] of located(
+        for (const [identity, [key, fn]] of numbered(
             Object.entries(record.fnMap),
-            ([, { decl, loc }]) => [decl, loc],
+            () => "",
+            ([, { loc }]) => loc,
         )) {
             const known = functions.get(identity);
             functions.set(identity, {
@@ -167,9 +185,10 @@ function united(records: FileCoverage[]) {
                 count: (known?.count ?? 0) + (record.f[key] ?? 0),
             });
         }
-        for (const [identity, [key, branch]] of located(
+        for (const [identity, [key, branch]] of numbered(
             Object.entries(record.branchMap),
-            ([, { type, loc }]) => [type, loc],
+            ([, { type }]) => type ?? "",
+            ([, { loc }]) => loc,
         )) {
             const group = groups.get(identity) ?? {
                 branch,
@@ -178,8 +197,9 @@ function united(records: FileCoverage[]) {
             };
             group.records += 1;
             const counts = record.b[key] ?? [];
-            for (const [arm, [index, location]] of located(
+            for (const [arm, [index, location]] of numbered(
                 [...(branch.locations ?? []).entries()],
+                () => "",
                 ([, location]) => location,
             )) {
                 const known = group.arms.get(arm);
@@ -252,7 +272,7 @@ export function combineCoverage(sides: Sides): CoverageMap {
     );
 }
 
-// Two compilations that place one authored arm at two locations count it twice; this bounds that excess.
+// Arms that compilations shape differently are counted apart; this bounds that excess.
 export function differingArms(sides: Sides): {
     groups: number;
     untaken: number;
