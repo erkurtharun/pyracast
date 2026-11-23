@@ -4,7 +4,7 @@ import {
     type APIRequestContext,
     type Page,
 } from "@playwright/test";
-import { workerWithdrawn } from "../testing/worker-state";
+import { workerWithdrawn } from "../tests/support/worker-state";
 import { accessibilityViolations } from "../tests/support/accessibility";
 import { mockApi } from "../tests/support/workspace";
 

@@ -649,10 +649,11 @@ container smoke pins those headers, the manifest and the icons.
   3. `git rm src/lib/worker-registration.tsx`, and remove its import and `<WorkerRegistration />`
      from `src/app/app/layout.tsx`.
 
-  `web/testing/worker-state.ts` reads an address serving `sw-withdraw.js` as the withdrawn state,
-  and the model test and `npm run test:production` then prove it: a fresh visit registers nothing,
-  and a browser holding the previous worker loses its registration at its next successful update
-  check and keeps its open window. A revert of the withdrawal commit makes the worker active again.
+  `web/tests/support/worker-state.ts` reads an address serving `sw-withdraw.js` as the withdrawn
+  state, and the model test and `npm run test:production` then prove it: a fresh visit registers
+  nothing, and a browser holding the previous worker loses its registration at its next successful
+  update check and keeps its open window. A revert of the withdrawal commit makes the worker active
+  again.
 - **Rollback:** a revert of the faulty change through CI and Release, never an older image and
   never a revert of the worker as a whole.
 - **Watch:** CSP reports for `worker-src` and the status of `/app/sw.js` and the manifest. A device

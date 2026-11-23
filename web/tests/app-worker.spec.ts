@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { runInNewContext } from "node:vm";
 import { expect, test } from "@playwright/test";
-import { workerWithdrawn } from "../testing/worker-state";
+import { workerWithdrawn } from "./support/worker-state";
 
 const SCOPE = "https://pyracast.test/app/";
 const NOTICE_POLICY =
