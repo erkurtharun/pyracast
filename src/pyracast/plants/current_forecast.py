@@ -1,11 +1,9 @@
 from datetime import date, datetime, timedelta
 from typing import cast
 
-from pyracast.calculation import calculate
 from pyracast.forecasts.faults import FROZEN_PAYLOAD_FAULTS, stored_data
-from pyracast.forecasts.history import ARCHIVED, live_state, result_state
+from pyracast.forecasts.history import ARCHIVED, composed_irradiance, live_state, result_state
 from pyracast.forecasts.intraday import (
-    VINTAGE_SCOPE,
     ActualsMode,
     apply_intraday_source,
     prepare_intraday_source,
@@ -14,7 +12,6 @@ from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.forecasts.sources import (
     current_forecast_snapshots,
     mark_forecast_fallback,
-    snapshot_data,
 )
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_sources import SELECTION_POLICY, apply_composition, compose_snapshots
@@ -147,21 +144,15 @@ def _composed_forecast(
                     apply_intraday_source(result, source)
                 else:
                     apply_composition(result, snapshots, composition)
-                irradiance = calculate(
+                irradiance = composed_irradiance(
                     configuration.binding,
                     target_date,
-                    snapshot_data(snapshot, intervals=list(composition.intervals)),
+                    snapshot=snapshot,
+                    source_kind=source_kind,
+                    snapshots=snapshots,
+                    composition=composition,
+                    source=source,
                 )
-                irradiance["provenance"] = {
-                    "snapshot_id": snapshot.pk,
-                    "binding_id": configuration.binding_id,
-                    "source_kind": source_kind,
-                }
-                cast(dict[str, object], irradiance["vintage"])["scope"] = VINTAGE_SCOPE
-                if source is not None:
-                    apply_intraday_source(irradiance, source)
-                else:
-                    apply_composition(irradiance, snapshots, composition)
             if source is None:
                 cast(dict[str, object], result["provenance"])["selection_policy"] = SELECTION_POLICY
             if historical and configuration.pk != plant.current_configuration_id:

@@ -19,9 +19,9 @@ _budget_lock = Lock()
 
 
 class RouteThrottle(SimpleRateThrottle):
-    def __init__(self) -> None:
+    def get_rate(self) -> str | None:
         # The scope and its rate come from the route of each request, not from the class.
-        pass
+        return None
 
     def allow_request(self, request: Request, view: APIView) -> bool:
         policy = route_policy(request)
