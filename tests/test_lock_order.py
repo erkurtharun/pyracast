@@ -152,8 +152,7 @@ def lock_order() -> Iterator[LockOrder]:
             order.locked |= acquired & WORKSPACE
         already_held = proven is not None and proven <= state.held_persons
         workspace = bool(acquired & WORKSPACE)
-        workspace_first = state.workspace or (several and workspace)
-        late_person = PERSON in acquired and workspace_first and not already_held
+        late_person = PERSON in acquired and (state.workspace or workspace) and not already_held
         late_workspace = workspace and state.open_person_cursor
         if connection.in_atomic_block and (late_person or late_workspace):
             order.late.append(sql)
@@ -414,7 +413,13 @@ STEPS: dict[str, Callable[[User, User, Tenant], object]] = {
         tenant.pk,
         bob.pk,
     ),
-    "lock bob with a comment inside the locking clause": lambda alice, bob, tenant: raw(
+    "lock memberships with their workspace and persons": lambda alice, bob, tenant: list(
+        Membership.objects.filter(tenant=tenant)
+        .select_related("tenant", "user")
+        .order_by("user_id")
+        .select_for_update(of=("tenant", "user"))
+    ),
+    "lock bob with a comment inside the locking clause":lambda alice, bob, tenant: raw(
         "SELECT id FROM auth_user WHERE id = %s FOR /* row lock */ UPDATE", bob.pk
     ),
     "write bob with alice's id in a text placeholder": lambda alice, bob, tenant: (
@@ -632,8 +637,12 @@ def test_a_person_locked_in_a_committed_transaction_is_not_held_in_the_next() ->
     assert len(order.late) == 1
 
 
-def test_one_execution_of_several_statements_acquiring_workspace_and_person_is_late() -> None:
-    assert late_statements("lock alice by key", "lock workspace and bob in one execution") == 1
+@pytest.mark.parametrize(
+    "step",
+    ["lock workspace and bob in one execution", "lock memberships with their workspace and persons"],
+)
+def test_one_execution_acquiring_workspace_and_person_rows_is_late(step: str) -> None:
+    assert late_statements("lock alice by key", step) == 1
 
 
 def test_a_workspace_lock_while_a_person_locking_cursor_is_open_is_late() -> None:
