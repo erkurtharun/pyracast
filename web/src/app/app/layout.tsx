@@ -5,9 +5,13 @@ import { Suspense, type ReactNode } from "react";
 import { AppRoot } from "@/features/session/app-root";
 import { appWindowColour } from "@/styles/tokens";
 
+const appName = "Pyracast";
+
 // Next streams page metadata into a new boundary on every client navigation, which leaves the document untitled until it arrives; the layout keeps one title mounted instead.
 export const metadata: Metadata = {
     title: null,
+    applicationName: appName,
+    appleWebApp: { title: appName, capable: false },
     robots: { index: false, follow: false },
     manifest: "/app/manifest.webmanifest",
     icons: {
@@ -24,7 +28,7 @@ export default async function AppLayout({
     await connection();
     return (
         <NextIntlClientProvider messages={null}>
-            <title>Pyracast workspace | Pyracast</title>
+            <title>{appName}</title>
             <Suspense>
                 <AppRoot>{children}</AppRoot>
             </Suspense>

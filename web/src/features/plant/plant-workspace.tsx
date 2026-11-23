@@ -80,7 +80,7 @@ export function PlantWorkspace({
     const configuration = currentPlant.current_configuration;
     // The review notice lists what happens next; an empty forecast would only repeat it.
     const awaitsFirstApproval = region.status === "pending" && !configuration;
-    usePageTitle(`${t(tab)} · ${currentPlant.name} | Pyracast`);
+    usePageTitle(`${t(tab)} · ${currentPlant.name}`);
     return (
         <ExportPlant
             value={{ id: currentPlant.id, name: currentPlant.name, timezone }}

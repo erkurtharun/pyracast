@@ -46,7 +46,7 @@ def _anonymous_session(body: bytes) -> bool:
 
 
 def _sign_in_page(body: bytes) -> bool:
-    return b"<title>Pyracast workspace" in body
+    return b"<title>Pyracast</title>" in body
 
 
 CHECKS: tuple[tuple[str, Callable[[bytes], bool], str], ...] = (
