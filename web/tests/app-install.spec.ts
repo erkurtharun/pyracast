@@ -8,16 +8,11 @@ import { mockApi, user } from "./support/workspace";
 
 const manifestAddress = "/app/manifest.webmanifest";
 const touchIconAddress = "/app/icons/apple-touch-icon.png";
-const manifest = JSON.parse(
-    readFileSync(
-        path.resolve(__dirname, "../public/app/manifest.webmanifest"),
-        "utf8",
-    ),
-) as {
-    id: string;
-    start_url: string;
-    scope: string;
-    display: string;
+const manifestText = readFileSync(
+    path.resolve(__dirname, "../public/app/manifest.webmanifest"),
+    "utf8",
+);
+const manifest = JSON.parse(manifestText) as {
     name: string;
     theme_color: string;
 };
@@ -211,44 +206,38 @@ async function visit(
     return served;
 }
 
-// Chromium reports a processed display mode by its enum name: "standalone" as "kStandalone".
-function chromiumDisplayMode(display: string) {
-    const words = display.split("-");
-    return `k${words.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join("")}`;
-}
-
-async function expectProcessedManifest(page: Page) {
+async function expectReceivedManifest(page: Page) {
     const browser = await page.context().newCDPSession(page);
     const found = await browser.send("Page.getAppManifest", {});
     expect(found.url).toBe(new URL(manifestAddress, page.url()).href);
     expect(found.errors).toEqual([]);
-    const startUrl = new URL(manifest.start_url, found.url);
-    const id = new URL(manifest.id, startUrl);
-    id.hash = "";
+    expect(found.data).toBe(manifestText);
+    const app = new URL("/app/", page.url()).href;
     expect({
         id: found.manifest.id,
         startUrl: found.manifest.startUrl,
         scope: found.manifest.scope,
         display: found.manifest.display,
     }).toEqual({
-        id: id.href,
-        startUrl: startUrl.href,
-        scope: new URL(manifest.scope, found.url).href,
-        display: chromiumDisplayMode(manifest.display),
+        id: app,
+        startUrl: app,
+        scope: app,
+        // Chromium reports a processed display mode by its enum name: "standalone" as "kStandalone".
+        display: "kStandalone",
     });
 }
 
 for (const address of addresses)
     test(`${address.name} serves the manifest link, the touch icon and the app's name as children of head ${
         address.layout === "app" ? "with" : "without"
-    } the theme colour, and the browser processes that manifest with the app's identity, start, scope and display`, async ({
+    } the theme colour, and the browser receives the checked-in manifest and processes it with the app's identity, start, scope and display`, async ({
         page,
         baseURL,
     }) => {
         const served = await visit(page, baseURL, address);
         await expectServedHead(page, served, address.layout);
         await expectLiveHead(page, address.layout);
-        await expectProcessedManifest(page);
+        await expectReceivedManifest(page);
     });
 
 test("a served head tag is selected by its relation or name as HTML reads them and counts only as a child of head, not in body or in script text", async ({
