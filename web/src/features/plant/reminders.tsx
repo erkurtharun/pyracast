@@ -345,258 +345,258 @@ function entered(form: FormData, name: string) {
 
 function ReminderSettings({ scope, region }: ReminderProps) {
     const t = useTranslations("Reminders");
+    const resource = useApiQuery(PATH, { path: scope });
+    return (
+        <Resource resource={resource} loading={t("loadingEmailReminders")}>
+            {(data) => (
+                <ReminderPanel
+                    scope={scope}
+                    region={region}
+                    data={data}
+                    reload={resource.reload}
+                />
+            )}
+        </Resource>
+    );
+}
+
+// The fields show the schedule they opened with, a save's answer or a Reload, never a background read.
+function ReminderPanel({
+    scope,
+    region,
+    data,
+    reload,
+}: ReminderProps & {
+    data: ReminderSchedule;
+    reload: () => Promise<ReminderSchedule>;
+}) {
+    const t = useTranslations("Reminders");
     const refresh = useRefresh();
     const format = useFormat();
     const label = useLabel();
     const headingId = useId();
     const time = (value: string | null | undefined) =>
         format.time(value, region.timezone);
-
-    const resource = useApiQuery(PATH, { path: scope });
-    const [form, setForm] = useState({ generation: 0, stale: false });
+    const [form, setForm] = useState({
+        generation: 0,
+        saves: 0,
+        stale: false,
+        schedule: data,
+    });
+    const { schedule } = form;
     return (
-        <Resource resource={resource} loading={t("loadingEmailReminders")}>
-            {(data) => (
-                <>
-                    <section className="panel" aria-labelledby={headingId}>
-                        <div className="section-heading">
-                            <div>
-                                <h2 id={headingId}>{t("emailReminders")}</h2>
-                            </div>
-                            <StatusTag
-                                group="ReminderState"
-                                value={data.state}
-                            />
-                        </div>
-                        <p className="fine" role="status">
-                            {data.deliveries[0] ? (
-                                <ReminderOutcome
-                                    outcome={data.deliveries[0]}
-                                    timezone={region.timezone}
-                                />
-                            ) : (
-                                t("noEmailYet")
-                            )}
-                        </p>
-                        {form.stale && (
-                            <AsyncButton
-                                variant="secondary"
-                                onClick={async () => {
-                                    try {
-                                        await resource.reload();
-                                    } catch {
-                                        // RefreshFailed reports it and the offer stays.
-                                        return;
-                                    }
-                                    setForm((current) => ({
-                                        generation: current.generation + 1,
-                                        stale: false,
-                                    }));
-                                }}
-                            >
-                                {t("reloadReminders")}
-                            </AsyncButton>
-                        )}
-                        <ActionForm
-                            key={form.generation}
-                            submit={t("saveReminders")}
-                            onSubmit={async (values) => {
-                                const language = formText(values, "language");
-                                try {
-                                    resource.replace(
-                                        await api.put(PATH, {
-                                            path: scope,
-                                            body: {
-                                                enabled:
-                                                    values.get("enabled") ===
-                                                    "on",
-                                                recipients: entered(
-                                                    values,
-                                                    "recipients",
-                                                ),
-                                                include_workspace_members:
-                                                    values.get(
-                                                        "include_workspace_members",
-                                                    ) === "on",
-                                                language: isLanguage(language)
-                                                    ? language
-                                                    : "en",
-                                                times: entered(values, "times"),
-                                                expected_revision:
-                                                    data.revision,
-                                            },
-                                        }),
-                                    );
-                                } catch (error) {
-                                    if (
-                                        error instanceof ApiError &&
-                                        error.code ===
-                                            "reminder_schedule_changed"
-                                    )
-                                        setForm((current) => ({
-                                            ...current,
-                                            stale: true,
-                                        }));
-                                    throw error;
-                                }
+        <>
+            <section className="panel" aria-labelledby={headingId}>
+                <div className="section-heading">
+                    <div>
+                        <h2 id={headingId}>{t("emailReminders")}</h2>
+                    </div>
+                    <StatusTag group="ReminderState" value={data.state} />
+                </div>
+                <p className="fine" role="status">
+                    {data.deliveries[0] ? (
+                        <ReminderOutcome
+                            outcome={data.deliveries[0]}
+                            timezone={region.timezone}
+                        />
+                    ) : (
+                        t("noEmailYet")
+                    )}
+                </p>
+                {form.stale && (
+                    <AsyncButton
+                        variant="secondary"
+                        onClick={async () => {
+                            let current: ReminderSchedule;
+                            try {
+                                current = await reload();
+                            } catch {
+                                // RefreshFailed reports it and the offer stays.
+                                return;
+                            }
+                            setForm((shown) => ({
+                                ...shown,
+                                generation: shown.generation + 1,
+                                stale: false,
+                                schedule: current,
+                            }));
+                        }}
+                    >
+                        {t("reloadReminders")}
+                    </AsyncButton>
+                )}
+                <ActionForm
+                    key={form.generation}
+                    submit={t("saveReminders")}
+                    onSubmit={async (values) => {
+                        const language = formText(values, "language");
+                        let saved: ReminderSchedule;
+                        try {
+                            saved = await api.put(PATH, {
+                                path: scope,
+                                body: {
+                                    enabled: values.get("enabled") === "on",
+                                    recipients: entered(values, "recipients"),
+                                    include_workspace_members:
+                                        values.get(
+                                            "include_workspace_members",
+                                        ) === "on",
+                                    language: isLanguage(language)
+                                        ? language
+                                        : "en",
+                                    times: entered(values, "times"),
+                                    expected_revision: schedule.revision,
+                                },
+                            });
+                        } catch (error) {
+                            if (
+                                error instanceof ApiError &&
+                                error.code === "reminder_schedule_changed"
+                            )
                                 setForm((current) => ({
                                     ...current,
-                                    stale: false,
+                                    stale: true,
                                 }));
-                                await refresh.workspace(scope.tenant_id);
-                            }}
-                        >
-                            <Fragment key={JSON.stringify(data)}>
-                                <CheckboxField
-                                    label={t(
-                                        "enableForecastEmailsForThisPlant",
-                                    )}
-                                    name="enabled"
-                                    defaultChecked={data.enabled}
-                                />
-                                {region.status !== "approved" && (
-                                    <Notice>{t("approvalRequired")}</Notice>
-                                )}
-                                <DeliveryTimes data={data} />
-                                <RecipientFields data={data} />
-                                <Select
-                                    label={t("emailLanguage")}
-                                    name="language"
-                                    defaultValue={data.language}
-                                    required
-                                >
-                                    <option value="en">English</option>
-                                    <option value="tr">Türkçe</option>
-                                </Select>
-                                <details>
-                                    <summary>{t("reminderDetails")}</summary>
-                                    <p className="fine">
-                                        {t("reminderPolicy", {
-                                            limit:
-                                                data.daily_reminder_limit ==
-                                                null
-                                                    ? "?"
-                                                    : format.number(
-                                                          data.daily_reminder_limit,
-                                                      ),
-                                        })}
-                                    </p>
-                                </details>
-                            </Fragment>
-                        </ActionForm>
-                    </section>
-                    <details className="panel">
-                        <summary>{t("recentDeliveries")}</summary>
-                        {data.deliveries.length ? (
-                            <ScrollRegion
-                                label={t("recentForecastEmailDeliveries")}
-                            >
-                                <table>
-                                    <caption className="sr-only">
-                                        {t("recentForecastEmailDeliveries")}
-                                    </caption>
-                                    <thead>
-                                        <tr>
-                                            <th>{t("scheduled")}</th>
-                                            <th>{t("emailRecipients")}</th>
-                                            <th>{t("status")}</th>
-                                            <th>{t("collected")}</th>
-                                            <th>{t("dataAge")}</th>
-                                            <th>{t("sent")}</th>
-                                            <th>{t("details")}</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {data.deliveries.map((row) => (
-                                            <tr key={row.id}>
-                                                <td>
-                                                    {time(row.scheduled_for)}
-                                                </td>
-                                                <td className="delivery-recipients">
-                                                    {row.recipients
-                                                        ? row.recipients.map(
-                                                              (email) => (
-                                                                  <div
-                                                                      key={
-                                                                          email
-                                                                      }
-                                                                  >
-                                                                      {email}
-                                                                  </div>
-                                                              ),
-                                                          )
-                                                        : t(
-                                                              "deliveryRecipientCount",
-                                                              {
-                                                                  count: row.recipient_count,
-                                                              },
-                                                          )}
-                                                </td>
-                                                <td>
-                                                    <StatusTag
-                                                        group="NotificationDeliveryStatus"
-                                                        value={row.status}
-                                                    />
-                                                    {row.forecast_status && (
-                                                        <div className="fine">
-                                                            {label(
-                                                                "PreparedMessageKind",
-                                                                row.forecast_status,
-                                                            )}
-                                                        </div>
-                                                    )}
-                                                </td>
-                                                <td>
-                                                    {time(row.collected_at)}
-                                                </td>
-                                                <td>
-                                                    {row.source_age_seconds ==
-                                                    null
-                                                        ? MISSING
-                                                        : t("sourceAge", {
-                                                              hours: Math.floor(
-                                                                  row.source_age_seconds /
-                                                                      3600,
-                                                              ),
-                                                              minutes:
-                                                                  Math.floor(
-                                                                      (row.source_age_seconds %
-                                                                          3600) /
-                                                                          60,
-                                                                  ),
-                                                          })}
-                                                    {row.stale && (
-                                                        <StatusTag
-                                                            group="Freshness"
-                                                            value="stale"
-                                                        />
-                                                    )}
-                                                </td>
-                                                <td>{time(row.sent_at)}</td>
-                                                <td>
-                                                    {row.late
-                                                        ? t("lateDelivery")
-                                                        : ""}
-                                                    {row.last_error
-                                                        ? label(
-                                                              "NotificationDeliveryError",
-                                                              row.last_error,
-                                                          )
-                                                        : MISSING}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </ScrollRegion>
-                        ) : (
-                            <Empty title={t("noDeliveriesYet")}>
-                                {t("scheduledDeliveriesAppearHere")}
-                            </Empty>
+                            throw error;
+                        }
+                        setForm((current) => ({
+                            ...current,
+                            saves: current.saves + 1,
+                            stale: false,
+                            schedule: saved,
+                        }));
+                        await refresh.workspace(scope.tenant_id);
+                    }}
+                >
+                    <Fragment key={form.saves}>
+                        <CheckboxField
+                            label={t("enableForecastEmailsForThisPlant")}
+                            name="enabled"
+                            defaultChecked={schedule.enabled}
+                        />
+                        {region.status !== "approved" && (
+                            <Notice>{t("approvalRequired")}</Notice>
                         )}
-                    </details>
-                </>
-            )}
-        </Resource>
+                        <DeliveryTimes data={schedule} />
+                        <RecipientFields data={schedule} />
+                        <Select
+                            label={t("emailLanguage")}
+                            name="language"
+                            defaultValue={schedule.language}
+                            required
+                        >
+                            <option value="en">English</option>
+                            <option value="tr">Türkçe</option>
+                        </Select>
+                        <details>
+                            <summary>{t("reminderDetails")}</summary>
+                            <p className="fine">
+                                {t("reminderPolicy", {
+                                    limit:
+                                        schedule.daily_reminder_limit == null
+                                            ? "?"
+                                            : format.number(
+                                                  schedule.daily_reminder_limit,
+                                              ),
+                                })}
+                            </p>
+                        </details>
+                    </Fragment>
+                </ActionForm>
+            </section>
+            <details className="panel">
+                <summary>{t("recentDeliveries")}</summary>
+                {data.deliveries.length ? (
+                    <ScrollRegion label={t("recentForecastEmailDeliveries")}>
+                        <table>
+                            <caption className="sr-only">
+                                {t("recentForecastEmailDeliveries")}
+                            </caption>
+                            <thead>
+                                <tr>
+                                    <th>{t("scheduled")}</th>
+                                    <th>{t("emailRecipients")}</th>
+                                    <th>{t("status")}</th>
+                                    <th>{t("collected")}</th>
+                                    <th>{t("dataAge")}</th>
+                                    <th>{t("sent")}</th>
+                                    <th>{t("details")}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {data.deliveries.map((row) => (
+                                    <tr key={row.id}>
+                                        <td>{time(row.scheduled_for)}</td>
+                                        <td className="delivery-recipients">
+                                            {row.recipients
+                                                ? row.recipients.map(
+                                                      (email) => (
+                                                          <div key={email}>
+                                                              {email}
+                                                          </div>
+                                                      ),
+                                                  )
+                                                : t("deliveryRecipientCount", {
+                                                      count: row.recipient_count,
+                                                  })}
+                                        </td>
+                                        <td>
+                                            <StatusTag
+                                                group="NotificationDeliveryStatus"
+                                                value={row.status}
+                                            />
+                                            {row.forecast_status && (
+                                                <div className="fine">
+                                                    {label(
+                                                        "PreparedMessageKind",
+                                                        row.forecast_status,
+                                                    )}
+                                                </div>
+                                            )}
+                                        </td>
+                                        <td>{time(row.collected_at)}</td>
+                                        <td>
+                                            {row.source_age_seconds == null
+                                                ? MISSING
+                                                : t("sourceAge", {
+                                                      hours: Math.floor(
+                                                          row.source_age_seconds /
+                                                              3600,
+                                                      ),
+                                                      minutes: Math.floor(
+                                                          (row.source_age_seconds %
+                                                              3600) /
+                                                              60,
+                                                      ),
+                                                  })}
+                                            {row.stale && (
+                                                <StatusTag
+                                                    group="Freshness"
+                                                    value="stale"
+                                                />
+                                            )}
+                                        </td>
+                                        <td>{time(row.sent_at)}</td>
+                                        <td>
+                                            {row.late ? t("lateDelivery") : ""}
+                                            {row.last_error
+                                                ? label(
+                                                      "NotificationDeliveryError",
+                                                      row.last_error,
+                                                  )
+                                                : MISSING}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </ScrollRegion>
+                ) : (
+                    <Empty title={t("noDeliveriesYet")}>
+                        {t("scheduledDeliveriesAppearHere")}
+                    </Empty>
+                )}
+            </details>
+        </>
     );
 }

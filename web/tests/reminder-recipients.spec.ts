@@ -971,6 +971,140 @@ test("saved reminder fields stay unavailable until the refreshed settings arrive
     await expect(address).toHaveValue("custom@example.test");
 });
 
+function readOfReminders(request: { method(): string; url(): string }) {
+    return request.method() === "GET" && request.url().endsWith("/reminders/");
+}
+
+async function focusWindow(page: Page) {
+    await page.evaluate(() =>
+        document.dispatchEvent(
+            new Event("visibilitychange", { bubbles: true }),
+        ),
+    );
+}
+
+test("a read refused while a save runs leaves no address on screen once the save is answered", async ({
+    page,
+}) => {
+    await page.clock.install();
+    await reminderApi(page, ["kept@example.test"]);
+    let reads: "answered" | "refused" | "held" = "answered";
+    const saving = Promise.withResolvers<void>();
+    const answerSave = Promise.withResolvers<void>();
+    const heldRead = Promise.withResolvers<void>();
+    const releaseRead = Promise.withResolvers<void>();
+    await page.route("**/reminders/", async (route) => {
+        if (route.request().method() === "PUT") {
+            saving.resolve();
+            await answerSave.promise;
+            return route.fallback();
+        }
+        if (reads === "answered") return route.fallback();
+        if (reads === "held") {
+            heldRead.resolve();
+            await releaseRead.promise;
+        }
+        return route.fulfill({
+            status: 403,
+            json: errorBody(
+                "workspace_admin_required",
+                "Only workspace administrators can read reminder addresses.",
+            ),
+        });
+    });
+    await openReminders(page);
+    const address = page.getByLabel("Email address 1", { exact: true });
+    await expect(address).toHaveValue("kept@example.test");
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    await saving.promise;
+    reads = "refused";
+    await page.clock.runFor(5_000);
+    await focusWindow(page);
+    const refusal = page.getByRole("alert").filter({
+        hasText: "Only workspace administrators can read reminder addresses.",
+    });
+    await expect(refusal).toBeVisible();
+    reads = "held";
+    answerSave.resolve();
+    await heldRead.promise;
+    try {
+        await expect(refusal).toBeVisible();
+        await expect(page.getByText("kept@example.test")).toHaveCount(0);
+        await expect(address).toHaveCount(0);
+    } finally {
+        releaseRead.resolve();
+    }
+    await expect(refusal).toBeVisible();
+});
+
+test("a read answered while a save runs updates the last email but leaves the fields as typed", async ({
+    page,
+}) => {
+    await page.clock.install();
+    await reminderApi(page);
+    const first = page.waitForResponse((response) =>
+        readOfReminders(response.request()),
+    );
+    await openReminders(page);
+    const shown = (await (await first).json()) as {
+        deliveries: Record<string, unknown>[];
+    };
+    let hold = false;
+    const heldRead = Promise.withResolvers<void>();
+    const releaseRead = Promise.withResolvers<void>();
+    const saving = Promise.withResolvers<void>();
+    const answerSave = Promise.withResolvers<void>();
+    await page.route("**/reminders/", async (route) => {
+        if (route.request().method() === "PUT") {
+            saving.resolve();
+            await answerSave.promise;
+            return route.fallback();
+        }
+        if (!hold) return route.fallback();
+        hold = false;
+        heldRead.resolve();
+        await releaseRead.promise;
+        return route.fulfill({
+            json: {
+                ...shown,
+                deliveries: [
+                    {
+                        ...shown.deliveries[0],
+                        id: 2,
+                        status: "skipped",
+                        sent_at: null,
+                    },
+                ],
+            },
+        });
+    });
+    const address = page.getByLabel("Email address 1", { exact: true });
+    await address.fill("typed@example.test");
+    hold = true;
+    await page.clock.runFor(5_000);
+    await focusWindow(page);
+    await heldRead.promise;
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    await saving.promise;
+    const delivered = page.waitForResponse((response) =>
+        readOfReminders(response.request()),
+    );
+    releaseRead.resolve();
+    await delivered;
+    try {
+        await expect(
+            page.getByRole("status").filter({ hasText: "Last email: Skipped" }),
+        ).toBeVisible();
+        await expect(address).toHaveValue("typed@example.test");
+    } finally {
+        answerSave.resolve();
+    }
+    await expect(
+        page.getByText("Saved successfully.", { exact: true }),
+    ).toBeVisible();
+    await expect(address).toHaveValue("typed@example.test");
+});
+
 for (const width of [320, 390]) {
     test(`stored and custom recipients match the visible fields at ${width}px`, async ({
         page,
