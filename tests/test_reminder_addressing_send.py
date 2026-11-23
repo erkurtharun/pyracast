@@ -560,6 +560,8 @@ def test_two_stored_spellings_of_one_mailbox_with_differing_choices_are_both_hid
         role=TO
     )
 
-    to, cc, bcc = headers(sent_on())
-
-    assert (to, cc, sorted(bcc)) == ([], [], sorted([UNICODE_MAILBOX, ACE_MAILBOX]))
+    assert headers(sent_on()) == ([], [], [ACE_MAILBOX])
+    assert set(DeliveryRecipient.objects.values_list("address", "role")) == {
+        (UNICODE_MAILBOX, BCC),
+        (ACE_MAILBOX, BCC),
+    }

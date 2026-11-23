@@ -1024,7 +1024,7 @@ def test_two_typed_role_entries_for_spellings_of_one_mailbox_are_refused() -> No
 
 
 @pytest.mark.parametrize("departure", [remove, erase])
-def test_a_departure_leaves_the_other_spelling_of_the_address_on_the_list_hidden(
+def test_a_typed_row_in_another_spelling_of_a_departing_members_address_goes_with_them(
     departure: Any,
 ) -> None:
     system, _, _ = workspace()
@@ -1047,10 +1047,8 @@ def test_a_departure_leaves_the_other_spelling_of_the_address_on_the_list_hidden
 
     assert departure(system, holder)
 
-    assert list(ReminderRecipient.objects.values_list("address", "role", "role_members")) == [
-        (ACE_MAILBOX, "to", [held])
-    ]
-    assert sent_headers(1) == ([ADMIN], ["alice@example.com", "bob@example.com"], [ACE_MAILBOX])
+    assert not ReminderRecipient.objects.exists()
+    assert sent_headers(1) == ([ADMIN], ["alice@example.com", "bob@example.com"], [])
 
 
 @pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
@@ -1087,7 +1085,7 @@ def test_a_member_entry_naming_the_earlier_members_of_an_address_refuses_the_sav
         assert stale.json()["code"] == "reminder_schedule_changed"
         assert (revision(system), stored_roles(system), len(events(system))) == before
 
-    assert FOLDED[1] in sent_headers(0)[2]
+    assert FOLDED[0] in sent_headers(0)[2]
 
     both = sorted([membership(ops), membership(bob)])
     honoured = put(
@@ -1098,7 +1096,7 @@ def test_a_member_entry_naming_the_earlier_members_of_an_address_refuses_the_sav
     )
     assert honoured.status_code == 200, honoured.content
     assert stored_roles(system)[1] == {}
-    assert FOLDED[1] in sent_headers(1)[1]
+    assert FOLDED[0] in sent_headers(1)[1]
 
 
 def test_member_entries_that_share_a_membership_or_a_mailbox_are_refused() -> None:

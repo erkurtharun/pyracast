@@ -31,12 +31,12 @@ from pyracast.notifications.models import (
     NotificationDeliveryError,
     NotificationDeliveryStatus,
     PreparedMessageKind,
-    RecipientRole,
 )
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.preparation import prepare_delivery
 from pyracast.notifications.recipients import (
     Resolved,
+    headers,
     narrow_recipients,
     placements,
     record_roles,
@@ -138,10 +138,7 @@ def _mark_transmit(
         addresses = resolved.addresses
         placed = placements(delivery.schedule, resolved, addresses)
         record_roles(delivery, addresses, placed)
-        message.to, message.cc, message.bcc = (
-            [address for address, given in zip(addresses, placed, strict=True) if given == role]
-            for role in (RecipientRole.TO, RecipientRole.CC, RecipientRole.BCC)
-        )
+        message.to, message.cc, message.bcc = headers(addresses, placed)
         return True
 
 

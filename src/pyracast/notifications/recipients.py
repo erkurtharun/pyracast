@@ -1,10 +1,10 @@
-import re
-import unicodedata
 from collections import defaultdict
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from functools import cache
 
 from allauth.account.models import EmailAddress
+from django.core.mail.backends.smtp import EmailBackend as SMTPBackend
 from django.db.models import Case, F, Q, Value, When
 
 from pyracast.accounts.models import Membership, WorkspaceRole
@@ -29,33 +29,35 @@ OPEN_DELIVERIES = (
 )
 
 
-IDNA_FULL_STOPS = re.compile("[.\u3002\uff0e\uff61]")
-
-
 def recipient_key(address: str) -> str:
     return address.strip().casefold()
 
 
-def _normalized(text: str) -> str:
-    return unicodedata.normalize("NFKC", text)
+@cache
+def _smtp() -> SMTPBackend:
+    return SMTPBackend(alias="addressing", host="localhost")
 
 
-def _decoded_label(label: str) -> str:
-    if label[:4].casefold() != "xn--":
-        return label
+def prepared(address: str) -> str:
+    """The addr-spec the SMTP backend puts in `RCPT TO`; `ValueError` where it refuses one."""
+    return _smtp().prep_address(address)
+
+
+def wire_form(address: str) -> str:
+    """What a header carries: the prepared form, or the address as stored where it has none."""
     try:
-        decoded = label[4:].encode("ascii").decode("punycode")
-    except UnicodeError:
-        return label
-    # An A-label encodes a non-ASCII character (RFC 5890); any other label is another DNS name.
-    return label if _normalized(_normalized(decoded).casefold()).isascii() else decoded
+        return prepared(address)
+    except ValueError:
+        return address
 
 
 def mailbox_key(address: str) -> str:
-    """What addressing compares: every spelling of one mailbox has one key."""
-    local, at, domain = _normalized(address).rpartition("@")
-    labels = (_decoded_label(label) for label in IDNA_FULL_STOPS.split(domain))
-    return _normalized(recipient_key(local + at + _normalized(".".join(labels))))
+    """What addressing compares: one key for every spelling a message carries as one address."""
+    try:
+        return recipient_key(prepared(address))
+    except ValueError:
+        # `recipient_key` strips whitespace, so no prepared form's key starts with a line feed.
+        return "\n" + recipient_key(address)
 
 
 @dataclass(frozen=True)
@@ -86,11 +88,9 @@ class Member:
 
 @dataclass(frozen=True)
 class Workspace:
-    """`holders`: by stored key, the memberships, active or not, holding it verified or primary."""
-
     active: frozenset[int]
     _members: Mapping[str, Member]
-    holders: Mapping[str, frozenset[int]]
+    _holders: Mapping[str, frozenset[int]]
 
     @property
     def members(self) -> tuple[Member, ...]:
@@ -110,6 +110,10 @@ class Workspace:
     def are_members(self, address: str, memberships: Collection[int]) -> bool:
         """Whether these are exactly the members of the address in this read of people."""
         return self.memberships(address) == frozenset(memberships)
+
+    def holders(self, address: str) -> frozenset[int]:
+        """The memberships, active or not, holding the address verified or as primary."""
+        return self._holders.get(mailbox_key(address), frozenset())
 
 
 NO_MEMBERS = Workspace(frozenset(), {}, {})
@@ -153,9 +157,9 @@ def _workspace(people: Sequence[Person]) -> Workspace:
         key = mailbox_key(person.primary)
         if person.active and key in {mailbox_key(address) for address in person.verified}:
             grouped.setdefault(key, []).append(person)
-        for held in {recipient_key(address) for address in (person.primary, *person.verified)}:
-            if held:
-                holders[held].add(person.membership)
+        for address in (person.primary, *person.verified):
+            if address.strip():
+                holders[mailbox_key(address)].add(person.membership)
     return Workspace(
         frozenset(person.membership for person in people if person.active),
         {
@@ -320,18 +324,29 @@ def placements(
     )
 
 
+def headers(
+    addresses: Sequence[str], placed: Sequence[RecipientRole]
+) -> tuple[list[str], list[str], list[str]]:
+    """`To`, `Cc` and `Bcc` in wire form, each mailbox key once at its first placement."""
+    found: dict[RecipientRole, list[str]] = {role: [] for role in RecipientRole}
+    keys: set[str] = set()
+    for address, role in zip(addresses, placed, strict=True):
+        if (key := mailbox_key(address)) not in keys:
+            keys.add(key)
+            found[role].append(wire_form(address))
+    return found[RecipientRole.TO], found[RecipientRole.CC], found[RecipientRole.BCC]
+
+
 def planned_recipients(
     members: Workspace, stored: Sequence[Explicit], addresses: Sequence[str]
 ) -> list[Explicit]:
     """Each address keeps its ties and gains those of the members who hold it now, so an email
     change of its member never makes it an external address."""
-    ties = {recipient_key(row.address): row.ties for row in stored}
+    ties: dict[str, frozenset[int]] = defaultdict(frozenset)
+    for row in stored:
+        ties[mailbox_key(row.address)] |= row.ties
     return [
-        Explicit(
-            address,
-            ties.get(key := recipient_key(address), frozenset())
-            | members.holders.get(key, frozenset()),
-        )
+        Explicit(address, ties.get(mailbox_key(address), frozenset()) | members.holders(address))
         for address in addresses
     ]
 

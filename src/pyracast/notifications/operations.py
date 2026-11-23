@@ -40,6 +40,7 @@ from pyracast.notifications.recipients import (
     needs_members,
     placements,
     planned_recipients,
+    prepared,
     store_member_choices,
     store_recipients,
     typed_choices,
@@ -215,6 +216,12 @@ def get_reminder_schedule(
 def _check_recipients(submitted: ReminderSettings) -> None:
     for address in submitted.recipients:
         validate_recipient(address)
+        try:
+            prepared(address)
+        except ValueError:
+            raise ValidationError(
+                {"recipients": ValidationError(validate_email.message, code=validate_email.code)}
+            ) from None
     if len({mailbox_key(address) for address in submitted.recipients}) != len(submitted.recipients):
         raise DomainError(ErrorCode.DUPLICATE_RECIPIENTS, field="recipients")
     if submitted.enabled and not (submitted.recipients or submitted.include_workspace_members):
