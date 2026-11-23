@@ -250,9 +250,7 @@ type FirstArguments = {
 type Producer = string | EnumerationMembers | FirstArguments;
 export type Producers = Readonly<Record<string, readonly Producer[]>>;
 
-// The modules, from the repository root, whose literals can produce each code family, whose
-// code names members of an enumeration, or whose calls of a result type pass the code first;
-// a code another module holds labels nothing.
+// Each code family's producers, from the repository root; a code no producer yields labels nothing.
 const PRODUCERS: Producers = {
     "Calibrations.values": ["src/pyracast/plants/numerics.py"],
     "Calibrations.status_messages": [
@@ -339,8 +337,7 @@ function enumerationValues(
     });
 }
 
-// The text up to the first comma stands for the first argument, so a comma inside it can only
-// drop a code.
+// The text up to the first comma stands for the first argument: a comma in it only drops a code.
 function firstArgumentValues(root: string, producer: FirstArguments): string[] {
     const code = readFileSync(path.join(root, producer.module), "utf8");
     const literals = new Set<string>();
@@ -350,9 +347,6 @@ function firstArgumentValues(root: string, producer: FirstArguments): string[] {
     return [...literals];
 }
 
-// Every lower-case code a string literal of the modules holds, every Python f-string that
-// composes one, every enumeration value a producer's code names by its member, and every code
-// a producer passes first to its result type.
 function codePatterns(root: string, producers: readonly Producer[]): RegExp[] {
     const literals = new Set<string>();
     const composed = new Set<string>();
