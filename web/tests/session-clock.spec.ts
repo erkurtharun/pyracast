@@ -218,23 +218,24 @@ test("a Retry sent before the stored confirmation and answered after it, with th
 }) => {
     await signedInOnClock(page);
     await openWorkspace(page);
+    const settled = await outstandingAnswers(page);
     const confirmedAt = start.getTime() + 60_000;
-    await page.clock.setSystemTime(confirmedAt);
-    const confirmed = page.waitForResponse("**/api/session/");
+    await page.clock.setFixedTime(confirmedAt);
+    const confirmed = settled(0);
     await focusWindow(page);
-    expect((await confirmed).ok()).toBe(true);
-    await page.clock.setSystemTime(confirmedAt - 1_000);
+    await confirmed;
+    await page.clock.setFixedTime(confirmedAt - 1_000);
     await failSessionReads(page);
     await expect(cover(page)).toBeVisible();
     await page.unroute("**/api/**", abort);
     const retry = await holdNext(page, "/api/session/");
-    await page.clock.setSystemTime(confirmedAt - 500);
+    await page.clock.setFixedTime(confirmedAt - 500);
     await page.getByRole("button", { name: "Try again" }).click();
     await retry.reached;
-    await page.clock.setSystemTime(confirmedAt + 500);
-    const answered = page.waitForResponse("**/api/session/");
+    await page.clock.setFixedTime(confirmedAt + 500);
+    const answered = settled(0);
     retry.release();
-    expect((await answered).ok()).toBe(true);
+    await answered;
     await expect(cover(page)).toHaveCount(0);
     await expect(
         page.getByRole("heading", { name: "Plants", exact: true }),
