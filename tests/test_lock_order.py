@@ -155,7 +155,8 @@ def lock_order() -> Iterator[LockOrder]:
         if connection.connection.info.transaction_status is TransactionStatus.IDLE:
             state = _Transaction()
         result = execute(sql, params, many, context)
-        rows = -1 if LATER_STATEMENT.search(sql) else context["cursor"].rowcount
+        several = LATER_STATEMENT.search(sql) is not None
+        rows = -1 if several else context["cursor"].rowcount
         nothing = rows == 0 and locks_only_reported_rows(sql)
         acquired = frozenset() if nothing else acquired_tables(sql)
         proven = None if many else proven_persons(sql, params, rows)
@@ -165,7 +166,8 @@ def lock_order() -> Iterator[LockOrder]:
             order.locked |= acquired & WORKSPACE
         already_held = proven is not None and proven <= state.held_persons
         workspace = bool(acquired & WORKSPACE)
-        late_person = PERSON in acquired and state.workspace and not already_held
+        workspace_first = state.workspace or (several and workspace)
+        late_person = PERSON in acquired and workspace_first and not already_held
         late_workspace = workspace and state.open_person_cursor
         if connection.in_atomic_block and (late_person or late_workspace):
             order.late.append(sql)
@@ -420,6 +422,12 @@ STEPS: dict[str, Callable[[User, User, Tenant], object]] = {
     "lock bob behind an empty statement": lambda alice, bob, tenant: raw(
         "SELECT 1 WHERE false; SELECT id FROM auth_user WHERE id = %s FOR UPDATE", bob.pk
     ),
+    "lock workspace and bob in one execution": lambda alice, bob, tenant: raw(
+        "SELECT id FROM accounts_tenant WHERE id = %s FOR UPDATE;"
+        " SELECT id FROM auth_user WHERE id = %s FOR UPDATE",
+        tenant.pk,
+        bob.pk,
+    ),
     "lock bob with a comment inside the locking clause": lambda alice, bob, tenant: raw(
         "SELECT id FROM auth_user WHERE id = %s FOR /* row lock */ UPDATE", bob.pk
     ),
@@ -624,6 +632,10 @@ def test_a_person_locked_in_a_committed_transaction_is_not_held_in_the_next() ->
         in_one_transaction(people, "lock workspace", "write alice")
 
     assert len(order.late) == 1
+
+
+def test_one_execution_of_several_statements_acquiring_workspace_and_person_is_late() -> None:
+    assert late_statements("lock alice by key", "lock workspace and bob in one execution") == 1
 
 
 def test_a_workspace_lock_while_a_person_locking_cursor_is_open_is_late() -> None:
