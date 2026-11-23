@@ -6,7 +6,11 @@ import {
     coverageOptions,
     sourcePath,
 } from "./coverage-options";
-import { coverageShortfalls, type Floor } from "./coverage-floor";
+import {
+    coverageFigures,
+    coverageShortfalls,
+    type Floor,
+} from "./coverage-floor";
 
 export default class CoverageReporter implements Reporter {
     async onEnd() {
@@ -35,6 +39,9 @@ export default class CoverageReporter implements Reporter {
         if (!/^DA:\d+,[1-9]\d*/m.test(lcov)) {
             throw new Error("LCOV contains no measured execution");
         }
+        console.log(
+            `Measured frontend coverage: ${JSON.stringify(coverageFigures(lcov))}`,
+        );
         const floor = JSON.parse(
             await readFile("coverage-floor.json", "utf8"),
         ) as Floor;
