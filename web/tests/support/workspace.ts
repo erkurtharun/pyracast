@@ -395,7 +395,7 @@ export async function mockApi(
 
 type Delivery = Schemas["ReminderDeliveryOutput"];
 type ReminderAnswer = Schemas["ReminderOutput"];
-type ReminderPayload = Schemas["ReminderInput"];
+type ReminderPayload = Schemas["ReminderInput"] & { disclosure?: string };
 type Role = Schemas["RecipientRoleEnum"];
 export type ReminderPerson = {
     membership: number;
@@ -435,18 +435,13 @@ export type ReminderOptions = {
     hidden?: boolean;
     hiddenByDeparture?: boolean;
     typed?: Record<string, Role | (TypedChoice & { ties?: number[] })>;
-    // Non-ASCII spellings with the wire form the server's tests establish for each.
-    wire?: Record<string, string>;
 };
-type Key = (address: string) => string;
-type World = {
-    persons: ReminderPerson[];
-    key: Key;
-    wireOf: (address: string) => string | null;
-};
+// The backend does not publish this refusal code yet.
+const DISCLOSURE_CHANGED = "reminder_disclosure_changed";
+type Code = ErrorCode | typeof DISCLOSURE_CHANGED;
 type Refusal = {
     status: number;
-    code: ErrorCode;
+    code: Code;
     fields?: string[];
     message?: string;
 };
@@ -458,7 +453,6 @@ type Member = {
 type People = {
     members: Member[];
     active: Set<number>;
-    unaddressable: boolean;
     member: (address: string) => Member | undefined;
     holders: (address: string) => number[];
 };
@@ -469,63 +463,38 @@ const sameIds = (left: number[], right: number[]) =>
     sorted(left).join() === sorted(right).join();
 const verifiedOf = (person: ReminderPerson) =>
     person.verified ?? [person.primary];
-const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-const ASCII = /^[\x20-\x7e]*$/;
-const RECIPIENT_MAX_LENGTH = 254;
 
-function addressing(wire: Record<string, string>) {
-    const declared = new Map(
-        Object.entries(wire).map(([spelling, form]) => [
-            spelling.toLowerCase(),
-            form,
-        ]),
+const ATOM = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+$/;
+const LABEL = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/;
+
+// The amended contract's plain form: ASCII, a dot-atom local part, a domain of host labels.
+export function plain(address: string) {
+    const parts = address.split("@");
+    if (
+        !/^[\x21-\x7e]*$/.test(address) ||
+        address.length > 254 ||
+        parts.length !== 2
+    )
+        return false;
+    const [local, domain] = parts as [string, string];
+    const labels = domain.split(".");
+    return (
+        local.length >= 1 &&
+        local.length <= 64 &&
+        local.split(".").every((atom) => ATOM.test(atom)) &&
+        labels.length >= 2 &&
+        labels.every((label) => label.length <= 63 && LABEL.test(label)) &&
+        !/^[0-9]+$/.test(labels.at(-1)!)
     );
-    const wireOf = (address: string) => {
-        const text = address.trim();
-        const form = ASCII.test(text)
-            ? text
-            : (declared.get(text.toLowerCase()) ?? "");
-        return form.length <= RECIPIENT_MAX_LENGTH && EMAIL.test(form)
-            ? form
-            : null;
-    };
-    // An address without a wire form has a key no wire form has, as on the server.
-    const key: Key = (address) =>
-        wireOf(address)?.toLowerCase() ?? `\n${address.trim().toLowerCase()}`;
-    return { wireOf, key };
 }
+
+const identity = (address: string) => address.trim().toLowerCase();
 
 function combined<T>(choices: T[], hidden: T): T | undefined {
     const distinct = new Map(
         choices.map((choice) => [JSON.stringify(choice), choice]),
     );
     return distinct.size > 1 ? hidden : [...distinct.values()][0];
-}
-
-type Stored = TypedChoice & { ties: number[] };
-
-function typedChoices(rows: TypedRow[], key: Key) {
-    const grouped = new Map<string, TypedRow[]>();
-    for (const row of rows)
-        grouped.set(key(row.address), [
-            ...(grouped.get(key(row.address)) ?? []),
-            row,
-        ]);
-    return new Map(
-        [...grouped].map(([found, same]): [string, Stored] => [
-            found,
-            {
-                ...combined<TypedChoice>(
-                    same.map((row) => ({
-                        role: row.role,
-                        members: sorted(row.members),
-                    })),
-                    { role: "bcc", members: [] },
-                )!,
-                ties: sorted(same.flatMap((row) => row.ties)),
-            },
-        ]),
-    );
 }
 
 function people(members: (string | ReminderPerson)[]): ReminderPerson[] {
@@ -541,23 +510,23 @@ function people(members: (string | ReminderPerson)[]): ReminderPerson[] {
     );
 }
 
-function read({ persons, key, wireOf }: World): People {
+function read(persons: ReminderPerson[]): People {
     const grouped = new Map<string, ReminderPerson[]>();
     const holders = new Map<string, Set<number>>();
     for (const person of [...persons].sort(
         (a, b) => a.membership - b.membership,
     )) {
-        const own = key(person.primary);
+        const own = identity(person.primary);
         if (
             person.active !== false &&
-            verifiedOf(person).some((address) => key(address) === own)
+            verifiedOf(person).some((address) => identity(address) === own)
         )
             grouped.set(own, [...(grouped.get(own) ?? []), person]);
         for (const address of [person.primary, ...verifiedOf(person)])
             if (address.trim())
                 holders.set(
-                    key(address),
-                    (holders.get(key(address)) ?? new Set()).add(
+                    identity(address),
+                    (holders.get(identity(address)) ?? new Set()).add(
                         person.membership,
                     ),
                 );
@@ -574,29 +543,22 @@ function read({ persons, key, wireOf }: World): People {
                 .filter((person) => person.active !== false)
                 .map((person) => person.membership),
         ),
-        unaddressable: persons.some((person) =>
-            [person.primary, ...verifiedOf(person)].some(
-                (address) => address.trim() && !wireOf(address),
-            ),
-        ),
         member: (address) =>
-            members.find((member) => key(member.address) === key(address)),
-        holders: (address) => sorted(holders.get(key(address)) ?? []),
+            members.find(
+                (member) => identity(member.address) === identity(address),
+            ),
+        holders: (address) => sorted(holders.get(identity(address)) ?? []),
     };
 }
 
 const eligible = (row: TypedRow, found: People) =>
     !row.ties.length || row.ties.some((id) => found.active.has(id));
 
-function effective(
-    include: boolean,
-    rows: TypedRow[],
-    found: People,
-    key: Key,
-) {
+function effective(include: boolean, rows: TypedRow[], found: People) {
     const addresses = new Map<string, string>();
     const add = (address: string) => {
-        if (!addresses.has(key(address))) addresses.set(key(address), address);
+        if (!addresses.has(identity(address)))
+            addresses.set(identity(address), address);
     };
     for (const row of rows) if (eligible(row, found)) add(row.address);
     if (include) for (const member of found.members) add(member.address);
@@ -615,16 +577,14 @@ function candidate(
     address: string,
     store: ReminderStore,
     found: People,
-    key: Key,
 ): Candidate {
     const member = found.member(address);
-    const typedRows = typedChoices(store.rows, key);
-    const stored = typedRows.get(key(address));
+    const stored = store.rows.find(
+        (row) => identity(row.address) === identity(address),
+    );
     const typed = stored?.role ? stored : undefined;
     const hiddenTies = new Set(
-        [...typedRows.values()].flatMap((row) =>
-            row.role === "bcc" ? row.ties : [],
-        ),
+        store.rows.flatMap((row) => (row.role === "bcc" ? row.ties : [])),
     );
     return {
         member,
@@ -654,11 +614,10 @@ function placements(
     addresses: string[],
     store: ReminderStore,
     found: People,
-    key: Key,
 ): Role[] {
-    if (store.hide || found.unaddressable) return addresses.map(() => "bcc");
+    if (store.hide) return addresses.map(() => "bcc");
     const placed = addresses.map((address): Role | null => {
-        const item = candidate(address, store, found, key);
+        const item = candidate(address, store, found);
         const role = explicitRole(item);
         if (role) return role;
         if (store.include && item.member)
@@ -667,6 +626,17 @@ function placements(
     });
     const fallback: Role = placed.includes("to") ? "cc" : "to";
     return placed.map((role) => role ?? fallback);
+}
+
+// An opaque digest of the mode and the exact To and Copy mailboxes the configuration shows.
+function disclosureOf(store: ReminderStore, found: People) {
+    const sent = effective(store.include, store.rows, found);
+    const placed = placements(sent, store, found);
+    const listed = (role: Role) =>
+        sent.filter((_, index) => placed[index] === role).map(identity);
+    return Buffer.from(
+        JSON.stringify([store.hide, listed("to"), listed("cc")]),
+    ).toString("base64url");
 }
 
 const BASE_DELIVERY: Delivery = {
@@ -688,7 +658,7 @@ const BASE_DELIVERY: Delivery = {
 
 function reminderAnswer(
     store: ReminderStore,
-    world: World,
+    persons: ReminderPerson[],
     {
         limit,
         dailyLimit,
@@ -703,16 +673,16 @@ function reminderAnswer(
         requested: Schemas["LanguageEnum"];
     },
 ): ReminderAnswer {
-    const found = read(world);
-    const sent = effective(store.include, store.rows, found, world.key);
+    const found = read(persons);
+    const sent = effective(store.include, store.rows, found);
     const placed = new Map(
-        placements(sent, store, found, world.key).map((role, index) => [
-            world.key(sent[index]!),
+        placements(sent, store, found).map((role, index) => [
+            identity(sent[index]!),
             role,
         ]),
     );
     const placement = (address: string) =>
-        placed.get(world.key(address)) ?? "bcc";
+        placed.get(identity(address)) ?? "bcc";
     return {
         enabled: store.enabled,
         revision: store.revision,
@@ -738,15 +708,12 @@ function reminderAnswer(
                       memberships: member.memberships,
                       address: member.address,
                       kind: member.administrator ? "administrator" : "member",
-                      role: candidate(member.address, store, found, world.key)
-                          .chosen,
+                      role: candidate(member.address, store, found).chosen,
                       placement: placement(member.address),
                   })),
                   added: store.rows.map((row) => ({
                       address: row.address,
-                      role: explicitRole(
-                          candidate(row.address, store, found, world.key),
-                      ),
+                      role: explicitRole(candidate(row.address, store, found)),
                       placement: placement(row.address),
                       eligible: eligible(row, found),
                       memberships: found.member(row.address)?.memberships ?? [],
@@ -777,7 +744,10 @@ function reminderAnswer(
     };
 }
 
-function storeOf(options: ReminderOptions, world: World): ReminderStore {
+function storeOf(
+    options: ReminderOptions,
+    persons: ReminderPerson[],
+): ReminderStore {
     if (options.unsaved)
         return {
             saved: false,
@@ -791,7 +761,7 @@ function storeOf(options: ReminderOptions, world: World): ReminderStore {
             choices: new Map(),
             revision: 0,
         };
-    const found = read(world);
+    const found = read(persons);
     const rows = (options.recipients ?? [user.email]).map(
         (address): TypedRow => {
             const choice = options.typed?.[address];
@@ -818,7 +788,7 @@ function storeOf(options: ReminderOptions, world: World): ReminderStore {
         hide: options.hidden ?? options.hiddenByDeparture ?? true,
         departed: options.hiddenByDeparture ?? false,
         choices: new Map(
-            world.persons.flatMap((person) =>
+            persons.flatMap((person) =>
                 person.choice ? [[person.membership, person.choice]] : [],
             ),
         ),
@@ -827,8 +797,8 @@ function storeOf(options: ReminderOptions, world: World): ReminderStore {
 }
 
 function defaultReminders() {
-    const world = { persons: people([user.email]), ...addressing({}) };
-    return reminderAnswer(storeOf({}, world), world, {
+    const persons = people([user.email]);
+    return reminderAnswer(storeOf({}, persons), persons, {
         limit: 5,
         dailyLimit: 10,
         deliveries: [],
@@ -862,6 +832,15 @@ const published = (
         readFileSync(path.resolve(__dirname, "../../openapi.json"), "utf8"),
     ) as { components: { schemas: Record<string, Schema> } }
 ).components.schemas;
+const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+// The published input does not carry the preview's digest yet.
+const REMINDER_INPUT: Schema = {
+    ...published.ReminderInput,
+    properties: {
+        ...published.ReminderInput!.properties,
+        disclosure: { type: "string" },
+    },
+};
 
 function resolved(schema: Schema): Schema {
     return schema.$ref
@@ -933,14 +912,14 @@ const invalid = (field: string): Refusal => ({
 function refused(
     body: unknown,
     store: ReminderStore,
-    world: World,
+    persons: ReminderPerson[],
     {
         limit,
         dailyLimit,
         administrator,
     }: { limit: number; dailyLimit: number; administrator: boolean },
 ): Refusal | null {
-    const shape = violations(body, { $ref: "ReminderInput" });
+    const shape = violations(body, REMINDER_INPUT);
     if (shape.includes(""))
         return { status: 400, code: "invalid_request", fields: shape };
     const submitted = body as ReminderPayload;
@@ -950,12 +929,12 @@ function refused(
     const fields = [
         ...shape,
         ...(shape.some((field) => field.startsWith("recipients")) ||
-        submitted.recipients.every((address) => world.wireOf(address))
+        submitted.recipients.every((address) => plain(address.trim()))
             ? []
             : ["recipients"]),
         ...(repeated(
             named.flatMap((entry) => sorted(entry.memberships).map(String)),
-        ) || repeated(named.map((entry) => world.key(entry.address)))
+        ) || repeated(named.map((entry) => identity(entry.address)))
             ? ["member_roles"]
             : []),
     ];
@@ -963,12 +942,11 @@ function refused(
     const typed = submitted.address_roles ?? [];
     const recipients = submitted.recipients.map((address) => address.trim());
     if (
-        repeated(typed.map((entry) => world.key(entry.address))) ||
+        repeated(typed.map((entry) => identity(entry.address))) ||
         typed.some(
             (entry) =>
                 !recipients.some(
-                    (address) =>
-                        world.key(address) === world.key(entry.address),
+                    (address) => identity(address) === identity(entry.address),
                 ),
         )
     )
@@ -976,7 +954,7 @@ function refused(
     if (!administrator) return { status: 403, code: "permission_denied" };
     if (submitted.expected_revision !== store.revision)
         return { status: 409, code: "reminder_schedule_changed" };
-    if (repeated(recipients.map(world.key)))
+    if (repeated(recipients.map(identity)))
         return {
             status: 400,
             code: "duplicate_recipients",
@@ -1014,7 +992,7 @@ function refused(
             fields: ["times"],
             message: `This plant allows at most ${dailyLimit} delivery times a day.`,
         };
-    const found = read(world);
+    const found = read(persons);
     if (
         ![...typed, ...named].every((entry) =>
             sameIds(
@@ -1024,14 +1002,9 @@ function refused(
         )
     )
         return { status: 409, code: "reminder_schedule_changed" };
-    const next = stored(submitted, store, world);
-    const count = effective(next.include, next.rows, found, world.key).length;
-    const current = effective(
-        store.include,
-        store.rows,
-        found,
-        world.key,
-    ).length;
+    const next = stored(submitted, store, persons);
+    const count = effective(next.include, next.rows, found).length;
+    const current = effective(store.include, store.rows, found).length;
     const unchangedPause =
         !submitted.enabled &&
         submitted.include_workspace_members === store.include &&
@@ -1049,10 +1022,12 @@ function refused(
     return null;
 }
 
-const messages: Partial<Record<ErrorCode, string>> = {
+const messages: Partial<Record<Code, string>> = {
     invalid_request: "The request input was refused.",
     reminder_schedule_changed:
         "The email reminders changed. Reload before saving.",
+    [DISCLOSURE_CHANGED]:
+        "The addresses this save would show changed. Review them before saving.",
     duplicate_recipients:
         "Recipient addresses must be distinct (case-insensitive).",
     recipient_required: "Add a recipient or include the workspace members.",
@@ -1065,7 +1040,9 @@ const messages: Partial<Record<ErrorCode, string>> = {
 function refusalBody(refusal: Refusal) {
     const message = refusal.message ?? messages[refusal.code] ?? "Refused.";
     const fields = (refusal.fields ?? []).filter(Boolean);
-    return errorBody(refusal.code, message, {
+    return {
+        code: refusal.code,
+        message,
         ...(fields.length && {
             fields: Object.fromEntries(
                 fields.map((field) => [
@@ -1076,37 +1053,31 @@ function refusalBody(refusal: Refusal) {
                 ]),
             ),
         }),
-    });
+    };
 }
 
 function stored(
     payload: ReminderPayload,
     before: ReminderStore,
-    world: World,
+    persons: ReminderPerson[],
 ): ReminderStore {
-    const found = read(world);
-    const key = world.key;
+    const found = read(persons);
     const rows = payload.recipients.map((text): TypedRow => {
         const address = text.trim();
-        const kept = before.rows.filter(
-            (row) => key(row.address) === key(address),
+        const kept = before.rows.find(
+            (row) => identity(row.address) === identity(address),
         );
-        const ties = sorted([
-            ...kept.flatMap((row) => row.ties),
-            ...found.holders(address),
-        ]);
+        const ties = sorted([...(kept?.ties ?? []), ...found.holders(address)]);
         const entry = payload.address_roles?.find(
-            (item) => key(item.address) === key(address),
+            (item) => identity(item.address) === identity(address),
         );
-        if (!entry) {
-            const choice = typedChoices(kept, key).get(key(address));
+        if (!entry)
             return {
                 address,
-                role: choice?.role ?? "",
-                members: choice?.role ? choice.members : [],
+                role: kept?.role ?? "",
+                members: kept?.role ? kept.members : [],
                 ties,
             };
-        }
         return {
             address,
             role: entry.role ?? "",
@@ -1149,69 +1120,109 @@ const signature = (store: ReminderStore) =>
         [...store.choices].sort(([a], [b]) => a - b),
     ]);
 
+type Method = "GET" | "PUT" | "POST";
+type Held = {
+    method: Method;
+    released: Promise<void>;
+    committed: () => void;
+};
+
 export async function reminderApi(page: Page, options: ReminderOptions = {}) {
-    await mockApi(page);
+    const account = await mockApi(page);
     const limit = options.limit ?? 5;
     const dailyLimit = options.dailyLimit ?? 10;
     const persons = people(options.members ?? [user.email]);
-    const world = { persons, ...addressing(options.wire ?? {}) };
-    let store = storeOf(options, world);
+    let store = storeOf(options, persons);
     const deliveries = options.deliveries ?? (options.unsaved ? [] : [{}]);
     const viewer = options.viewer ?? (() => false);
-    const later: { method: string; released: Promise<void> }[] = [];
+    const later: Held[] = [];
+    const failing: Method[] = [];
     const answer = (value: ReminderStore, route: Route) =>
-        reminderAnswer(value, world, {
+        reminderAnswer(value, persons, {
             limit,
             dailyLimit,
             deliveries,
             administrator: !viewer(route.request().method()),
             requested: requestLanguage(route),
         });
+    const refuse = (route: Route, refusal: Refusal) =>
+        route.fulfill({ status: refusal.status, json: refusalBody(refusal) });
     const write = async (route: Route) => {
         const body: unknown = route.request().postDataJSON();
-        const refusal = refused(body, store, world, {
+        const refusal = refused(body, store, persons, {
             limit,
             dailyLimit,
             administrator: !viewer(route.request().method()),
         });
         if (refusal) {
-            await route.fulfill({
-                status: refusal.status,
-                json: refusalBody(refusal),
-            });
+            await refuse(route, refusal);
             return null;
         }
-        const next = stored(body as ReminderPayload, store, world);
+        const next = stored(body as ReminderPayload, store, persons);
         return signature(next) === signature(store)
             ? store
             : { ...next, revision: store.revision + 1 };
     };
+    // Answers once the request is applied and its answer captured, so a held request sees no later change.
+    const respond = async (route: Route, json: unknown) => {
+        const method = route.request().method() as Method;
+        const failed = failing.indexOf(method);
+        const gate = later.findIndex((item) => item.method === method);
+        const held = gate >= 0 ? later.splice(gate, 1)[0] : undefined;
+        held?.committed();
+        if (held) await held.released;
+        if (failed >= 0) {
+            failing.splice(failed, 1);
+            return route.fulfill({
+                status: 503,
+                json: errorBody("server_error", "The service is unavailable."),
+            });
+        }
+        await route.fulfill({ json });
+    };
     await page.route("**/reminders/preview/", async (route) => {
         const preview = await write(route);
-        if (preview) await route.fulfill({ json: answer(preview, route) });
+        if (preview)
+            await respond(route, {
+                ...answer(preview, route),
+                disclosure: disclosureOf(preview, read(persons)),
+            });
     });
     await page.route("**/reminders/", async (route) => {
         const method = route.request().method();
         if (method === "PUT") {
             const next = await write(route);
             if (!next) return;
+            const { disclosure } = route.request().postDataJSON() as {
+                disclosure?: string;
+            };
+            if (!next.hide && disclosure !== disclosureOf(next, read(persons)))
+                return refuse(route, {
+                    status: 409,
+                    code: DISCLOSURE_CHANGED,
+                });
             store = next;
         }
-        const json = answer(store, route);
-        const gate = later.findIndex((item) => item.method === method);
-        if (gate >= 0) await later.splice(gate, 1)[0]!.released;
-        await route.fulfill({ json });
+        await respond(route, answer(store, route));
     });
     return {
+        account,
         persons,
         deliveries,
-        answerLater: (method: "GET" | "PUT") => {
+        answerLater: (method: Method) => {
             let release!: () => void;
+            let committed!: () => void;
             const released = new Promise<void>(
                 (resolve) => (release = resolve),
             );
-            later.push({ method, released });
-            return release;
+            const captured = new Promise<void>(
+                (resolve) => (committed = resolve),
+            );
+            later.push({ method, released, committed });
+            return { release, committed: captured };
+        },
+        failNext: (method: Method) => {
+            failing.push(method);
         },
     };
 }

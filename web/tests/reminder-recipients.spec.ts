@@ -1,4 +1,4 @@
-import { expect, test } from "./support/test";
+import { expect, test, type Page } from "./support/test";
 import {
     accountWith,
     mockApi,
@@ -15,7 +15,7 @@ test("shared reminder recipients and email language survive administrator transf
     page,
 }, testInfo) => {
     let role = "admin";
-    const account = await reminderApi(page, {
+    const { account } = await reminderApi(page, {
         enabled: true,
         viewer: () => role === "viewer",
     });
@@ -94,76 +94,7 @@ test("shared reminder recipients and email language survive administrator transf
     expect(saves).toBe(1);
 });
 
-test("a failed reload after saving keeps the fields as sent, offers a reload and shows the read once a retry loads it", async ({
-    page,
-}) => {
-    await reminderApi(page, { enabled: true });
-    let unavailable = false;
-    await page.route("**/reminders/", (route) => {
-        if (route.request().method() === "PUT") unavailable = true;
-        else if (unavailable)
-            return route.fulfill({
-                status: 503,
-                json: errorBody("busy", "Reminder service is busy."),
-            });
-        return route.fallback();
-    });
-    const read = (status: number) =>
-        page.waitForResponse(
-            (response) =>
-                response.request().method() === "GET" &&
-                response.url().endsWith("/reminders/") &&
-                response.status() === status,
-        );
-    await openReminders(page);
-    await page.getByText("Recent deliveries", { exact: true }).click();
-    const history = page.getByRole("table", {
-        name: "Recent forecast email deliveries",
-    });
-    await expect(history).toBeVisible();
-    await page.getByRole("button", { name: /Add time/ }).click();
-    await page.getByLabel("Delivery time 2", { exact: true }).fill("07:00");
-    const failed = read(503);
-    await page.getByRole("button", { name: "Save reminders" }).click();
-    await failed;
-    const notice = page
-        .getByRole("alert")
-        .filter({ hasText: "Could not refresh" });
-    await expect(notice).toBeVisible();
-    await expect(
-        page.getByLabel("Delivery time 1", { exact: true }),
-    ).toHaveValue("08:00");
-    await expect(
-        page.getByLabel("Delivery time 2", { exact: true }),
-    ).toHaveValue("07:00");
-    await expect(
-        page.getByText("Saved successfully.", { exact: true }),
-    ).toBeVisible();
-    await expect(
-        page.getByRole("button", { name: "Reload reminders", exact: true }),
-    ).toBeVisible();
-    await expect(history).toBeVisible();
-
-    unavailable = false;
-    const reloaded = read(200);
-    await notice
-        .getByRole("button", { name: "Try again", exact: true })
-        .click();
-    await reloaded;
-    await expect(notice).toHaveCount(0);
-    await expect(
-        page.getByLabel("Delivery time 1", { exact: true }),
-    ).toHaveValue("07:00");
-    await expect(
-        page.getByLabel("Delivery time 2", { exact: true }),
-    ).toHaveValue("08:00");
-    await expect(
-        page.getByRole("button", { name: "Reload reminders", exact: true }),
-    ).toHaveCount(0);
-    await expect(history).toBeVisible();
-});
-
-test("workspace toggle counts unique addresses live and keeps manual recipients separate at 320px", async ({
+test("the saved count follows the saved workspace members and typed addresses, once per mailbox, at 320px", async ({
     page,
 }, testInfo) => {
     await page.setViewportSize({ width: 320, height: 900 });
@@ -176,9 +107,10 @@ test("workspace toggle counts unique addresses live and keeps manual recipients 
     const toggle = page.getByLabel("Include workspace members", {
         exact: true,
     });
-    await expect(page.getByText("1 / 5", { exact: true })).toBeVisible();
+    const count = page.locator("p.recipient-count");
+    await expect(count).toHaveText("1 / 5");
     await toggle.check();
-    await expect(page.getByText("2 / 5", { exact: true })).toBeVisible();
+    await expect(count).toHaveText("1 / 5");
     await page.getByText("Workspace members (2)", { exact: true }).click();
     await expect(
         page.getByRole("listitem").filter({ hasText: "second@example.test" }),
@@ -189,8 +121,6 @@ test("workspace toggle counts unique addresses live and keeps manual recipients 
     await page
         .getByLabel("Email address 2", { exact: true })
         .fill("extra@example.test");
-    await page.getByLabel("Email address 2", { exact: true }).blur();
-    await expect(page.getByText("3 / 5", { exact: true })).toBeVisible();
     const outgoing = page.waitForRequest(
         (request) =>
             request.method() === "PUT" && request.url().endsWith("/reminders/"),
@@ -200,10 +130,12 @@ test("workspace toggle counts unique addresses live and keeps manual recipients 
         include_workspace_members: true,
         recipients: ["MEMBER@example.test", "extra@example.test"],
     });
+    await expect(count).toHaveText("3 / 5");
     await expect(toggle).toBeChecked();
-    await expect(page.getByText("3 / 5", { exact: true })).toBeVisible();
     await toggle.uncheck();
-    await expect(page.getByText("2 / 5", { exact: true })).toBeVisible();
+    await expect(count).toHaveText("3 / 5");
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    await expect(count).toHaveText("2 / 5");
     expect(
         await page.evaluate(
             () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -242,6 +174,10 @@ test("automatic-only recipients persist without capturing the saving administrat
             request.method() === "PUT" && request.url().endsWith("/reminders/"),
     );
     await page.getByRole("button", { name: "Save reminders" }).click();
+    await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Save and show addresses" })
+        .click();
     expect((await outgoing).postDataJSON()).toMatchObject({
         include_workspace_members: true,
         recipients: [],
@@ -317,7 +253,6 @@ test("an oversized automatic group preserves every member and can be turned off"
     await page
         .getByLabel("Include workspace members", { exact: true })
         .uncheck();
-    await expect(page.getByText("1 / 5", { exact: true })).toBeVisible();
     const outgoing = page.waitForRequest(
         (request) =>
             request.method() === "PUT" && request.url().endsWith("/reminders/"),
@@ -344,12 +279,6 @@ test("turning on a new oversized automatic group shows the limit and the server 
     });
     await openReminders(page);
     await page.getByLabel("Include workspace members", { exact: true }).check();
-    await expect(
-        page.getByText(
-            "This plant allows at most 5 distinct recipient addresses in total.",
-            { exact: true },
-        ),
-    ).toBeVisible();
     await page.getByRole("button", { name: "Save reminders" }).click();
     await expect(page.locator(".notice[role=alert]")).toContainText(
         "This plant allows at most 5 distinct recipient addresses in total.",
@@ -363,7 +292,7 @@ test("turning on a new oversized automatic group shows the limit and the server 
 test("Turkish automatic recipient labels preserve readable characters", async ({
     page,
 }) => {
-    const account = await reminderApi(page);
+    const { account } = await reminderApi(page);
     await page.route("**/api/session/", (route) =>
         route.fulfill({
             json: { ...sessionIdentity(account.current), language: "tr" },
@@ -522,8 +451,6 @@ test("five recipients can be added, removed, saved and reloaded at 320px", async
             .getByLabel(`Email address ${index}`, { exact: true })
             .fill(`person${index}@example.test`);
     }
-    await page.getByLabel("Email address 5", { exact: true }).blur();
-    await expect(page.getByText("5 / 5", { exact: true })).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Add address" }),
     ).toBeEnabled();
@@ -576,8 +503,6 @@ test("dynamic recipient limit and server error retain entered values", async ({
     await page
         .getByLabel("Email address 2", { exact: true })
         .fill("second@example.test");
-    await page.getByLabel("Email address 2", { exact: true }).blur();
-    await expect(page.getByText("2 / 2", { exact: true })).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Add address" }),
     ).toBeEnabled();
@@ -662,115 +587,103 @@ test("duplicate recipient addresses are refused by the server and kept on screen
     ).toHaveValue("first@example.test");
 });
 
-test("a save from a form read before another change is refused with a reload", async ({
+const CONFLICT =
+    "Nothing was saved: the reminder settings or the people in this workspace changed. Check them and save again.";
+
+async function changeElsewhere(page: Page, recipients: string[]) {
+    await expect(
+        page.getByLabel("Email address 1", { exact: true }),
+    ).toHaveValue(user.email);
+    const answer = await page.evaluate(
+        async (recipients) =>
+            (
+                await fetch("/api/tenants/1/regions/1/reminders/", {
+                    method: "PUT",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({
+                        enabled: false,
+                        include_workspace_members: false,
+                        language: "en",
+                        recipients,
+                        times: ["08:00"],
+                        expected_revision: 0,
+                        hide_recipients: true,
+                    }),
+                })
+            ).status,
+        recipients,
+    );
+    expect(answer).toBe(200);
+}
+
+test("a save refused after another change keeps the draft, reads again and the next save is accepted", async ({
     page,
 }) => {
     await reminderApi(page);
     await openReminders(page);
-    await page.route("**/reminders/", (route) =>
-        route.request().method() === "PUT"
-            ? route.fulfill({
-                  status: 409,
-                  json: errorBody(
-                      "reminder_schedule_changed",
-                      "The email reminders changed. Reload before saving.",
-                  ),
-              })
-            : route.fallback(),
+    await changeElsewhere(page, ["current@example.test"]);
+    const address = page.getByLabel("Email address 1", { exact: true });
+    await address.fill("mine@example.test");
+    const read = page.waitForResponse(
+        (response) =>
+            response.request().method() === "GET" &&
+            response.url().endsWith("/reminders/"),
     );
-    await page
-        .getByLabel("Email address 1", { exact: true })
-        .fill("stale@example.test");
     await page.getByRole("button", { name: "Save reminders" }).click();
-    await expect(page.locator(".notice[role=alert]")).toContainText(
-        "The email reminders changed. Reload before saving.",
+    const alert = page.locator("form .notice[role=alert]");
+    await expect(alert).toContainText(CONFLICT);
+    await expect(alert).toBeFocused();
+    await read;
+    await expect(address).toHaveValue("mine@example.test");
+    const outgoing = page.waitForRequest(
+        (request) =>
+            request.method() === "PUT" && request.url().endsWith("/reminders/"),
     );
-    await page.unroute("**/reminders/");
-    await reminderApi(page, { recipients: ["current@example.test"] });
-    await page
-        .getByRole("button", { name: "Reload reminders", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    expect((await outgoing).postDataJSON()).toMatchObject({
+        recipients: ["mine@example.test"],
+        expected_revision: 1,
+    });
+    await expect(alert).toHaveCount(0);
     await expect(
-        page.getByLabel("Email address 1", { exact: true }),
-    ).toHaveValue("current@example.test");
+        page.getByText("Saved successfully.", { exact: true }),
+    ).toBeVisible();
+    await expect(address).toHaveValue("mine@example.test");
 });
 
-test("a reload that fails after a refused save reports the failure and keeps the reload offered", async ({
+test("a read that fails after a refused save says so beside Retry and reports no page error", async ({
     page,
 }) => {
     const errors: Error[] = [];
     page.on("pageerror", (error) => errors.push(error));
-    await reminderApi(page);
+    const { failNext } = await reminderApi(page);
     await openReminders(page);
-    let refused = false;
-    await page.route("**/reminders/", (route) => {
-        if (route.request().method() === "PUT") {
-            refused = true;
-            return route.fulfill({
-                status: 409,
-                json: errorBody(
-                    "reminder_schedule_changed",
-                    "The email reminders changed. Reload before saving.",
-                ),
-            });
-        }
-        return refused
-            ? route.fulfill({
-                  status: 503,
-                  json: errorBody("busy", "Reminder service is busy."),
-              })
-            : route.fallback();
-    });
-    await page.getByRole("button", { name: "Save reminders" }).click();
-    const reload = page.getByRole("button", {
-        name: "Reload reminders",
-        exact: true,
-    });
+    await changeElsewhere(page, ["current@example.test"]);
+    failNext("GET");
     const failed = page.waitForResponse(
         (response) =>
             response.request().method() === "GET" &&
             response.url().endsWith("/reminders/") &&
             response.status() === 503,
     );
-    await reload.click();
+    await page.getByRole("button", { name: "Save reminders" }).click();
     await failed;
+    await expect(page.locator("form .notice[role=alert]")).toContainText(
+        CONFLICT,
+    );
     await expect(
-        page.getByRole("alert").filter({ hasText: "Could not refresh" }),
+        page.getByText("The present recipients could not be loaded.", {
+            exact: true,
+        }),
     ).toBeVisible();
-    await expect(reload).toBeVisible();
+    const retry = page
+        .getByRole("heading", { name: "Who sees what" })
+        .locator("xpath=..")
+        .getByRole("button", { name: "Try again", exact: true });
+    await retry.click();
+    await expect(page.locator("p.recipient-count")).toHaveText("1 / 5");
+    await expect(retry).toHaveCount(0);
     expect(errors).toEqual([]);
-});
-
-test("a save accepted after a refused one withdraws the reload offer", async ({
-    page,
-}) => {
-    await reminderApi(page);
-    await openReminders(page);
-    let refuse = true;
-    await page.route("**/reminders/", (route) => {
-        if (route.request().method() !== "PUT" || !refuse)
-            return route.fallback();
-        refuse = false;
-        return route.fulfill({
-            status: 409,
-            json: errorBody(
-                "reminder_schedule_changed",
-                "The email reminders changed. Reload before saving.",
-            ),
-        });
-    });
-    const save = page.getByRole("button", { name: "Save reminders" });
-    const reload = page.getByRole("button", {
-        name: "Reload reminders",
-        exact: true,
-    });
-    await save.click();
-    await expect(reload).toBeVisible();
-    await save.click();
-    await expect(
-        page.getByText("Saved successfully.", { exact: true }),
-    ).toBeVisible();
-    await expect(reload).toHaveCount(0);
 });
 
 test("saved reminder fields stay unavailable until the refreshed settings arrive", async ({
@@ -798,8 +711,13 @@ test("saved reminder fields stay unavailable until the refreshed settings arrive
         await expect(address).toHaveValue("custom@example.test");
         await expect(address).toBeDisabled();
         await expect(
-            page.getByRole("button", { name: "Saving…" }),
-        ).toBeDisabled();
+            page.getByText("Saved. Loading the saved recipients…", {
+                exact: true,
+            }),
+        ).toBeFocused();
+        await expect(
+            page.getByRole("button", { name: /Save reminders|Saving…/ }),
+        ).toHaveCount(0);
     } finally {
         refresh.resolve();
     }

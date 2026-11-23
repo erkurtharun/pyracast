@@ -1,15 +1,3 @@
-.review {
-    margin: var(--space-3) 0;
-    padding: var(--space-3) var(--space-4);
-    border: 1px solid var(--amber-218);
-    border-radius: 9px;
-    background: var(--amber-51);
-}
-.review p {
-    margin: 0 0 var(--space-2);
-    color: var(--amber-714);
-    font-size: 14px;
-}
 .members {
     margin: 0 0 var(--space-4);
     padding: 0;
@@ -31,6 +19,18 @@
     overflow-wrap: anywhere;
     font-size: 14px;
 }
+.listHeading {
+    margin: var(--space-3) 0 var(--space-1-5);
+    font-size: 14px;
+    font-weight: 600;
+}
+.listHeading:focus-visible,
+.summary h3:focus-visible,
+.line p:focus-visible,
+.dialog h2:focus-visible {
+    outline: 3px solid var(--amber);
+    outline-offset: 3px;
+}
 .entry {
     margin-bottom: var(--space-3);
 }
@@ -42,6 +42,8 @@
 }
 .roles {
     display: inline-flex;
+    margin: 0;
+    padding: 0;
     border: 1px solid var(--neutral-251);
     border-radius: 10px;
     background: var(--white);
@@ -89,15 +91,8 @@
     outline-offset: 2px;
 }
 .state {
-    display: inline-flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0 var(--space-3);
     color: var(--muted);
     font-size: 13px;
-}
-.state :global(.text-button) {
-    margin-right: 0;
 }
 .summary {
     margin: var(--space-4) 0;
@@ -111,23 +106,69 @@
     margin: 0 0 var(--space-2);
     font-size: 15px;
 }
-.summary h3:focus-visible {
-    outline: 3px solid var(--amber);
-    outline-offset: 3px;
-}
-.summary p {
+.summary p,
+.dialog p {
     margin: 0 0 var(--space-1-5);
     font-size: 14px;
+}
+.line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    margin-bottom: var(--space-2);
+}
+.line p {
+    margin: 0;
+    font-weight: 600;
+}
+.groups {
+    margin: 0 0 var(--space-2);
+    font-size: 14px;
+}
+.groups dt {
+    margin-top: var(--space-1-5);
+    font-weight: 600;
+}
+.groups dd {
+    margin: 0 0 var(--space-1) var(--space-3);
+    overflow-wrap: anywhere;
+}
+.outside {
+    display: block;
+    color: var(--amber-714);
+    font-size: 13px;
+    font-weight: 550;
 }
 .warning {
     overflow-wrap: anywhere;
     color: var(--amber-714);
     font-weight: 550;
 }
-.summary .unsaved {
-    margin-top: var(--space-2);
+.dialog {
+    box-sizing: border-box;
+    width: min(32rem, calc(100vw - 32px));
+    max-height: calc(100dvh - 32px);
+    padding: var(--space-4) var(--space-5);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--white);
     color: var(--ink);
-    font-weight: 600;
+    overflow-wrap: anywhere;
+    box-shadow: var(--shadow);
+}
+.dialog::backdrop {
+    background: var(--neutral-0-a16);
+}
+.dialog h2 {
+    margin: 0 0 var(--space-2);
+    font-size: 17px;
+}
+.actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-3);
+    margin-top: var(--space-3);
 }
 @media (max-width: 479px) {
     .placement,
@@ -136,5 +177,8 @@
     }
     .roles {
         display: flex;
+    }
+    .dialog {
+        padding: var(--space-3) var(--space-4);
     }
 }
