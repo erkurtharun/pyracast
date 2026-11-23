@@ -15,7 +15,7 @@ import { deviceZone } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
 import { contactEmail } from "@/lib/public-metadata";
 import { keys } from "@/lib/api/keys";
-import { cadence, QueryOwner, useApiList } from "@/lib/api/query";
+import { answerSentAt, cadence, QueryOwner, useApiList } from "@/lib/api/query";
 import { routes, screenOf, type Screen } from "@/lib/routes";
 import {
     confirmAnswer,
@@ -105,16 +105,13 @@ export function WorkspaceShell({
     useEffect(() => {
         if (owner === undefined) return;
         const list = keys.path(owner, "/api/tenants/");
-        // Only a fetch whose answer arrived dispatches a success that is not manual; a cached,
-        // placeholder or cancelled result dispatches none.
         return client.getQueryCache().subscribe((event) => {
+            const sentAt = answerSentAt(event);
             if (
-                event.type === "updated" &&
-                event.action.type === "success" &&
-                !event.action.manual &&
+                sentAt !== undefined &&
                 partialMatchKey(event.query.queryKey, list)
             )
-                confirmAnswer();
+                confirmAnswer(sentAt);
         });
     }, [client, owner]);
     const rows = tenants.data?.results ?? [];

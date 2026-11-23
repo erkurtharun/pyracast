@@ -23,9 +23,8 @@ type SessionState = {
     replaced: boolean;
     signOut: SignOutState;
 };
-// answeredAt is wall-clock time.
 type Confirmation = {
-    answeredAt: number;
+    sentAt: number;
     covered: boolean;
 };
 
@@ -51,7 +50,7 @@ let state: SessionState = {
     replaced: false,
     signOut: { status: "idle" },
 };
-let confirmation: Confirmation = { answeredAt: 0, covered: false };
+let confirmation: Confirmation = { sentAt: 0, covered: false };
 let documentOwner: string | null | undefined;
 // What a session read's answer may have missed: this tab's session changes, another tab's
 // observation and every read started or session adopted here.
@@ -107,17 +106,26 @@ export function useSessionClock() {
     return now;
 }
 
-export function confirmAnswer() {
-    confirmation = { answeredAt: Date.now(), covered: false };
-    notify();
+// The wall clock counts a suspended device's sleep; a send time later than now is old, so a clock set back cannot postpone the check.
+function staleSince(sentAt: number) {
+    const now = Date.now();
+    return now < sentAt || now - sentAt >= serverIdleLimitMs;
 }
 
-// The wall clock counts the time a suspended device slept. An answer stamped later than now counts
-// as old, so a clock set back cannot postpone the check.
 function stale() {
-    const now = Date.now();
-    const { answeredAt } = confirmation;
-    return now < answeredAt || now - answeredAt >= serverIdleLimitMs;
+    return staleSince(confirmation.sentAt);
+}
+
+// A stale stamp, also one from before the clock was set back, yields to any fresh answer.
+function confirm(sentAt: number) {
+    if (staleSince(sentAt) || (!stale() && sentAt < confirmation.sentAt))
+        return false;
+    confirmation = { sentAt, covered: false };
+    return true;
+}
+
+export function confirmAnswer(sentAt: number) {
+    if (confirm(sentAt)) notify();
 }
 
 // Once set, the cover stays whatever the clock does until an answer arrives.
@@ -213,7 +221,7 @@ export function isCurrent(session: Session | undefined) {
     return observed === null || observed === tagOf(session);
 }
 
-export function adoptSession(session: Session) {
+export function adoptSession(session: Session, sentAt?: number) {
     const owner = sessionOwner(session) ?? null;
     if (documentOwner === undefined) {
         documentOwner = owner;
@@ -231,11 +239,7 @@ export function adoptSession(session: Session) {
             session,
             replaced: state.replaced || owner !== documentOwner,
         };
-    confirmation = {
-        ...confirmation,
-        answeredAt: Date.now(),
-        covered: false,
-    };
+    if (sentAt !== undefined) confirm(sentAt);
     setCsrfToken(session.csrf_token);
     observe(session.session_tag ?? "");
     generation += 1;
@@ -279,11 +283,12 @@ async function confirmedRead(): Promise<Session> {
 function startRead(): Flight {
     generation += 1;
     const started = mark();
+    const sentAt = Date.now();
     const current: Flight = {
         ...started,
         promise: confirmedRead().then((session) => {
             if (unchangedSince(started)) {
-                adoptSession(session);
+                adoptSession(session, sentAt);
                 return session;
             }
             if (flight === current) flight = undefined;

@@ -10,6 +10,7 @@ import {
     isMarked,
     liveRegion,
     markDocument,
+    outstandingAnswers,
     resentNotice,
     sessionAnswer,
     type Account,
@@ -18,6 +19,7 @@ import {
 const start = new Date("2026-11-20T09:00:00Z");
 const idleLimit = 30 * 60_000;
 const tick = 30_000;
+const listPoll = 2 * 60_000;
 const capacity = "DC nameplate capacity (MW)";
 
 function cover(page: Page) {
@@ -103,7 +105,11 @@ test("a window whose workspace list answers reads no session and stays uncovered
     ).toBeVisible();
     const reads = server.reads;
     server.failing = true;
-    await page.clock.runFor(idleLimit + 4 * tick);
+    for (let passed = 0; passed < idleLimit + 4 * tick; passed += listPoll) {
+        const listed = page.waitForResponse("**/api/tenants/");
+        await page.clock.runFor(listPoll);
+        expect((await listed).ok()).toBe(true);
+    }
     expect(server.reads).toBe(reads);
     await expect(cover(page)).toHaveCount(0);
     await expect(
@@ -328,6 +334,149 @@ test("a cover hides what the screens last announced", async ({ page }) => {
     await expect(cover(page)).toBeVisible();
     await expect(liveRegion(page)).toBeHidden();
     await expect(page.getByText(resentNotice)).toBeHidden();
+});
+
+type Held = { reached: Promise<void>; release: () => void };
+
+async function holdNext(page: Page, path: string): Promise<Held> {
+    let reach!: () => void;
+    const reached = new Promise<void>((resolve) => (reach = resolve));
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let held = false;
+    await page.route(`**${path}`, async (route) => {
+        if (held) return route.fallback();
+        held = true;
+        reach();
+        await released;
+        return route.fallback();
+    });
+    return { reached, release };
+}
+
+async function openWorkspace(page: Page) {
+    await page.goto("/app/w/1/");
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
+}
+
+async function failSessionReads(page: Page) {
+    await page.route("**/api/**", abort);
+    const failed = sessionReadFailed(page);
+    await focusWindow(page);
+    await failed;
+}
+
+type Settled = (count: number) => Promise<void>;
+
+// Query Core refetches stale queries on a visibilitychange at window, where no session read listens.
+function refetchStale(page: Page) {
+    return page.evaluate(() =>
+        window.dispatchEvent(new Event("visibilitychange")),
+    );
+}
+
+async function heldListRead(page: Page, settled: Settled) {
+    const list = await holdNext(page, "/api/tenants/");
+    await page.clock.setSystemTime(start.getTime() + tick);
+    const others = settled(1);
+    await refetchStale(page);
+    await list.reached;
+    await others;
+    return list;
+}
+
+test("a workspace-list answer released after the idle limit confirms nothing before a failed session read", async ({
+    page,
+}) => {
+    await signedInOnClock(page);
+    await openWorkspace(page);
+    const settled = await outstandingAnswers(page);
+    const list = await heldListRead(page, settled);
+    await page.clock.setSystemTime(start.getTime() + idleLimit + 2 * tick);
+    list.release();
+    await settled(0);
+    await failSessionReads(page);
+    await page.clock.runFor(tick);
+    await expect(cover(page)).toBeVisible();
+    await page.clock.runFor(tick);
+    await expect(cover(page)).toBeVisible();
+});
+
+test("a workspace-list answer released after the idle limit keeps the cover a failed session read set", async ({
+    page,
+}) => {
+    await signedInOnClock(page);
+    await openWorkspace(page);
+    const settled = await outstandingAnswers(page);
+    const list = await heldListRead(page, settled);
+    await page.clock.setSystemTime(start.getTime() + idleLimit + 2 * tick);
+    await failSessionReads(page);
+    await expect(cover(page)).toBeVisible();
+    list.release();
+    await settled(0);
+    await page.clock.runFor(tick);
+    await expect(cover(page)).toBeVisible();
+});
+
+test("a session answer released after the idle limit confirms nothing", async ({
+    page,
+}) => {
+    await signedInOnClock(page);
+    await openWorkspace(page);
+    const settled = await outstandingAnswers(page);
+    const read = await holdNext(page, "/api/session/");
+    await focusWindow(page);
+    await read.reached;
+    await page.clock.setSystemTime(start.getTime() + idleLimit + tick);
+    read.release();
+    await settled(0);
+    await failSessionReads(page);
+    await page.clock.runFor(tick);
+    await expect(cover(page)).toBeVisible();
+    await page.clock.runFor(tick);
+    await expect(cover(page)).toBeVisible();
+});
+
+test("a workspace-list answer sent after the cover was set lifts it", async ({
+    page,
+}) => {
+    await signedInOnClock(page);
+    await openSettingsForm(page);
+    await page.route("**/api/**", abort);
+    await page.clock.runFor(idleLimit + tick);
+    await expect(cover(page)).toBeVisible();
+    const reads = await holdNext(page, "/api/session/");
+    await page.unroute("**/api/**", abort);
+    const listed = page.waitForResponse("**/api/tenants/");
+    await refetchStale(page);
+    expect((await listed).ok()).toBe(true);
+    await expect(cover(page)).toHaveCount(0);
+    await expect(page.getByLabel(capacity)).toHaveValue("6.25");
+    reads.release();
+});
+
+test("an older workspace-list answer after a newer session answer moves the confirmation nowhere", async ({
+    page,
+}) => {
+    await signedInOnClock(page);
+    await openWorkspace(page);
+    const settled = await outstandingAnswers(page);
+    const list = await heldListRead(page, settled);
+    await page.clock.setSystemTime(start.getTime() + 20 * 60_000);
+    const answered = settled(1);
+    await focusWindow(page);
+    await answered;
+    list.release();
+    await settled(0);
+    await page.clock.setSystemTime(start.getTime() + idleLimit + 2 * tick);
+    await failSessionReads(page);
+    await page.clock.runFor(tick);
+    await expect(cover(page)).toHaveCount(0);
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
 });
 
 test("a workspace-list answer after a failed session read covers nothing", async ({

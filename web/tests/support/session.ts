@@ -96,9 +96,7 @@ export async function refuseReload(page: Page) {
     return { refused };
 }
 
-// Every reaction queued once an API answer's body was read, or its request failed, runs before the
-// document's next task, which reports how many API answers it still awaits. The document calls
-// back, because an evaluation waits while a navigation is pending.
+// Report from a message task: it runs after the answer's reactions, and a page clock does not hold it.
 export async function outstandingAnswers(page: Page) {
     const waiting: { count: number; resolve: () => void }[] = [];
     await page.exposeFunction("answersOutstanding", (count: number) => {
@@ -111,13 +109,14 @@ export async function outstandingAnswers(page: Page) {
         let outstanding = 0;
         const settle = () => {
             outstanding--;
-            setTimeout(() =>
+            const task = new MessageChannel();
+            task.port1.onmessage = () =>
                 (
                     window as unknown as {
                         answersOutstanding: (count: number) => void;
                     }
-                ).answersOutstanding(outstanding),
-            );
+                ).answersOutstanding(outstanding);
+            task.port2.postMessage(null);
         };
         const send = window.fetch.bind(window);
         window.fetch = async (input, init) => {
