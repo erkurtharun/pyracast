@@ -329,8 +329,7 @@ def configure_reminders(
     member_roles: Sequence[MemberChoice] | None = None,
 ) -> ReminderSchedule:
     """`expected_revision` is the revision the administrator's form was read at; a schedule
-    changed since then is refused instead of overwritten, and so is a member choice whose
-    member no longer has the address the form showed."""
+    changed since then is refused instead of overwritten."""
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
     if language not in Language.values:

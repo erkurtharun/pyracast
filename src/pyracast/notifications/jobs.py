@@ -51,8 +51,7 @@ logger = logging.getLogger(__name__)
 
 
 def _authorize(delivery: NotificationDelivery, limit: int) -> tuple[Resolved | None, str]:
-    """The reads that permit the delivery with its addresses narrowed in the database, or the
-    reason to skip."""
+    """What permits the delivery, its addresses narrowed in the database, or the skip reason."""
     schedule = delivery.schedule
     clock = delivery.scheduled_for.astimezone(ZoneInfo(schedule.region.timezone)).strftime("%H:%M")
     if not schedule.enabled or clock not in schedule.times:

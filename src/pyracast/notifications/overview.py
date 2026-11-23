@@ -49,8 +49,7 @@ class MemberAddress:
 
 @dataclass(frozen=True)
 class AddedAddress:
-    """`role` is the explicit choice the rule applies to the address, `memberships` the active
-    members whose verified primary address it is."""
+    """`role` is the explicit choice the rule gives the address, `null` while none applies."""
 
     address: str
     role: RecipientRole | None

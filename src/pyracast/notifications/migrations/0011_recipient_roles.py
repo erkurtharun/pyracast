@@ -18,8 +18,7 @@ class Migration(migrations.Migration):
         ("notifications", "0010_delivery_preparation_metadata"),
     ]
 
-    # Existing schedules stay hidden, typed addresses carry no choice and every delivery row
-    # was sent in blind copy.
+    # Existing schedules stay hidden, typed rows carry no choice, delivery rows were blind copies.
     operations: ClassVar[list[Operation]] = [
         migrations.AddField(
             model_name="reminderschedule",

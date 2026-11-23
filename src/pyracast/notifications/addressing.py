@@ -12,8 +12,6 @@ def sent_hidden(hide_recipients: bool) -> bool:
 
 
 def members_choice(choices: Iterable[RecipientRole]) -> RecipientRole | None:
-    """The choice of an address's members: Hidden if any of them chose it or if those who chose
-    disagree, otherwise the role they agree on."""
     found = set(choices)
     if RecipientRole.BCC in found or len(found) > 1:
         return RecipientRole.BCC
@@ -22,9 +20,7 @@ def members_choice(choices: Iterable[RecipientRole]) -> RecipientRole | None:
 
 @dataclass(frozen=True)
 class Candidate:
-    """One address of a reminder's list. `member` and `administrator` describe the active members
-    whose verified primary address it is; `chosen` is their combined choice and `typed` the
-    choice of the typed row that holds the address, whose To or Cc counts only while `counts`."""
+    """`member`: the address is the verified primary address of active members of the workspace."""
 
     address: str
     member: bool = False

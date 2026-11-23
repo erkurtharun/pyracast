@@ -86,8 +86,7 @@ class Member:
 
 @dataclass(frozen=True)
 class Workspace:
-    """`holders` maps each stored key to the memberships, active or not, holding it as a verified
-    or primary address."""
+    """`holders`: by stored key, the memberships, active or not, holding it verified or primary."""
 
     active: frozenset[int]
     _members: Mapping[str, Member]
@@ -121,9 +120,7 @@ def workspace(tenant_id: int, *, leaving: int | None = None) -> Workspace:
 
 
 def workspaces(tenant_ids: Iterable[int], *, leaving: int | None = None) -> dict[int, Workspace]:
-    """Every membership of the workspaces with its account read in one statement. An address
-    confirmation locks the account and not the workspace, so statements read apart could mix
-    two states of one person; and callers hold the workspace, which may not wait for a person."""
+    """One statement: an address confirmation locks the account, not the workspace callers hold."""
     ids = set(tenant_ids)
     rows = Membership.objects.filter(tenant_id__in=ids)
     if leaving is not None:
@@ -371,8 +368,7 @@ def store_recipients(
 def store_member_choices(
     schedule: ReminderSchedule, choices: Mapping[int, RecipientRole | None]
 ) -> bool:
-    """Stores or, for `None`, deletes the choice of each named membership; whether any
-    changed."""
+    """Stores or, for `None`, deletes each named membership's choice; whether any changed."""
     rows = ReminderMemberRole.objects.filter(schedule=schedule)
     stored = dict(rows.filter(membership_id__in=choices).values_list("membership_id", "role"))
     deleted = [pk for pk, role in choices.items() if role is None and pk in stored]
@@ -411,8 +407,7 @@ def narrow_recipients(delivery: NotificationDelivery, current: Sequence[str]) ->
 def record_roles(
     delivery: NotificationDelivery, addresses: Sequence[str], placed: Sequence[RecipientRole]
 ) -> None:
-    """Writes every remaining row's header of this attempt, so a retry never keeps an earlier
-    attempt's role."""
+    """Writes every remaining row's header of this attempt, so a retry keeps no earlier role."""
     keys = {
         role: [
             recipient_key(address)
@@ -443,8 +438,7 @@ def delivery_addresses(delivery: NotificationDelivery) -> list[str]:
 
 
 def delivery_roles(delivery: NotificationDelivery) -> list[tuple[str, RecipientRole]] | None:
-    """Each address with its header, only for a message that reached or may have reached its
-    recipients: a rejected one showed no header to anyone."""
+    """Only for a message that reached or may have reached anyone: a rejected one showed none."""
     if delivery.status not in (
         NotificationDeliveryStatus.SENT,
         NotificationDeliveryStatus.UNCERTAIN,

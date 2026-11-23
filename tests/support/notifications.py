@@ -240,8 +240,7 @@ LOCAL_MAIL = {"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBack
 
 
 def pending_address_change(user: User, address: str) -> Callable[[], None]:
-    """Asks over HTTP to change `user`'s address to `address`; the returned call confirms it
-    through the verification endpoint."""
+    """Requests the change over HTTP; the returned call confirms it at the verification endpoint."""
     user.set_password(PASSWORD)
     user.save(update_fields=["password"])
     client = Client(enforce_csrf_checks=True)
@@ -260,8 +259,7 @@ def pending_address_change(user: User, address: str) -> Callable[[], None]:
 
 @dataclass
 class StatementHook:
-    """Runs `action` once, right after the first statement on this connection that names
-    `table` once `armed`, letting `skip` such statements pass first."""
+    """Runs `action` once, after the first armed statement naming `table`, past `skip` of them."""
 
     table: str
     action: Callable[[], object]
