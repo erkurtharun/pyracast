@@ -268,7 +268,11 @@ def _refuse_administrator(account_id: int) -> None:
 
 
 def _forget_recipients(
-    account_id: int, addresses: Collection[str], regions: Collection[int], changes: Counter[str]
+    account_id: int,
+    addresses: Collection[str],
+    regions: Collection[int],
+    hidden: Collection[int],
+    changes: Counter[str],
 ) -> None:
     # Only rows of the locked regions, each deleted by the id it was locked under: a row another
     # client commits later is left, and no schedule changes without its revision.
@@ -284,7 +288,7 @@ def _forget_recipients(
     _count(changes, ReminderRecipient.objects.filter(pk__in=entries).delete())
     _count(changes, ReminderRecipientTie.objects.filter(pk__in=ties).delete())
     if revised := ReminderSchedule.objects.filter(
-        pk__in={*entries.values(), *ties.values()}
+        pk__in={*entries.values(), *ties.values()} - {*hidden}
     ).update(revision=F("revision") + 1):
         changes["notifications.ReminderSchedule"] += revised
     delivered = _locked(
@@ -453,7 +457,7 @@ def _erase(account_id: int) -> Erasure:
         list(Membership.objects.filter(user_id=account_id).values_list("tenant_id", flat=True))
     ):
         changes["notifications.ReminderSchedule"] += len(hidden)
-    _forget_recipients(account_id, addresses, list(locked_regions), changes)
+    _forget_recipients(account_id, addresses, list(locked_regions), hidden, changes)
     _forget_mail(account_id, addresses, changes)
     _forget_sessions(account, addresses, changes)
     _forget_identity(account_id, changes)

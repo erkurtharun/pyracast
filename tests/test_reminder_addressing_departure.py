@@ -195,8 +195,7 @@ def test_a_departure_hides_the_visible_schedule_a_successor_of_the_address_would
         before.effective_from,
     )
     assert events(system) == logged
-    if departure is remove:
-        assert after.revision == before.revision + 1
+    assert after.revision == before.revision + 1
     assert User.objects.get(pk=bob.pk).email in (SHARED, ACE)
     assert answer(system, system.member)["hidden_by_departure"] is True
     assert answer(system, bob)["hidden_by_departure"] is None
@@ -275,6 +274,37 @@ def test_the_next_save_clears_the_mark_and_is_recorded(
     assert (saved["hide_recipients"], saved["hidden_by_departure"]) == (True, False)
     assert saved["revision"] == hidden.revision + 1
     assert events(system) == logged + 1
+
+
+@pytest.mark.parametrize(
+    ("hidden_before", "row"),
+    [
+        pytest.param(False, True, id="hidden with a row deleted"),
+        pytest.param(True, True, id="row deleted of a hidden schedule"),
+        pytest.param(False, False, id="hidden without a row"),
+    ],
+)
+def test_an_erasure_advances_and_counts_a_schedule_once(hidden_before: bool, row: bool) -> None:
+    system, alice, _ = workspace()
+    typed = [SHARED] if row else []
+    moved(alice, SHARED)
+    save(
+        system,
+        recipients=typed,
+        address_roles=[
+            {"address": address, "role": "bcc", "memberships": [membership(alice)]}
+            for address in typed
+        ],
+        hide_recipients=hidden_before,
+    )
+    before = schedule_of(system)
+
+    erased = erase_account(alice.pk, execute=True)
+
+    after = schedule_of(system)
+    assert (after.hide_recipients, after.revision) == (True, before.revision + 1)
+    assert erased.changes["notifications.ReminderSchedule"] == 1
+    assert erased.changes.get("notifications.ReminderRecipient") == (1 if row else None)
 
 
 def test_the_database_refuses_a_departure_mark_on_a_visible_schedule() -> None:
