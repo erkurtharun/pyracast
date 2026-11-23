@@ -380,6 +380,16 @@ for (const authenticated of [false, true, null]) {
     });
 }
 
+test("an authentication answer carries its HTTP status, not the status its body names", async () => {
+    adoptSession(signedIn("token"));
+    answer(() => json({ status: 401, meta: { is_authenticated: false } }));
+    const result = await authRequest("auth/session", "GET");
+    expect(result).toEqual({
+        status: 200,
+        meta: { is_authenticated: false },
+    });
+});
+
 test("path parameters and query values build one encoded URL", () => {
     expect(
         apiUrl("/api/tenants/{tenant_id}/change-requests/", {

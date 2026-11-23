@@ -362,6 +362,30 @@ for (const outcome of ["refused", "confirmed"] as const) {
     });
 }
 
+test("a sign-out answered 200 with a signed-out body fails and keeps the document until allauth's signed-out answer", async () => {
+    adoptSession(session("a"));
+    answer(
+        () => json({ status: 401, meta: { is_authenticated: false } }),
+        signedOutAnswer,
+    );
+    const failed = await signOut().catch((failure) => failure);
+    expect(failed).toBeInstanceOf(ApiError);
+    expect(failed).toMatchObject({
+        message: "The server returned an invalid response. Please try again.",
+    });
+    expect(sessionState()).toMatchObject({
+        replaced: false,
+        signOut: { status: "failed" },
+    });
+    expect(sent()).toEqual(["DELETE /api/auth/browser/v1/auth/session a"]);
+    await signOut();
+    expect(sessionState().replaced).toBe(true);
+    expect(sent()).toEqual([
+        "DELETE /api/auth/browser/v1/auth/session a",
+        "DELETE /api/auth/browser/v1/auth/session a",
+    ]);
+});
+
 test("a save whose connection failed may have been applied", async () => {
     adoptSession(session("a"));
     answer(() => {

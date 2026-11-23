@@ -115,6 +115,42 @@ test("a sign-out answered with a 401 that does not say the browser is signed out
     expect(server.deletes).toEqual(["tag-a", "tag-a"]);
 });
 
+test("a sign-out answered 200 with a signed-out body stays signing out until Retry", async ({
+    page,
+}) => {
+    const account: { current: Account } = { current: firstAccount };
+    await mockApi(page);
+    await serveSession(page, () => account.current);
+    const server = await signOutServer(page, account);
+    await page.route("**/api/auth/browser/v1/auth/session", (route) => {
+        if (route.request().method() !== "DELETE" || !server.failing)
+            return route.fallback();
+        server.deletes.push(route.request().headers()["x-session-tag"]);
+        return route.fulfill({
+            status: 200,
+            json: { status: 401, meta: { is_authenticated: false } },
+        });
+    });
+    await page.goto("/app/w/1/");
+    await expect(plants(page)).toBeVisible();
+    await markDocument(page);
+    await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    await expect(signingOut(page)).toBeVisible();
+    await expect(
+        page.getByText(
+            "The server returned an invalid response. Please try again.",
+        ),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+    expect(await isMarked(page)).toBe(true);
+    expect(server.deletes).toEqual(["tag-a"]);
+    server.failing = false;
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect(welcome(page)).toBeVisible();
+    expect(await isMarked(page)).toBe(false);
+    expect(server.deletes).toEqual(["tag-a", "tag-a"]);
+});
+
 function unopened(page: Page) {
     return page.getByRole("heading", { name: "Pyracast could not be opened" });
 }

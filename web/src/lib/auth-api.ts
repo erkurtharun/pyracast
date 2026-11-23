@@ -22,7 +22,7 @@ export type AuthResult<TData = AuthData> = {
     status: number;
     data?: TData;
     meta?: {
-        is_authenticated?: boolean;
+        is_authenticated?: boolean | null;
         secret?: string;
         totp_url?: string;
         password_changed?: boolean;
@@ -76,5 +76,5 @@ export async function authRequest<TData = AuthData>(
         )
     )
         throw errorFromResponse(status, data);
-    return data as AuthResult<TData>;
+    return { ...(data as AuthResult<TData>), status };
 }
