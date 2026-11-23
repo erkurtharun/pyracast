@@ -24,14 +24,18 @@ function inInstalledWindow() {
     );
 }
 
-// The /app layout keeps one <title> mounted; a screen renames it while it is shown.
-export function usePageTitle(screen: string) {
+export function useScreenTitle(screen: string) {
     const installed = useSyncExternalStore(
         subscribeDisplayMode,
         inInstalledWindow,
         () => false,
     );
-    const title = installed ? screen : `${screen} | Pyracast`;
+    return installed ? screen : `${screen} | Pyracast`;
+}
+
+// The /app layout keeps one <title> mounted; a screen renames it while it is shown.
+export function usePageTitle(screen: string) {
+    const title = useScreenTitle(screen);
     useEffect(() => {
         const previous = document.title;
         document.title = title;

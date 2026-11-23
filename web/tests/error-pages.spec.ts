@@ -1,4 +1,5 @@
 import { test, expect } from "./support/test";
+import { standInDisplayMode } from "./support/display-mode";
 import { mockApi, user } from "./support/workspace";
 
 async function breakSession(page: Parameters<typeof mockApi>[0]) {
@@ -164,10 +165,8 @@ test("a failed language hand-off is titled and leads to the start screen without
     expect(attempts).toEqual(["POST"]);
 });
 
-test("a failure of the application frame offers a document reload", async ({
-    page,
-}) => {
-    await page.addInitScript(() => {
+function breakApplicationFrame(page: Parameters<typeof mockApi>[0]) {
+    return page.addInitScript(() => {
         const lang = Object.getOwnPropertyDescriptor(
             HTMLElement.prototype,
             "lang",
@@ -184,6 +183,61 @@ test("a failure of the application frame offers a document reload", async ({
             },
         });
     });
+}
+
+function breakPublicFrame(page: Parameters<typeof mockApi>[0]) {
+    return page.addInitScript(() => {
+        const startsWith = Object.getOwnPropertyDescriptor(
+            String.prototype,
+            "startsWith",
+        )!.value as (
+            this: unknown,
+            search: string,
+            position?: number,
+        ) => boolean;
+        String.prototype.startsWith = function (search, position) {
+            if (String(this) === location.pathname && search === "/app/")
+                throw new Error("The page could not read its address.");
+            return startsWith.call(this, search, position);
+        };
+    });
+}
+
+for (const [kind, address, breakFrame] of [
+    ["an app", "/app/", breakApplicationFrame],
+    ["a public", "/typo/", breakPublicFrame],
+] as const)
+    for (const [surface, mode, title] of [
+        [
+            "a browser tab",
+            "browser",
+            "This page could not be displayed | Pyracast",
+        ],
+        [
+            "an installed window",
+            "standalone",
+            "This page could not be displayed",
+        ],
+    ] as const)
+        test(`a failure of the frame at ${kind} address is titled for ${surface}`, async ({
+            page,
+        }) => {
+            await standInDisplayMode(page, mode);
+            await breakFrame(page);
+            await mockApi(page);
+            await page.goto(address);
+            await expect(
+                page.getByRole("button", {
+                    name: "Reload page / Sayfayı yenile",
+                }),
+            ).toBeVisible();
+            await expect(page).toHaveTitle(title);
+        });
+
+test("a failure of the application frame offers a document reload", async ({
+    page,
+}) => {
+    await breakApplicationFrame(page);
     await mockApi(page);
     await page.goto("/app/");
     await expect(
