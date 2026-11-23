@@ -1085,13 +1085,31 @@ def provider_backed_calibration(system: System, plant: Plant) -> CalibrationRun:
     return run
 
 
+def queries_of_each_day_read_alone(client: Client, system: System, plant: Plant) -> int:
+    count = 0
+    for offset in range(-7, 15):
+        with CaptureQueriesContext(connection) as queries:
+            forecast_read(client, system, plant, TODAY + timedelta(days=offset))
+        count += len(queries)
+    for offset in range(1, 31):
+        with CaptureQueriesContext(connection) as queries:
+            native_production_day(client, system, plant, TODAY - timedelta(days=offset))
+        count += len(queries)
+    return count
+
+
 @pytest.mark.parametrize(
-    ("calibration", "per_forecast_day"),
-    [(None, 9), ("usable", 14), ("provider-backed", 16)],
-    ids=["without-calibration", "one-usable-calibration", "provider-backed-calibration"],
+    "calibration",
+    [None, "usable", "provider-backed", "provider-backed-with-an-open-outage"],
+    ids=[
+        "without-calibration",
+        "one-usable-calibration",
+        "provider-backed-calibration",
+        "provider-backed-calibration-and-an-outage-without-end-from-the-first-day",
+    ],
 )
-def test_the_queries_stay_within_the_bound_per_forecast_day(
-    monkeypatch: pytest.MonkeyPatch, calibration: str | None, per_forecast_day: int
+def test_the_days_read_issues_no_more_queries_than_its_days_read_one_by_one(
+    monkeypatch: pytest.MonkeyPatch, calibration: str | None
 ) -> None:
     system, plant = make_plant(monkeypatch)
     if calibration == "usable":
@@ -1100,16 +1118,24 @@ def test_the_queries_stay_within_the_bound_per_forecast_day(
     for offset in range(1, 31):
         metered(system, plant, TODAY - timedelta(days=offset))
     client = client_for(system.member)
-    if calibration == "provider-backed":
+    if calibration is not None and calibration.startswith("provider-backed"):
         run = provider_backed_calibration(system, plant)
-        assert {
-            forecast_read(client, system, plant, day)["calibration_id"]
-            for day in (TODAY - timedelta(days=1), TODAY, TODAY + timedelta(days=14))
-        } == {run.pk}
+        if calibration.endswith("outage"):
+            first, _ = local_day_bounds(TODAY - timedelta(days=7), system.binding.timezone)
+            incident(system, plant, first, None)
+        reads = [
+            forecast_read(client, system, plant, day)
+            for day in (TODAY - timedelta(days=7), TODAY, TODAY + timedelta(days=14))
+        ]
+        assert {read["calibration_id"] for read in reads} == {run.pk}
+        assert all(
+            (read["outage_scenario"] is not None) == calibration.endswith("outage")
+            for read in reads
+        )
     client.get(plant_path(system, plant))
-    forecast_days = 22
-    count = queries_of(client, system, plant)
-    assert count <= 40 + per_forecast_day * forecast_days, count
+    days = queries_of(client, system, plant)
+    one_by_one = queries_of_each_day_read_alone(client, system, plant)
+    assert days <= one_by_one, (days, one_by_one)
 
 
 def best_of_five_alternately(*reads: Callable[[], HttpResponseBase]) -> list[float]:
