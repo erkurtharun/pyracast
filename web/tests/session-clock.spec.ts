@@ -180,7 +180,9 @@ test("a cover lifts at the answer of Retry after the clock was moved back", asyn
 
 function showWindow(page: Page) {
     return page.evaluate(() =>
-        document.dispatchEvent(new Event("visibilitychange")),
+        document.dispatchEvent(
+            new Event("visibilitychange", { bubbles: true }),
+        ),
     );
 }
 
