@@ -39,8 +39,9 @@ export function usePageTitle(screen: string) {
     useEffect(() => {
         const previous = document.title;
         document.title = title;
+        const shown = document.title;
         return () => {
-            document.title = previous;
+            if (document.title === shown) document.title = previous;
         };
     }, [title]);
 }

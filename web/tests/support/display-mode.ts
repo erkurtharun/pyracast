@@ -5,7 +5,7 @@ export const installedModes = [
     "minimal-ui",
     "window-controls-overlay",
 ] as const;
-export type DisplayMode = "browser" | (typeof installedModes)[number];
+type DisplayMode = "browser" | (typeof installedModes)[number];
 
 type StandIn = { setDisplayMode: (mode: DisplayMode) => void };
 

@@ -234,6 +234,42 @@ for (const [kind, address, breakFrame] of [
             await expect(page).toHaveTitle(title);
         });
 
+for (const [surface, mode, title] of [
+    ["a browser tab", "browser", "This page could not be displayed | Pyracast"],
+    ["an installed window", "standalone", "This page could not be displayed"],
+] as const)
+    test(`a failure of the frame under a named screen is titled for ${surface}`, async ({
+        page,
+    }) => {
+        await standInDisplayMode(page, mode);
+        await breakApplicationFrame(page);
+        await page.addInitScript(() =>
+            sessionStorage.setItem("frameRepaired", "yes"),
+        );
+        await mockApi(page);
+        let language = "en";
+        const session = () => ({
+            user: { ...user, language_preference: language },
+            csrf_token: "token",
+            language,
+        });
+        await page.route("**/api/session/", (route) =>
+            route.fulfill({ json: session() }),
+        );
+        await page.route("**/api/session/language/", (route) => {
+            language = route.request().postDataJSON().language as string;
+            return route.fulfill({ json: session() });
+        });
+        await page.goto("/app/w/1/plants/11/forecast/");
+        await expect(page).toHaveTitle(/^Forecast · East array/);
+        await page.evaluate(() => sessionStorage.removeItem("frameRepaired"));
+        await page.getByLabel("Language", { exact: true }).selectOption("tr");
+        await expect(
+            page.getByRole("button", { name: "Reload page / Sayfayı yenile" }),
+        ).toBeVisible();
+        await expect(page).toHaveTitle(title);
+    });
+
 test("a failure of the application frame offers a document reload", async ({
     page,
 }) => {
