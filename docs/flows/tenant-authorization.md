@@ -50,8 +50,8 @@ sequenceDiagram
 | Table | R/W | What |
 | --- | --- | --- |
 | `accounts_membership` | R | Role per (tenant, user); unique pair, one `admin` per tenant (partial unique). Written by invitation, removal and reassignment flows |
-| `accounts_tenant` | R, `FOR UPDATE` | Lock row of every writer that checks a role (`tenant_membership(lock=True)`, `authorize_workspace_admin`), and of `reassign_workspace_admin`; first in the lock order |
-| `auth_user`, `mfa_authenticator`, `django_session` | R; `auth_user` `FOR UPDATE` in EPIAS connect/disconnect | `is_active` joined into membership queries; `is_staff`, `is_superuser`; `has_mfa_evidence` needs a live authenticator whose id is in the session's authentication records |
+| `accounts_tenant` | R, `FOR UPDATE` | Lock row of every writer that checks a role (`tenant_membership(lock=True)`, `authorize_workspace_admin`), and of `reassign_workspace_admin`; first among the workspace rows |
+| `auth_user`, `mfa_authenticator`, `django_session` | R; `auth_user` `FOR NO KEY UPDATE` before workspace rows where a transaction locks the person | `is_active` joined into membership queries; `is_staff`, `is_superuser`; `has_mfa_evidence` needs a live authenticator whose id is in the session's authentication records |
 | `regions_region` | R | Only table below the tenant with `tenant_id`; plants and deeper rows reach it through `region_id` |
 
 ## Authorization
@@ -81,7 +81,7 @@ A signed-in 403 also writes an `authorization_denied` or `csrf_refused` security
 
 ## Rules and invariants
 
-- Lock order starts at `accounts_tenant`, then region, plant, request rows. Member removal first locks the member's account rows (`lock_account`), as the account processes do, and an outsider never queues for the tenant lock. Every role check takes the tenant lock first, so a reassignment waits for in-flight writers and later writers see the new admin.
+- Lock order ([decision record](../ARCHITECTURE.md#tenancy-and-authorization)): a person's account rows before the workspace rows, which start at `accounts_tenant`, then region, plant, request rows. Member removal checks caller and target before locking, so an outsider never queues for the tenant lock, then locks the member's account rows (`lock_account`) and rechecks the target under the tenant lock. A write's role check is repeated under the tenant lock, so a reassignment waits for in-flight writers and later writers see the new admin.
 - The policy is only a first gate; correctness depends on the repeat inside the operation.
 - A proposal is bound to the membership id, so a removed and re-added member cannot recover old authorship. `lock_timeout` is 5 s, `statement_timeout` 60 s (`background/deadlines.py`, `DATABASES` in `src/pyracast/settings.py`).
 - Role strings are `admin` and `viewer`; "member" in a policy means any active membership.

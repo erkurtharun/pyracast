@@ -7,7 +7,7 @@ An operator runs `terraform plan` and `apply` in `infra/terraform` (normally fro
 - Operator commands `terraform -chdir=infra/terraform init -backend-config=...`, `plan -out=production.tfplan`, `apply production.tfplan`, `output -json github_environment_variables` (procedure in `docs/DEPLOYMENT.md`, "Create the infrastructure").
 - Inputs: `infra/terraform/variables.tf` (validated variables), `terraform.tfvars.example`, `backend.hcl.example` (partial `backend "gcs" {}` in `versions.tf`). The local `terraform.tfvars`, `backend.hcl`, `*.tfplan` and `.terraform/` are git-ignored.
 - Resources: `main.tf` (APIs, network, firewalls, registry, secrets, bucket, disk, optional disk snapshots, VM), `iam.tf` (service accounts, roles, audit logs, WIF, optional image-rescan identity), `monitoring.tf` (email channel, uptime check, log-based metrics, alert policies, security log bucket and sink), `outputs.tf`.
-- VM trigger: Compute Engine runs `metadata.startup-script` (`templates/startup.sh.tftpl`, with `templates/network-guard.sh` embedded) on every boot.
+- VM trigger: Compute Engine runs `metadata.startup-script` (`infra/terraform/templates/startup.sh.tftpl`, with `infra/terraform/templates/network-guard.sh` embedded) on every boot.
 - CI: `.github/workflows/ci.yml`, job "Deployment configuration and containers", steps "Validate Terraform without cloud credentials or backend access" and "Verify the boot script on a stubbed host without cloud access" (`deploy/test-boot.sh`). Dependabot (`.github/dependabot.yml`) proposes provider pin changes in `versions.tf` and `.terraform.lock.hcl`.
 
 ## Sequence
@@ -73,7 +73,7 @@ No PostgreSQL table is read or written. The stores that carry this flow's state:
 | `/etc/pyracast/host.json` (0600) | W (each boot, when it differs) | The keys of `deploy/host_contract.py` (domain, ACME email, backup bucket, pinned secret versions, `origin_pull_ca`; `daily_backups` only with the daily backup tier) |
 | `/etc/fstab`, `/var/lib/pyracast/{postgres,rabbitmq,gateway,release.lock}`, `/opt/pyracast/releases` | W | Data disk mount `nodev,nosuid,nofail`; owned data directories; the release lock 0600 |
 | `/etc/docker/daemon.json`, Docker apt source and key, `/usr/local/sbin/pyracast-network-guard` | W (when they differ) | Docker settings (iptables backend, `live-restore`); the guard script |
-| `/etc/systemd/system/pyracast.service`, `docker.service.d/pyracast-data.conf` | W (when they differ) | Application unit, Docker mount and guard hooks |
+| `/etc/systemd/system/pyracast.service`, `/etc/systemd/system/docker.service.d/pyracast-data.conf` | W (when they differ) | Application unit, Docker mount and guard hooks |
 | `/etc/systemd/system/pyracast-{backup,rehearsal,watchdog}.{service,timer}` | W (each release and boot) | Copied from `deploy/systemd/` |
 | iptables chains `DOCKER-USER`, `PYRACAST_METADATA` | W (each Docker and application start) | Drop rule for `169.254.169.254` |
 | GitHub `production` environment variables | W (by hand) | The `GCP_*` values and `PYRACAST_PUBLIC_ORIGIN` from the output (`GCP_MIGRATION_SECRET` is the short secret ID); a release treats `GCP_MIGRATION_SECRET_VERSION` and `PYRACAST_PUBLIC_ORIGIN` as optional (`latest` version, public probe skipped with a warning) |
@@ -98,7 +98,7 @@ No PostgreSQL table is read or written. The stores that carry this flow's state:
 | Change would destroy a secret, the backup bucket or the data disk | Plan error from `prevent_destroy` |
 | `init` with another prefix than the one holding the state (`backend.hcl.example` and `DEPLOYMENT.md` use `production`) | Empty state: the plan proposes creating everything and apply fails on existing names (not run) |
 | VM replacement or delete while `deletion_protection = true` | Apply error |
-| `machine_type` change (resize) on a running VM | Apply fails: `allow_stopping_for_update` is not set (not run) |
+| `machine_type` change (resize), or another field that needs a stop (service account, scopes, minimum CPU platform), on a running VM | The plan shows an in-place update; apply stops the VM, changes it and starts it again (`allow_stopping_for_update = true`), so the service is down meanwhile; a failed apply can leave it stopped, so check the VM's actual state before recovery |
 | Host is not Ubuntu 24.04 amd64 | Script exits 1, nothing changed |
 | Data disk not visible within 90 s | Startup script exits; first boot leaves no units |
 | Disk has a non-ext4 filesystem, or no filesystem but a signature or a nonzero first MiB | Script exits 1 without formatting |
@@ -131,4 +131,4 @@ No PostgreSQL table is read or written. The stores that carry this flow's state:
 
 - `.github/workflows/ci.yml`: `terraform fmt -check -recursive`, `init -backend=false -input=false -lockfile=readonly`, `validate`, `deploy/test-boot.sh` (the rendered boot script on a stubbed host: first, unchanged, changed and upgraded boots) and `systemd-analyze verify` of the release units.
 - `tests/test_boot_script.py` reads the template as text. `tests/test_host_contract.py`: what Terraform writes into `host.json` equals the contract. `tests/test_operations_contracts.py` reads `infra/terraform` as text (alert policies match host events, firewall ranges match the gateway).
-- Gaps: no Playwright test touches `infra/terraform` and nothing plans it; `templates/network-guard.sh` is stubbed in the boot test and neither template is shellchecked; `docs/DEPLOYMENT.md` ("Verification boundary") states that `deploy/smoke.sh` does not prove GCP IAM, the metadata firewall rules, ACME or public DNS.
+- Gaps: no Playwright test touches `infra/terraform` and nothing plans it; `infra/terraform/templates/network-guard.sh` is stubbed in the boot test and neither template is shellchecked; `docs/DEPLOYMENT.md` ("Verification boundary") states that `deploy/smoke.sh` does not prove GCP IAM, the metadata firewall rules, ACME or public DNS.
