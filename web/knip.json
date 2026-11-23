@@ -4,13 +4,17 @@
         "playwright.config.ts",
         "tests/**/*.spec.ts",
         "integration/**/*.spec.ts",
+        "production-tests/**/*.spec.ts",
         "testing/coverage-reporter.ts",
+        "testing/server-coverage.ts",
+        "testing/front.ts",
         "eslint/console-scripts.config.mjs"
     ],
     "project": [
         "src/**/*.{ts,tsx}",
         "tests/**/*.ts",
         "integration/**/*.ts",
+        "production-tests/**/*.ts",
         "testing/**/*.{ts,mjs}",
         "eslint/**/*.mjs"
     ],

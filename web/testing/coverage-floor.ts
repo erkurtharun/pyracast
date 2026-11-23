@@ -26,13 +26,23 @@ export function lcovTotals(lcov: string): Totals {
 }
 
 // Percentages with one decimal, rounded down, so a floor copied from a report is met by it.
-export function coverageShortfalls(lcov: string, floor: Floor): string[] {
+export function coverageFigures(lcov: string): Floor {
     const totals = lcovTotals(lcov);
-    return metrics.flatMap((metric) => {
-        const { found, hit } = totals[metric];
-        const percent = found ? Math.floor((hit * 1000) / found) / 10 : 0;
-        return percent < floor[metric]
-            ? [`${metric} ${percent}% is below the floor of ${floor[metric]}%`]
-            : [];
-    });
+    return Object.fromEntries(
+        metrics.map((metric) => {
+            const { found, hit } = totals[metric];
+            return [metric, found ? Math.floor((hit * 1000) / found) / 10 : 0];
+        }),
+    ) as Floor;
+}
+
+export function coverageShortfalls(lcov: string, floor: Floor): string[] {
+    const figures = coverageFigures(lcov);
+    return metrics.flatMap((metric) =>
+        figures[metric] < floor[metric]
+            ? [
+                  `${metric} ${figures[metric]}% is below the floor of ${floor[metric]}%`,
+              ]
+            : [],
+    );
 }

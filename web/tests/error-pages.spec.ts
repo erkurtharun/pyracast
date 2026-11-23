@@ -1,18 +1,19 @@
 import { test, expect } from "./support/test";
 import { standInDisplayMode } from "./support/display-mode";
-import { mockApi, user } from "./support/workspace";
+import { accountWith, mockApi, sessionIdentity } from "./support/workspace";
 
 async function breakSession(page: Parameters<typeof mockApi>[0]) {
+    const account = await mockApi(page);
     let broken = true;
     await page.route("**/api/session/", (route) =>
-        route.fulfill({
-            json: {
-                user: broken
-                    ? { ...user, username: 0 }
-                    : { ...user, can_admin: false, mfa_required: false },
-                csrf_token: "token",
-            },
-        }),
+        broken
+            ? route.fulfill({
+                  json: {
+                      ...sessionIdentity(account.current),
+                      user: { ...account.current?.user, username: 0 },
+                  },
+              })
+            : route.fallback(),
     );
     return () => {
         broken = false;
@@ -22,7 +23,6 @@ async function breakSession(page: Parameters<typeof mockApi>[0]) {
 test("a workspace render failure offers a localized retry", async ({
     page,
 }) => {
-    await mockApi(page);
     const repair = await breakSession(page);
     await page.goto("/app/");
     const failure = page.getByRole("heading", {
@@ -42,7 +42,6 @@ test("the workspace failure text follows the language cookie", async ({
     page,
     baseURL,
 }) => {
-    await mockApi(page);
     await breakSession(page);
     await page
         .context()
@@ -64,7 +63,6 @@ test("the workspace failure text follows the language cookie", async ({
 test("a workspace render failure offers a reload for a window without browser controls", async ({
     page,
 }) => {
-    await mockApi(page);
     const repair = await breakSession(page);
     await page.goto("/app/");
     await expect(
@@ -94,7 +92,6 @@ function startScreen(page: Parameters<typeof mockApi>[0]) {
 test("a workspace render failure leads to the start screen in a new document", async ({
     page,
 }) => {
-    await mockApi(page);
     const repair = await breakSession(page);
     await page.goto("/app/account/");
     await expect(
@@ -246,11 +243,12 @@ for (const [surface, mode, title] of [
         await page.addInitScript(() =>
             sessionStorage.setItem("frameRepaired", "yes"),
         );
-        await mockApi(page);
+        const account = await mockApi(page, {
+            account: { current: accountWith({ language_preference: "en" }) },
+        });
         let language = "en";
         const session = () => ({
-            user: { ...user, language_preference: language },
-            csrf_token: "token",
+            ...sessionIdentity(account.current),
             language,
         });
         await page.route("**/api/session/", (route) =>
@@ -258,6 +256,7 @@ for (const [surface, mode, title] of [
         );
         await page.route("**/api/session/language/", (route) => {
             language = route.request().postDataJSON().language as string;
+            account.current = accountWith({ language_preference: language });
             return route.fulfill({ json: session() });
         });
         await page.goto("/app/w/1/plants/11/forecast/");
