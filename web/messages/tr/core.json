@@ -212,6 +212,12 @@
         "attentionReason": "İlgi bekliyor: {reason}",
         "awaitingSetup": "Kurulumu bir yöneticinin tamamlaması bekleniyor"
     },
+    "InstallApp": {
+        "install": "Uygulamayı yükle",
+        "browserMenu": "Tarayıcı menüsünü açın ve adında yükle sözcüğü geçen komutu seçin; örneğin Bu siteyi uygulama olarak yükleyin ya da Yükle ve kısayol oluştur. Bazı tarayıcılarda bu komut bir alt menüdedir.",
+        "homeScreen": "Paylaş'a, ardından Ana Ekrana Ekle'ye dokunun. Paylaş görünmüyorsa sayfa menüsündedir.",
+        "dock": "Safari'de Dosya > Dock'a Ekle'yi seçin."
+    },
     "Common": {
         "unexpected": "Bir sorun oluştu.",
         "saveFailed": "Değişiklikler kaydedilemedi",
