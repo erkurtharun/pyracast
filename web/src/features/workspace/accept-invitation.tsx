@@ -1,6 +1,6 @@
 "use client";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api } from "@/lib/api/client";
 import { routes } from "@/lib/routes";
 import { sessionState, signOut, useSessionState } from "@/lib/session-client";
@@ -18,19 +18,31 @@ export function AcceptInvitation({
     const t = useTranslations("WorkspaceMembers");
     const { session } = useSessionState();
     const [accepting, setAccepting] = useState(false);
+    const claimed = useRef(false);
+    const claim = () => {
+        if (claimed.current || sessionState().signOut.status !== "idle")
+            return false;
+        claimed.current = true;
+        return true;
+    };
     const accept = async () => {
+        if (!claim()) return;
         setAccepting(true);
         try {
             await api.post("/api/invitations/accept/", {
                 body: { token: invitationToken },
             });
         } catch (error) {
+            claimed.current = false;
             setAccepting(false);
             throw error;
         }
         if (sessionState().signOut.status !== "idle") return;
         clearWorkspaceInvitation();
         window.location.replace(routes.workspaces());
+    };
+    const switchAccount = () => {
+        if (claim()) void signOut({ keepInvitation: true }).catch(() => {});
     };
     return (
         <main className="auth-page">
@@ -52,11 +64,7 @@ export function AcceptInvitation({
                         type="button"
                         className="button secondary"
                         disabled={accepting}
-                        onClick={() =>
-                            void signOut({ keepInvitation: true }).catch(
-                                () => {},
-                            )
-                        }
+                        onClick={switchAccount}
                     >
                         {t("useAnotherAccount")}
                     </button>

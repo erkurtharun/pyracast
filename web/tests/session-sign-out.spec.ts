@@ -433,19 +433,18 @@ test("an acceptance answered after signing out began navigates nowhere", async (
         respond();
     });
     await page.goto("/app/invitation/#token=invite-secret");
-    await expect(
-        page.getByRole("button", { name: "Accept invitation", exact: true }),
-    ).toBeVisible();
     await markDocument(page);
-    // Both presses run in one task, before a render can disable either button.
-    await page.evaluate(() => {
-        const button = (name: string) =>
-            [...document.querySelectorAll("button")].find(
-                (element) => element.textContent === name,
-            )!;
-        button("Accept invitation").click();
-        button("Use another account").click();
-    });
+    await page
+        .getByRole("button", { name: "Accept invitation", exact: true })
+        .click();
+    await page.evaluate(() =>
+        (
+            window as unknown as {
+                next: { router: { push(href: string): void } };
+            }
+        ).next.router.push("/app/account/"),
+    );
+    await page.getByRole("button", { name: "Sign out", exact: true }).click();
     await expect(signingOut(page)).toBeVisible();
     release();
     await answered;
@@ -457,8 +456,60 @@ test("an acceptance answered after signing out began navigates nowhere", async (
     await page.getByRole("button", { name: "Try again" }).click();
     await retried;
     await expect(page.getByText("Sign-out is unavailable.")).toBeVisible();
-    expect(new URL(page.url()).pathname).toBe("/app/invitation/");
+    expect(new URL(page.url()).pathname).toBe("/app/account/");
     expect(await pendingInvitation(page)).toBe("invite-secret");
     expect(await isMarked(page)).toBe(true);
     expect(server.deletes).toEqual(["tag-a", "tag-a"]);
 });
+
+for (const first of ["Accept invitation", "Use another account"] as const) {
+    test(`pressing ${first} and the other in one task starts only the first`, async ({
+        page,
+    }) => {
+        const account: { current: Account } = { current: firstAccount };
+        await mockApi(page);
+        await serveSession(page, () => account.current);
+        const server = await signOutServer(page, account);
+        const accepts: string[] = [];
+        await page.route("**/api/invitations/accept/", (route) => {
+            accepts.push(route.request().method());
+            return route.fulfill({
+                status: 503,
+                json: errorBody("busy", "Accepting is unavailable."),
+            });
+        });
+        await page.goto("/app/invitation/#token=invite-secret");
+        await expect(
+            page.getByRole("button", {
+                name: "Use another account",
+                exact: true,
+            }),
+        ).toBeEnabled();
+        await page.evaluate((first) => {
+            const button = (name: string) =>
+                [...document.querySelectorAll("button")].find(
+                    (element) => element.textContent === name,
+                )!;
+            const second =
+                first === "Accept invitation"
+                    ? "Use another account"
+                    : "Accept invitation";
+            button(first).click();
+            button(second).click();
+        }, first);
+        if (first === "Accept invitation") {
+            await expect(
+                page.getByText("Accepting is unavailable."),
+            ).toBeVisible();
+            await expect(signingOut(page)).toHaveCount(0);
+            expect(accepts).toEqual(["POST"]);
+            expect(server.deletes).toEqual([]);
+        } else {
+            await expect(
+                page.getByText("Sign-out is unavailable."),
+            ).toBeVisible();
+            expect(accepts).toEqual([]);
+            expect(server.deletes).toEqual(["tag-a"]);
+        }
+    });
+}
