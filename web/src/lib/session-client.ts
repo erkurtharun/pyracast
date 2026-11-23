@@ -9,7 +9,7 @@ import {
     type LaneRequest,
     type Tag,
 } from "./api/lane";
-import { ApiError } from "./api/errors";
+import { ApiError, NotSentError } from "./api/errors";
 import { authRequest, authUrl, type AuthResult } from "./auth-api";
 import { browserErrors } from "@/i18n/browser";
 
@@ -65,6 +65,7 @@ let generation = 0;
 let adopted: { mark: Mark; session: Session } | undefined;
 let confirming: Promise<Tag> | undefined;
 let signingOut = false;
+let signedOutHere = false;
 let clearTabInvitation = () => {};
 const listeners = new Set<() => void>();
 
@@ -352,6 +353,7 @@ export async function signOut({ keepInvitation = false } = {}) {
         if (!signedOutBy(ended))
             throw new ApiError(browserErrors()("invalidResponse"));
         if (shown) {
+            signedOutHere = true;
             state = { ...state, replaced: true };
             notify();
             return;
@@ -374,9 +376,11 @@ function documentTag(): Tag {
 }
 
 // The lane releases a queued request when the sign-out's answer arrives, before signOut reads it.
-function sends(request: LaneRequest, tag: string) {
-    if (signingOut && !isSignOut(request)) return false;
-    return !state.replaced && tagOf(state.session) === tag;
+function refusal(request: LaneRequest, tag: string) {
+    if ((signingOut && !isSignOut(request)) || signedOutHere)
+        return new NotSentError(browserErrors()("notSentSigningOut"));
+    if (state.replaced || tagOf(state.session) !== tag) return changedSession();
+    return undefined;
 }
 
 function isSignOut({ method, url }: LaneRequest) {
@@ -388,7 +392,7 @@ function isSignOut({ method, url }: LaneRequest) {
 // replaced the one those requests carried.
 confirmSessionWith({
     tag: documentTag,
-    sends,
+    refusal,
     confirm: () => {
         confirming ??= startRead()
             .promise.then(tagOf)

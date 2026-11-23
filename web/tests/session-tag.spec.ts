@@ -6,6 +6,7 @@ import { errorBody } from "./support/errors";
 
 let {
     adoptSession,
+    answerLost,
     api,
     ApiError,
     authRequest,
@@ -20,6 +21,7 @@ let {
 function startDocument() {
     ({
         adoptSession,
+        answerLost,
         api,
         ApiError,
         authRequest,
@@ -281,6 +283,11 @@ test("V1: a request that waited behind another one or for its retry is not sent 
 
 const signedOutAnswer = () =>
     json({ status: 401, meta: { is_authenticated: false } }, 401);
+const notSent = {
+    message: "This request was not sent because signing out was in progress.",
+    status: 0,
+    code: null,
+};
 
 test("a read waiting for its busy retry sends nothing after the sign-out was confirmed", async () => {
     adoptSession(session("a"));
@@ -300,11 +307,71 @@ test("a read waiting for its busy retry sends nothing after the sign-out was con
     await signOut();
     expect(sessionState().replaced).toBe(true);
     release();
-    expect(await read).toMatchObject({ code: "session_changed" });
+    expect(await read).toMatchObject(notSent);
     expect(sent()).toEqual([
         "GET /api/tenants/ a",
         "DELETE /api/auth/browser/v1/auth/session a",
     ]);
+});
+
+for (const outcome of ["refused", "confirmed"] as const) {
+    test(`a save waiting for its busy retry while this tab signs out is told it was not sent; the sign-out is ${outcome}`, async () => {
+        adoptSession(session("a"));
+        const { gate, release } = held();
+        const { arrived, arrive } = arrival();
+        answer(
+            () => {
+                arrive();
+                return json(
+                    errorBody("session_busy", "Busy.", { retry_after: 0 }),
+                    429,
+                );
+            },
+            async () => {
+                await gate;
+                return outcome === "refused"
+                    ? json(errorBody("csrf_failed", "The page expired."), 403)
+                    : signedOutAnswer();
+            },
+        );
+        const saving = api
+            .post("/api/tenants/{tenant_id}/sites/", site)
+            .catch((failure) => failure);
+        await arrived;
+        const ending = signOut().catch((failure) => failure);
+        const refused = await saving;
+        release();
+        const ended = await ending;
+        expect(refused).toBeInstanceOf(ApiError);
+        expect(refused).toMatchObject(notSent);
+        expect(answerLost(refused)).toBe(false);
+        expect(sent()).toEqual([
+            "POST /api/tenants/1/sites/ a",
+            "DELETE /api/auth/browser/v1/auth/session a",
+        ]);
+        if (outcome === "refused") {
+            expect(ended).toMatchObject({ status: 403, code: "csrf_failed" });
+            expect(sessionState()).toMatchObject({
+                replaced: false,
+                signOut: { status: "failed" },
+            });
+        } else {
+            expect(ended).toBeUndefined();
+            expect(sessionState().replaced).toBe(true);
+        }
+    });
+}
+
+test("a save whose connection failed may have been applied", async () => {
+    adoptSession(session("a"));
+    answer(() => {
+        throw new TypeError("Failed to fetch");
+    });
+    const lost = await api
+        .post("/api/tenants/{tenant_id}/sites/", site)
+        .catch((failure) => failure);
+    expect(lost).toMatchObject({ status: 0, code: null });
+    expect(answerLost(lost)).toBe(true);
 });
 
 test("a request queued behind the sign-out sends nothing after the sign-out was confirmed", async () => {
@@ -323,7 +390,7 @@ test("a request queued behind the sign-out sends nothing after the sign-out was 
     );
     release();
     await ending;
-    expect(await read).toMatchObject({ code: "session_changed" });
+    expect(await read).toMatchObject(notSent);
     expect(sent()).toEqual(["DELETE /api/auth/browser/v1/auth/session a"]);
 });
 
