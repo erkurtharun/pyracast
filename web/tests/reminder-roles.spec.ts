@@ -20,6 +20,8 @@ const NOT_SAVED =
 const outsideWarning = (address: string) =>
     `${address} is not the verified primary address of an active member and will be visible to every recipient.`;
 const NO_RECIPIENT = "This address adds no recipient.";
+const UNICODE = "ops@bücher.de";
+const ACE = "ops@xn--bcher-kva.de";
 const DEPARTURE =
     "Every recipient was hidden again because a member left or an account was deleted. The remaining choices are kept.";
 
@@ -183,6 +185,24 @@ test("a plant without a schedule opens unticked with the administrator in To, me
     await expect(line(page, NOT_SAVED)).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Use the defaults for everyone" }),
+    ).toHaveCount(0);
+});
+
+test("a plant without a schedule opens with no history in the language of the request", async ({
+    page,
+}) => {
+    await page.setExtraHTTPHeaders({ "Accept-Language": "tr" });
+    await reminderApi(page, { unsaved: true, members: TEAM });
+    await openReminders(page);
+    await expect(
+        page.getByLabel("Email language", { exact: true }),
+    ).toHaveValue("tr");
+    await page.getByText("Recent deliveries", { exact: true }).click();
+    await expect(
+        page.getByText("No deliveries yet", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("table", { name: "Recent forecast email deliveries" }),
     ).toHaveCount(0);
 });
 
@@ -431,14 +451,12 @@ test("an earlier row edited into a later row's address shows no other row's answ
 test("a typed spelling and a member's spelling of one mailbox show no hidden recipient", async ({
     page,
 }) => {
-    const UNICODE = "ops@bücher.de";
-    const ACE = "ops@xn--bcher-kva.de";
     await reminderApi(page, {
         recipients: [ACE],
         members: [ADMIN, { membership: 2, primary: UNICODE }],
         includeMembers: true,
         hidden: false,
-        aliases: [[UNICODE, ACE]],
+        wire: { [UNICODE]: ACE },
     });
     await openReminders(page);
     await expect(line(page, `To: ${ADMIN}`)).toBeVisible();
@@ -646,14 +664,14 @@ test("a save that changes only a time sends no role at all", async ({
 test("a spelling the server folds onto a member's address shows that member's Copy once the answer arrives", async ({
     page,
 }) => {
-    const STORED = "ops@bücher.de";
-    const TYPED = "ops@xn--bcher-kva.de";
+    const STORED = UNICODE;
+    const TYPED = ACE;
     await reminderApi(page, {
         recipients: [],
         members: [ADMIN, { membership: 2, primary: STORED, choice: "cc" }],
         includeMembers: false,
         hidden: false,
-        aliases: [[STORED, TYPED]],
+        wire: { [UNICODE]: ACE },
     });
     await openReminders(page);
     const preview = hold(page, "**/reminders/preview/");
@@ -1575,6 +1593,120 @@ test("the mock keeps a hidden typed row's ties when its member moves and ties ev
             "pat.new@example.test": [null, "bcc"],
             [QUINN]: [null, "bcc"],
         });
+    }
+});
+
+test("the mock combines the choices of two stored spellings of one mailbox and keeps the combined choice on a save", async ({
+    page,
+}) => {
+    await reminderApi(page, {
+        recipients: [UNICODE, ACE],
+        members: [ADMIN],
+        hidden: false,
+        typed: { [UNICODE]: "to" },
+        wire: { [UNICODE]: ACE },
+    });
+    await page.goto("/app/");
+    const call = caller(page);
+    const stored = (await call("GET")).json;
+    expect(
+        stored.addresses.added.map(
+            (row: { role: string | null; placement: string }) => [
+                row.role,
+                row.placement,
+            ],
+        ),
+    ).toEqual([
+        ["bcc", "bcc"],
+        ["bcc", "bcc"],
+    ]);
+    expect(stored.recipient_count).toBe(1);
+    const saved = await call("PUT", {
+        ...SAVED,
+        include_workspace_members: false,
+        recipients: [ACE],
+    });
+    expect(saved.status).toBe(200);
+    expect(saved.json.addresses.added).toMatchObject([
+        { address: ACE, role: "bcc", placement: "bcc" },
+    ]);
+});
+
+const DOMAIN = Array.from({ length: 4 }, () => "ä".repeat(57)).join(".");
+const LONG_UNICODE = `${"o".repeat(253 - DOMAIN.length - 3)}@${DOMAIN}.de`;
+const WITHOUT_WIRE_FORM = [
+    "ops@a�b.de",
+    "ops@example.com（x）",
+    "ops@exa，mple.com",
+    "ops@example.com。",
+    "ops@straẞe.de",
+    "ops@ᲐᲑ.ge",
+    ...["K", "ſ", "İ", "ı"].map((letter) => `t${letter}st@example.com`),
+    LONG_UNICODE,
+];
+
+test("the mock refuses every address the server cannot carry with the server's status, code and field", async ({
+    page,
+}) => {
+    await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: TEAM,
+        hidden: false,
+        dailyLimit: 2,
+        wire: { [UNICODE]: ACE },
+    });
+    await page.goto("/app/");
+    const call = caller(page);
+    expect(LONG_UNICODE).toHaveLength(254);
+    const cases: [string[], number, string, string[]][] = [
+        ...WITHOUT_WIRE_FORM.map(
+            (address): [string[], number, string, string[]] => [
+                [address],
+                400,
+                "invalid_request",
+                ["recipients"],
+            ],
+        ),
+        [["Ops <ops@example.com>"], 400, "invalid_request", ["recipients.0"]],
+        [[UNICODE, ACE], 400, "duplicate_recipients", ["recipients"]],
+    ];
+    for (const path of ["preview/", ""]) {
+        const method = path ? "POST" : "PUT";
+        for (const [recipients, status, code, fields] of cases) {
+            const answer = await call(method, { ...SAVED, recipients }, path);
+            expect([recipients, answer.status, answer.json.code]).toEqual([
+                recipients,
+                status,
+                code,
+            ]);
+            expect(Object.keys(answer.json.fields ?? {})).toEqual(fields);
+        }
+        const times = await call(
+            method,
+            { ...SAVED, times: ["07:00", "08:00", "09:00"] },
+            path,
+        );
+        expect([times.status, times.json.code]).toEqual([
+            400,
+            "too_many_reminder_times",
+        ]);
+        expect(Object.keys(times.json.fields)).toEqual(["times"]);
+    }
+    const revision = (await call("GET")).json.revision;
+    for (const recipients of [
+        [UNICODE],
+        [ACE],
+        ["ops@xn--strae-oqa8r.de", "ops@xn--strasse-t2a.de"],
+    ]) {
+        const answer = await call(
+            "POST",
+            { ...SAVED, recipients, expected_revision: revision },
+            "preview/",
+        );
+        expect([recipients, answer.status]).toEqual([recipients, 200]);
+        expect(answer.json.recipient_count).toBe(
+            recipients.length + TEAM.length,
+        );
     }
 });
 
