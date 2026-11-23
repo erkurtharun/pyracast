@@ -949,3 +949,19 @@ def test_a_delivery_row_the_retention_sweep_passes_keeps_its_visible_role() -> N
     assert list(DeliveryRecipient.objects.order_by("pk").values_list("address", "role")) == rows
     ((status, roles),) = history_roles(system)
     assert (status, [(entry["address"], entry["role"]) for entry in roles]) == ("sent", rows)
+
+
+def test_a_hidden_typed_choice_is_stored_whatever_members_the_form_saw() -> None:
+    system, alice, bob = workspace()
+
+    response = put(
+        system,
+        include_workspace_members=False,
+        recipients=[alice.email],
+        hide_recipients=False,
+        address_roles=[{"address": alice.email, "role": "bcc", "memberships": [membership(bob)]}],
+    )
+
+    assert response.status_code == 200, response.content
+    assert list(ReminderRecipient.objects.values_list("role", "role_members")) == [("bcc", [])]
+    assert sent_headers(0) == ([], [], [alice.email])
