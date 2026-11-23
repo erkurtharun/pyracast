@@ -235,23 +235,12 @@ test("the withdrawal script replaces the worker without touching an open window"
         (window as Marked).marker = "open";
     });
     await switchFront(request, "script", "withdrawal");
-    const remaining = await page.evaluate(async () => {
+    await page.evaluate(async () => {
         const registration =
             await navigator.serviceWorker.getRegistration("/app/");
         await registration!.update();
-        const replacement = registration!.installing ?? registration!.waiting;
-        await new Promise<void>((resolve) => {
-            const settled = () =>
-                !replacement ||
-                ["activated", "redundant"].includes(replacement.state);
-            if (settled()) resolve();
-            replacement?.addEventListener("statechange", () => {
-                if (settled()) resolve();
-            });
-        });
-        return (await navigator.serviceWorker.getRegistrations()).length;
     });
-    expect(remaining).toBe(0);
+    await expect.poll(() => registrations(page)).toEqual([]);
     expect(await page.evaluate(() => (window as Marked).marker)).toBe("open");
     expect(new URL(page.url()).pathname).toBe("/app/");
     await context.setOffline(true);
