@@ -36,6 +36,17 @@ export class ApiError extends DisplayError {
     }
 }
 
+// Status 0 like a lost connection, but this tab refused the request before it left.
+export class NotSentError extends ApiError {}
+
+export function answerLost(error: unknown) {
+    return (
+        error instanceof ApiError &&
+        error.status === 0 &&
+        !(error instanceof NotSentError)
+    );
+}
+
 // The compiler keeps this set equal to the generated vocabulary.
 const ERROR_CODES: Record<ErrorCode, true> = {
     invalid_request: true,

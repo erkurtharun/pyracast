@@ -509,8 +509,8 @@ def dump_database(host: Host) -> tuple[str, Path]:
     stamp = datetime.datetime.now(datetime.UTC).strftime("%Y/%m/%d/%Y%m%dT%H%M%SZ")
     name = f"postgres/{stamp}{PRERESET}{uuid.uuid4().hex}.dump"
     archive = archive_path(host, name)
-    partial = archive.with_suffix(".partial")
-    with partial.open("wb") as stream:
+    unfinished = archive.with_suffix(".partial")
+    with unfinished.open("wb") as stream:
         subprocess.run(
             [
                 *compose(host),
@@ -529,7 +529,7 @@ def dump_database(host: Host) -> tuple[str, Path]:
             check=True,
             timeout=1200,
         )
-    partial.replace(archive)
+    unfinished.replace(archive)
     return name, archive
 
 
@@ -679,23 +679,23 @@ def download_archive(host: Host, name: str) -> Path:
     with urllib.request.urlopen(described, timeout=30) as reply:  # noqa: S310
         metadata = json.load(reply)
     archive = archive_path(host, name)
-    partial = archive.with_suffix(".partial")
+    unfinished = archive.with_suffix(".partial")
     media = urllib.request.Request(
         f"https://storage.googleapis.com/storage/v1/b/{path}?alt=media", headers=headers
     )
-    with urllib.request.urlopen(media, timeout=300) as reply, partial.open("wb") as stream:  # noqa: S310
+    with urllib.request.urlopen(media, timeout=300) as reply, unfinished.open("wb") as stream:  # noqa: S310
         while block := reply.read(1024 * 1024):
             stream.write(block)
-    with partial.open("rb") as stream:
+    with unfinished.open("rb") as stream:
         md5 = base64.b64encode(hashlib.file_digest(stream, "md5").digest()).decode()
     if (
         not isinstance(metadata, dict)
         or metadata.get("md5Hash") != md5
-        or metadata.get("size") != str(partial.stat().st_size)
+        or metadata.get("size") != str(unfinished.stat().st_size)
     ):
-        partial.unlink()
+        unfinished.unlink()
         raise RefusedError(f"The download of {name} does not match the bucket's checksum.")
-    partial.replace(archive)
+    unfinished.replace(archive)
     return archive
 
 
@@ -910,7 +910,8 @@ def print_prepared(host: Host, record: Record, solcast: SolcastExport) -> None:
     print(f"  Solcast export: gs://{host.bucket}/{solcast.object}")
     print(f"  Solcast SHA-256: {solcast.sha256}")
     print(f"  Solcast snapshots: {solcast.rows}")
-    print(f"  Release commit: {host.release.resolve().name}")
+    # install-release.sh names a release directory <commit>-<image digest prefix>.
+    print(f"  Release commit: {host.release.resolve().name.partition('-')[0]}")
     for key, value in sorted(release_values(host).items()):
         if key.endswith("_IMAGE"):
             print(f"  {key}={value}")

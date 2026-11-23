@@ -53,7 +53,7 @@ sequenceDiagram
 | `connections_provideraccount` | R/W | Locked `FOR UPDATE`; replacement writes `encrypted_api_key`, `api_key_fingerprint`, `credential_revision` and `revalidation_due_at`; the run writes `revalidation_due_at`, and its validations' `record_provider_failure` writes `authentication_failed_revision` on a 401 and `request_blocked_until` on a 402 or 429 of the current key; clearing writes `request_blocked_until`; `daily_quota` is never touched |
 | `connections_sitebinding` | R/W | The run's validations write `validated_at`, `validated_credential_revision` and `health`; the setup and the approval are unchanged |
 | `forecasts_requestattempt` | R/W | Each revalidation reserves one `validation` request; the account page reads the UTC day's ledger |
-| `forecasts_collectionjob` | R/W | A successful validation of an approved plant re-arms its latest forecast job refused for the key (`timing.armed_again_by_validation`) |
+| `forecasts_collectionjob` | R/W | A successful validation can re-arm the plant's latest due forecast job refused for the key (rule in `provider-quota-and-backoff`) |
 | `regions_auditevent` | R/W | `provider_secret_rotated` and `provider_cooldown_cleared` (account target, `revision` = `credential_revision`); the run reads the replacement's event for its operator and records `connection_validated` or `connection_validation_failed` per plant |
 
 ## Authorization
@@ -77,7 +77,8 @@ sequenceDiagram
 | Run: key replaced or lease moved on during the run | Outcome `stopped` or `lease_lost`; the due time the newer replacement or dispatch set is kept |
 | Run: 401, or the account's 401 block | `key_rejected`, due time cleared |
 | Run: a stored provider delay / used-up quota / a provider answer that is unreachable, throttled or failing | `waiting`, due at the delay's end / the next UTC day / after `RETRY_DELAY` (15 minutes) |
-| Run: a plant refused for the forecast reserve | The run goes on with later plants, then is `waiting` until `AFTER_THE_SLOT` (30 s) after the account's next forecast slot, at the latest the next UTC day |
+| Run: a plant refused for the forecast reserve | The run goes on with later plants; a run that reaches its end is `waiting`, due when room may be free again (`revalidation._after_the_next_slot`). A later plant's outcome that ends the run sets its own due time |
+| Run: the account row cannot be locked at `_take_lease` (lock timeout or deadlock) | Outcome `contended`: nothing written, the delivery ends normally (`job_claim_contended`, `worker-runtime`), the dispatch lease stays and the account is due again when it ends (5 minutes) |
 | Run: a plant refused by the provider (403, 404, non-retryable) / by a validation rule | That plant gets `error` health / keeps its health; the run goes on |
 
 ## Rules and invariants
@@ -92,5 +93,5 @@ sequenceDiagram
 
 ## Tests
 
-- `tests/test_provider_accounts.py` (pages, replacement, clearing, refusals), `tests/test_provider_key_fingerprint.py`, `tests/test_provider_key_fingerprint_migration.py`, `tests/test_account_rotation.py`, `tests/test_provider_recovery.py`, `tests/test_key_revalidation.py` (also the restore that queues revalidation), `tests/test_revalidation_progress.py`, `tests/test_revalidation_simulation.py`, `tests/test_provider_revalidation_reserve.py`, `tests/test_console_outcomes.py`, `tests/test_console_failures.py`. Effects: `tests/test_collection_review_regressions.py`, `tests/test_revalidation_schedule.py`, `tests/test_delivery_health.py`, `tests/test_provider_secrets.py`.
+- `tests/test_provider_accounts.py` (pages, replacement, clearing, refusals), `tests/test_provider_key_fingerprint.py`, `tests/test_provider_key_fingerprint_migration.py`, `tests/test_account_rotation.py`, `tests/test_provider_recovery.py`, `tests/test_key_revalidation.py` (also the restore that queues revalidation), `tests/test_revalidation_progress.py`, `tests/test_revalidation_simulation.py`, `tests/test_provider_revalidation_reserve.py`, `tests/test_claim_contention.py` (`contended`), `tests/test_console_outcomes.py`, `tests/test_console_failures.py`. Effects: `tests/test_collection_review_regressions.py`, `tests/test_revalidation_schedule.py`, `tests/test_delivery_health.py`, `tests/test_provider_secrets.py`.
 - Gaps: the Playwright test opens the provider accounts list but neither replaces a key nor clears a delay.

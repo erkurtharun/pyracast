@@ -307,7 +307,7 @@ def test_two_exceptions_for_one_finding_are_refused(pair: list[ScanException]) -
         load_exceptions(json.dumps(pair))
 
 
-def test_the_tracked_exceptions_are_exactly_the_two_reviewed_entries() -> None:
+def test_the_tracked_exceptions_are_exactly_the_reviewed_entries() -> None:
     tracked = load_exceptions(
         (ROOT / "deploy" / "image-scan-exceptions.json").read_text(encoding="utf-8")
     )
@@ -317,19 +317,40 @@ def test_the_tracked_exceptions_are_exactly_the_two_reviewed_entries() -> None:
             "service": "backend",
             "vulnerability": "CVE-2026-124709",
             "package": "libssl3t64",
-            "reason": "Not affected: the flaw is in OpenSSL's QUIC server, and this image runs "
-            "none, because CPython's ssl module offers no QUIC and every process either serves "
-            "plain HTTP over TCP behind the gateway or only opens outbound connections.",
+            "reason": "Not affected: the flaw is in OpenSSL's QUIC server, and this image uses "
+            "none: CPython's ssl module offers only stream TLS, the servers serve plain HTTP "
+            "over TCP behind the gateway, and the application's outbound clients connect over "
+            "TCP.",
             "expires": "2026-12-21",
         },
         {
             "service": "web",
             "vulnerability": "CVE-2026-124709",
             "package": "libssl3t64",
-            "reason": "Not affected: the flaw is in OpenSSL's QUIC server, and this image runs "
-            "none and never loads the system library, because the official Node.js binary "
-            "carries its own OpenSSL and the Next.js server serves plain HTTP over TCP behind "
-            "the gateway.",
+            "reason": "Not affected: the flaw is in OpenSSL's QUIC server, and this image uses "
+            "none: the official Node.js binary carries its own OpenSSL, the Next.js server "
+            "serves plain HTTP over TCP behind the gateway, and no QUIC client or server is "
+            "configured.",
+            "expires": "2026-12-21",
+        },
+        {
+            "service": "backend",
+            "vulnerability": "CVE-2026-107494",
+            "package": "libssl3t64",
+            "reason": "Not affected: the flaw is in OpenSSL's QUIC stack, and this image uses "
+            "none: CPython's ssl module offers only stream TLS, the servers serve plain HTTP "
+            "over TCP behind the gateway, and the application's outbound clients connect over "
+            "TCP.",
+            "expires": "2026-12-21",
+        },
+        {
+            "service": "web",
+            "vulnerability": "CVE-2026-107494",
+            "package": "libssl3t64",
+            "reason": "Not affected: the flaw is in OpenSSL's QUIC stack, and this image uses "
+            "none: the official Node.js binary carries its own OpenSSL, the Next.js server "
+            "serves plain HTTP over TCP behind the gateway, and no QUIC client or server is "
+            "configured.",
             "expires": "2026-12-21",
         },
     ]

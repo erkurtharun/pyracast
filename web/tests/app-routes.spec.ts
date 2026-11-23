@@ -1,11 +1,14 @@
 import { expect, test, type Page } from "./support/test";
+import { secondAccount, secondUser } from "./support/session";
 import {
+    firstAccount,
     mockApi,
     paged,
     plant,
     region,
     tenantRow,
     user,
+    type AccountState,
 } from "./support/workspace";
 
 async function mockMembers(page: Page) {
@@ -189,19 +192,21 @@ test("the document keeps its title while the workspace changes address", async (
         );
         expect(titles.length).toBeGreaterThan(0);
         expect(
-            titles.filter((title) => !/^1:\S.* \| Pyracast$/.test(title)),
+            titles.filter(
+                (title) => !/^1:(Pyracast|\S.* \| Pyracast)$/.test(title),
+            ),
         ).toEqual([]);
     };
     // The observer starts at the first title; the server head shows the document starts with it.
     const titledFromStart = async (address: string) => {
         const html = await (await page.goto(address))!.text();
         expect(html.match(/<title>[^<]*<\/title>/g)).toEqual([
-            "<title>Pyracast workspace | Pyracast</title>",
+            "<title>Pyracast</title>",
         ]);
         expect(html.indexOf("<title>")).toBeLessThan(html.indexOf("</head>"));
     };
     await titledFromStart("/app/w/1/");
-    await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
+    await expect(page).toHaveTitle("Plants · Sunfield Energy | Pyracast");
     await page.getByRole("button", { name: /East array/ }).click();
     await expect(page).toHaveURL(/\/plants\/\d+\/forecast\/$/);
     await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -210,13 +215,13 @@ test("the document keeps its title while the workspace changes address", async (
     await expect(page).toHaveURL(/\/plants\/\d+\/forecast\/$/);
     await page.getByRole("button", { name: "Account" }).click();
     await expect(page).toHaveURL("/app/account/");
-    await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
+    await expect(page).toHaveTitle("Account settings | Pyracast");
     await titlesKeptSinceFirst();
     await titledFromStart("/app/w/1/plants/11/unknown/");
     await expect(
         page.getByRole("heading", { name: "Page not found" }),
     ).toBeVisible();
-    await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
+    await expect(page).toHaveTitle("Pyracast");
     expect(await page.locator("title").count()).toBe(1);
     await titlesKeptSinceFirst();
     await page.route(
@@ -237,7 +242,7 @@ test("the document keeps its title while the workspace changes address", async (
     await expect(
         page.getByRole("heading", { name: "This page could not be displayed" }),
     ).toBeVisible();
-    await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
+    await expect(page).toHaveTitle("Pyracast");
     expect(await page.locator("title").count()).toBe(1);
     await titlesKeptSinceFirst();
 });
@@ -262,7 +267,7 @@ test("plant sections carry their own document title", async ({ page }) => {
     await expect(page).toHaveTitle("Settings · East array | Pyracast");
     await page.getByRole("button", { name: /All plants/ }).click();
     await expect(page).toHaveURL("/app/w/1/");
-    await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
+    await expect(page).toHaveTitle("Plants · Sunfield Energy | Pyracast");
     expect(await page.locator("title").count()).toBe(1);
 });
 
@@ -384,29 +389,13 @@ for (const anonymous of [false, true])
 test("a sign-out or another account never shows the previous account's cached plants", async ({
     page,
 }) => {
-    await mockApi(page);
-    let account = 1;
-    let secondSignedIn = false;
+    const account = await mockApi(page);
     let releaseSites!: () => void;
     const sitesHeld = new Promise<void>((resolve) => {
         releaseSites = resolve;
     });
-    await page.route("**/api/auth/browser/v1/auth/login", (route) => {
-        secondSignedIn = account === 2;
-        return route.fallback();
-    });
-    await page.route("**/api/session/", (route) =>
-        secondSignedIn
-            ? route.fulfill({
-                  json: {
-                      user: { ...user, id: 2, email: "other@example.test" },
-                      csrf_token: "signed-token",
-                  },
-              })
-            : route.fallback(),
-    );
     await page.route("**/api/tenants/1/sites/", async (route) => {
-        if (!secondSignedIn) return route.fallback();
+        if (account.current?.user !== secondUser) return route.fallback();
         await sitesHeld;
         await route.fulfill({
             json: paged([
@@ -426,13 +415,17 @@ test("a sign-out or another account never shows the previous account's cached pl
     await expect(
         page.locator("form").getByRole("button", { name: "Sign in" }),
     ).toBeVisible();
-    account = 2;
-    await page.getByLabel("Email", { exact: true }).fill("other@example.test");
+    await page.route("**/api/auth/browser/v1/auth/login", (route) => {
+        account.current = secondAccount;
+        return route.fallback();
+    });
+    await page.getByLabel("Email", { exact: true }).fill(secondUser.email);
     await page
         .getByLabel("Password", { exact: true })
         .fill("Test-only-cobalt-79!");
     await page.locator("form").getByRole("button", { name: "Sign in" }).click();
     await expect(page.getByText("Loading plants")).toBeVisible();
+    expect(account.current?.user).toBe(secondUser);
     await expect(page.getByRole("button", { name: /East array/ })).toHaveCount(
         0,
     );
@@ -449,36 +442,19 @@ test("a tab adopts another account signed in in a second tab at its focus read a
     page,
     context,
 }) => {
-    const other = { ...user, id: 2, email: "other@example.test" };
-    let account: "first" | "none" | "second" = "first";
+    const account: AccountState = { current: firstAccount };
     let readSeen!: () => void;
     const readRequested = new Promise<void>((resolve) => (readSeen = resolve));
     const second = await context.newPage();
     for (const tab of [page, second]) {
-        await mockApi(tab);
-        await tab.route("**/api/auth/browser/v1/auth/login", (route) => {
-            account = "second";
+        await mockApi(tab, { account });
+        await tab.route("**/api/session/", (route) => {
+            if (tab === page && account.current?.user === secondUser)
+                readSeen();
             return route.fallback();
-        });
-        await tab.route("**/api/auth/browser/v1/auth/session", (route) => {
-            if (route.request().method() === "DELETE") account = "none";
-            return route.fallback();
-        });
-        await tab.route("**/api/session/", async (route) => {
-            const answered = account;
-            if (tab === page && answered === "second") readSeen();
-            await route.fulfill({
-                json:
-                    answered === "none"
-                        ? { user: null, csrf_token: "anonymous-token" }
-                        : {
-                              user: answered === "second" ? other : user,
-                              csrf_token: "signed-token",
-                          },
-            });
         });
         await tab.route("**/api/tenants/1/sites/", (route) =>
-            account === "second"
+            account.current?.user === secondUser
                 ? route.fulfill({
                       json: paged([
                           {
@@ -494,24 +470,30 @@ test("a tab adopts another account signed in in a second tab at its focus read a
                   })
                 : route.fallback(),
         );
-        await tab.route("**/api/tenants/1/members/", (route) =>
-            route.fulfill({
+        await tab.route("**/api/tenants/1/members/", (route) => {
+            const member = account.current?.user;
+            return route.fulfill({
                 json: {
-                    members: [
-                        {
-                            id: account === "second" ? other.id : user.id,
-                            email:
-                                account === "second" ? other.email : user.email,
-                            role: "admin",
-                        },
-                    ],
+                    members: member
+                        ? [
+                              {
+                                  id: member.id,
+                                  email: member.email,
+                                  role: "admin",
+                              },
+                          ]
+                        : [],
                 },
-            }),
-        );
+            });
+        });
         await tab.route("**/api/tenants/1/invitations/", (route) =>
             route.fulfill({ json: { invitations: [] } }),
         );
     }
+    await second.route("**/api/auth/browser/v1/auth/login", (route) => {
+        account.current = secondAccount;
+        return route.fallback();
+    });
     await page.goto("/app/w/1/members/");
     await expect(page.getByText(user.email).first()).toBeVisible();
     await page.getByRole("button", { name: /Plants/ }).click();
@@ -526,7 +508,8 @@ test("a tab adopts another account signed in in a second tab at its focus read a
     await expect(
         second.locator("form").getByRole("button", { name: "Sign in" }),
     ).toBeVisible();
-    await second.getByLabel("Email", { exact: true }).fill(other.email);
+    expect(account.current).toBeNull();
+    await second.getByLabel("Email", { exact: true }).fill(secondUser.email);
     await second
         .getByLabel("Password", { exact: true })
         .fill("Test-only-cobalt-79!");
@@ -537,6 +520,7 @@ test("a tab adopts another account signed in in a second tab at its focus read a
     await expect(
         second.getByRole("button", { name: /Second account array/ }),
     ).toBeVisible();
+    expect(account.current?.user).toBe(secondUser);
     await page.bringToFront();
     // Headless Chromium fires no focus event for bringToFront.
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
@@ -549,6 +533,6 @@ test("a tab adopts another account signed in in a second tab at its focus read a
     );
     await page.getByRole("button", { name: "Members", exact: true }).click();
     await expect(page).toHaveURL("/app/w/1/members/");
-    await expect(page.getByText(other.email).first()).toBeVisible();
+    await expect(page.getByText(secondUser.email).first()).toBeVisible();
     await expect(page.getByText(user.email)).toHaveCount(0);
 });

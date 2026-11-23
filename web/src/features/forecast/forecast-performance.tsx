@@ -2,7 +2,7 @@
 import { useTranslations } from "next-intl";
 import { ScrollRegion } from "@/ui/scroll-region";
 
-import { useState, type FormEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 import { ViewNav } from "@/ui/action";
 import type { PlantScope } from "@/lib/api";
 import type { RequestOptions } from "@/lib/api/client";
@@ -53,7 +53,7 @@ export function ForecastPerformance({
                 : {}),
         };
     }
-    function load(event: FormEvent) {
+    function load(event: SubmitEvent) {
         event.preventDefault();
         setQuery(request(comparison));
     }

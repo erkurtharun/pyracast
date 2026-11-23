@@ -2,7 +2,7 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import type { Plant, PlantScope } from "@/lib/api";
-import { ApiError, DisplayError } from "@/lib/api/errors";
+import { answerLost, DisplayError } from "@/lib/api/errors";
 import { useApiList } from "@/lib/api/query";
 import { outagesExport } from "@/lib/exports";
 import { CsvDownload } from "@/ui/csv-download";
@@ -133,7 +133,7 @@ export function Outages({
                 type: "sendFailed",
                 change,
                 current,
-                answered: !(error instanceof ApiError && error.status === 0),
+                answered: !answerLost(error),
                 direct,
             });
             setScreen(failed);

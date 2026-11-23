@@ -1,11 +1,13 @@
 import { expect, test, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
 import {
+    accountWith,
     answer,
     mockApi,
     paged,
+    sessionIdentity,
     tenantRow,
-    user,
+    type AccountState,
     type Mock,
 } from "./support/workspace";
 import { readFile } from "node:fs/promises";
@@ -994,10 +996,10 @@ async function memberOutages(
         ReturnType<typeof memberList> | Promise<ReturnType<typeof memberList>>,
 ) {
     await page.clock.install({ time: new Date("2026-11-10T12:00:00Z") });
-    await mockApi(page);
+    const account = await mockApi(page);
     await page.route("**/api/session/", (route) =>
         route.fulfill({
-            json: { user, language: "en", csrf_token: "signed-token" },
+            json: { ...sessionIdentity(account.current), language: "en" },
         }),
     );
     await page.route("**/api/tenants/", (route) =>
@@ -1013,6 +1015,7 @@ async function memberOutages(
     await page.route("**/api/**/outages/", async (route) =>
         route.fulfill({ json: await read() }),
     );
+    return account;
 }
 
 async function openOutages(page: Page) {
@@ -1300,19 +1303,18 @@ function memberPage(
 }
 
 // Another tab saves the session's language; this tab reads the session again when its window regains focus.
-async function sessionLanguage(page: Page) {
-    let language = "en";
+async function sessionLanguage(page: Page, account: AccountState) {
+    account.current = accountWith({ language_preference: "en" });
     await page.route("**/api/session/", (route) =>
         route.fulfill({
             json: {
-                user: { ...user, language_preference: language },
-                language,
-                csrf_token: "signed-token",
+                ...sessionIdentity(account.current),
+                language: account.current?.user.language_preference,
             },
         }),
     );
     return async (next: string) => {
-        language = next;
+        account.current = accountWith({ language_preference: next });
         await page.clock.runFor(5_000);
         await page.evaluate(() => window.dispatchEvent(new Event("focus")));
         await expect(page.locator("html")).toHaveAttribute("lang", next);
@@ -1336,8 +1338,8 @@ function cancelledFour(): OutageRow {
 test("a language change keeps what was typed into an open resolution and where the focus was", async ({
     page,
 }) => {
-    await memberOutages(page, () => memberList());
-    const speak = await sessionLanguage(page);
+    const account = await memberOutages(page, () => memberList());
+    const speak = await sessionLanguage(page, account);
     await openOutages(page);
     const inverter = outageCard(page, "Inverter offline");
     await inverter
@@ -1366,8 +1368,10 @@ test("a language change while a resolution is sent keeps it sending, sends it on
 }) => {
     const answered = gate();
     const submissions: unknown[] = [];
-    await memberOutages(page, () => memberList(submissions.length ? 4 : null));
-    const speak = await sessionLanguage(page);
+    const account = await memberOutages(page, () =>
+        memberList(submissions.length ? 4 : null),
+    );
+    const speak = await sessionLanguage(page, account);
     await page.route("**/change-requests/incidents/", async (route) => {
         submissions.push(route.request().postDataJSON());
         await answered.pass();

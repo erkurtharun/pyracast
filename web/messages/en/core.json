@@ -212,6 +212,12 @@
         "attentionReason": "Needs attention: {reason}",
         "awaitingSetup": "Waiting for an administrator to finish setup"
     },
+    "Session": {
+        "signingOut": "Signing out",
+        "unconfirmed": "Could not confirm your session",
+        "unconfirmedHelp": "This page and what you entered are kept. They are shown again once the server answers.",
+        "retry": "Try again"
+    },
     "InstallApp": {
         "install": "Install app",
         "browserMenu": "Open the browser menu and choose the command with Install in its name, such as Install this site as an app or Install and create shortcut. In some browsers it is inside a submenu.",

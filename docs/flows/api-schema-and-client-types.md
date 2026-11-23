@@ -31,7 +31,7 @@ sequenceDiagram
     else valid
         Dj->>Dj: write web/openapi.json
         Gen-->>Npm: exit 0
-        Npm->>Ts: openapi.json to src/lib/schema.d.ts
+        Npm->>Ts: openapi.json to web/src/lib/schema.d.ts
         Npm->>Pr: format both files, ignore-path is the root .gitignore
     end
     Dev->>Gen: generate_api_schema.py --check (CI, check.py)

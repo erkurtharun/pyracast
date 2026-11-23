@@ -1,5 +1,5 @@
 "use client";
-import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import {
     useCallback,
@@ -15,25 +15,35 @@ import { reloadPage } from "@/lib/on-demand";
 import { routes } from "@/lib/routes";
 import { browserErrors } from "@/i18n/browser";
 import {
+    clearInvitationWith,
+    confirmIdleSession,
     isCurrent,
     loadSession,
     observedTagKey,
     sessionOwner,
     sessionState,
+    signOut,
+    useSessionClock,
     useSessionState,
+    useSessionUnconfirmed,
     type Session,
+    type SignOutState,
 } from "@/lib/session-client";
 import { Brand } from "@/ui/brand";
+import { useErrorMessage } from "@/ui/form";
 import { LiveRegion } from "@/ui/live-region";
+import { clearWorkspaceInvitation } from "@/features/workspace/workspace-invitation";
 import { useLanguageHandoff } from "./language-handoff";
 import { SessionLanguage, useSessionLanguage } from "./session-language";
 import { Notice } from "@/ui/ui";
 
 if (typeof window !== "undefined") captureInstallPrompt();
+clearInvitationWith(clearWorkspaceInvitation);
 
 export function AppRoot({ children }: { children: ReactNode }) {
     const [client] = useState(createQueryClient);
     const { session, failure, fail, clear, retry } = useSessionBootstrap();
+    const { retired, signOut: leaving } = useSessionState();
     const handoff = useLanguageHandoff(session);
     const language = useSessionLanguage(session, handoff.status !== "ready");
     const ready =
@@ -41,36 +51,47 @@ export function AppRoot({ children }: { children: ReactNode }) {
         handoff.status === "ready" &&
         language.status === "ready";
     useFocusSessionRead(ready);
+    const restored = useRestoredDocument();
+    const ending = retired !== undefined || restored;
+    useDocumentReload(ending);
     const current = useCurrentSession(session, ready, fail, clear);
-    const owner = sessionOwner(session);
-    useForeignCacheRemoval(client, owner);
+    const unconfirmed = useSessionUnconfirmed();
     return (
         <QueryClientProvider client={client}>
             <SessionLanguage value={language}>
-                <LiveRegion>
-                    {ready && current ? (
-                        <QueryOwner value={owner}>{children}</QueryOwner>
-                    ) : language.status === "failed" ? (
-                        <Bootstrap
-                            failure={{ kind: "catalogue" }}
-                            retry={reloadPage}
-                        />
-                    ) : handoff.status === "failed" ? (
-                        <Bootstrap
-                            failure={{ kind: "language" }}
-                            retry={handoff.retry}
-                        />
-                    ) : (
-                        <Bootstrap
-                            failure={
-                                failure === undefined
-                                    ? undefined
-                                    : { kind: "session", message: failure }
-                            }
-                            retry={retry}
-                        />
-                    )}
-                </LiveRegion>
+                <IdleSessionCheck />
+                {ending ? (
+                    <Bootstrap retry={retry} />
+                ) : leaving.status !== "idle" ? (
+                    <SigningOut state={leaving} />
+                ) : ready && current ? (
+                    <QueryOwner value={sessionOwner(session)}>
+                        <Screens
+                            covered={unconfirmed && Boolean(session?.user)}
+                        >
+                            {children}
+                        </Screens>
+                    </QueryOwner>
+                ) : language.status === "failed" ? (
+                    <Bootstrap
+                        failure={{ kind: "catalogue" }}
+                        retry={reloadPage}
+                    />
+                ) : handoff.status === "failed" ? (
+                    <Bootstrap
+                        failure={{ kind: "language" }}
+                        retry={handoff.retry}
+                    />
+                ) : (
+                    <Bootstrap
+                        failure={
+                            failure === undefined
+                                ? undefined
+                                : { kind: "session", message: failure }
+                        }
+                        retry={retry}
+                    />
+                )}
             </SessionLanguage>
         </QueryClientProvider>
     );
@@ -216,13 +237,104 @@ function useCurrentSession(
     return current;
 }
 
-function useForeignCacheRemoval(
-    client: QueryClient,
-    owner: string | undefined,
-) {
+// The reload runs after the ending document's screens and their leave listeners are gone.
+function useDocumentReload(ending: boolean) {
     useEffect(() => {
-        client.removeQueries({
-            predicate: (query) => query.queryKey[1] !== owner,
-        });
-    }, [client, owner]);
+        if (ending) reloadPage();
+    }, [ending]);
+}
+
+// A document restored from the back-forward cache may show a session that ended meanwhile.
+function useRestoredDocument() {
+    const [restored, setRestored] = useState(false);
+    useEffect(() => {
+        const restore = (event: PageTransitionEvent) => {
+            if (event.persisted) setRestored(true);
+        };
+        window.addEventListener("pageshow", restore);
+        return () => window.removeEventListener("pageshow", restore);
+    }, []);
+    return restored;
+}
+
+function IdleSessionCheck() {
+    const now = useSessionClock();
+    useEffect(() => {
+        if (document.visibilityState === "visible") confirmIdleSession();
+    }, [now]);
+    return null;
+}
+
+function Screens({
+    covered,
+    children,
+}: {
+    covered: boolean;
+    children: ReactNode;
+}) {
+    return (
+        <>
+            {covered && <SessionUnconfirmed />}
+            <div hidden={covered} inert={covered}>
+                <LiveRegion>{children}</LiveRegion>
+            </div>
+        </>
+    );
+}
+
+function SessionUnconfirmed() {
+    const t = useTranslations("Session");
+    return (
+        <main className="auth-page">
+            <div className="auth-card">
+                <Brand surface="light" />
+                <h1>{t("unconfirmed")}</h1>
+                <p>{t("unconfirmedHelp")}</p>
+                <button
+                    className="button"
+                    onClick={() => void loadSession().catch(() => {})}
+                >
+                    {t("retry")}
+                </button>
+            </div>
+        </main>
+    );
+}
+
+function SigningOut({
+    state,
+}: {
+    state: Exclude<SignOutState, { status: "idle" }>;
+}) {
+    const t = useTranslations("Session");
+    const errorMessage = useErrorMessage();
+    return (
+        <main className="auth-page">
+            <div className="auth-card">
+                <Brand surface="light" />
+                <h1>{t("signingOut")}</h1>
+                {state.status === "failed" ? (
+                    <>
+                        <Notice error>{errorMessage(state.error)}</Notice>
+                        <button
+                            className="button"
+                            onClick={() =>
+                                void signOut({
+                                    keepInvitation: state.keepInvitation,
+                                }).catch(() => {})
+                            }
+                        >
+                            {t("retry")}
+                        </button>
+                    </>
+                ) : (
+                    <div
+                        className="loading-indicator"
+                        role="progressbar"
+                        aria-label={t("signingOut")}
+                    />
+                )}
+            </div>
+        </main>
+    );
 }

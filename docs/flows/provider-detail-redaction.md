@@ -47,7 +47,7 @@ sequenceDiagram
 | Condition | Result |
 | --- | --- |
 | Private key at any depth (`_PRIVATE_FIELDS`) | Key and value removed, no marker |
-| `provider` key whose value is not a string (also `None`), or is `solcast` or `fixture` (case-folded) | Key removed; any other string, such as `open_meteo`, is kept |
+| `provider` key whose value is not a string (also `None`), or is `solcast` or `fixture` (case-folded) | Key removed; any other string is kept |
 | Key containing `solcast` other than `solcast_ghi_wm2`, `solcast_kwh_m2` | Key removed; those two become `reference_ghi_wm2`, `reference_kwh_m2` |
 | String containing `solcast` inside a technical subtree | Whole string equal to `solcast_forecast` or `solcast_estimated_actuals` becomes `forecast` or `estimated_actuals` (under any technical key); a string directly under `quality_flags` gets `reference` for the word; anything else becomes `null` |
 | Redacted string | Becomes `null`, not a marker text; a technical string inside a list becomes a `null` item |
@@ -65,10 +65,9 @@ sequenceDiagram
 - Stored provenance keeps operator detail: below `capacity_normalization`, `reference_capacity_normalization` and `reference_import` only allowlisted fields are delivered (the import's id, hash and time, and a short list of source settings); the rest of those subtrees is dropped before the walk.
 - Two keys that map to the same public key (`solcast_ghi_wm2` and `reference_ghi_wm2`) overwrite each other in iteration order.
 - `authorized_by_id`, `site_id` and `resource_id` are private. Internal numeric ids such as `binding_id` and `snapshot_id` and the `binding_revision` value are not private (no recorded decision); a test pins `provenance.binding_id` as public.
-- Open-Meteo is the licensed attribution exception (`docs/ARCHITECTURE.md`): its `provider` value `open_meteo` and `attribution` reach the customer because only `solcast` and `fixture` are dropped.
 
 ## Tests
 
-- `tests/test_public_data.py`: user text and production attribution preserved, legacy `source_kind` aliases, `quality_flags` rewrite, user text rewritten inside a technical subtree, `provider: None` dropped, the allowlisted provenance subtrees, the renderer giving the same bytes with no request and on any path (built with `APIRequestFactory`), calibration detail over the real API with a check that stored rows are unchanged, credential removal at any depth. Its email test checks `notifications.mail` `build_message`, which does not use this projection.
+- `tests/test_public_data.py`: user text and production attribution preserved, the two provider-named `source_kind` values mapped to public names and any other removed, `quality_flags` rewrite, user text rewritten inside a technical subtree, `provider: None` dropped, the allowlisted provenance subtrees, the renderer giving the same bytes with no request and on any path (built with `APIRequestFactory`), calibration detail over the real API with a check that stored rows are unchanged, credential removal at any depth. Its email test checks `notifications.mail` `build_message`, which does not use this projection.
 - `tests/test_public_schema.py`: the generated schema validates and contains no provider name. `tests/test_midnight_forecast_fallback.py` pins `provenance.binding_id` in a public response. `web/tests/public-site.spec.ts` checks marketing pages only.
 - Gaps: no test sweeps every customer endpoint for provider names; none for a new unlisted field, for `provider: fixture`, for the key collision, or for deployment under a script prefix; no Playwright test sees a redacted API payload.

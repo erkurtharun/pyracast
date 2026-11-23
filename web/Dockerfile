@@ -21,7 +21,7 @@ RUN apt-get update && apt-get upgrade --no-install-recommends -y \
     && cp -L /usr/share/doc/libatomic1/copyright /runtime/usr/share/doc/libatomic1/ \
     && dpkg-query --status libatomic1 > /runtime/var/lib/dpkg/status.d/libatomic1
 
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:cb87acc574abe719b6e5c547384defa2f7b1f24af9605d3f618cf852495d8be2 AS runtime
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:532c7a94f9e96ba9db75eb9388f4227751131c7cb0a411d1a8521af4096135de AS runtime
 ENV NODE_ENV=production HOSTNAME=0.0.0.0 PORT=3000
 WORKDIR /app
 COPY --from=runtime-node /runtime/ /

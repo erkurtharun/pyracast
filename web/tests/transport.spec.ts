@@ -1,19 +1,17 @@
 import { expect, test } from "@playwright/test";
-import {
-    api,
-    apiUrl,
-    buildUrl,
-    type RequestOptions,
-} from "../src/lib/api/client";
-import { ApiError } from "../src/lib/api/errors";
-import { authRequest } from "../src/lib/auth-api";
-import {
+import { apiUrl, buildUrl, type RequestOptions } from "../src/lib/api/client";
+import { openDocument } from "./support/document";
+import { errorBody } from "./support/errors";
+
+let {
     adoptSession,
+    api,
+    ApiError,
+    authRequest,
     loadSession,
     sessionState,
     signOut,
-} from "../src/lib/session-client";
-import { errorBody } from "./support/errors";
+} = openDocument();
 
 type Call = {
     method: string;
@@ -84,6 +82,15 @@ const anonymous = (token: string) => ({
 });
 
 test.beforeEach(() => {
+    ({
+        adoptSession,
+        api,
+        ApiError,
+        authRequest,
+        loadSession,
+        sessionState,
+        signOut,
+    } = openDocument());
     calls = [];
 });
 test.afterEach(() => {
@@ -203,6 +210,7 @@ test("unsafe requests carry the CSRF token of the current session", async () => 
 });
 
 test("a session read started before sign-out is not handed out after it", async () => {
+    adoptSession(signedIn("token"));
     let release!: () => void;
     const held = new Promise<void>((resolve) => {
         release = resolve;
@@ -251,7 +259,6 @@ test("a not-authenticated answer ends the session once", async () => {
         "not_authenticated",
     ]);
     await expect.poll(() => sessionState().session?.user).toBeNull();
-    expect(sessionState().ended).toBe(true);
     expect(calls.filter((call) => call.url === "/api/session/")).toHaveLength(
         3,
     );
@@ -333,6 +340,56 @@ test("an allauth flow answer does not end the session", async () => {
     expect(calls).toHaveLength(2);
 });
 
+for (const [name, body] of [
+    ["a body without allauth's fields", { detail: "Unauthorized" }],
+    [
+        "a body without the authentication state",
+        { status: 401, data: { flows: [] } },
+    ],
+    [
+        "a body whose status is not 401",
+        { status: 200, meta: { is_authenticated: true } },
+    ],
+] as const) {
+    test(`an authentication request answered 401 with ${name} fails`, async () => {
+        adoptSession(signedIn("token"));
+        answer(() => json(body, 401));
+        const error = await authRequest("account/providers", "DELETE", {
+            provider: "google",
+            account: "account-42",
+        }).catch((failure) => failure);
+        expect(error).toBeInstanceOf(ApiError);
+        expect(error).toMatchObject({ status: 401 });
+        expect(calls).toHaveLength(1);
+    });
+}
+
+for (const authenticated of [false, true, null]) {
+    test(`allauth's 401 with is_authenticated ${authenticated} is returned to its caller`, async () => {
+        adoptSession(signedIn("token"));
+        const body = {
+            status: 401,
+            data: { flows: [] },
+            meta: { is_authenticated: authenticated },
+        };
+        answer(() => json(body, 401));
+        const result = await authRequest("auth/email/verify", "POST", {
+            key: "123456",
+        });
+        expect(result).toEqual(body);
+    });
+}
+
+test("an authentication answer carries its HTTP status, not the status its body names", async () => {
+    adoptSession(signedIn("token"));
+    answer(() => json({ status: 401, meta: { is_authenticated: false } }));
+    const result = await authRequest("auth/session", "GET");
+    expect(result).toEqual({
+        status: 200,
+        meta: { is_authenticated: false },
+    });
+});
+
 test("path parameters and query values build one encoded URL", () => {
     expect(
         apiUrl("/api/tenants/{tenant_id}/change-requests/", {
@@ -391,7 +448,7 @@ test("a URL requires every named path parameter", () => {
     );
 });
 
-test("a session read that discovers expiry records the signed-out transition", async () => {
+test("a session read that discovers expiry adopts it once a second read agrees", async () => {
     adoptSession(signedIn("token"));
     answer(
         () => json(anonymous("anonymous")),
@@ -399,36 +456,53 @@ test("a session read that discovers expiry records the signed-out transition", a
     );
     await loadSession();
     expect(sessionState().session?.user).toBeNull();
-    expect(sessionState().ended).toBe(true);
+    expect(calls).toHaveLength(2);
 });
 
-test("an explicit sign-out returns to sign-in without an expiry notice", async () => {
+test("a confirmed sign-out ends the document without reading the session", async () => {
     adoptSession(signedIn("token"));
-    answer(
-        () => json({ status: 401, meta: { is_authenticated: false } }, 401),
-        () => json(anonymous("anonymous")),
-    );
+    answer(() => json({ status: 401, meta: { is_authenticated: false } }, 401));
     await signOut();
-    expect(sessionState().session?.user).toBeNull();
-    expect(sessionState().ended).toBe(false);
+    expect(sessionState()).toMatchObject({
+        retired: "signedOutHere",
+        ended: false,
+    });
+    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+        "DELETE /api/auth/browser/v1/auth/session",
+    ]);
 });
 
 const signedOutAnswer = () =>
     json({ status: 401, meta: { is_authenticated: false } }, 401);
 
+for (const [name, body] of [
+    ["a refusal without allauth's answer", { detail: "Unauthorized" }],
+    [
+        "a signed-in allauth answer",
+        { status: 401, meta: { is_authenticated: true } },
+    ],
+] as const) {
+    test(`a sign-out answered with ${name} keeps the document and fails`, async () => {
+        adoptSession(signedIn("token"));
+        answer(() => json(body, 401));
+        const error = await signOut().catch((failure) => failure);
+        expect(error).toBeInstanceOf(ApiError);
+        expect(sessionState().retired).toBeUndefined();
+        expect(sessionState()).toMatchObject({
+            signOut: { status: "failed" },
+            session: { csrf_token: "token" },
+        });
+        expect(calls).toHaveLength(1);
+    });
+}
+
 test("a sign-out refused for a key another tab renewed signs out the renewed session", async () => {
     adoptSession(signedIn("token"));
-    answer(
-        changed,
-        () => json(signedIn("rotated")),
-        signedOutAnswer,
-        () => json(anonymous("anonymous")),
-    );
-    const session = await signOut();
-    expect(session.user).toBeNull();
+    answer(changed, () => json(signedIn("rotated")), signedOutAnswer);
+    await signOut();
     expect(sessionState()).toMatchObject({
         ended: false,
-        session: { user: null },
+        retired: "signedOutHere",
     });
     expect(
         calls.map((call) => `${call.method} ${call.url} ${call.token}`),
@@ -436,7 +510,6 @@ test("a sign-out refused for a key another tab renewed signs out the renewed ses
         "DELETE /api/auth/browser/v1/auth/session token",
         "GET /api/session/ null",
         "DELETE /api/auth/browser/v1/auth/session rotated",
-        "GET /api/session/ null",
     ]);
 });
 
@@ -474,10 +547,7 @@ test("an account read refused for a session that ended is not repeated", async (
         (failure) => failure,
     );
     expect(error).toMatchObject({ code: "session_changed" });
-    expect(sessionState()).toMatchObject({
-        ended: true,
-        session: { user: null },
-    });
+    expect(sessionState().session?.user).toBeNull();
     expect(calls).toHaveLength(4);
 });
 
@@ -491,8 +561,8 @@ test("an account change answered as signed out is not repeated", async () => {
     expect(calls).toHaveLength(2);
 });
 
-test("a sign-out after which the browser holds another session is reported", async () => {
-    adoptSession(signedIn("token"));
+test("leaving a sign-in stage after which the browser holds a signed-in session is reported", async () => {
+    adoptSession(anonymous("token"));
     answer(signedOutAnswer, () =>
         json({ ...signedIn("other"), session_tag: "other-session" }),
     );

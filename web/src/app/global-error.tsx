@@ -4,6 +4,7 @@ import { brandProperties } from "@/styles/tokens";
 import "@/styles/tokens.css";
 import "./globals.css";
 import { reloadPage } from "@/lib/on-demand";
+import { useScreenTitle } from "@/ui/page-title";
 import en from "../../messages/en/shell.json";
 import tr from "../../messages/tr/shell.json";
 
@@ -13,10 +14,11 @@ export default function GlobalError({
     error: unknown;
     retry: () => void;
 }) {
+    const title = useScreenTitle(en.AppError.title);
     return (
         <html lang="en" style={brandProperties as CSSProperties}>
             <body>
-                <title>{`${en.AppError.title} | Pyracast`}</title>
+                <title>{title}</title>
                 <main className="auth-page">
                     <section className="panel narrow">
                         <h1>{en.AppError.title}</h1>

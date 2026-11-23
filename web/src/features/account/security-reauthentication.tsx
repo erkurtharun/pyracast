@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type SubmitEvent } from "react";
 import { loadSession } from "@/lib/session-client";
 import { ApiError, displayMessage } from "@/lib/api/errors";
 import { authRequest } from "@/lib/auth-api";
@@ -57,7 +57,7 @@ export function ReauthenticationForm({
         if (codeSent) inputRef.current?.focus();
     }, [codeSent]);
 
-    async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
         event.preventDefault();
         if (disabled || pendingRef.current) return;
         const payloadValue = mode === "password" ? value : value.trim();

@@ -46,7 +46,7 @@ def _anonymous_session(body: bytes) -> bool:
 
 
 def _sign_in_page(body: bytes) -> bool:
-    return b"<title>Pyracast workspace" in body
+    return b"<title>Pyracast</title>" in body
 
 
 CHECKS: tuple[tuple[str, Callable[[bytes], bool], str], ...] = (
@@ -70,12 +70,12 @@ def _problem(
 def probe(origin: str, get: Fetch, sleep: Callable[[float], None]) -> list[str]:
     problems = []
     for path, valid, wrong in CHECKS:
-        for attempt in range(ATTEMPTS):
-            if attempt:
-                sleep(RETRY_SECONDS)
-            problem = _problem(origin, path, valid, wrong, get)
+        problem = _problem(origin, path, valid, wrong, get)
+        for _ in range(ATTEMPTS - 1):
             if problem is None:
                 break
+            sleep(RETRY_SECONDS)
+            problem = _problem(origin, path, valid, wrong, get)
         if problem is not None:
             problems.append(problem)
     return problems

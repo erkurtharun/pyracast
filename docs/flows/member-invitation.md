@@ -4,7 +4,7 @@ A workspace administrator submits an email address on the Members screen. The ba
 
 ## Entry points
 
-- `web/src/features/workspace/workspace-members.tsx` `WorkspaceMembers` at `/app/w/<tenant>/members/` (administrators only) composes `members/invite-member.tsx` `InviteMember` (form and the `plants_at_recipient_limit` warning) and `members/pending-invitations.tsx` `PendingInvitations` (state, delivery hints, "Send again", "Cancel invitation").
+- `web/src/features/workspace/workspace-members.tsx` `WorkspaceMembers` at `/app/w/<tenant>/members/` (administrators only) composes `web/src/features/workspace/members/invite-member.tsx` `InviteMember` (form and the `plants_at_recipient_limit` warning) and `web/src/features/workspace/members/pending-invitations.tsx` `PendingInvitations` (state, delivery hints, "Send again", "Cancel invitation").
 - `GET|POST /api/tenants/{t}/invitations/` -> `pyracast.api.workspaces.WorkspaceInvitationsView`; `DELETE .../invitations/{i}/` -> `WorkspaceInvitationView`; `POST .../invitations/{i}/resend/` -> `WorkspaceInvitationResendView` (`src/pyracast/urls.py`). Actor: workspace administrator. They call `pyracast.accounts.invitations.invite_workspace_member`, `reissue_workspace_invitation` and `revoke_workspace_invitation`, as does the platform console with `platform=True` (`/admin/workspaces/{id}/invitations/...`, `pyracast.platform_admin.tenant_views`) and workspace creation, which can invite the first administrator.
 - Mail templates `src/pyracast/accounts/templates/mail/workspace_invitation.txt` and `.html`. The intent is an `OutboundMail` row; the `send_outbound_mail` actor (`pyracast.notifications.outbox`) sends through `pyracast.mail.send.send` (flow `email-transport`).
 
