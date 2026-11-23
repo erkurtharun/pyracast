@@ -218,8 +218,11 @@ export function useApiList<P extends ListPath>(
     );
 }
 
-export function readAgain(client: QueryClient, filters: QueryFilters = {}) {
-    void client.cancelQueries(filters);
+export async function readAgain(
+    client: QueryClient,
+    filters: QueryFilters = {},
+) {
+    await client.cancelQueries(filters);
     return client.invalidateQueries(filters);
 }
 
@@ -240,8 +243,9 @@ export function useRefresh() {
     const client = useQueryClient();
     const owner = useOwner();
     return useMemo(() => {
-        const refresh = (queryKey: QueryKey) =>
-            readAgain(client, changed(queryKey));
+        const tenants = keys.path(owner, "/api/tenants/");
+        const askedFor = (queryKey: QueryKey) =>
+            client.invalidateQueries({ queryKey }, { cancelRefetch: false });
         const key = (request: Request) =>
             keys.request(owner, request.path, request.options);
         return {
@@ -256,11 +260,11 @@ export function useRefresh() {
                             mounted && key(mounted),
                         ),
                     ),
-                    refresh(keys.path(owner, "/api/tenants/")),
+                    readAgain(client, changed(tenants)),
                 ]),
             requests: (tenant: number) =>
                 Promise.all([
-                    refresh(
+                    askedFor(
                         keys.path(
                             owner,
                             "/api/tenants/{tenant_id}/change-requests/",
@@ -269,9 +273,9 @@ export function useRefresh() {
                             },
                         ),
                     ),
-                    refresh(keys.path(owner, "/api/tenants/")),
+                    askedFor(tenants),
                 ]),
-            tenants: () => refresh(keys.path(owner, "/api/tenants/")),
+            tenants: () => client.invalidateQueries({ queryKey: tenants }),
         };
     }, [client, owner]);
 }

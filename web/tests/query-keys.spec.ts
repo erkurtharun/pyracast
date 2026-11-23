@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import {
+    defaultScheduler,
     focusManager,
+    notifyManager,
     QueryClient,
     QueryObserver,
     type QueryKey,
@@ -23,8 +25,13 @@ const forecast =
     "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/forecast/";
 const realFetch = globalThis.fetch;
 
+test.beforeEach(() => {
+    notifyManager.setScheduler((callback) => callback());
+});
+
 test.afterEach(() => {
     globalThis.fetch = realFetch;
+    notifyManager.setScheduler(defaultScheduler);
 });
 
 function cached(client: QueryClient, key: readonly unknown[]) {
@@ -91,54 +98,87 @@ test("a request key carries its path parameters and query and is the same in eve
 });
 
 const sitesKey = keys.request("1:a", sites, { path: { tenant_id: 5 } });
+const workspaceChange = (client: QueryClient) =>
+    readAgain(client, changed(keys.workspace("1:a", 5)));
 
-// Reads of one request whose answers the test delivers, in any order.
+type Fetched = { value: string; requests: number };
+
 function heldReads() {
     const reads: {
         resolve: (rows: string) => void;
         reject: (error: unknown) => void;
+        answer: ReturnType<ReturnType<typeof answered<string>>>;
     }[] = [];
+    const waiting: { count: number; resolve: () => void }[] = [];
+    const sent = (count: number) =>
+        reads.length >= count
+            ? Promise.resolve()
+            : new Promise<void>((resolve) => waiting.push({ count, resolve }));
+    const read = async (index: number) => {
+        await sent(index + 1);
+        return reads[index]!;
+    };
     return {
-        queryFn: answered(
-            () =>
-                new Promise<{ value: string; requests: number }>(
-                    (resolve, reject) =>
-                        reads.push({
-                            resolve: (rows) =>
-                                resolve({ value: rows, requests: 1 }),
-                            reject,
-                        }),
-                ),
-        ),
-        read: (index: number) => reads[index]!,
+        queryFn: () => {
+            let settle!: Pick<(typeof reads)[number], "resolve" | "reject">;
+            const pending = new Promise<Fetched>((resolve, reject) => {
+                settle = {
+                    resolve: (rows) => resolve({ value: rows, requests: 1 }),
+                    reject,
+                };
+            });
+            const answer = answered(() => pending)();
+            reads.push({ ...settle, answer });
+            for (const waiter of waiting)
+                if (reads.length >= waiter.count) waiter.resolve();
+            return answer;
+        },
+        sent,
+        read,
+        resolve: async (index: number, rows: string) =>
+            (await read(index)).resolve(rows),
+        reject: async (index: number, error: unknown) =>
+            (await read(index)).reject(error),
         count: () => reads.length,
     };
 }
 
 type Server = ReturnType<typeof heldReads>;
 type Result = Parameters<typeof shownAnswer<string>>[0];
+type Shown = ReturnType<typeof shownAnswer<string>>;
+
+const same = (left: Shown, right: Shown) =>
+    JSON.stringify(left) === JSON.stringify(right);
 
 function watch(client: QueryClient, server: Server, queryKey = sitesKey) {
     const observer = new QueryObserver(client, {
         queryKey,
         queryFn: server.queryFn,
     });
-    const delivered: ReturnType<typeof shownAnswer<string>>[] = [];
-    const stop = observer.subscribe((result) =>
-        delivered.push(shownAnswer(result as Result)),
-    );
+    const delivered: Shown[] = [];
+    const waiting: { expected: Shown; resolve: () => void }[] = [];
+    const stop = observer.subscribe((result) => {
+        const shown = shownAnswer(result as Result);
+        delivered.push(shown);
+        for (const waiter of waiting)
+            if (same(shown, waiter.expected)) waiter.resolve();
+    });
+    const now = () => shownAnswer(observer.getCurrentResult() as Result);
     return {
         observer,
         stop,
-        now: () => shownAnswer(observer.getCurrentResult() as Result),
+        now,
         retry: () => observer.refetch({ cancelRefetch: false }),
-        // Consecutive equal results are one state on the screen.
+        shows: (expected: Shown) =>
+            same(now(), expected)
+                ? Promise.resolve()
+                : new Promise<void>((resolve) =>
+                      waiting.push({ expected, resolve }),
+                  ),
         history: () =>
             delivered.filter(
                 (shown, index) =>
-                    index === 0 ||
-                    JSON.stringify(shown) !==
-                        JSON.stringify(delivered[index - 1]),
+                    index === 0 || !same(shown, delivered[index - 1]!),
             ),
     };
 }
@@ -146,7 +186,6 @@ function watch(client: QueryClient, server: Server, queryKey = sitesKey) {
 const refusal = (status: number, message = "Refused.") =>
     new ApiError(message, { status });
 const offline = () => new ApiError("Unreachable.", { status: 0 });
-const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
 const rows = (value: string, error?: string) => ({
     data: value,
     error,
@@ -161,9 +200,13 @@ const pending = { data: undefined, error: undefined, denied: false };
 
 async function shownWithRows(client: QueryClient, server: Server) {
     const shown = watch(client, server);
-    server.read(0).resolve("rows");
-    await expect.poll(() => shown.now().data).toBe("rows");
+    await server.resolve(0, "rows");
+    await shown.shows(rows("rows"));
     return shown;
+}
+
+function stored(client: QueryClient, queryKey: QueryKey) {
+    return client.getQueryCache().find({ queryKey, exact: true })!;
 }
 
 test("no delivery carries rows after a refusal, through failed reads, a Retry and a language change, until an authorized read answers", async () => {
@@ -171,22 +214,22 @@ test("no delivery carries rows after a refusal, through failed reads, a Retry an
     const server = heldReads();
     const shown = await shownWithRows(client, server);
     try {
-        void shown.retry();
-        server.read(1).reject(refusal(403));
-        await expect.poll(() => shown.now()).toEqual(refused());
-        void shown.retry();
-        server.read(2).reject(offline());
-        await expect.poll(() => shown.now()).toEqual(refused("Unreachable."));
-        void readAgain(client);
-        await expect.poll(() => server.count()).toBe(4);
-        server.read(3).reject(offline());
-        await settled();
+        const refusedRetry = shown.retry();
+        await server.reject(1, refusal(403));
+        await refusedRetry;
+        expect(shown.now()).toEqual(refused());
+        const lostRetry = shown.retry();
+        await server.reject(2, offline());
+        await lostRetry;
         expect(shown.now()).toEqual(refused("Unreachable."));
-        void shown.retry();
-        server.read(4).resolve("rows allowed again");
-        await expect
-            .poll(() => shown.now())
-            .toEqual(rows("rows allowed again"));
+        const languageRead = readAgain(client);
+        await server.reject(3, offline());
+        await languageRead;
+        expect(shown.now()).toEqual(refused("Unreachable."));
+        const allowedRetry = shown.retry();
+        await server.resolve(4, "rows allowed again");
+        await allowedRetry;
+        expect(shown.now()).toEqual(rows("rows allowed again"));
         expect(shown.history()).toEqual([
             pending,
             rows("rows"),
@@ -205,18 +248,15 @@ test("a Retry joins a running read, so that read's refusal is the answer shown",
     const server = heldReads();
     const shown = await shownWithRows(client, server);
     try {
-        void shown.retry();
-        server.read(1).reject(offline());
-        await expect
-            .poll(() => shown.now())
-            .toEqual(rows("rows", "Unreachable."));
+        const lostRetry = shown.retry();
+        await server.reject(1, offline());
+        await lostRetry;
+        expect(shown.now()).toEqual(rows("rows", "Unreachable."));
         focusManager.setFocused(false);
         focusManager.setFocused(true);
-        await expect.poll(() => server.count()).toBe(3);
+        await server.sent(3);
         const retry = shown.retry();
-        await settled();
-        expect(server.count()).toBe(3);
-        server.read(2).reject(refusal(403));
+        await server.reject(2, refusal(403));
         await retry;
         expect(shown.now()).toEqual(refused());
         expect(server.count()).toBe(3);
@@ -229,7 +269,6 @@ test("a Retry joins a running read, so that read's refusal is the answer shown",
 
 test("reading again after a change ends every shown query with a read sent after it and leaves an unshown one invalidated", async () => {
     const client = createQueryClient();
-    const workspace = keys.workspace("1:a", 5);
     const initialKey = keys.request("1:a", sites, {
         path: { tenant_id: 5 },
         query: { page: 2 },
@@ -244,30 +283,23 @@ test("reading again after a change ends every shown query with a read sent after
     const initial = watch(client, initialServer, initialKey);
     const unshownServer = heldReads();
     client.setQueryData(unshownKey, { value: "unshown rows", requests: 1 });
-    const unshown = client.getQueryCache().find({
-        queryKey: unshownKey,
-        exact: true,
-    })!;
+    const unshown = stored(client, unshownKey);
     try {
         void populated.retry();
-        await expect.poll(() => initialServer.count()).toBe(1);
+        await populatedServer.sent(2);
+        await initialServer.sent(1);
         void unshown
             .fetch({ queryKey: unshownKey, queryFn: unshownServer.queryFn })
             .catch(() => undefined);
-        expect(populatedServer.count()).toBe(2);
+        await unshownServer.sent(1);
         expect(unshown.state.fetchStatus).toBe("fetching");
 
-        const refreshed = readAgain(client, changed(workspace));
-        await settled();
-        expect(populatedServer.count()).toBe(3);
-        expect(initialServer.count()).toBe(2);
-        expect(unshownServer.count()).toBe(1);
-        populatedServer.read(1).resolve("rows sent before the change");
-        initialServer.read(0).resolve("rows sent before the change");
-        unshownServer.read(0).resolve("rows sent before the change");
-        await settled();
-        populatedServer.read(2).resolve("rows after the change");
-        initialServer.read(1).resolve("rows after the change");
+        const refreshed = workspaceChange(client);
+        await populatedServer.resolve(1, "rows sent before the change");
+        await initialServer.resolve(0, "rows sent before the change");
+        await unshownServer.resolve(0, "rows sent before the change");
+        await populatedServer.resolve(2, "rows after the change");
+        await initialServer.resolve(1, "rows after the change");
         await refreshed;
 
         expect(populated.history()).toEqual([
@@ -285,9 +317,82 @@ test("reading again after a change ends every shown query with a read sent after
             value: "unshown rows",
             requests: 1,
         });
+        expect(unshownServer.count()).toBe(1);
     } finally {
         populated.stop();
         initial.stop();
+    }
+});
+
+test("a first read whose answer is accepted as a change is answered still ends with a read sent after the change", async () => {
+    const client = createQueryClient();
+    const server = heldReads();
+    const shown = watch(client, server);
+    try {
+        const before = await server.read(0);
+        const refreshed = before.answer.then(() => workspaceChange(client));
+        before.resolve("rows sent before the change");
+        await Promise.race([refreshed, server.sent(2)]);
+        expect(server.count()).toBe(2);
+        await server.resolve(1, "rows after the change");
+        await refreshed;
+        expect(shown.now()).toEqual(rows("rows after the change"));
+        expect(shown.history()).toEqual([
+            pending,
+            rows("rows sent before the change"),
+            rows("rows after the change"),
+        ]);
+    } finally {
+        shown.stop();
+    }
+});
+
+test("an unshown read whose answer is accepted as a change is answered stays invalidated", async () => {
+    const client = createQueryClient();
+    const server = heldReads();
+    const unshownKey = keys.request("1:a", sites, {
+        path: { tenant_id: 5 },
+        query: { page: 3 },
+    });
+    client.setQueryData(unshownKey, { value: "unshown rows", requests: 1 });
+    const unshown = stored(client, unshownKey);
+    const fetched = unshown
+        .fetch({ queryKey: unshownKey, queryFn: server.queryFn })
+        .catch(() => undefined);
+    const before = await server.read(0);
+    const refreshed = before.answer.then(() => workspaceChange(client));
+    before.resolve("rows sent before the change");
+    await refreshed;
+    await fetched;
+    expect(unshown.state.isInvalidated).toBe(true);
+    expect(unshown.state.fetchStatus).toBe("idle");
+    expect(unshown.state.data).toEqual({
+        value: "rows sent before the change",
+        requests: 1,
+    });
+    expect(server.count()).toBe(1);
+});
+
+test("a shown read whose answer is accepted as a change is answered is replaced by a read sent after the change", async () => {
+    const client = createQueryClient();
+    const server = heldReads();
+    const shown = await shownWithRows(client, server);
+    try {
+        void shown.observer.refetch();
+        const before = await server.read(1);
+        const refreshed = before.answer.then(() => workspaceChange(client));
+        before.resolve("rows sent before the change");
+        await server.resolve(2, "rows after the change");
+        await refreshed;
+        expect(server.count()).toBe(3);
+        expect(shown.history()).toEqual([
+            pending,
+            rows("rows"),
+            rows("rows sent before the change"),
+            rows("rows after the change"),
+        ]);
+    } finally {
+        shown.stop();
     }
 });
 
@@ -298,13 +403,12 @@ test("a change's read cancels a held read whose answer would be a refusal; when 
     const answeredAt = shown.observer.getCurrentResult().dataUpdatedAt;
     try {
         void shown.retry();
-        const refreshed = readAgain(client, changed(keys.workspace("1:a", 5)));
-        await settled();
-        expect(server.count()).toBe(3);
-        server.read(1).reject(refusal(403));
-        server.read(2).reject(offline());
+        await server.sent(2);
+        const refreshed = workspaceChange(client);
+        await server.sent(3);
+        await server.reject(1, refusal(403));
+        await server.reject(2, offline());
         await refreshed;
-        await settled();
         expect(shown.now()).toEqual(rows("rows", "Unreachable."));
         expect(shown.observer.getCurrentResult().dataUpdatedAt).toBe(
             answeredAt,
@@ -339,16 +443,57 @@ for (const [answer, expected] of [
         const shown = await shownWithRows(client, server);
         try {
             const reloaded = outcome(reload<string>(client, sitesKey));
-            await settled();
-            expect(server.count()).toBe(2);
-            if (answer === "rows") server.read(1).resolve("newer rows");
-            else if (answer === "refusal") server.read(1).reject(refusal(403));
-            else server.read(1).reject(offline());
+            if (answer === "rows") await server.resolve(1, "newer rows");
+            else if (answer === "refusal") await server.reject(1, refusal(403));
+            else await server.reject(1, offline());
             expect(await reloaded).toEqual(expected);
+            expect(server.count()).toBe(2);
         } finally {
             shown.stop();
         }
     });
+
+test("a reload whose read is cancelled and reverted rejects while the earlier rows stay", async () => {
+    const client = createQueryClient();
+    const server = heldReads();
+    const shown = await shownWithRows(client, server);
+    try {
+        const reloaded = outcome(reload<string>(client, sitesKey));
+        await server.sent(2);
+        await client.cancelQueries({ queryKey: sitesKey, exact: true });
+        expect(await reloaded).toEqual({ status: 0 });
+        expect(stored(client, sitesKey).state).toMatchObject({
+            data: { value: "rows", requests: 1 },
+            dataUpdateCount: 1,
+        });
+    } finally {
+        shown.stop();
+    }
+});
+
+test("a reload resolves with an answer written in the same millisecond as the one before it", async () => {
+    const realNow = Date.now;
+    const instant = realNow();
+    Date.now = () => instant;
+    const client = createQueryClient();
+    const server = heldReads();
+    try {
+        const shown = await shownWithRows(client, server);
+        try {
+            const reloaded = outcome(reload<string>(client, sitesKey));
+            await server.resolve(1, "newer rows");
+            expect(await reloaded).toEqual({ value: "newer rows" });
+            expect(stored(client, sitesKey).state).toMatchObject({
+                dataUpdatedAt: instant,
+                dataUpdateCount: 2,
+            });
+        } finally {
+            shown.stop();
+        }
+    } finally {
+        Date.now = realNow;
+    }
+});
 
 test("a reload rejects when its query is removed while it reads or was never read", async () => {
     const client = createQueryClient();
@@ -356,9 +501,9 @@ test("a reload rejects when its query is removed while it reads or was never rea
     const shown = await shownWithRows(client, server);
     try {
         const reloaded = outcome(reload<string>(client, sitesKey));
-        await settled();
+        await server.sent(2);
         client.removeQueries({ queryKey: sitesKey, exact: true });
-        server.read(1).resolve("rows of a removed query");
+        await server.resolve(1, "rows of a removed query");
         expect(await reloaded).toEqual({ status: "other" });
         const absent: QueryKey = keys.request("1:a", sites, {
             path: { tenant_id: 9 },
@@ -382,16 +527,15 @@ test("a reload whose key the screen left meanwhile answers with that key's own r
     });
     try {
         const reloaded = outcome(reload<string>(client, sitesKey));
-        await settled();
+        await server.sent(2);
         shown.observer.setOptions({
             queryKey: otherKey,
             queryFn: server.queryFn,
         });
-        await expect.poll(() => server.count()).toBe(3);
-        server.read(2).resolve("rows of the shown key");
-        server.read(1).resolve("rows of the left key");
+        await server.resolve(2, "rows of the shown key");
+        await server.resolve(1, "rows of the left key");
         expect(await reloaded).toEqual({ value: "rows of the left key" });
-        await expect.poll(() => shown.now().data).toBe("rows of the shown key");
+        await shown.shows(rows("rows of the shown key"));
     } finally {
         shown.stop();
     }

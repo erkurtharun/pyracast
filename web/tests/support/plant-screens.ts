@@ -18,7 +18,6 @@ const reading = {
     aggregated: false,
 } as const;
 
-// A signed-in administrator whose language choice the server stores and answers with.
 export async function signIn(
     page: Page,
     { language = "en" }: { language?: Language } = {},
@@ -85,7 +84,6 @@ export async function openPlant(page: Page, section?: string) {
         await page.getByRole("button", { name: section, exact: true }).click();
 }
 
-// Every API request fails as a dropped connection would, after the browser said it went offline.
 export async function loseConnection(page: Page) {
     let lost = true;
     await page.route("**/api/**", (route) =>
@@ -126,7 +124,6 @@ export const activeOutage: Outage = {
     pending_request_id: null,
 };
 
-// One plant's outage list as an administrator reads it.
 export async function serveOutages(page: Page, outages: Outage[]) {
     await page.route("**/plants/21/outages/", (route) =>
         route.request().method() === "GET"

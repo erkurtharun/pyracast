@@ -25,7 +25,6 @@ function outageSection(page: Page) {
 const outage = (page: Page) =>
     page.getByRole("heading", { name: "Inverter disconnected" });
 
-// Answers the first read of the address with a refusal, every later one as mocked.
 async function failFirstRead(page: Page, url: string) {
     let failed = false;
     await page.route(url, (route) => {
@@ -50,7 +49,36 @@ async function retryFailedRead(page: Page) {
     await expect(failure).toHaveCount(0);
 }
 
-test("after the connection drops, the shell and a polled screen say so at their polls while a typed value stays, and the online event reads again", async ({
+const savedProductionFailed = (page: Page) =>
+    page
+        .getByRole("alert")
+        .filter({ hasText: "Could not refresh saved production." });
+
+test("after the connection drops, the production screen and the shell say so at their own polls, and the online event reads again", async ({
+    page,
+}) => {
+    await page.clock.install({ time: now });
+    await signIn(page);
+    await serveProduction(page, [{ can_edit: true }]);
+    await openPlant(page, "Production");
+    await expect(
+        page.getByRole("button", { name: /^Edit 08:00/ }),
+    ).toBeVisible();
+    const reconnect = await loseConnection(page);
+    const production = savedProductionFailed(page);
+    await page.clock.runFor(30_000);
+    await expect(production).toContainText("Could not reach the server.");
+    await expect(refreshFailed(page)).toHaveCount(0);
+    await page.clock.runFor(90_000);
+    await expect(refreshFailed(page).first()).toContainText(
+        "Could not reach the server.",
+    );
+    await reconnect();
+    await expect(refreshFailed(page)).toHaveCount(0);
+    await expect(production).toHaveCount(0);
+});
+
+test("an open production editor keeps the value typed before the connection dropped through the shell's failed poll and the reconnection", async ({
     page,
 }) => {
     await page.clock.install({ time: now });
@@ -58,30 +86,21 @@ test("after the connection drops, the shell and a polled screen say so at their 
     await serveProduction(page, [{ can_edit: true }]);
     await openPlant(page, "Production");
     await page.getByRole("button", { name: /^Edit 08:00/ }).click();
-    const value = page.locator(".production-row-editor").getByRole("textbox");
-    await value.first().fill("0,5");
-    await page
+    const value = page
         .locator(".production-row-editor")
-        .getByRole("button", { name: "Cancel", exact: true })
-        .click();
+        .getByRole("textbox")
+        .first();
+    await value.fill("0,5");
     const reconnect = await loseConnection(page);
-    const production = page
-        .getByRole("alert")
-        .filter({ hasText: "Could not refresh saved production." });
-    await page.clock.runFor(30_000);
-    await expect(production).toContainText("Could not reach the server.");
-    await expect(refreshFailed(page)).toHaveCount(0);
-    await page.getByRole("button", { name: /^Edit 08:00/ }).click();
-    await value.first().fill("0,7");
-    await page.clock.runFor(90_000);
+    await page.clock.runFor(120_000);
     await expect(refreshFailed(page).first()).toContainText(
         "Could not reach the server.",
     );
-    await expect(value.first()).toHaveValue("0,7");
+    await expect(value).toHaveValue("0,5");
     await reconnect();
     await expect(refreshFailed(page)).toHaveCount(0);
-    await expect(production).toHaveCount(0);
-    await expect(value.first()).toHaveValue("0,7");
+    await expect(savedProductionFailed(page)).toHaveCount(0);
+    await expect(value).toHaveValue("0,5");
 });
 
 test("without a poll the outage list reports a dropped connection at focus and on Retry while an open outage form keeps what was typed", async ({
@@ -118,6 +137,7 @@ test("without a poll the outage list reports a dropped connection at focus and o
     await failed;
     expect(outageReads).toBe(reads + 1);
     await expect(notice).toBeVisible();
+    await expect(page.getByLabel("Incident title")).toHaveValue("Grid fault");
     await reconnect();
     await expect(notice).toHaveCount(0);
     await expect(page.getByLabel("Incident title")).toHaveValue("Grid fault");
@@ -224,7 +244,6 @@ test("a Retry while a focus read runs sends no second request, and that read's r
     expect(reads).toBe(sent);
 });
 
-// Records whether a plant card was ever shown from now on, between two checks of the screen.
 async function watchPlantCards(page: Page) {
     await page.evaluate(() => {
         const shown = () =>
@@ -261,6 +280,13 @@ test("plants refused in one language are not shown again from another language's
         else if (refused) {
             reached.resolve();
             await release.promise;
+            return route.fulfill({
+                status: 403,
+                json: errorBody(
+                    "membership_required",
+                    "Bu çalışma alanının üyesi değilsiniz.",
+                ),
+            });
         } else return route.fallback();
         return route.fulfill({
             status: 403,
@@ -291,7 +317,12 @@ test("plants refused in one language are not shown again from another language's
     expect(await cardShown()).toBe(false);
     await reached.promise;
     release.resolve();
-    await expect(denial).toBeVisible();
+    await expect(
+        page
+            .getByRole("alert")
+            .filter({ hasText: "Bu çalışma alanının üyesi değilsiniz." }),
+    ).toBeVisible();
+    await expect(denial).toHaveCount(0);
     await expect(retry).toBeVisible();
     expect(await cardShown()).toBe(false);
 });
@@ -313,6 +344,7 @@ test("a language change while reads fail keeps the earlier outages with the time
             ? route.abort("internetdisconnected")
             : route.fallback(),
     );
+    await page.clock.setFixedTime(new Date(now.getTime() + 7 * 60_000));
     await page.getByLabel("Language", { exact: true }).selectOption("tr");
     await expect(
         page.getByRole("heading", { name: "Santral kesintileri", exact: true }),
@@ -361,6 +393,65 @@ test("a first inbox read that failed offers Retry, which reads it again", async 
     await page.getByRole("button", { name: "Inbox", exact: true }).click();
     await retryFailedRead(page);
     await expect(page.getByText("No submissions here.")).toBeVisible();
+});
+
+const pendingInboxRead = (url: string) =>
+    url.includes("/change-requests/?") && url.includes("scope=pending");
+
+test("Refresh list while the first inbox read runs sends no second request, and that read's refusal is shown", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    await page.goto("/app/");
+    await expect(
+        page.getByRole("button", { name: /East array/ }),
+    ).toBeVisible();
+    let reads = 0;
+    const reached = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    await page.route("**/change-requests/?*", async (route) => {
+        if (!pendingInboxRead(route.request().url())) return route.fallback();
+        reads++;
+        if (reads > 1) return route.abort("internetdisconnected");
+        reached.resolve();
+        await release.promise;
+        return route.fulfill({
+            status: 403,
+            json: errorBody(
+                "permission_denied",
+                "You cannot read this workspace's submissions.",
+            ),
+        });
+    });
+    await page.getByRole("button", { name: "Inbox", exact: true }).click();
+    await reached.promise;
+    await page
+        .getByRole("button", { name: "Refresh list", exact: true })
+        .click();
+    release.resolve();
+    await expect(
+        page.getByRole("alert").filter({
+            hasText: "You cannot read this workspace's submissions.",
+        }),
+    ).toBeVisible();
+    await expect(page.getByText("Could not reach the server.")).toHaveCount(0);
+    expect(reads).toBe(1);
+});
+
+test("Refresh list reads an idle inbox list again", async ({ page }) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    await page.goto("/app/");
+    await page.getByRole("button", { name: "Inbox", exact: true }).click();
+    await expect(page.getByText("No submissions here.")).toBeVisible();
+    const read = page.waitForRequest((request) =>
+        pendingInboxRead(request.url()),
+    );
+    await page
+        .getByRole("button", { name: "Refresh list", exact: true })
+        .click();
+    await read;
 });
 
 test("a first automatic calibration read that failed offers Retry, which reads it again", async ({
