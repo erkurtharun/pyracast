@@ -11,7 +11,6 @@ Read on demand. The code is the source of truth; these pages hold what it cannot
 | Irradiance, energy and calibration calculations | [IRRADIANCE.md](IRRADIANCE.md) |
 | Production topology, release and recovery | [DEPLOYMENT.md](DEPLOYMENT.md) |
 | How contributors and coding agents work, verify and deliver | [AGENTS.md](../AGENTS.md) |
-| State of the current improvement program | [agents/PROGRESS.md](agents/PROGRESS.md) |
 
 ## Keeping it true
 

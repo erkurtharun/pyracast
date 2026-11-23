@@ -19,6 +19,34 @@ const config = (phase: string): NextConfig => ({
                     { key: "X-Frame-Options", value: "DENY" },
                 ],
             },
+            {
+                source: "/app/:file([^/]+\\.webmanifest)",
+                headers: [{ key: "Cache-Control", value: "no-cache" }],
+            },
+            {
+                source: "/app/icons/:file([^/]+\\.png)",
+                headers: [{ key: "Cache-Control", value: "no-cache" }],
+            },
+            {
+                source: "/app/sw.js",
+                headers: [
+                    { key: "Content-Type", value: "text/javascript" },
+                    { key: "Cache-Control", value: "no-store" },
+                    {
+                        key: "Content-Security-Policy",
+                        value: "default-src 'none'; connect-src 'self'",
+                    },
+                ],
+            },
+        ]);
+    },
+    redirects() {
+        return Promise.resolve([
+            {
+                source: "/app/:file(manifest\\.webmanifest|sw\\.js|icons/(?:any|maskable)-(?:192|512)\\.png|icons/apple-touch-icon\\.png)/",
+                destination: "/app/:file",
+                permanent: true,
+            },
         ]);
     },
     rewrites() {

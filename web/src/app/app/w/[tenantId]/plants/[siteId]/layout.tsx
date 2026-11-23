@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import type { ReactNode } from "react";
 import { PlantSite } from "@/features/plant/plant-site";
 import { routeId } from "@/lib/routes";
 
@@ -6,7 +7,7 @@ export default async function PlantLayout({
     children,
     params,
 }: {
-    children: React.ReactNode;
+    children: ReactNode;
     params: Promise<{ siteId: string }>;
 }) {
     const siteId = routeId((await params).siteId);

@@ -3774,7 +3774,7 @@
                     "content": {
                         "application/json": {
                             "schema": {
-                                "$ref": "#/components/schemas/IncidentInput"
+                                "$ref": "#/components/schemas/IncidentCreate"
                             }
                         }
                     },
@@ -3791,6 +3791,16 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/IncidentOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
                                 }
                             }
                         },
@@ -7463,6 +7473,55 @@
                     }
                 },
                 "required": ["code", "current", "message"]
+            },
+            "IncidentCreate": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "$ref": "#/components/schemas/IncidentKindEnum"
+                    },
+                    "title": {
+                        "type": "string",
+                        "maxLength": 200
+                    },
+                    "notes": {
+                        "type": "string",
+                        "default": "",
+                        "maxLength": 2000
+                    },
+                    "starts_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "available_dc_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0,
+                        "nullable": true
+                    },
+                    "available_inverter_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0,
+                        "nullable": true
+                    },
+                    "available_export_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0,
+                        "nullable": true
+                    },
+                    "idempotency_key": {
+                        "type": "string",
+                        "format": "uuid"
+                    }
+                },
+                "required": ["kind", "starts_at", "title"]
             },
             "IncidentInput": {
                 "type": "object",
