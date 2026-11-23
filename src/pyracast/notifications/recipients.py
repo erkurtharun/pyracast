@@ -570,29 +570,33 @@ def remove_member_recipients(tenant_id: int, membership_id: int, emails: set[str
     removed = rows.filter(
         Q(ties__membership_id=membership_id) | Q(ties__isnull=True, key__in=keys)
     ).values("pk")
-    changed = set(
-        ReminderRecipient.objects.filter(pk__in=removed).values_list("schedule_id", flat=True)
+    deleted = list(
+        ReminderRecipient.objects.filter(pk__in=removed).values_list("schedule_id", "address")
     )
     ReminderRecipient.objects.filter(pk__in=removed).delete()
+    changed = {schedule_id for schedule_id, _ in deleted}
     ReminderSchedule.objects.filter(pk__in=changed - hidden).update(revision=F("revision") + 1)
-    _revoke_unauthorized(tenant_id, membership_id, keys)
+    mailboxes = {mailbox_key(address) for address in emails if address.strip()}
+    mailboxes.update(mailbox_key(address) for _, address in deleted)
+    _revoke_unauthorized(tenant_id, membership_id, mailboxes)
 
 
-def _revoke_unauthorized(tenant_id: int, leaving: int, keys: set[str]) -> None:
-    """Revokes the open deliveries' rows of these keys that their schedule no longer authorizes
-    without the leaving membership; an address another active member holds stays."""
-    candidates = list(
-        DeliveryRecipient.objects.filter(
+def _revoke_unauthorized(tenant_id: int, leaving: int, mailboxes: set[str]) -> None:
+    """Revokes the open deliveries' rows of these mailboxes that their schedule no longer
+    authorizes without the leaving membership; an address another active member holds stays."""
+    candidates = [
+        row
+        for row in DeliveryRecipient.objects.filter(
             delivery__schedule__region__tenant_id=tenant_id,
             delivery__status__in=OPEN_DELIVERIES,
-            key__in=keys,
         ).values_list(
             "pk",
             "address",
             "delivery__schedule_id",
             "delivery__schedule__include_workspace_members",
         )
-    )
+        if mailbox_key(row[1]) in mailboxes
+    ]
     if not candidates:
         return
     schedules = {schedule_id: include for _, _, schedule_id, include in candidates}
