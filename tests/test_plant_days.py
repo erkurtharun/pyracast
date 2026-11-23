@@ -317,8 +317,18 @@ def test_a_daylight_saving_day_has_one_row_per_local_hour(
     assert forecast["timezone"] == production["timezone"] == "Europe/Berlin"
     assert production["complete"] is True
     assert production["total_mwh"] == pytest.approx(hours * 10)
-    read = forecast_read(client_for(system.member), system, plant, day)
+    client = client_for(system.member)
+    read = forecast_read(client, system, plant, day)
     assert same_instants(forecast) == same_instants(reduced_forecast(read))
+    assert production_with_instants(production) == native_production_day(client, system, plant, day)
+
+
+def each_forecast_day_is_its_read(
+    client: Client, system: System, plant: Plant, body: dict[str, Any]
+) -> None:
+    for day in body["forecast"]:
+        read = forecast_read(client, system, plant, date.fromisoformat(day["date"]))
+        assert same_instants(day) == same_instants(reduced_forecast(read))
 
 
 def test_each_forecast_day_is_the_reduced_automatic_forecast_read(
@@ -327,18 +337,79 @@ def test_each_forecast_day_is_the_reduced_automatic_forecast_read(
     system, plant = make_plant(monkeypatch)
     forecast_window(system)
     body = days_of(system, plant)
-    client = client_for(system.member)
-    days = by_date(body["forecast"])
-    for offset in (-7, -1, 0, 1, 14):
-        day = TODAY + timedelta(days=offset)
-        assert same_instants(days[day]) == same_instants(
-            reduced_forecast(forecast_read(client, system, plant, day))
-        )
+    each_forecast_day_is_its_read(client_for(system.member), system, plant, body)
     assert {day["source_kind"] for day in body["forecast"][:7]} == {"estimated_actuals"}
     assert {day["source_kind"] for day in body["forecast"][7:]} == {"forecast"}
     assert all(day["rows"] and day["total_mwh"] is not None for day in body["forecast"])
     assert all(len(day["rows"]) == 24 for day in body["forecast"])
     assert all(day["affected"] is None for day in body["forecast"])
+
+
+def test_superseded_partial_and_newly_calibrated_days_are_the_reduced_forecast_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    configuration = plant.current_configuration
+    assert configuration is not None
+    for offset in range(-7, 0):
+        day = TODAY + timedelta(days=offset)
+        _, end = local_day_bounds(day, system.binding.timezone)
+        estimated_actuals(system, day, 0.3, end + timedelta(hours=1))
+    for offset in range(14):
+        day = TODAY + timedelta(days=offset)
+        publish_snapshot(snapshot_for(system, day, collected_at=NOW - timedelta(hours=2)))
+    superseded = TODAY + timedelta(days=3)
+    publish_snapshot(
+        snapshot_for(system, superseded, power_kw=0.2, collected_at=NOW - timedelta(hours=1))
+    )
+    partial = snapshot_for(system, TODAY + timedelta(days=14), collected_at=NOW)
+    partial.normalized_intervals = partial.normalized_intervals[:20]
+    publish_snapshot(partial)
+    run = activated_calibration(
+        system, configuration, 0.8, TODAY - timedelta(days=4), NOW - timedelta(hours=1)
+    )
+    body = days_of(system, plant)
+    client = client_for(system.member)
+    each_forecast_day_is_its_read(client, system, plant, body)
+    assert [
+        forecast_read(client, system, plant, TODAY + timedelta(days=offset))["calibration_id"]
+        for offset in range(-7, 0)
+    ] == [None] * 3 + [run.pk] * 4
+    days = by_date(body["forecast"])
+    assert days[superseded]["total_mwh"] < days[superseded + timedelta(days=1)]["total_mwh"]
+    last = days[TODAY + timedelta(days=14)]
+    assert last["partial"] is True
+    assert last["total_mwh"] is not None
+    assert [row["mwh"] is None for row in last["rows"]] == [False] * 10 + [True] * 14
+
+
+def test_a_plant_without_a_configuration_answers_each_day_as_its_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    forecast_window(system)
+    Plant.objects.filter(pk=plant.pk).update(current_configuration=None)
+    body = days_of(system, plant)
+    client = client_for(system.member)
+    each_forecast_day_is_its_read(client, system, plant, body)
+    each_production_day_is_its_native_read(client, system, plant, body)
+    assert {day["unavailable_reason"] for day in body["forecast"][7:]} == {
+        "configuration_unavailable"
+    }
+    assert all(day["rows"] == [] for day in body["forecast"][7:] + body["production"])
+
+
+def test_the_reference_capacity_fallback_day_is_the_reduced_forecast_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant, old_id = reference_transition(monkeypatch)
+    body = days_of(system, plant)
+    read = forecast_read(client_for(system.member), system, plant, REFERENCE_DAY)
+    assert read["result"]["provenance"]["snapshot_id"] == old_id
+    assert "reference_transition_fallback" in read["result"]["quality_flags"]
+    assert same_instants(by_date(body["forecast"])[REFERENCE_DAY]) == same_instants(
+        reduced_forecast(read)
+    )
 
 
 def test_a_mixed_day_names_the_sources_of_each_row(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -350,6 +421,7 @@ def test_a_mixed_day_names_the_sources_of_each_row(monkeypatch: pytest.MonkeyPat
     mixed, single = days[TODAY], days[TODAY + timedelta(days=1)]
     assert mixed["source_kind"] == "mixed"
     read = forecast_read(client_for(system.member), system, plant, TODAY)
+    assert same_instants(mixed) == same_instants(reduced_forecast(read))
     assert [row["sources"] for row in mixed["rows"]] == [
         row["source_kinds"] for row in read["result"]["intervals"]
     ]
@@ -661,26 +733,35 @@ def test_production_days_are_the_reduced_native_production_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    complete, partial, empty = (TODAY - timedelta(days=offset) for offset in (1, 2, 3))
+    complete, partial, empty, zero, before_midnight, after_midnight = (
+        TODAY - timedelta(days=offset) for offset in (1, 2, 3, 4, 6, 5)
+    )
     metered(system, plant, complete)
     metered(system, plant, partial, minutes=30, hours=8)
+    metered(system, plant, zero, mwh=0)
     configuration = plant.current_configuration
     assert configuration is not None
+    _, midnight = local_day_bounds(before_midnight, system.binding.timezone)
+    ProductionObservation.objects.create(
+        plant=plant,
+        configuration=configuration,
+        starts_at=midnight - timedelta(minutes=30),
+        ends_at=midnight + timedelta(minutes=30),
+        energy_mwh=5,
+        source="meter",
+        recorded_by=system.member,
+    )
     acquisition((configuration, provider(system, plant)))
     body = days_of(system, plant)
-    read = client_for(system.member).get(
-        plant_path(system, plant, "production"),
-        {
-            "start_date": (TODAY - timedelta(days=30)).isoformat(),
-            "end_date": (TODAY - timedelta(days=1)).isoformat(),
-            "native_intervals": "true",
-        },
-    )
-    assert read.status_code == 200
-    assert [production_with_instants(day) for day in body["production"]] == reduced_production(
-        read.json()
-    )
+    each_production_day_is_its_native_read(client_for(system.member), system, plant, body)
     days = by_date(body["production"])
+    assert days[zero]["complete"] is True
+    assert days[zero]["total_mwh"] == 0
+    assert {row["mwh"] for row in days[zero]["rows"]} == {0}
+    assert len(days[zero]["rows"]) == 24
+    for day in (before_midnight, after_midnight):
+        assert days[day]["rows"] == []
+        assert days[day]["total_mwh"] is None
     assert days[complete]["complete"] is True
     assert days[complete]["total_mwh"] == pytest.approx(240)
     assert {
@@ -779,6 +860,24 @@ def test_only_a_member_reads_the_days_of_a_plant_of_an_active_location_in_the_ad
     trashed = member.get(plant_path(system, plant))
     assert trashed.status_code == 404
     assert trashed.json()["code"] == "not_found"
+
+
+def test_a_session_whose_membership_or_account_ended_reads_no_days(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    viewer = viewer_of(system)
+    former_member, suspended = client_for(viewer), client_for(system.member)
+    assert former_member.get(plant_path(system, plant)).status_code == 200
+    assert suspended.get(plant_path(system, plant)).status_code == 200
+    Membership.objects.filter(user=viewer).delete()
+    User.objects.filter(pk=system.member.pk).update(is_active=False)
+    ended = former_member.get(plant_path(system, plant))
+    assert ended.status_code == 403
+    assert ended.json()["code"] == "membership_required"
+    signed_out = suspended.get(plant_path(system, plant))
+    assert signed_out.status_code == 401
+    assert signed_out.json()["code"] == "not_authenticated"
 
 
 def one_a_minute(scope: str) -> override_settings:
