@@ -19,6 +19,7 @@ import {
     controlsOf,
     formOf,
     identity,
+    typedIdentity,
     type Control,
     type Form,
 } from "./reminder-body";
@@ -248,6 +249,7 @@ function ReviewDialog({
             <p id={`${id}-sentence`}>{t("reviewSentence")}</p>
             <Groups answer={review.answer} />
             {!to.length && !cc.length && <p>{t("noAddressShown")}</p>}
+            <p>{t("reviewLater")}</p>
             {review.status === "failed" && (
                 <div
                     className="notice error"
@@ -457,7 +459,7 @@ function RecipientSection({
             )}
             <p className="recipient-label">{t("otherAddresses")}</p>
             {form.rows.map((row, index) => {
-                const key = identity(row.text);
+                const key = typedIdentity(row.text);
                 const item = added.get(key);
                 const member = members.get(key);
                 const control = controls.get(key);
@@ -595,15 +597,19 @@ export function ReminderEditor({
     const { draft } = desk.panel;
     const form = formOf(answer, draft);
     const update = (change: (draft: Draft) => Draft) =>
-        desk.change((now) => ({
-            ...now,
-            draft: {
-                ...change(now.draft),
-                base: edited(now.draft)
-                    ? (now.draft.base ?? answer.revision)
-                    : answer.revision,
-            },
-        }));
+        desk.change((now) => {
+            const started = edited(now.draft);
+            return {
+                ...now,
+                outcome: started ? now.outcome : "none",
+                draft: {
+                    ...change(now.draft),
+                    base: started
+                        ? (now.draft.base ?? answer.revision)
+                        : answer.revision,
+                },
+            };
+        });
     const rebase = useEffectEvent(() =>
         desk.change((now) =>
             now.draft.base === undefined && edited(now.draft)

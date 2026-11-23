@@ -281,10 +281,14 @@ function ReminderSettings({ scope, region }: ReminderProps) {
         resource.discard();
     });
     useEffect(() => {
-        if (access === undefined) return;
-        if (!access && (was.current || (was.current === undefined && carried)))
+        if (access) was.current = true;
+        else if (
+            access === false &&
+            (was.current || (was.current === undefined && carried))
+        ) {
             lose();
-        was.current = access;
+            was.current = false;
+        }
     }, [access, carried]);
     useEffect(() => {
         if (
@@ -302,7 +306,8 @@ function ReminderSettings({ scope, region }: ReminderProps) {
             let own = false;
             flushSync(() =>
                 setPanel((now) => {
-                    if (now.draft !== sent) return now;
+                    // A new object: React skips an identical state, and the discarded read must leave in this commit.
+                    if (now.draft !== sent) return { ...now };
                     own = true;
                     focused.current = null;
                     return {
@@ -317,7 +322,7 @@ function ReminderSettings({ scope, region }: ReminderProps) {
             );
             if (own) line.current?.focus();
             if (path === "refusal") {
-                was.current = false;
+                if (own) was.current = false;
                 void refresh.tenants();
             }
             if (path === "saved")

@@ -222,6 +222,7 @@
         "roleOnceSaved": "You can choose a role once this address is saved.",
         "choiceRemoved": "Your choice “{role}” for {address} was removed: the saved recipients or the people in this workspace changed.",
         "noAddressShown": "No address will appear in To or Copy.",
+        "reviewLater": "People who join this workspace later, or change their address, appear by the same rule.",
         "outcomes": {
             "changed": "Nothing of this save was stored: the reminder settings or the people in this workspace changed.",
             "refused": "The request was refused and nothing was saved. The page reads the saved settings again.",

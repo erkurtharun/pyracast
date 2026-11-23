@@ -34,6 +34,8 @@ const SAVED_LINE = "Saved successfully.";
 const LOADING = "Loading email reminders…";
 const UNAVAILABLE = "The service is unavailable.";
 const NO_ADDRESS_SHOWN = "No address will appear in To or Copy.";
+const LATER =
+    "People who join this workspace later, or change their address, appear by the same rule.";
 const HIDDEN_TODAY =
     "Every recipient is hidden today. You can address the administrator directly and keep members in copy.";
 const HIDDEN_HELPER =
@@ -1226,6 +1228,48 @@ test("an active member keeps their own role control beside a typed row of their 
     expect(body).not.toHaveProperty("address_roles");
 });
 
+for (const [difference, spelled] of [
+    ["a leading space", " kim@example.test"],
+    ["a non-ASCII letter whose lower case is ASCII", "Kim@example.test"],
+] as const)
+    test(`two members whose addresses differ only by ${difference} each choose their own role`, async ({
+        page,
+    }) => {
+        const PLAIN = "kim@example.test";
+        await reminderApi(page, {
+            recipients: [],
+            members: [
+                ADMIN,
+                { membership: 2, primary: spelled },
+                { membership: 3, primary: PLAIN },
+            ],
+            includeMembers: true,
+            hidden: false,
+        });
+        await openReminders(page);
+        const rows = page
+            .getByRole("listitem")
+            .filter({ hasText: /im@example\.test/ });
+        await expect(rows).toHaveCount(2);
+        await rows
+            .nth(0)
+            .getByRole("radio", { name: "Hidden", exact: true })
+            .check();
+        await rows
+            .nth(1)
+            .getByRole("radio", { name: "Copy", exact: true })
+            .check();
+        await expect(
+            rows.nth(0).getByRole("radio", { name: "Hidden", exact: true }),
+        ).toBeChecked();
+        const previewed = nextRequest(page, isPreview);
+        await saveButton(page).click();
+        expect((await previewed).postDataJSON().member_roles).toEqual([
+            { memberships: [2], address: spelled, role: "bcc" },
+            { memberships: [3], address: PLAIN, role: "cc" },
+        ]);
+    });
+
 for (const cause of ["a departure hides everyone", "the address becomes typed"])
     test(`when ${cause}, focus on a removed member control moves to the panel heading`, async ({
         page,
@@ -1306,6 +1350,76 @@ for (const reviewing of [false, true])
         await expect(dialog(page)).toHaveCount(0);
         await expect(reviewing ? panelHeading(page) : language).toBeFocused();
     });
+
+async function reviewThenDrop(
+    page: Page,
+    viewer?: (method: string) => boolean,
+) {
+    await page.clock.install();
+    const api = await reminderApi(page, {
+        recipients: [],
+        members: [ADMIN, MEMBER, THIRD],
+        includeMembers: true,
+        hidden: false,
+        viewer,
+    });
+    return {
+        ...api,
+        start: async () => {
+            await openReminders(page);
+            await radio(page, MEMBER, "Hidden").check();
+            await time(page, 1).fill("09:00");
+            await review(page);
+            api.persons[1]!.active = false;
+            await refetch(page);
+            await expect(line(page, DROPPED("Hidden", MEMBER))).toBeVisible();
+        },
+    };
+}
+
+test("a confirmed save answered 409 after a read dropped a reviewed choice closes the review before the read that follows is delivered, and keeps the remaining draft", async ({
+    page,
+}) => {
+    const { start } = await reviewThenDrop(page);
+    await start();
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+    const put = nextRequest(page, isWrite);
+    const reading = nextRequest(page, isRead);
+    await confirmButton(page).click();
+    expect((await (await put).response())!.status()).toBe(409);
+    await (await reading).response();
+    await expect(dialog(page)).toHaveCount(0);
+    await page.clock.resume();
+    await expect(saveButton(page)).toBeEnabled();
+    await expect(time(page, 1)).toHaveValue("09:00");
+    await expect(line(page, DROPPED("Hidden", MEMBER))).toBeVisible();
+});
+
+test("a save refused because administration moved, after a read dropped a reviewed choice, drops the remaining edits once a read carries no addresses", async ({
+    page,
+}) => {
+    let role: "admin" | "viewer" = "admin";
+    let revoked = false;
+    const { start, failNext } = await reviewThenDrop(
+        page,
+        (method) => revoked && method === "GET",
+    );
+    await asRole(page, () => role);
+    await start();
+    failNext("PUT", "before", {
+        status: 403,
+        code: "workspace_admin_required",
+    });
+    revoked = true;
+    role = "viewer";
+    await confirmButton(page).click();
+    await expect(line(page, COUNT_ONLY(2))).toBeVisible();
+    revoked = false;
+    role = "admin";
+    await tenantsAgain(page);
+    await expect(saveButton(page)).toBeEnabled();
+    await expect(time(page, 1)).toHaveValue("08:00");
+});
 
 async function atOutcomeFocus(page: Page, needles: string[]) {
     await page.evaluate((needles) => {
@@ -1430,46 +1544,60 @@ test("an administrator answer cached before administration moved is discarded wh
     }
 });
 
-test("a viewer whose reminders read still carries addresses discards it once and reads no more", async ({
-    page,
-}) => {
-    let role: "admin" | "viewer" = "admin";
-    await page.clock.install();
-    await reminderApi(page, {
-        recipients: [OUTSIDE],
-        members: TEAM,
-        includeMembers: true,
-        hidden: false,
-    });
-    await asRole(page, () => role);
-    await speaking(page);
-    const after = order(page);
-    await openReminders(page);
-    await expect(typedFields(page)).toHaveValue(OUTSIDE);
-    await page.getByRole("button", { name: "Location", exact: true }).click();
-    role = "viewer";
-    await tenantsAgain(page);
-    await page
-        .getByRole("button", { name: "Email reminders", exact: true })
-        .click();
-    await expect(line(page, COUNT_ONLY(3))).toBeVisible();
-    const switched = nextRequest(
+for (const cached of [true, false])
+    test(`a viewer whose reminders read still carries addresses discards it once and reads no more, ${cached ? "over an administrator answer cached before administration moved" : "when the first read of the panel carries them"}`, async ({
         page,
-        (method, url) =>
-            method === "POST" && url.endsWith("/api/session/language/"),
-    );
-    const read = nextRequest(page, isRead);
-    await speak(page, "tr");
-    const post = await switched;
-    await (await read).response();
-    await expect(
-        page.getByText(
-            "En fazla 5 alıcıdan 3 alıcı. Adresleri bu uygulamada yalnızca çalışma alanı yöneticisi görür.",
-            { exact: true },
-        ),
-    ).toBeVisible();
-    expect(after(post, isRead)).toEqual([await read]);
-});
+    }) => {
+        let role: "admin" | "viewer" = cached ? "admin" : "viewer";
+        await page.clock.install();
+        await reminderApi(page, {
+            recipients: [OUTSIDE],
+            members: TEAM,
+            includeMembers: true,
+            hidden: false,
+        });
+        await asRole(page, () => role);
+        await speaking(page);
+        const after = order(page);
+        const reads: Request[] = [];
+        page.on("request", (request) => {
+            if (isRead(request.method(), request.url())) reads.push(request);
+        });
+        let opened = 0;
+        if (cached) {
+            await openReminders(page);
+            await expect(typedFields(page)).toHaveValue(OUTSIDE);
+            await page
+                .getByRole("button", { name: "Location", exact: true })
+                .click();
+            role = "viewer";
+            await tenantsAgain(page);
+            opened = reads.length;
+            await page
+                .getByRole("button", { name: "Email reminders", exact: true })
+                .click();
+        } else await openReminders(page);
+        await expect.poll(() => reads.length - opened).toBe(2);
+        await reads.at(-1)!.response();
+        await expect(line(page, COUNT_ONLY(3))).toBeVisible();
+        const switched = nextRequest(
+            page,
+            (method, url) =>
+                method === "POST" && url.endsWith("/api/session/language/"),
+        );
+        const read = nextRequest(page, isRead);
+        await speak(page, "tr");
+        const post = await switched;
+        await (await read).response();
+        await expect(
+            page.getByText(
+                "En fazla 5 alıcıdan 3 alıcı. Adresleri bu uygulamada yalnızca çalışma alanı yöneticisi görür.",
+                { exact: true },
+            ),
+        ).toBeVisible();
+        expect(after(post, isRead)).toEqual([await read]);
+        expect(reads.length - opened).toBe(3);
+    });
 
 for (const cause of [
     "a count-only read",
@@ -1676,7 +1804,7 @@ for (const variant of ["save", "preview", "refusal"] as const)
     });
 
 for (const code of ["csrf_failed", "workspace_admin_required"] as const)
-    test(`a save refused 403 ${code} while still administrator clears the draft, reads again and keeps a line that stays true beside the editor`, async ({
+    test(`a save refused 403 ${code} while still administrator clears the draft, reads again and keeps a line that stays true beside the editor until a new edit starts another draft`, async ({
         page,
     }) => {
         const { failNext } = await reminderApi(page, {
@@ -1695,10 +1823,14 @@ for (const code of ["csrf_failed", "workspace_admin_required"] as const)
         await saveButton(page).click();
         const write = await put;
         const refusal = (await write.response())!;
-        expect([refusal.status(), (await refusal.json()).code]).toEqual([
-            403,
+        expect(refusal.status()).toBe(403);
+        expect(await refusal.json()).toEqual({
             code,
-        ]);
+            message:
+                code === "csrf_failed"
+                    ? "The page expired. Reload it and try again."
+                    : "Workspace administrator required.",
+        });
         const shown = code === "csrf_failed" ? REFUSED : LOST;
         await expect(line(page, shown)).toBeFocused();
         const read = await reading;
@@ -1710,6 +1842,11 @@ for (const code of ["csrf_failed", "workspace_admin_required"] as const)
         await expect(saveButton(page)).toBeEnabled();
         await expect(time(page, 1)).toHaveValue("08:00");
         await expect(line(page, shown)).toBeVisible();
+        await page
+            .getByLabel("Email language", { exact: true })
+            .selectOption("tr");
+        await expect(page.getByText(shown)).toHaveCount(0);
+        await expect(page.getByText("Your edits are kept")).toHaveCount(0);
     });
 
 test("a save whose outcome is unknown and whose following read carries no addresses no longer says that the edits are kept", async ({
@@ -1906,7 +2043,7 @@ test("focus on Recent deliveries goes to the panel heading when a loss discards 
     await expect(panelHeading(page)).toBeFocused();
 });
 
-test("the review takes focus, confines the keyboard to its own controls, returns focus to Save on Escape and fits a narrow screen", async ({
+test("the review takes focus, says that people who join or change their address later follow the same rule, confines the keyboard to its own controls, returns focus to Save on Escape and fits a narrow screen", async ({
     page,
 }) => {
     const LONG =
@@ -1925,6 +2062,7 @@ test("the review takes focus, confines the keyboard to its own controls, returns
         dialog(page).getByRole("heading", { name: TITLE }),
     ).toBeFocused();
     await expect(dialog(page)).toHaveAccessibleDescription(SENTENCE);
+    await expect(line(dialog(page), LATER)).toBeVisible();
     await expect(listed(dialog(page))).toContainText([
         `${LONG}${OUTSIDE_MARK}`,
     ]);
@@ -2057,6 +2195,12 @@ test("the review, the outside mark, a dropped choice, a review without To or Cop
         ),
     ).toBeVisible();
     await expect(line(turkishDialog, "Gizli (Bcc): 3 alıcı")).toBeVisible();
+    await expect(
+        line(
+            turkishDialog,
+            "Bu çalışma alanına sonradan katılan veya adresini değiştiren kişiler de aynı kurala göre yer alır.",
+        ),
+    ).toBeVisible();
     await turkishDialog
         .getByRole("button", { name: "Düzenlemeye dön", exact: true })
         .click();
@@ -2082,11 +2226,12 @@ test("the review, the outside mark, a dropped choice, a review without To or Cop
         await expect(line(page, outcome)).toBeFocused();
         await expect(save).toBeEnabled();
     };
+    const refusedTurkish =
+        "İstek reddedildi ve hiçbir şey kaydedilmedi. Sayfa kayıtlı ayarları yeniden okuyor.";
     failNext("PUT", "before", { status: 403, code: "csrf_failed" });
-    await confirmTurkish(
-        "İstek reddedildi ve hiçbir şey kaydedilmedi. Sayfa kayıtlı ayarları yeniden okuyor.",
-    );
+    await confirmTurkish(refusedTurkish);
     await turkishRadio(ADMIN, "Bilgi").check();
+    await expect(page.getByText(refusedTurkish)).toHaveCount(0);
     failNext("PUT");
     await confirmTurkish(
         "Kaydetme doğrulanamadı. Sayfa kayıtlı ayarları yeniden okuyor. Düzenlemeleriniz duruyor.",

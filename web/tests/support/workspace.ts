@@ -522,7 +522,10 @@ function framework(address: string) {
     );
 }
 
-const identity = (address: string) => address.trim().toLowerCase();
+const identity = (address: string) =>
+    address.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+// The server's email fields trim a submitted address before it is compared.
+const submittedIdentity = (address: string) => identity(address.trim());
 
 function combined<T>(choices: T[], hidden: T): T | undefined {
     const distinct = new Map(
@@ -566,7 +569,7 @@ function read(persons: ReminderPerson[]): People {
                 );
     }
     const members = [...grouped.values()].map((found) => ({
-        address: found[0]!.primary.trim(),
+        address: found[0]!.primary,
         memberships: found.map((person) => person.membership),
         administrator: found.some((person) => person.administrator === true),
     }));
@@ -985,7 +988,7 @@ function refused(
         ...entries,
         ...(repeated(
             named.flatMap((entry) => sorted(entry.memberships).map(String)),
-        ) || repeated(named.map((entry) => identity(entry.address)))
+        ) || repeated(named.map((entry) => submittedIdentity(entry.address)))
             ? ["member_roles"]
             : []),
     ];
@@ -993,11 +996,12 @@ function refused(
     const typed = submitted.address_roles ?? [];
     const recipients = submitted.recipients.map((address) => address.trim());
     if (
-        repeated(typed.map((entry) => identity(entry.address))) ||
+        repeated(typed.map((entry) => submittedIdentity(entry.address))) ||
         typed.some(
             (entry) =>
                 !recipients.some(
-                    (address) => identity(address) === identity(entry.address),
+                    (address) =>
+                        identity(address) === submittedIdentity(entry.address),
                 ),
         )
     )
@@ -1047,7 +1051,7 @@ function refused(
         ![...typed, ...named].every((entry) =>
             sameIds(
                 entry.memberships,
-                found.member(entry.address)?.memberships ?? [],
+                found.member(entry.address.trim())?.memberships ?? [],
             ),
         )
     )
@@ -1085,6 +1089,7 @@ const messages: Partial<Record<Code, string>> = {
     reminder_time_required:
         "Add at least one delivery time to turn reminders on.",
     workspace_admin_required: "Workspace administrator required.",
+    csrf_failed: "The page expired. Reload it and try again.",
 };
 
 function refusalBody(refusal: Refusal) {
@@ -1119,7 +1124,7 @@ function stored(
         );
         const ties = sorted([...(kept?.ties ?? []), ...found.holders(address)]);
         const entry = payload.address_roles?.find(
-            (item) => identity(item.address) === identity(address),
+            (item) => submittedIdentity(item.address) === identity(address),
         );
         if (!entry)
             return {

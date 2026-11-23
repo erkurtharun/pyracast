@@ -8,7 +8,9 @@ import {
     type Target,
 } from "./reminder-draft";
 
-export const identity = (address: string) => address.trim().toLowerCase();
+export const identity = (address: string) =>
+    address.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+export const typedIdentity = (text: string) => identity(text.trim());
 
 const keyOf = ({ kind, address, memberships }: Target) =>
     JSON.stringify([kind, identity(address), memberships]);
@@ -36,7 +38,7 @@ export function controlsOf(addresses: Addresses, form: Form) {
             .filter((item) => item.eligible)
             .map((item) => [identity(item.address), item]),
     );
-    const listed = new Set(form.rows.map((row) => identity(row.text)));
+    const listed = new Set(form.rows.map((row) => typedIdentity(row.text)));
     const controls = new Map<string, Control>();
     const offer = (
         kind: Target["kind"],
