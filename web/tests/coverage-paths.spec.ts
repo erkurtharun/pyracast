@@ -319,6 +319,39 @@ test("coverage mode refuses to start without the wrapper's run identifier", () =
     expect(coverageRun({ PLAYWRIGHT_COVERAGE_RUN: "run-1" })).toBeUndefined();
 });
 
+function productionBuildConfig(coverage: boolean) {
+    const env = {
+        ...process.env,
+        PLAYWRIGHT_COVERAGE: coverage ? "1" : undefined,
+    };
+    const script = `
+        const load = require("next/dist/server/config").default;
+        const { PHASE_PRODUCTION_BUILD } = require("next/constants");
+        load(PHASE_PRODUCTION_BUILD, process.cwd()).then((config) =>
+            console.log(JSON.stringify({
+                minify: config.experimental.turbopackMinify ?? null,
+                sourceMaps: config.productionBrowserSourceMaps,
+            })),
+        );`;
+    const result = spawnSync(process.execPath, ["-e", script], {
+        env,
+        encoding: "utf8",
+    });
+    expect(result.status, result.stderr).toBe(0);
+    return JSON.parse(result.stdout.trim().split("\n").at(-1)!) as unknown;
+}
+
+test("only the coverage build is left unminified, beside its browser source maps", () => {
+    expect(productionBuildConfig(true)).toEqual({
+        minify: false,
+        sourceMaps: true,
+    });
+    expect(productionBuildConfig(false)).toEqual({
+        minify: null,
+        sourceMaps: false,
+    });
+});
+
 const name = "web/src/lib/pick.ts";
 const first = (count: number): [number, number] => [2, count];
 const second = (count: number): [number, number] => [4, count];
