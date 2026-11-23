@@ -1,12 +1,7 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Page, type Route } from "@playwright/test";
 import { errorBody } from "./errors";
+import type { ErrorCode } from "../../src/lib/api/errors";
 
-import type {
-    AddressRole,
-    MemberRole,
-    ReminderAnswer,
-    Role,
-} from "../../src/features/plant/reminder-addressing";
 import type { components } from "../../src/lib/schema";
 
 type Schemas = components["schemas"];
@@ -298,13 +293,7 @@ export async function mockApi(
                           "PaginatedCalibrationSummaryOutputList",
                           paged([]),
                       );
-        else if (path.endsWith("/reminders/"))
-            data = reminderAnswer(reminderStore({}), people([user.email]), {
-                limit: 5,
-                dailyLimit: 10,
-                deliveries: [],
-                administrator: true,
-            });
+        else if (path.endsWith("/reminders/")) data = defaultReminders();
         else if (path.endsWith("/location-change-requests/"))
             data = answer("PaginatedLocationChangeOutputList", paged([]));
         else if (path.endsWith("/performance/"))
@@ -344,27 +333,30 @@ export async function mockApi(
 }
 
 type Delivery = Schemas["ReminderDeliveryOutput"];
-type TypedChoice = { role: Role; members: number[] };
+type ReminderAnswer = Schemas["ReminderOutput"];
+type ReminderPayload = Schemas["ReminderInput"];
+type Role = Schemas["RecipientRoleEnum"];
 export type ReminderPerson = {
     membership: number;
     address: string;
     administrator?: boolean;
     active?: boolean;
-    choice?: Role | null;
+    verified?: boolean;
+    choice?: Role;
 };
+type TypedChoice = { role: Role | ""; members: number[]; ties?: number[] };
+type TypedRecord = { role: Role | ""; members: number[]; ties: number[] };
 type ReminderStore = {
     enabled: boolean;
     recipients: string[];
     times: string[];
     language: Schemas["LanguageEnum"];
-    include_workspace_members: boolean;
-    hide_recipients: boolean;
-    typed: Map<string, TypedChoice>;
+    include: boolean;
+    hide: boolean;
+    departed: boolean;
+    typed: Map<string, TypedRecord>;
+    choices: Map<number, Role>;
     revision: number;
-};
-type ReminderPayload = Omit<Schemas["ReminderInput"], "address_roles"> & {
-    address_roles?: AddressRole[];
-    member_roles?: MemberRole[];
 };
 export type ReminderOptions = {
     recipients?: string[];
@@ -376,12 +368,28 @@ export type ReminderOptions = {
     includeMembers?: boolean;
     viewer?: () => boolean;
     hidden?: boolean;
+    hiddenByDeparture?: boolean;
     typed?: Record<string, Role | TypedChoice>;
+    // Spellings that are one mailbox, as the server's mailbox key folds them.
+    aliases?: string[][];
 };
+type World = { persons: ReminderPerson[]; key: (address: string) => string };
+type Refusal = { status: number; code: ErrorCode; field?: string };
 
-const keyOf = (address: string) => address.trim().toLowerCase();
+const MAX_ITEMS = 32767;
+const sorted = (ids: number[]) => [...ids].sort((a, b) => a - b);
 const sameIds = (left: number[], right: number[]) =>
-    left.join() === [...right].sort((a, b) => a - b).join();
+    sorted(left).join() === sorted(right).join();
+
+function mailboxKey(aliases: string[][]) {
+    return (address: string) => {
+        const folded = address.trim().toLowerCase();
+        const group = aliases.find((spellings) =>
+            spellings.some((spelling) => spelling.toLowerCase() === folded),
+        );
+        return group ? group[0]!.toLowerCase() : folded;
+    };
+}
 
 function people(members: (string | ReminderPerson)[]): ReminderPerson[] {
     return members.map((member, index) =>
@@ -389,143 +397,192 @@ function people(members: (string | ReminderPerson)[]): ReminderPerson[] {
             ? {
                   membership: index + 1,
                   address: member,
-                  administrator: keyOf(member) === keyOf(user.email),
+                  administrator:
+                      member.toLowerCase() === user.email.toLowerCase(),
               }
             : member,
     );
 }
 
-function reminderStore(
-    options: ReminderOptions,
-    persons: ReminderPerson[] = [],
-): ReminderStore {
+function membersOf(world: World, address: string) {
+    return world.persons
+        .filter(
+            (person) =>
+                person.active !== false &&
+                person.verified !== false &&
+                world.key(person.address) === world.key(address),
+        )
+        .sort((a, b) => a.membership - b.membership);
+}
+
+function holders(world: World, address: string) {
+    return sorted(
+        world.persons
+            .filter(
+                (person) =>
+                    person.verified !== false &&
+                    world.key(person.address) === world.key(address),
+            )
+            .map((person) => person.membership),
+    );
+}
+
+function groups(world: World) {
+    const grouped = new Map<string, ReminderPerson[]>();
+    for (const person of world.persons)
+        if (person.active !== false && person.verified !== false) {
+            const key = world.key(person.address);
+            grouped.set(key, [...(grouped.get(key) ?? []), person]);
+        }
+    return [...grouped.values()]
+        .map((group) => group.sort((a, b) => a.membership - b.membership))
+        .sort((a, b) => a[0]!.membership - b[0]!.membership);
+}
+
+function storeOf(options: ReminderOptions, world: World): ReminderStore {
     const recipients = options.recipients ?? [user.email];
+    const typed = new Map<string, TypedRecord>();
+    for (const address of recipients)
+        typed.set(world.key(address), {
+            role: "",
+            members: [],
+            ties: holders(world, address),
+        });
+    for (const [address, choice] of Object.entries(options.typed ?? {}))
+        typed.set(
+            world.key(address),
+            typeof choice === "string"
+                ? {
+                      role: choice,
+                      members:
+                          choice === "bcc"
+                              ? []
+                              : membersOf(world, address).map(
+                                    (person) => person.membership,
+                                ),
+                      ties: holders(world, address),
+                  }
+                : { ties: holders(world, address), ...choice },
+        );
     return {
         enabled: options.enabled ?? false,
         recipients,
         times: ["08:00"],
         language: "en",
-        include_workspace_members: options.includeMembers ?? false,
-        hide_recipients: options.hidden ?? false,
-        typed: new Map(
-            Object.entries(options.typed ?? {}).map(([address, choice]) => [
-                keyOf(address),
-                typeof choice === "string"
-                    ? {
-                          role: choice,
-                          members: holders(persons, address).map(
-                              (person) => person.membership,
-                          ),
-                      }
-                    : choice,
-            ]),
+        include: options.includeMembers ?? false,
+        hide: options.hidden ?? options.hiddenByDeparture ?? true,
+        departed: options.hiddenByDeparture ?? false,
+        typed,
+        choices: new Map(
+            world.persons.flatMap((person) =>
+                person.choice ? [[person.membership, person.choice]] : [],
+            ),
         ),
         revision: 0,
     };
 }
 
-function holders(persons: ReminderPerson[], address: string) {
-    return persons
-        .filter(
-            (person) =>
-                person.active !== false &&
-                keyOf(person.address) === keyOf(address),
-        )
-        .sort((a, b) => a.membership - b.membership);
-}
-
-function memberChoice(members: ReminderPerson[]): Role | null {
-    const chosen = new Set(
-        members.flatMap((member) => (member.choice ? [member.choice] : [])),
-    );
-    if (chosen.has("bcc") || chosen.size > 1) return "bcc";
-    return [...chosen][0] ?? null;
-}
-
-function typedChoice(
-    store: ReminderStore,
-    address: string,
-    members: ReminderPerson[],
-): Role | null {
-    const typed = store.typed.get(keyOf(address));
-    if (!typed) return null;
-    if (typed.role === "bcc") return "bcc";
-    return sameIds(
-        typed.members,
-        members.map((member) => member.membership),
-    )
-        ? typed.role
-        : null;
-}
-
-function explicitRole(
-    store: ReminderStore,
-    persons: ReminderPerson[],
-    address: string,
-): Role | null {
-    const members = holders(persons, address);
-    const c = memberChoice(members);
-    const t = store.recipients.some((item) => keyOf(item) === keyOf(address))
-        ? typedChoice(store, address, members)
-        : null;
-    if (c === "bcc" || t === "bcc") return "bcc";
-    return c ?? t;
-}
-
-function eligible(persons: ReminderPerson[], address: string) {
-    const tied = persons.filter(
-        (person) => keyOf(person.address) === keyOf(address),
-    );
-    return !tied.length || tied.some((person) => person.active !== false);
-}
-
-function workspaceMembers(persons: ReminderPerson[]) {
-    const groups = new Map<string, ReminderPerson[]>();
-    for (const person of [...persons].sort(
-        (a, b) => a.membership - b.membership,
-    ))
-        if (person.active !== false)
-            groups.set(keyOf(person.address), [
-                ...(groups.get(keyOf(person.address)) ?? []),
-                person,
-            ]);
-    return [...groups.values()];
-}
-
-function effective(store: ReminderStore, persons: ReminderPerson[]) {
-    return [
+function addressing(store: ReminderStore, world: World) {
+    const typedOf = (address: string) =>
+        store.recipients.some((item) => world.key(item) === world.key(address))
+            ? store.typed.get(world.key(address))
+            : undefined;
+    const eligible = (address: string) => {
+        const ties = typedOf(address)?.ties ?? [];
+        return (
+            !ties.length ||
+            ties.some(
+                (id) =>
+                    world.persons.find((person) => person.membership === id)
+                        ?.active !== false,
+            )
+        );
+    };
+    const memberChoice = (members: ReminderPerson[]) => {
+        const chosen = new Set(
+            members.flatMap((member) => {
+                const role = store.choices.get(member.membership);
+                return role ? [role] : [];
+            }),
+        );
+        if (chosen.has("bcc") || chosen.size > 1) return "bcc" as const;
+        return [...chosen][0] ?? null;
+    };
+    const explicit = (address: string): Role | null => {
+        const members = membersOf(world, address);
+        const c = memberChoice(members);
+        const row = typedOf(address);
+        const t =
+            row?.role === "bcc"
+                ? "bcc"
+                : row?.role &&
+                    sameIds(
+                        row.members,
+                        members.map((member) => member.membership),
+                    )
+                  ? row.role
+                  : null;
+        const tiedHidden = [...store.typed.values()].some(
+            (other) =>
+                other.role === "bcc" &&
+                members.some((member) =>
+                    other.ties.includes(member.membership),
+                ),
+        );
+        if (c === "bcc" || t === "bcc" || tiedHidden) return "bcc";
+        return c ?? t;
+    };
+    const list = [
         ...new Map(
             [
-                ...store.recipients.filter((address) =>
-                    eligible(persons, address),
-                ),
-                ...(store.include_workspace_members
-                    ? workspaceMembers(persons).map(
-                          (group) => group[0]!.address,
-                      )
+                ...store.recipients.filter(eligible),
+                ...(store.include
+                    ? groups(world).map((group) => group[0]!.address)
                     : []),
-            ].map((address) => [keyOf(address), address]),
+            ].map((address) => [world.key(address), address]),
         ).values(),
     ];
-}
-
-function placements(store: ReminderStore, persons: ReminderPerson[]): Role[] {
-    const list = effective(store, persons);
-    if (store.hide_recipients) return list.map(() => "bcc");
-    const placed = list.map((address) => {
-        const members = holders(persons, address);
-        const role = explicitRole(store, persons, address);
+    const first = list.map((address) => {
+        if (store.hide) return "bcc";
+        const role = explicit(address);
         if (role) return role;
-        if (!store.include_workspace_members || !members.length) return "bcc";
+        const members = membersOf(world, address);
+        if (!store.include || !members.length) return "bcc";
         return members.some((member) => member.administrator) ? "to" : null;
     });
-    const fallback: Role = placed.includes("to") ? "cc" : "to";
-    return placed.map((role) => role ?? fallback);
+    const fallback: Role = first.includes("to") ? "cc" : "to";
+    const placed = new Map(
+        list.map((address, index) => [
+            world.key(address),
+            first[index] ?? fallback,
+        ]),
+    );
+    const placement = (address: string): Role =>
+        placed.get(world.key(address)) ??
+        (store.hide ? "bcc" : (explicit(address) ?? "bcc"));
+    return { list, eligible, explicit, memberChoice, placement };
+}
+
+function deliveriesOf(
+    store: ReminderStore,
+    world: World,
+    rows: Partial<Delivery>[],
+): Partial<Delivery>[] {
+    const { list, placement } = addressing(store, world);
+    return rows.map((delivery) => ({
+        recipient_count: list.length,
+        recipients: list,
+        recipient_roles: list.map((address) => ({
+            address,
+            role: placement(address),
+        })),
+        ...delivery,
+    }));
 }
 
 function reminderAnswer(
     store: ReminderStore,
-    persons: ReminderPerson[],
+    world: World,
     {
         limit,
         dailyLimit,
@@ -538,9 +595,11 @@ function reminderAnswer(
         administrator: boolean;
     },
 ): ReminderAnswer {
-    const list = effective(store, persons);
-    const roles = placements(store, persons);
-    const groups = workspaceMembers(persons);
+    const { list, eligible, explicit, memberChoice, placement } = addressing(
+        store,
+        world,
+    );
+    const grouped = groups(world);
     return {
         enabled: store.enabled,
         revision: store.revision,
@@ -553,27 +612,30 @@ function reminderAnswer(
                 : "no_recipients",
         times: store.times,
         language: store.language,
-        include_workspace_members: store.include_workspace_members,
-        hide_recipients: store.hide_recipients,
+        include_workspace_members: store.include,
+        hide_recipients: store.hide,
+        hidden_by_departure: administrator ? store.departed : null,
         addresses: administrator
             ? {
                   recipients: store.recipients,
-                  workspace_recipients: groups.map(
+                  workspace_recipients: grouped.map(
                       (group) => group[0]!.address,
                   ),
-                  members: groups.map((group) => ({
-                      membership: group[0]!.membership,
+                  members: grouped.map((group) => ({
+                      memberships: group.map((member) => member.membership),
                       address: group[0]!.address,
                       kind: group.some((member) => member.administrator)
                           ? "administrator"
                           : "member",
                       role: memberChoice(group),
+                      placement: placement(group[0]!.address),
                   })),
                   added: store.recipients.map((address) => ({
                       address,
-                      role: explicitRole(store, persons, address),
-                      eligible: eligible(persons, address),
-                      memberships: holders(persons, address).map(
+                      role: explicit(address),
+                      placement: eligible(address) ? placement(address) : "bcc",
+                      eligible: eligible(address),
+                      memberships: membersOf(world, address).map(
                           (member) => member.membership,
                       ),
                   })),
@@ -581,14 +643,14 @@ function reminderAnswer(
             : null,
         recipient_limit: limit,
         recipient_count: list.length,
-        workspace_member_count: groups.length,
+        workspace_member_count: grouped.length,
         recipient_limit_exceeded: list.length > limit,
         daily_reminder_limit: dailyLimit,
         deliveries: deliveries.map((delivery, index) => {
             const row: Delivery = {
                 id: index + 1,
-                recipient_count: list.length,
-                recipients: administrator ? list : null,
+                recipient_count: 0,
+                recipients: [],
                 recipient_roles: null,
                 scheduled_for: "2026-01-01T08:00:00Z",
                 collected_at: null,
@@ -603,192 +665,260 @@ function reminderAnswer(
                 ...delivery,
             };
             const reached = row.status === "sent" || row.status === "uncertain";
-            return "recipient_roles" in delivery
-                ? row
-                : {
-                      ...row,
-                      recipient_roles:
-                          row.recipients && reached
-                              ? row.recipients.map((address, at) => ({
-                                    address,
-                                    role: roles[at]!,
-                                }))
-                              : null,
-                  };
+            return {
+                ...row,
+                recipients: administrator ? row.recipients : null,
+                recipient_roles:
+                    administrator && row.recipients && reached
+                        ? row.recipient_roles
+                        : null,
+            };
         }),
     };
 }
 
-const repeated = (values: string[]) =>
-    new Set(values.map(keyOf)).size !== values.length;
+function defaultReminders() {
+    const world = { persons: people([user.email]), key: mailboxKey([]) };
+    const store = storeOf({}, world);
+    return reminderAnswer(store, world, {
+        limit: 5,
+        dailyLimit: 10,
+        deliveries: [],
+        administrator: true,
+    });
+}
 
-// The server's refusals, in its order of checks.
+const repeated = (values: string[]) => new Set(values).size !== values.length;
+const isEmail = (value: unknown) =>
+    typeof value === "string" &&
+    value.length <= 254 &&
+    /^[^@\s]+@[^@\s]+$/.test(value);
+const isMemberships = (value: unknown) =>
+    Array.isArray(value) &&
+    value.length <= MAX_ITEMS &&
+    value.every((id) => Number.isInteger(id) && id >= 1);
+const isRole = (value: unknown) =>
+    value === null || value === "to" || value === "cc" || value === "bcc";
+
+function invalidEntries(value: unknown) {
+    return (
+        value !== undefined &&
+        (!Array.isArray(value) ||
+            value.length > MAX_ITEMS ||
+            value.some(
+                (entry: Record<string, unknown>) =>
+                    !entry ||
+                    !isEmail(entry.address) ||
+                    !("role" in entry) ||
+                    !isRole(entry.role) ||
+                    !isMemberships(entry.memberships),
+            ))
+    );
+}
+
 function refused(
     submitted: ReminderPayload,
-    stored: ReminderStore,
-    count: number,
-    current: number,
+    store: ReminderStore,
+    world: World,
     limit: number,
-) {
-    if (repeated(submitted.recipients))
+): Refusal | null {
+    const invalid = (field: string): Refusal => ({
+        status: 400,
+        code: "invalid_request",
+        field,
+    });
+    if (!submitted.recipients.every(isEmail)) return invalid("recipients");
+    if (invalidEntries(submitted.address_roles))
+        return invalid("address_roles");
+    if (invalidEntries(submitted.member_roles)) return invalid("member_roles");
+    const typed = submitted.address_roles ?? [];
+    const recipientKeys = submitted.recipients.map(world.key);
+    if (
+        repeated(typed.map((entry) => world.key(entry.address))) ||
+        typed.some((entry) => !recipientKeys.includes(world.key(entry.address)))
+    )
+        return invalid("address_roles");
+    const named = submitted.member_roles ?? [];
+    if (
+        repeated(named.flatMap((entry) => entry.memberships.map(String))) ||
+        repeated(named.map((entry) => world.key(entry.address)))
+    )
+        return invalid("member_roles");
+    if (submitted.expected_revision !== store.revision)
+        return { status: 409, code: "reminder_schedule_changed" };
+    if (repeated(recipientKeys))
         return {
+            status: 400,
             code: "duplicate_recipients",
             field: "recipients",
-            message: "Recipient addresses must be distinct (case-insensitive).",
-        } as const;
+        };
     if (
         submitted.enabled &&
         !submitted.recipients.length &&
         !submitted.include_workspace_members
     )
-        return {
-            code: "recipient_required",
-            field: "recipients",
-            message: "Add a recipient or include the workspace members.",
-        } as const;
+        return { status: 400, code: "recipient_required", field: "recipients" };
     if (repeated(submitted.times))
         return {
+            status: 400,
             code: "duplicate_reminder_times",
             field: "times",
-            message: "Use each delivery time once.",
-        } as const;
+        };
     if (submitted.enabled && !submitted.times.length)
-        return {
-            code: "reminder_time_required",
-            field: "times",
-            message: "Add at least one delivery time to turn reminders on.",
-        } as const;
-    const typed = submitted.address_roles ?? [];
-    if (
-        repeated(typed.map((entry) => entry.address)) ||
-        typed.some(
-            (entry) =>
-                !submitted.recipients.some(
-                    (address) => keyOf(address) === keyOf(entry.address),
-                ),
-        )
-    )
-        return {
-            code: "invalid_request",
-            field: "address_roles",
-            message: "Name each typed address once.",
-        } as const;
-    const named = submitted.member_roles ?? [];
-    if (
-        repeated(named.map((entry) => String(entry.membership))) ||
-        repeated(named.map((entry) => entry.address))
-    )
-        return {
-            code: "invalid_request",
-            field: "member_roles",
-            message: "Name each member once.",
-        } as const;
+        return { status: 400, code: "reminder_time_required", field: "times" };
+    const count = addressing(stored(submitted, store, world), world).list
+        .length;
+    const current = addressing(store, world).list.length;
     const unchangedPause =
         !submitted.enabled &&
-        submitted.include_workspace_members ===
-            stored.include_workspace_members &&
-        submitted.language === stored.language &&
-        submitted.recipients.join() === stored.recipients.join() &&
-        [...submitted.times].sort().join() === [...stored.times].sort().join();
+        submitted.include_workspace_members === store.include &&
+        submitted.language === store.language &&
+        submitted.recipients.join() === store.recipients.join() &&
+        [...submitted.times].sort().join() === [...store.times].sort().join();
     if (count > limit && !(count < current || unchangedPause))
         return {
+            status: 400,
             code: "recipient_limit_exceeded",
             field: "recipients",
-            message: `This plant allows at most ${limit} distinct recipient addresses in total.`,
-        } as const;
+        };
+    const exact = (memberships: number[], address: string) =>
+        sameIds(
+            memberships,
+            membersOf(world, address).map((member) => member.membership),
+        );
+    if (
+        ![...typed, ...named].every((entry) =>
+            exact(entry.memberships, entry.address),
+        )
+    )
+        return { status: 409, code: "reminder_schedule_changed" };
     return null;
+}
+
+const messages: Partial<Record<ErrorCode, string>> = {
+    invalid_request: "The request input was refused.",
+    reminder_schedule_changed:
+        "The email reminders changed. Reload before saving.",
+    duplicate_recipients:
+        "Recipient addresses must be distinct (case-insensitive).",
+    recipient_required: "Add a recipient or include the workspace members.",
+    duplicate_reminder_times: "Use each delivery time once.",
+    reminder_time_required:
+        "Add at least one delivery time to turn reminders on.",
+    permission_denied: "You do not have permission to perform this action.",
+};
+
+function refusalBody(refusal: Refusal, limit: number) {
+    const message =
+        refusal.code === "recipient_limit_exceeded"
+            ? `This plant allows at most ${limit} distinct recipient addresses in total.`
+            : (messages[refusal.code] ?? "Refused.");
+    return errorBody(refusal.code, message, {
+        ...(refusal.field && { fields: { [refusal.field]: message } }),
+    });
 }
 
 function stored(
     payload: ReminderPayload,
     before: ReminderStore,
-    persons: ReminderPerson[],
+    world: World,
 ): ReminderStore {
-    const typed = new Map<string, TypedChoice>();
+    const typed = new Map<string, TypedRecord>();
     for (const address of payload.recipients) {
-        const members = holders(persons, address).map(
-            (member) => member.membership,
+        const key = world.key(address);
+        const entry = payload.address_roles?.find(
+            (item) => world.key(item.address) === key,
         );
-        if (!payload.address_roles) {
-            const kept = before.typed.get(keyOf(address));
-            if (kept) typed.set(keyOf(address), kept);
-            continue;
-        }
-        const entry = payload.address_roles.find(
-            (item) => keyOf(item.address) === keyOf(address),
-        );
-        if (entry?.role === "bcc")
-            typed.set(keyOf(address), { role: "bcc", members: [] });
-        else if (entry && sameIds(members, entry.memberships))
-            typed.set(keyOf(address), { role: entry.role, members });
+        const ties = holders(world, address);
+        const kept = before.recipients.some((item) => world.key(item) === key)
+            ? before.typed.get(key)
+            : undefined;
+        if (!entry)
+            typed.set(
+                key,
+                kept ? { ...kept, ties } : { role: "", members: [], ties },
+            );
+        else if (entry.role === "to" || entry.role === "cc")
+            typed.set(key, {
+                role: entry.role,
+                members: entry.memberships,
+                ties,
+            });
+        else typed.set(key, { role: entry.role ?? "", members: [], ties });
     }
+    const choices = new Map(before.choices);
     for (const entry of payload.member_roles ?? [])
-        for (const member of holders(persons, entry.address))
-            member.choice = entry.role;
+        for (const member of membersOf(world, entry.address))
+            if (entry.role) choices.set(member.membership, entry.role);
+            else choices.delete(member.membership);
     return {
         enabled: payload.enabled,
         recipients: payload.recipients,
         times: [...payload.times].sort(),
         language: payload.language,
-        include_workspace_members: payload.include_workspace_members,
-        hide_recipients: payload.hide_recipients ?? true,
+        include: payload.include_workspace_members,
+        hide: payload.hide_recipients ?? true,
+        departed: false,
         typed,
-        revision: before.revision + 1,
+        choices,
+        revision: before.revision,
     };
 }
 
-const changed = () =>
-    errorBody(
-        "reminder_schedule_changed",
-        "The email reminders changed. Reload before saving.",
-    );
+const signature = (store: ReminderStore) =>
+    JSON.stringify({
+        ...store,
+        revision: 0,
+        typed: [...store.typed].sort(),
+        choices: [...store.choices].sort(),
+    });
 
 export async function reminderApi(page: Page, options: ReminderOptions = {}) {
     await mockApi(page);
     const limit = options.limit ?? 5;
     const persons = people(options.members ?? [user.email]);
-    let store = reminderStore(options, persons);
+    const world = { persons, key: mailboxKey(options.aliases ?? []) };
+    let store = storeOf(options, world);
+    const deliveries = deliveriesOf(store, world, options.deliveries ?? [{}]);
+    const viewer = options.viewer ?? (() => false);
+    const answer = (value: ReminderStore) =>
+        reminderAnswer(value, world, {
+            limit,
+            dailyLimit: options.dailyLimit ?? 10,
+            deliveries,
+            administrator: !viewer(),
+        });
+    const write = async (route: Route) => {
+        const payload = route.request().postDataJSON() as ReminderPayload;
+        expect(["en", "tr"]).toContain(payload.language);
+        const refusal: Refusal | null = viewer()
+            ? { status: 403, code: "permission_denied" }
+            : refused(payload, store, world, limit);
+        if (refusal) {
+            await route.fulfill({
+                status: refusal.status,
+                json: refusalBody(refusal, limit),
+            });
+            return null;
+        }
+        const next = stored(payload, store, world);
+        return signature(next) === signature(store)
+            ? store
+            : { ...next, revision: store.revision + 1 };
+    };
+    await page.route("**/reminders/preview/", async (route) => {
+        const preview = await write(route);
+        if (preview) await route.fulfill({ json: answer(preview) });
+    });
     await page.route("**/reminders/", async (route) => {
         if (route.request().method() === "PUT") {
-            const payload = route.request().postDataJSON() as ReminderPayload;
-            expect(["en", "tr"]).toContain(payload.language);
-            if (payload.expected_revision !== store.revision)
-                return route.fulfill({ status: 409, json: changed() });
-            const refusal = refused(
-                payload,
-                store,
-                effective({ ...store, ...payload }, persons).length,
-                effective(store, persons).length,
-                limit,
-            );
-            if (refusal)
-                return route.fulfill({
-                    status: 400,
-                    json: errorBody(refusal.code, refusal.message, {
-                        fields: { [refusal.field]: refusal.message },
-                    }),
-                });
-            if (
-                (payload.member_roles ?? []).some(
-                    (entry) =>
-                        !holders(persons, entry.address).some(
-                            (member) => member.membership === entry.membership,
-                        ),
-                )
-            )
-                return route.fulfill({ status: 409, json: changed() });
-            store = stored(payload, store, persons);
+            const next = await write(route);
+            if (!next) return;
+            store = next;
         }
-        await route.fulfill({
-            json: reminderAnswer(store, persons, {
-                limit,
-                dailyLimit: options.dailyLimit ?? 10,
-                deliveries: options.deliveries ?? [{}],
-                administrator: !(options.viewer ?? (() => false))(),
-            }),
-        });
+        await route.fulfill({ json: answer(store) });
     });
-    return { persons };
+    return { persons, deliveries };
 }
 
 export async function openReminders(page: Page) {

@@ -186,6 +186,7 @@ test("workspace toggle counts unique addresses live and keeps manual recipients 
     await page
         .getByLabel("Email address 2", { exact: true })
         .fill("extra@example.test");
+    await page.getByLabel("Email address 2", { exact: true }).blur();
     await expect(page.getByText("3 / 5", { exact: true })).toBeVisible();
     const outgoing = page.waitForRequest(
         (request) =>
@@ -219,6 +220,7 @@ test("automatic-only recipients persist without capturing the saving administrat
         enabled: true,
         members: ["member@example.test"],
         includeMembers: true,
+        hidden: false,
     });
     await openReminders(page);
     const address = page.getByLabel("Email address 1", { exact: true });
@@ -330,9 +332,11 @@ test("turning on a new oversized automatic group shows the limit and the server 
     });
     await openReminders(page);
     await page.getByLabel("Include workspace members", { exact: true }).check();
-    await expect(page.getByText("6 / 5", { exact: true })).toBeVisible();
     await expect(
-        page.getByText("Use at most 5 email addresses.", { exact: true }),
+        page.getByText(
+            "This plant allows at most 5 distinct recipient addresses in total.",
+            { exact: true },
+        ),
     ).toBeVisible();
     await page.getByRole("button", { name: "Save reminders" }).click();
     await expect(page.locator(".notice[role=alert]")).toContainText(
@@ -506,10 +510,11 @@ test("five recipients can be added, removed, saved and reloaded at 320px", async
             .getByLabel(`Email address ${index}`, { exact: true })
             .fill(`person${index}@example.test`);
     }
+    await page.getByLabel("Email address 5", { exact: true }).blur();
     await expect(page.getByText("5 / 5", { exact: true })).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Add address" }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     expect(
         await page.evaluate(
             () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -538,9 +543,7 @@ test("five recipients can be added, removed, saved and reloaded at 320px", async
     ).toHaveValue("person5@example.test");
     await page.getByText("Recent deliveries", { exact: true }).click();
     await expect(
-        page
-            .getByRole("cell")
-            .getByText("person1@example.test", { exact: true }),
+        page.getByRole("cell").getByText(user.email, { exact: true }),
     ).toBeVisible();
     expect(
         await page.evaluate(
@@ -561,10 +564,11 @@ test("dynamic recipient limit and server error retain entered values", async ({
     await page
         .getByLabel("Email address 2", { exact: true })
         .fill("second@example.test");
+    await page.getByLabel("Email address 2", { exact: true }).blur();
+    await expect(page.getByText("2 / 2", { exact: true })).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Add address" }),
-    ).toBeDisabled();
-    await expect(page.getByText("2 / 2", { exact: true })).toBeVisible();
+    ).toBeEnabled();
     await page.route("**/reminders/", (route) =>
         route.fulfill({
             status: 400,
@@ -890,10 +894,8 @@ test("a paused schedule may be saved without recipients", async ({ page }) => {
         recipients: [],
         times: [],
         language: "en",
-        expected_revision: 1,
-        hide_recipients: false,
-        address_roles: [],
-        member_roles: [],
+        expected_revision: 0,
+        hide_recipients: true,
     });
     await expect(
         page.getByLabel("Email address 1", { exact: true }),

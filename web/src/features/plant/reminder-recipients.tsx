@@ -1,23 +1,30 @@
 "use client";
 import { useTranslations } from "next-intl";
-import { useRef, type RefObject } from "react";
+import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import { flushSync } from "react-dom";
+import type { components } from "@/lib/schema";
 import { CheckboxField } from "@/ui/form";
 import { Notice } from "@/ui/ui";
+import { ApiError } from "@/lib/api/errors";
 import {
-    ROLES,
-    addressing,
-    chosen,
-    withDefaults,
-    type Addressing,
+    filled,
+    memberKey,
+    type Addresses,
+    type Answer,
     type Choice,
-    type ReminderAnswer,
+    type Draft,
     type Role,
-    type Section,
-} from "./reminder-addressing";
+    type TypedRow,
+} from "./reminder-draft";
 import styles from "./reminder-recipients.module.css";
 import type { RecipientState } from "./reminders";
 import { useRowFocus } from "./row-focus";
+
+type Schemas = components["schemas"];
+type MemberRow = Schemas["MemberAddressOutput"];
+type AddedRow = Schemas["AddedAddressOutput"];
+const ROLES = ["to", "cc", "bcc"] as const satisfies readonly Role[];
+const visibleRole = (role: Role) => role !== "bcc";
 
 function focusChecked(name: string) {
     const checked = [...document.getElementsByName(name)].find(
@@ -26,18 +33,165 @@ function focusChecked(name: string) {
     checked?.focus();
 }
 
+type Preview =
+    | { status: "answered"; answer: Answer }
+    | { status: "checking" }
+    | { status: "refused"; message: string }
+    | { status: "failed"; retry: () => void };
+type Basis = { addresses: Addresses; recipients: string[] };
+
+function previewOf({ base, unsaved, preview }: RecipientState): Preview {
+    if (!unsaved) return { status: "answered", answer: base };
+    if (preview.current && preview.data?.answer.addresses)
+        return { status: "answered", answer: preview.data.answer };
+    const error = preview.error;
+    if (error instanceof ApiError && [400, 409].includes(error.status)) {
+        const fields = Object.values(error.fields);
+        return {
+            status: "refused",
+            message: fields.length ? fields.join(" ") : error.message,
+        };
+    }
+    if (error) return { status: "failed", retry: preview.retry };
+    return { status: "checking" };
+}
+
+// The last answer the rows are drawn from; while the present draft is checked it is an earlier one.
+function basisOf({ addresses, unsaved, preview }: RecipientState): Basis {
+    const answered = preview.data?.answer.addresses;
+    return unsaved && answered && preview.data
+        ? { addresses: answered, recipients: preview.data.body.recipients }
+        : { addresses, recipients: addresses.recipients };
+}
+
+// The answer has one entry per sent text, in order.
+function answersOf(rows: TypedRow[], basis: Basis) {
+    const used = new Set<number>();
+    const answers = new Map<number, AddedRow>();
+    for (const row of filled(rows)) {
+        const at = basis.recipients.findIndex(
+            (text, index) => !used.has(index) && text === row.text.trim(),
+        );
+        const added = basis.addresses.added[at];
+        if (at < 0 || !added) continue;
+        used.add(at);
+        answers.set(row.id, added);
+    }
+    return answers;
+}
+
+type Shown = { checked: Role; set: boolean };
+type TypedView = {
+    row: TypedRow;
+    added: AddedRow | undefined;
+    member: MemberRow | undefined;
+    shown: Shown | undefined;
+};
+
+function rowsOf(draft: Draft, basis: Basis, preview: Preview) {
+    const current = preview.status === "answered";
+    const answers = answersOf(draft.rows, basis);
+    const membersByKey = new Map(
+        basis.addresses.members.map((member) => [
+            memberKey(member.memberships),
+            member,
+        ]),
+    );
+    const shownAs = (
+        answered: { role: Choice; placement: Role },
+        decision: { role: Choice } | undefined,
+    ): Shown =>
+        current
+            ? { checked: answered.placement, set: answered.role !== null }
+            : {
+                  checked: decision?.role ?? answered.placement,
+                  set: (decision ? decision.role : answered.role) !== null,
+              };
+    const typed: TypedView[] = draft.rows.map((row) => {
+        const added = answers.get(row.id);
+        const member =
+            added?.memberships.length && added.eligible
+                ? membersByKey.get(memberKey(added.memberships))
+                : undefined;
+        return {
+            row,
+            added,
+            member,
+            shown:
+                added?.eligible && !draft.hide
+                    ? shownAs(added, draft.typed[row.id])
+                    : undefined,
+        };
+    });
+    const merged = new Set(
+        typed.flatMap((item) =>
+            item.member ? [memberKey(item.member.memberships)] : [],
+        ),
+    );
+    const members =
+        draft.include && !draft.hide
+            ? basis.addresses.members.map((member) => {
+                  const key = memberKey(member.memberships);
+                  return {
+                      member,
+                      key,
+                      shown: merged.has(key)
+                          ? undefined
+                          : shownAs(member, draft.members[key]),
+                  };
+              })
+            : [];
+    return { typed, members };
+}
+
+function summaryOf(
+    { typed, members }: ReturnType<typeof rowsOf>,
+    count: number,
+) {
+    const placed = [
+        ...members.flatMap(({ member, shown }) =>
+            shown ? [{ address: member.address, role: member.placement }] : [],
+        ),
+        ...typed.flatMap(({ added, shown }) =>
+            added && shown
+                ? [
+                      {
+                          address: added.address,
+                          role: added.placement,
+                          outside: !added.memberships.length,
+                      },
+                  ]
+                : [],
+        ),
+    ];
+    const listed = (role: Role) =>
+        placed.filter((item) => item.role === role).map((item) => item.address);
+    const to = listed("to");
+    const cc = listed("cc");
+    return {
+        to,
+        cc,
+        hidden: Math.max(0, count - to.length - cc.length),
+        outside: placed.filter(
+            (item) =>
+                "outside" in item && item.outside && visibleRole(item.role),
+        ),
+        count,
+    };
+}
+
 function Placement({
     name,
     address,
-    role,
-    set,
+    shown,
     onChoose,
+    children,
 }: {
     name: string;
     address: string;
-    role: Role;
-    set: boolean;
+    shown: Shown;
     onChoose: (choice: Choice) => void;
+    children?: ReactNode;
 }) {
     const t = useTranslations("Reminders");
     return (
@@ -52,7 +206,7 @@ function Placement({
                             type="radio"
                             name={name}
                             value={value}
-                            checked={role === value}
+                            checked={shown.checked === value}
                             onChange={() => onChoose(value)}
                         />
                         {t(`roles.${value}`)}
@@ -60,16 +214,14 @@ function Placement({
                 ))}
             </fieldset>
             <span className={styles.state}>
-                {t(set ? "chosenRole" : "defaultRole")}
-                {set && (
+                {children}
+                {t(shown.set ? "chosenRole" : "defaultRole")}
+                {shown.set && (
                     <button
                         type="button"
                         className="text-button"
                         aria-label={t("useDefaultFor", { address })}
-                        onClick={() => {
-                            flushSync(() => onChoose(null));
-                            focusChecked(name);
-                        }}
+                        onClick={() => onChoose(null)}
                     >
                         {t("useDefault")}
                     </button>
@@ -79,45 +231,101 @@ function Placement({
     );
 }
 
+function CheckState({ preview }: { preview: Preview }) {
+    const t = useTranslations("Reminders");
+    if (preview.status === "refused")
+        return <p className={styles.warning}>{preview.message}</p>;
+    if (preview.status !== "failed") return null;
+    return (
+        <>
+            <p>{t("checkFailed")}</p>
+            <button
+                type="button"
+                className="button secondary"
+                onClick={preview.retry}
+            >
+                {t("checkAgain")}
+            </button>
+        </>
+    );
+}
+
 function Summary({
-    view,
-    headingRef,
-    unsavedSection,
+    recipients,
+    preview,
+    rows,
+    heading,
+    held,
 }: {
-    view: Addressing;
-    headingRef: RefObject<HTMLHeadingElement | null>;
-    unsavedSection: boolean;
+    recipients: RecipientState;
+    preview: Preview;
+    rows: ReturnType<typeof rowsOf>;
+    heading: RefObject<HTMLHeadingElement | null>;
+    held: ReactNode;
 }) {
     const t = useTranslations("Reminders");
+    const { unsaved } = recipients;
+    const view =
+        preview.status === "answered"
+            ? summaryOf(rows, preview.answer.recipient_count)
+            : null;
     return (
         <div className={styles.summary}>
-            <h3 tabIndex={-1} ref={headingRef}>
+            <h3 tabIndex={-1} ref={heading}>
                 {t("whoSeesWhat")}
             </h3>
+            {held}
             <div aria-live="polite">
-                {view.to.length > 0 && (
-                    <p>{t("summaryTo", { addresses: view.to.join(", ") })}</p>
+                {preview.status === "checking" && <p>{t("checking")}</p>}
+                <CheckState preview={preview} />
+                {view && (
+                    <>
+                        {view.to.length > 0 && (
+                            <p>
+                                {t("summaryTo", {
+                                    addresses: view.to.join(", "),
+                                })}
+                            </p>
+                        )}
+                        {view.cc.length > 0 && (
+                            <p>
+                                {t("summaryCopy", {
+                                    addresses: view.cc.join(", "),
+                                })}
+                            </p>
+                        )}
+                        {view.hidden > 0 && (
+                            <p>{t("summaryHidden", { count: view.hidden })}</p>
+                        )}
+                        {view.count ? (
+                            <p>{t("summarySentence")}</p>
+                        ) : (
+                            <p>{t("nobodyReceives")}</p>
+                        )}
+                        {view.outside.map((item, index) => (
+                            <p key={index} className={styles.warning}>
+                                {t("outsideWarning", { address: item.address })}
+                            </p>
+                        ))}
+                        {!view.to.length && view.cc.length > 0 && (
+                            <p className={styles.warning}>{t("noToWarning")}</p>
+                        )}
+                        {view.count > 0 &&
+                            !view.to.length &&
+                            !view.cc.length && (
+                                <p className={styles.warning}>
+                                    {t("allHiddenWarning")}
+                                </p>
+                            )}
+                    </>
                 )}
-                {view.cc.length > 0 && (
-                    <p>{t("summaryCopy", { addresses: view.cc.join(", ") })}</p>
-                )}
-                {view.hidden > 0 && (
-                    <p>{t("summaryHidden", { count: view.hidden })}</p>
-                )}
-                <p>{t("summarySentence")}</p>
-                {view.outside.map((address) => (
-                    <p key={address} className={styles.warning}>
-                        {t("outsideWarning", { address })}
+                {unsaved && (
+                    <p className={styles.unsaved}>
+                        {t("notSavedYet")}
+                        {view && view.to.length + view.cc.length > 0 && (
+                            <> {t("savingShowsAddresses")}</>
+                        )}
                     </p>
-                ))}
-                {view.noTo && (
-                    <p className={styles.warning}>{t("noToWarning")}</p>
-                )}
-                {view.allHidden && (
-                    <p className={styles.warning}>{t("allHiddenWarning")}</p>
-                )}
-                {unsavedSection && (
-                    <p className={styles.unsaved}>{t("notSavedYet")}</p>
                 )}
             </div>
         </div>
@@ -125,67 +333,178 @@ function Summary({
 }
 
 export function RecipientSection({
-    answer,
     recipients,
+    heading,
+    held,
 }: {
-    answer: ReminderAnswer;
     recipients: RecipientState;
+    heading: RefObject<HTMLHeadingElement | null>;
+    held: ReactNode;
 }) {
     const t = useTranslations("Reminders");
-    const { addresses, section, update } = recipients;
-    const { prefix, focusRow } = useRowFocus(section.rows);
-    const headingRef = useRef<HTMLHeadingElement>(null);
-    const view = addressing(section, addresses);
-    const visible = !section.hide;
-    const groupName = (key: string | number) => `${prefix}-role-${key}`;
-    const setRows = (rows: Section["rows"]) => update({ ...section, rows });
-    const chooseTyped = (id: number, choice: Choice) =>
-        setRows(
-            section.rows.map((row) =>
-                row.id === id ? { ...row, choice } : row,
-            ),
-        );
-    const chooseMember = (membership: number, choice: Choice) =>
-        update({
-            ...section,
-            members: { ...section.members, [membership]: choice },
+    const { base, draft, update } = recipients;
+    const preview = previewOf(recipients);
+    const basis = basisOf(recipients);
+    const { prefix, focusRow } = useRowFocus(draft.rows);
+    const pendingFocus = useRef<string | null>(null);
+    const pressed = useRef(false);
+    useEffect(() => {
+        const down = () => (pressed.current = true);
+        const up = () => (pressed.current = false);
+        document.addEventListener("pointerdown", down, true);
+        document.addEventListener("pointerup", up, true);
+        document.addEventListener("pointercancel", up, true);
+        return () => {
+            document.removeEventListener("pointerdown", down, true);
+            document.removeEventListener("pointerup", up, true);
+            document.removeEventListener("pointercancel", up, true);
+        };
+    }, []);
+    useEffect(() => {
+        if (preview.status !== "answered" || !pendingFocus.current) return;
+        focusChecked(pendingFocus.current);
+        pendingFocus.current = null;
+    });
+    const rows = rowsOf(draft, basis, preview);
+    const visible = !draft.hide;
+    const counted =
+        preview.status === "answered" ? preview.answer : recipients.base;
+    const groupName = (key: string) => `${prefix}-role-${key}`;
+    const setRows = (change: (rows: TypedRow[]) => TypedRow[]) =>
+        update((now) => {
+            const next = change(now.rows);
+            const kept = new Set(next.map((row) => row.id));
+            return {
+                ...now,
+                rows: next,
+                typed: Object.fromEntries(
+                    Object.entries(now.typed).filter(([id]) =>
+                        kept.has(Number(id)),
+                    ),
+                ),
+            };
         });
-    const focusSummary = (next: Section) => {
-        flushSync(() => update(next));
-        headingRef.current?.focus();
+    const commit = (id: number, text: string) =>
+        update((now) => {
+            const row = now.rows.find((item) => item.id === id);
+            if (!row || row.text.trim() === text.trim()) return now;
+            const typed = { ...now.typed };
+            delete typed[id];
+            return {
+                ...now,
+                rows: now.rows.map((item) =>
+                    item.id === id ? { ...item, text } : item,
+                ),
+                typed,
+            };
+        });
+    // Committing during a press would move the control under the pointer before its click lands.
+    const commitOnBlur = (id: number, input: HTMLInputElement) => {
+        const apply = () => commit(id, input.value);
+        if (!pressed.current) return apply();
+        document.addEventListener("click", apply, {
+            capture: true,
+            once: true,
+        });
     };
-    // A hint only: the server decides the limit and which addresses count.
-    const count = new Set(
-        [
-            ...section.rows.map((row) => row.text.trim()).filter(Boolean),
-            ...(section.include ? addresses.workspace_recipients : []),
-        ].map((email) => email.toLowerCase()),
-    ).size;
+    const chooseMember = (member: MemberRow, role: Choice) =>
+        update((now) => ({
+            ...now,
+            members: {
+                ...now.members,
+                [memberKey(member.memberships)]: {
+                    memberships: member.memberships,
+                    address: member.address,
+                    role,
+                },
+            },
+        }));
+    const typedDecision = (
+        added: AddedRow,
+        member: MemberRow | undefined,
+        role: Choice,
+    ) => ({
+        role,
+        memberships: added.memberships,
+        ...(member && {
+            member: {
+                memberships: member.memberships,
+                address: member.address,
+            },
+        }),
+    });
+    const chooseTyped = (
+        id: number,
+        added: AddedRow,
+        member: MemberRow | undefined,
+        role: Choice,
+    ) =>
+        update((now) => ({
+            ...now,
+            typed: { ...now.typed, [id]: typedDecision(added, member, role) },
+        }));
+    const choose = (name: string, apply: (role: Choice) => void) => {
+        return (role: Choice) => {
+            if (role === null) pendingFocus.current = name;
+            apply(role);
+        };
+    };
+    const focusSummary = (change: (draft: Draft) => Draft) => {
+        flushSync(() => update(change));
+        heading.current?.focus();
+    };
+    const withDefaults = (now: Draft): Draft => {
+        const members = { ...now.members };
+        for (const { member, key, shown } of rows.members)
+            if (shown?.set)
+                members[key] = {
+                    memberships: member.memberships,
+                    address: member.address,
+                    role: null,
+                };
+        const typed = { ...now.typed };
+        for (const { row, added, member, shown } of rows.typed)
+            if (added && shown?.set)
+                typed[row.id] = typedDecision(added, member, null);
+        return { ...now, members, typed };
+    };
+    const anySet =
+        rows.members.some((item) => item.shown?.set) ||
+        rows.typed.some((item) => item.shown?.set);
     return (
         <fieldset className="reminder-recipients">
             <legend>{t("emailRecipients")}</legend>
             <span className="recipient-count fine" aria-live="polite">
-                {t("quotaCount", { count, limit: answer.recipient_limit })}
+                {t("quotaCount", {
+                    count: counted.recipient_count,
+                    limit: counted.recipient_limit,
+                })}
             </span>
             <p className="fine">{t("groupPrivacy")}</p>
-            {count > answer.recipient_limit && (
+            {counted.recipient_count > counted.recipient_limit && (
                 <Notice>
                     {t(
-                        answer.recipient_limit_exceeded
+                        counted.recipient_limit_exceeded
                             ? "recipientLimitExceeded"
                             : "recipientLimit",
-                        { limit: answer.recipient_limit },
+                        { limit: counted.recipient_limit },
                     )}
                 </Notice>
             )}
-            {answer.hide_recipients && section.hide && (
+            {base.hide_recipients && draft.hide && (
                 <div className={styles.review}>
-                    <p>{t("hiddenToday")}</p>
+                    <p>
+                        {t(
+                            base.hidden_by_departure
+                                ? "hiddenByDeparture"
+                                : "hiddenToday",
+                        )}
+                    </p>
                     <button
                         type="button"
                         className="button secondary"
                         onClick={() =>
-                            focusSummary({ ...section, hide: false })
+                            focusSummary((now) => ({ ...now, hide: false }))
                         }
                     >
                         {t("reviewAddressing")}
@@ -195,8 +514,8 @@ export function RecipientSection({
             <CheckboxField
                 label={t("hideRecipients")}
                 name="hide_recipients"
-                checked={section.hide}
-                onChange={(hide) => update({ ...section, hide })}
+                checked={draft.hide}
+                onChange={(hide) => update((now) => ({ ...now, hide }))}
             />
             {visible ? (
                 <>
@@ -209,50 +528,45 @@ export function RecipientSection({
             <CheckboxField
                 label={t("includeWorkspaceMembers")}
                 name="include_workspace_members"
-                checked={section.include}
-                onChange={(include) => update({ ...section, include })}
+                checked={draft.include}
+                onChange={(include) => update((now) => ({ ...now, include }))}
             />
             <p className="fine">{t("membershipSync")}</p>
-            {visible && <p className="fine">{t("membersJoinInCopy")}</p>}
-            {visible && section.include ? (
+            {visible && draft.include && (
+                <p className="fine">{t("newMembersDefault")}</p>
+            )}
+            {visible && draft.include ? (
                 <>
                     <p className="recipient-label">
                         {t("workspaceMembers", {
-                            count: addresses.members.length,
+                            count: rows.members.length,
                         })}
                     </p>
-                    {view.members.length ? (
+                    {rows.members.length ? (
                         <ul className={styles.members}>
-                            {view.members.map((item) => (
-                                <li
-                                    key={item.member.membership}
-                                    className={styles.member}
-                                >
+                            {rows.members.map(({ member, key, shown }) => (
+                                <li key={key} className={styles.member}>
                                     <span className={styles.identity}>
-                                        <span>{item.member.address}</span>
+                                        <span>{member.address}</span>
                                         <span className="field-hint">
-                                            {t(`kinds.${item.member.kind}`)}
+                                            {t(`kinds.${member.kind}`)}
                                         </span>
                                     </span>
-                                    {item.typed ? (
+                                    {shown ? (
+                                        <Placement
+                                            name={groupName(`m-${key}`)}
+                                            address={member.address}
+                                            shown={shown}
+                                            onChoose={choose(
+                                                groupName(`m-${key}`),
+                                                (role) =>
+                                                    chooseMember(member, role),
+                                            )}
+                                        />
+                                    ) : (
                                         <span className={styles.state}>
                                             {t("setUnderOtherAddresses")}
                                         </span>
-                                    ) : (
-                                        <Placement
-                                            name={groupName(
-                                                `member-${item.member.membership}`,
-                                            )}
-                                            address={item.member.address}
-                                            role={item.role}
-                                            set={item.set}
-                                            onChoose={(choice) =>
-                                                chooseMember(
-                                                    item.member.membership,
-                                                    choice,
-                                                )
-                                            }
-                                        />
                                     )}
                                 </li>
                             ))}
@@ -265,14 +579,16 @@ export function RecipientSection({
                 <details className="reminder-members">
                     <summary>
                         {t("workspaceMembers", {
-                            count: addresses.workspace_recipients.length,
+                            count: basis.addresses.workspace_recipients.length,
                         })}
                     </summary>
-                    {addresses.workspace_recipients.length ? (
+                    {basis.addresses.workspace_recipients.length ? (
                         <ul>
-                            {addresses.workspace_recipients.map((email) => (
-                                <li key={email}>{email}</li>
-                            ))}
+                            {basis.addresses.workspace_recipients.map(
+                                (email, index) => (
+                                    <li key={index}>{email}</li>
+                                ),
+                            )}
                         </ul>
                     ) : (
                         <p className="fine">{t("noWorkspaceMembers")}</p>
@@ -280,109 +596,114 @@ export function RecipientSection({
                 </details>
             )}
             <p className="recipient-label">{t("otherAddresses")}</p>
-            {view.typed.map((item, index) => {
-                const { row } = item;
-                return (
-                    <div className={styles.entry} key={row.id}>
-                        <div className="recipient-row">
-                            <label
-                                className="field"
-                                htmlFor={`${prefix}-${row.id}`}
+            {rows.typed.map(({ row, added, member, shown }, index) => (
+                <div className={styles.entry} key={row.id}>
+                    <div className="recipient-row">
+                        <label
+                            className="field"
+                            htmlFor={`${prefix}-${row.id}`}
+                        >
+                            {t("emailAddress", { index: index + 1 })}
+                            <input
+                                id={`${prefix}-${row.id}`}
+                                name="recipients"
+                                type="email"
+                                autoCapitalize="none"
+                                autoCorrect="off"
+                                defaultValue={row.text}
+                                onBlur={(event) =>
+                                    commitOnBlur(row.id, event.target)
+                                }
+                            />
+                        </label>
+                        {draft.rows.length > 1 && (
+                            <button
+                                className="button secondary"
+                                type="button"
+                                aria-label={t("removeEmailAddress", {
+                                    index: index + 1,
+                                })}
+                                onClick={() => {
+                                    const neighbour =
+                                        draft.rows[index + 1] ??
+                                        draft.rows[index - 1];
+                                    if (neighbour) focusRow(neighbour.id);
+                                    setRows((now) =>
+                                        now.filter(
+                                            (other) => other.id !== row.id,
+                                        ),
+                                    );
+                                }}
                             >
-                                {t("emailAddress", { index: index + 1 })}
-                                <input
-                                    id={`${prefix}-${row.id}`}
-                                    name="recipients"
-                                    type="email"
-                                    autoCapitalize="none"
-                                    autoCorrect="off"
-                                    value={row.text}
-                                    onChange={(event) =>
-                                        setRows(
-                                            section.rows.map((other) =>
-                                                other.id === row.id
-                                                    ? {
-                                                          ...other,
-                                                          text: event.target
-                                                              .value,
-                                                          choice: null,
-                                                      }
-                                                    : other,
-                                            ),
-                                        )
-                                    }
-                                />
-                            </label>
-                            {section.rows.length > 1 && (
-                                <button
-                                    className="button secondary"
-                                    type="button"
-                                    aria-label={t("removeEmailAddress", {
-                                        index: index + 1,
-                                    })}
-                                    onClick={() => {
-                                        const neighbour =
-                                            section.rows[index + 1] ??
-                                            section.rows[index - 1];
-                                        if (neighbour) focusRow(neighbour.id);
-                                        setRows(
-                                            section.rows.filter(
-                                                (other) => other.id !== row.id,
-                                            ),
-                                        );
-                                    }}
-                                >
-                                    <span aria-hidden="true">&times;</span>
-                                </button>
-                            )}
-                        </div>
-                        {item.address && !item.eligible ? (
-                            <p className="fine">{t("notReceiving")}</p>
-                        ) : (
-                            visible &&
-                            item.role && (
-                                <Placement
-                                    name={groupName(row.id)}
-                                    address={item.address}
-                                    role={item.role}
-                                    set={item.set}
-                                    onChoose={(choice) =>
-                                        chooseTyped(row.id, choice)
-                                    }
-                                />
-                            )
+                                <span aria-hidden="true">&times;</span>
+                            </button>
                         )}
                     </div>
-                );
-            })}
+                    {added && !added.eligible && (
+                        <p className="fine">{t("notReceiving")}</p>
+                    )}
+                    {visible &&
+                        !added &&
+                        row.text.trim() &&
+                        preview.status === "checking" && (
+                            <p className="fine">{t("checkingAddress")}</p>
+                        )}
+                    {added && shown && (
+                        <Placement
+                            name={groupName(`t-${row.id}`)}
+                            address={added.address}
+                            shown={shown}
+                            onChoose={choose(groupName(`t-${row.id}`), (role) =>
+                                chooseTyped(row.id, added, member, role),
+                            )}
+                        >
+                            {member && (
+                                <span className="field-hint">
+                                    {t(`kinds.${member.kind}`)}
+                                </span>
+                            )}
+                        </Placement>
+                    )}
+                    {added &&
+                        shown &&
+                        preview.status === "answered" &&
+                        !added.memberships.length &&
+                        visibleRole(added.placement) && (
+                            <p className={styles.warning}>
+                                {t("outsideWarning", {
+                                    address: added.address,
+                                })}
+                            </p>
+                        )}
+                </div>
+            ))}
             <button
                 className="button secondary"
                 type="button"
-                disabled={
-                    count >= answer.recipient_limit ||
-                    section.rows.length >= answer.recipient_limit
-                }
                 onClick={() => {
                     const id =
-                        Math.max(-1, ...section.rows.map((row) => row.id)) + 1;
+                        Math.max(-1, ...draft.rows.map((row) => row.id)) + 1;
                     focusRow(id);
-                    setRows([...section.rows, { id, text: "", choice: null }]);
+                    setRows((now) => [...now, { id, text: "" }]);
                 }}
             >
                 {t("addAddress")}
             </button>
-            {visible && view.to.length + view.cc.length + view.hidden > 0 && (
+            {!visible && <CheckState preview={preview} />}
+            {visible && (
                 <Summary
-                    view={view}
-                    headingRef={headingRef}
-                    unsavedSection={recipients.unsaved}
+                    recipients={recipients}
+                    preview={preview}
+                    rows={rows}
+                    heading={heading}
+                    held={held}
                 />
             )}
-            {visible && chosen(section, view) && (
+            {visible && anySet && (
                 <button
                     type="button"
                     className="button secondary"
-                    onClick={() => focusSummary(withDefaults(section, view))}
+                    onClick={() => focusSummary(withDefaults)}
                 >
                     {t("useDefaults")}
                 </button>
