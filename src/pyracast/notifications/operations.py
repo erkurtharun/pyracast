@@ -10,6 +10,7 @@ from django.db import connection, transaction
 from django.utils import translation
 from django.utils.translation import gettext
 
+from pyracast.accounts.addresses import plain_address
 from pyracast.accounts.authorization import require_platform_admin, tenant_membership
 from pyracast.accounts.models import Language, WorkspaceRole
 from pyracast.connections.models import MAX_DAILY_QUOTA
@@ -31,15 +32,14 @@ from pyracast.notifications.recipients import (
     Resolved,
     TypedChoice,
     Workspace,
-    addressable,
     choices,
     effective,
     explicit_recipients,
     grouped_recipients,
-    mailbox_key,
-    needs_members,
     placements,
     planned_recipients,
+    reads_people,
+    recipient_key,
     store_member_choices,
     store_recipients,
     typed_choices,
@@ -50,12 +50,18 @@ from pyracast.notifications.recipients import effective_recipients as effective_
 from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditAction, Region, RegionStatus, active_region
 
+RECIPIENT_MAX_LENGTH = 254
 # The largest per-plant recipient limit the console accepts (a smallint column).
 MAX_RECIPIENT_LIMIT = 32767
 
 
 def validate_recipient(address: str) -> None:
-    addressable(address)
+    if len(address) > RECIPIENT_MAX_LENGTH:
+        raise ValidationError(
+            gettext("Recipient addresses cannot exceed %(limit)s characters."),
+            params={"limit": RECIPIENT_MAX_LENGTH},
+        )
+    plain_address(address)
 
 
 def _all_valid(addresses: list[str]) -> bool:
@@ -68,11 +74,11 @@ def _all_valid(addresses: list[str]) -> bool:
 
 
 def invalid_recipient_region_ids() -> set[int]:
-    """Regions whose enabled reminders would go to an invalid address, in at most three
-    statements."""
-    schedules: dict[int, tuple[int, bool, int]] = {}
+    """Regions whose enabled reminders would go to an invalid address, or read people holding
+    one, in at most three statements."""
+    schedules: dict[int, tuple[int, bool, bool, int]] = {}
     rows: list[tuple[int, int, str, int | None]] = []
-    for pk, region_id, include, tenant_id, row, address, membership_id in (
+    for pk, region_id, include, hide, tenant_id, row, address, membership_id in (
         ReminderSchedule.objects.filter(
             active_region("region__"),
             enabled=True,
@@ -84,30 +90,29 @@ def invalid_recipient_region_ids() -> set[int]:
             "pk",
             "region_id",
             "include_workspace_members",
+            "hide_recipients",
             "region__tenant_id",
             "recipient_rows__pk",
             "recipient_rows__address",
             "recipient_rows__ties__membership_id",
         )
     ):
-        schedules[pk] = (region_id, include, tenant_id)
+        schedules[pk] = (region_id, include, hide, tenant_id)
         if row is not None:
             rows.append((pk, row, address, membership_id))
     explicit = grouped_recipients(rows)
-    members = workspaces(
-        {
-            tenant_id
-            for pk, (_, include, tenant_id) in schedules.items()
-            if needs_members(include, explicit.get(pk, []))
-        }
-    )
-    return {
-        region_id
-        for pk, (region_id, include, tenant_id) in schedules.items()
-        if not _all_valid(
-            effective(include, explicit.get(pk, []), members.get(tenant_id, NO_MEMBERS))
-        )
+    read = {
+        pk: reads_people(include, hide, explicit.get(pk, []))
+        for pk, (_, include, hide, _) in schedules.items()
     }
+    members = workspaces({tenant_id for pk, (*_, tenant_id) in schedules.items() if read[pk]})
+    found = set()
+    for pk, (region_id, include, _, tenant_id) in schedules.items():
+        people = members[tenant_id] if read[pk] else NO_MEMBERS
+        addresses = effective(include, explicit.get(pk, []), people)
+        if people.holds_non_plain or not _all_valid(addresses):
+            found.add(region_id)
+    return found
 
 
 SHARED_LIMIT = (
@@ -215,7 +220,9 @@ def _check_recipients(submitted: ReminderSettings) -> None:
             validate_recipient(address)
         except ValidationError as error:
             raise ValidationError({"recipients": error}) from None
-    if len({mailbox_key(address) for address in submitted.recipients}) != len(submitted.recipients):
+    if len({recipient_key(address) for address in submitted.recipients}) != len(
+        submitted.recipients
+    ):
         raise DomainError(ErrorCode.DUPLICATE_RECIPIENTS, field="recipients")
     if submitted.enabled and not (submitted.recipients or submitted.include_workspace_members):
         raise DomainError(ErrorCode.RECIPIENT_REQUIRED, field="recipients")
@@ -285,10 +292,10 @@ def _typed_choice(entry: AddressChoice) -> TypedChoice:
 def _typed_choices(
     planned: Sequence[Explicit], stored: Choices, changes: Sequence[AddressChoice]
 ) -> list[TypedChoice]:
-    named = {mailbox_key(entry.address): entry for entry in changes}
+    named = {recipient_key(entry.address): entry for entry in changes}
     return [
         _typed_choice(entry)
-        if (entry := named.get(mailbox_key(row.address)))
+        if (entry := named.get(recipient_key(row.address)))
         else stored.typed(row.address) or NO_CHOICE
         for row in planned
     ]

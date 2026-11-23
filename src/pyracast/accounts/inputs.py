@@ -32,6 +32,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MaxLengthValidator
 from django.http import HttpRequest
 
+from pyracast.accounts.addresses import plain_address
 from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.authentication import recovery_identity
 from pyracast.accounts.login_limits import check_second_factor, spent, throttled
@@ -69,6 +70,11 @@ class AddEmailInput(AllauthAddEmailInput):
             for validator in field.validators
             if not isinstance(validator, MaxLengthValidator)
         ] + [MaxLengthValidator(254)]
+
+    def clean_email(self) -> str:
+        plain_address(self.cleaned_data["email"])
+        email: str = super().clean_email()
+        return email
 
 
 class RequestPasswordResetInput(AllauthRequestPasswordResetInput):

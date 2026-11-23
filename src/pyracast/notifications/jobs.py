@@ -50,6 +50,14 @@ WAITING = (NotificationDeliveryStatus.PENDING, NotificationDeliveryStatus.RETRY)
 logger = logging.getLogger(__name__)
 
 
+def list_refusal(resolved: Resolved, limit: int) -> str:
+    """Why the resolved list is not sent, or `""`; a read of people holding an address that is
+    not plain refuses it first."""
+    if resolved.members.holds_non_plain:
+        return NotificationDeliveryError.INVALID_RECIPIENT
+    return recipient_refusal(resolved.addresses, limit)
+
+
 def _authorize(delivery: NotificationDelivery, limit: int) -> tuple[Resolved | None, str]:
     """What permits the delivery, its addresses narrowed in the database, or the skip reason."""
     schedule = delivery.schedule
@@ -57,7 +65,7 @@ def _authorize(delivery: NotificationDelivery, limit: int) -> tuple[Resolved | N
     if not schedule.enabled or clock not in schedule.times:
         return None, NotificationDeliveryError.CANCELLED_BY_SETTINGS_CHANGE
     resolved = resolve(schedule)
-    if reason := recipient_refusal(resolved.addresses, limit):
+    if reason := list_refusal(resolved, limit):
         return None, reason
     addresses = narrow_recipients(delivery, resolved.addresses)
     if not addresses:

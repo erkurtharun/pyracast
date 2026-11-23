@@ -5,6 +5,7 @@ from enum import StrEnum
 
 from pyracast.notifications.addressing import explicit_role, sent_hidden
 from pyracast.notifications.eligibility import notifiable_regions
+from pyracast.notifications.jobs import list_refusal
 from pyracast.notifications.models import (
     NotificationDelivery,
     NotificationDeliveryError,
@@ -14,19 +15,21 @@ from pyracast.notifications.models import (
 )
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.recipients import (
+    NO_MEMBERS,
     Explicit,
+    Resolved,
     Workspace,
     candidates,
     delivery_addresses,
     delivery_roles,
     effective,
     explicit_recipients,
-    mailbox_key,
     placements,
+    reads_people,
+    recipient_key,
     stored_choices,
     workspace,
 )
-from pyracast.notifications.scheduler import recipient_refusal
 from pyracast.regions.models import Region, RegionStatus
 
 STATE_OF_PAUSE: dict[str, ReminderState] = {
@@ -157,11 +160,15 @@ def assess(
     assessed = []
     for schedule in schedules:
         rows = explicit.get(schedule.pk, [])
-        recipients = effective(schedule.include_workspace_members, rows, members)
+        include = schedule.include_workspace_members
+        recipients = effective(include, rows, members)
+        read = reads_people(include, schedule.hide_recipients, rows)
         state = reminder_state(
             schedule,
             notifiable=schedule.region_id in notifiable,
-            refusal=recipient_refusal(recipients, limit),
+            refusal=list_refusal(
+                Resolved(rows, members if read else NO_MEMBERS, recipients), limit
+            ),
         )
         assessed.append(Assessment(schedule, rows, recipients, state))
     return assessed
@@ -210,12 +217,12 @@ def _addresses(
     typed = candidates([row.address for row in explicit], members, choices)
     sent = assessment.recipients
     placed = {
-        mailbox_key(address): role
+        recipient_key(address): role
         for address, role in zip(sent, placements(schedule, members, sent, choices), strict=True)
     }
 
     def placement(address: str) -> RecipientRole:
-        return placed.get(mailbox_key(address), RecipientRole.BCC)
+        return placed.get(recipient_key(address), RecipientRole.BCC)
 
     return ReminderAddresses(
         [row.address for row in explicit],

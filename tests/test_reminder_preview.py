@@ -152,7 +152,11 @@ def stale_member_entry(system: System, alice: User, bob: User) -> dict[str, Any]
 
 def duplicate_recipients(system: System, alice: User, bob: User) -> dict[str, Any]:
     return body(
-        system, alice, bob, recipients=["ops@bücher.de", "ops@xn--bcher-kva.de"], address_roles=[]
+        system,
+        alice,
+        bob,
+        recipients=["OPS@XN--BCHER-KVA.DE", "ops@xn--bcher-kva.de"],
+        address_roles=[],
     )
 
 

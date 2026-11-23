@@ -15,6 +15,7 @@ from pyracast.notifications.models import (
 )
 from pyracast.notifications.operations import (
     MAX_RECIPIENT_LIMIT,
+    RECIPIENT_MAX_LENGTH,
     AddressChoice,
     MemberChoice,
     validate_recipient,
@@ -30,7 +31,7 @@ from pyracast.notifications.overview import (
     ReminderOverview,
     ReminderSummary,
 )
-from pyracast.notifications.recipients import RECIPIENT_MAX_LENGTH, mailbox_key
+from pyracast.notifications.recipients import recipient_key
 
 
 class AddressRoleInput(InputSerializer):
@@ -40,6 +41,10 @@ class AddressRoleInput(InputSerializer):
         child=serializers.IntegerField(min_value=1), max_length=MAX_RECIPIENT_LIMIT
     )
 
+    def validate_address(self, value: str) -> str:
+        validate_recipient(value)
+        return value
+
 
 class MemberRoleInput(InputSerializer):
     memberships = serializers.ListField(
@@ -47,6 +52,10 @@ class MemberRoleInput(InputSerializer):
     )
     address = serializers.EmailField(max_length=RECIPIENT_MAX_LENGTH)
     role = serializers.ChoiceField(choices=RecipientRole.choices, allow_null=True)
+
+    def validate_address(self, value: str) -> str:
+        validate_recipient(value)
+        return value
 
 
 class ReminderInput(InputSerializer):
@@ -77,7 +86,7 @@ class ReminderInput(InputSerializer):
         return value
 
     def validate_member_roles(self, value: list[dict[str, Any]]) -> list[MemberChoice]:
-        keys = {mailbox_key(entry["address"]) for entry in value}
+        keys = {recipient_key(entry["address"]) for entry in value}
         memberships = [pk for entry in value for pk in set(entry["memberships"])]
         if len(set(memberships)) != len(memberships) or len(keys) != len(value):
             raise serializers.ValidationError(gettext("Choose each member's role once."))
@@ -93,9 +102,9 @@ class ReminderInput(InputSerializer):
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         if (entries := attrs.get("address_roles")) is None:
             return attrs
-        keys = [mailbox_key(entry["address"]) for entry in entries]
+        keys = [recipient_key(entry["address"]) for entry in entries]
         if len(set(keys)) != len(keys) or not set(keys) <= {
-            mailbox_key(address) for address in attrs["recipients"]
+            recipient_key(address) for address in attrs["recipients"]
         }:
             raise serializers.ValidationError(
                 {"address_roles": gettext("Choose a role once for each address of the recipients.")}

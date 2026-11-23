@@ -6,10 +6,10 @@ from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
-from django.core.validators import validate_email
 from django.db import connection
 from django.db.models import Q, QuerySet
 
+from pyracast.accounts.addresses import plain_address
 from pyracast.accounts.processes import lock_account
 
 INVALID_ADDRESS = "Enter a valid email address."
@@ -19,14 +19,10 @@ OPERATOR_LOCK = 0x50594F50
 
 
 def operator_address(value: str) -> str:
-    address = value.strip().lower()
     try:
-        validate_email(address)
+        return plain_address(value.strip()).lower()
     except ValidationError:
         raise CommandError(INVALID_ADDRESS) from None
-    if len(address) > 254:
-        raise CommandError(INVALID_ADDRESS)
-    return address
 
 
 class OperatorCommand(BaseCommand):

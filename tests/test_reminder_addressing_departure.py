@@ -8,6 +8,7 @@ from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.db import IntegrityError, connection
 from django.test import Client
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from pyracast import erasure, trash
@@ -17,7 +18,7 @@ from pyracast.erasure import erase_account
 from pyracast.notifications import operations
 from pyracast.notifications import recipients as recipient_rows
 from pyracast.notifications.jobs import process_notification
-from pyracast.notifications.models import RecipientRole, ReminderSchedule
+from pyracast.notifications.models import DeliveryRecipient, RecipientRole, ReminderSchedule
 from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.models import AuditEvent, Region
@@ -32,7 +33,7 @@ pytestmark = pytest.mark.django_db(transaction=True)
 
 ADMIN = "admin@example.com"
 SHARED = "shared@example.com"
-UNICODE, ACE = "ops@b\u00fccher.de", "ops@xn--bcher-kva.de"
+UPPER, ACE = "OPS@XN--BCHER-KVA.DE", "ops@xn--bcher-kva.de"
 
 
 @pytest.fixture(autouse=True)
@@ -145,7 +146,7 @@ HIDING = 'UPDATE "notifications_reminderschedule" SET "hide_recipients"'
 DELETION = 'DELETE FROM "notifications_reminderrecipient"'
 
 
-TYPED = {"other spelling": UNICODE}
+TYPED = {"other spelling": UPPER}
 
 
 def successor(case: str, bob: User) -> Callable[[Callable[[], bool]], bool]:
@@ -189,9 +190,8 @@ def test_a_departure_hides_the_visible_schedule_a_successor_of_the_address_would
     sends = [headers_of(queued, SLOT), next_send(1)]
     after = schedule_of(system)
     held = ACE if case == "other spelling" else SHARED
-    frozen_row_erased = departure is erase and case == "other spelling"
     assert sends == [
-        ([], [], [ADMIN] if frozen_row_erased else sorted([ADMIN, held])),
+        ([], [], sorted([ADMIN, TYPED.get(case, SHARED)])),
         ([], [], sorted([ADMIN, held])),
     ]
     assert after.hide_recipients
@@ -212,6 +212,9 @@ def test_a_departure_hides_a_resting_typed_to_whose_empty_binding_would_match_ag
     departure: Callable[[System, User], bool],
 ) -> None:
     system, _, _ = workspace()
+    member(system, ACE, verified=False)
+    elsewhere = User.objects.create(username="elsewhere", email=ACE)
+    EmailAddress.objects.create(user=elsewhere, email=ACE, verified=True, primary=True)
     save(
         system,
         recipients=[ACE],
@@ -219,7 +222,7 @@ def test_a_departure_hides_a_resting_typed_to_whose_empty_binding_would_match_ag
     )
     carol = member(system, "carol@example.com")
     chosen(schedule_of(system), carol, RecipientRole.BCC)
-    moved(carol, UNICODE)
+    moved(carol, UPPER)
     assert next_send(0)[0] == [ADMIN]
     queued = enqueue_due(SLOT + timedelta(days=1))[-1]
     before = schedule_of(system)
@@ -515,3 +518,29 @@ def test_a_save_racing_a_departure_ends_with_the_mode_the_later_one_leaves(
     assert (saved, departed) == ("saved", "departed")
     after = schedule_of(system)
     assert (after.hide_recipients, after.hidden_by_departure) == (save_first, save_first)
+
+
+def delivery_row_statements(system: System, departing: User) -> list[str]:
+    with CaptureQueriesContext(connection) as captured:
+        assert remove(system, departing)
+    return [
+        query["sql"]
+        for query in captured.captured_queries
+        if '"notifications_deliveryrecipient"' in query["sql"]
+    ]
+
+
+def test_a_removal_selects_the_rows_it_revokes_by_key_and_reads_none_without_an_address() -> None:
+    system, alice, _ = workspace()
+    save(system, hide_recipients=True)
+    (queued,) = enqueue_due(SLOT)
+    nameless = User.objects.create(username="nameless")
+    Membership.objects.create(tenant=system.tenant, user=nameless)
+
+    assert delivery_row_statements(system, nameless) == []
+    found = delivery_row_statements(system, alice)
+
+    selections = [sql for sql in found if sql.startswith("SELECT")]
+    assert len(selections) == 1
+    assert '"notifications_deliveryrecipient"."key" IN (\'alice@example.com\')' in selections[0]
+    assert DeliveryRecipient.objects.filter(delivery_id=queued, revoked=True).count() == 1
