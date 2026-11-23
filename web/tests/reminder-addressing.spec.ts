@@ -234,6 +234,8 @@ test("several members of one address are one row as the answer presents them", (
         typed: ["bcc set"],
     });
     expect(addressingFields(section, addresses)).toEqual({
+        recipients: ["Shared@Example.test"],
+        include_workspace_members: true,
         hide_recipients: false,
         address_roles: [
             {
@@ -296,6 +298,13 @@ test("the save names every typed choice with its members and every member row wi
         members: { ...section.members, 2: "bcc" },
     };
     expect(addressingFields(edited, addresses)).toEqual({
+        recipients: [
+            OUTSIDE,
+            "resting@example.test",
+            "Third@example.test",
+            "new@example.test",
+        ],
+        include_workspace_members: true,
         hide_recipients: false,
         address_roles: [
             { address: OUTSIDE, role: "cc", memberships: [] },
@@ -317,6 +326,8 @@ test("a hidden save keeps the typed choices and names no member", () => {
         { hide_recipients: true },
     );
     expect(addressingFields(section, addresses)).toEqual({
+        recipients: [OUTSIDE],
+        include_workspace_members: true,
         hide_recipients: true,
         address_roles: [{ address: OUTSIDE, role: "bcc", memberships: [] }],
     });

@@ -11,7 +11,7 @@ import { matchesSearch, siteName } from "./portfolio-search";
 import { Field, Select } from "@/ui/form";
 import { Empty, Notice, RefreshFailed } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
-import { ReminderLine } from "@/features/plant/reminders";
+import { ReminderLine } from "@/features/plant/reminder-line";
 import { useWorkspace } from "@/features/workspace/workspace-shell";
 import { DeletedNotice } from "@/features/trash/recent-deletion";
 

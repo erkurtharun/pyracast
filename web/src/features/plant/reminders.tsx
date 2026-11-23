@@ -1,6 +1,7 @@
 "use client";
 import { useTranslations } from "next-intl";
 import { ScrollRegion } from "@/ui/scroll-region";
+import dynamic from "next/dynamic";
 import { Fragment, useId, useState } from "react";
 import type { components } from "@/lib/schema";
 import type { Region, RegionScope } from "@/lib/api";
@@ -21,64 +22,75 @@ import {
 import { Resource } from "@/ui/resource";
 import { Empty, Notice } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
-import { addressingFields, type ReminderAnswer } from "./reminder-addressing";
+import { sectionUnavailable } from "@/lib/on-demand";
 import {
-    RecipientCount,
-    RecipientSection,
-    useRecipientSection,
-    useRowFocus,
-} from "./reminder-recipients";
+    addressingFields,
+    initialSection,
+    unsaved,
+    type AddressesAnswer,
+    type ReminderAnswer,
+    type Section,
+} from "./reminder-addressing";
+import { ReminderOutcome } from "./reminder-line";
+import { useRowFocus } from "./row-focus";
 type ReminderSchedule = components["schemas"]["ReminderOutput"];
 type ReminderBody = components["schemas"]["ReminderInput"];
 type Delivery = ReminderSchedule["deliveries"][number];
-type Outcome = Pick<Delivery, "scheduled_for" | "status" | "last_error">;
-export type ReminderSummary = components["schemas"]["ReminderSummaryOutput"];
 const PATH = "/api/tenants/{tenant_id}/regions/{region_id}/reminders/";
 // The generated schema predates the amended contract, whose answer names `memberships` on each added address.
 const answerOf = (data: ReminderSchedule) => data as unknown as ReminderAnswer;
-function ReminderOutcome({
-    outcome,
-    timezone,
-}: {
-    outcome: Outcome;
-    timezone: string;
-}) {
+const RecipientSection = dynamic(
+    () =>
+        import("./reminder-recipients").then(
+            (module) => module.RecipientSection,
+            sectionUnavailable,
+        ),
+    { loading: RecipientsLoading },
+);
+function RecipientsLoading() {
     const t = useTranslations("Reminders");
-    const format = useFormat();
-    const label = useLabel();
+    return <p className="fine">{t("loadingEmailReminders")}</p>;
+}
+export type RecipientState = {
+    addresses: AddressesAnswer;
+    section: Section;
+    unsaved: boolean;
+    update: (section: Section) => void;
+};
+function useRecipientSection(answer: ReminderAnswer): RecipientState | null {
+    const saved = JSON.stringify(answer);
+    const [edited, setEdited] = useState<{
+        saved: string;
+        section: Section;
+    } | null>(null);
+    if (!answer.addresses) return null;
+    const initial = initialSection(answer, answer.addresses);
+    const section = edited?.saved === saved ? edited.section : initial;
+    return {
+        addresses: answer.addresses,
+        section,
+        unsaved: unsaved(section, initial),
+        update: (next) => setEdited({ saved, section: next }),
+    };
+}
+function RecipientCount({ answer }: { answer: ReminderAnswer }) {
+    const t = useTranslations("Reminders");
     return (
         <>
-            {t("lastEmail", {
-                status: label("NotificationDeliveryStatus", outcome.status),
-                scheduled: format.time(outcome.scheduled_for, timezone),
-            })}
-            {outcome.last_error &&
-                ` ${label("NotificationDeliveryError", outcome.last_error)}`}
+            <p className="recipient-count">
+                {t("recipientCountOnly", {
+                    count: answer.recipient_count,
+                    limit: answer.recipient_limit,
+                })}
+            </p>
+            <p className="fine">
+                {t(
+                    answer.hide_recipients
+                        ? "recipientsHidden"
+                        : "recipientsVisible",
+                )}
+            </p>
         </>
-    );
-}
-export function ReminderLine({
-    reminder,
-    timezone,
-}: {
-    reminder: ReminderSummary;
-    timezone: string;
-}) {
-    const t = useTranslations("Reminders");
-    const label = useLabel();
-    return (
-        <p className="fine">
-            {t("dailyEmail", { state: label("ReminderState", reminder.state) })}
-            {reminder.last_delivery && (
-                <>
-                    {" · "}
-                    <ReminderOutcome
-                        outcome={reminder.last_delivery}
-                        timezone={timezone}
-                    />
-                </>
-            )}
-        </p>
     );
 }
 function DeliveryTimes({ data }: { data: ReminderAnswer }) {
@@ -200,20 +212,17 @@ function ReminderForm({
         <ActionForm
             submit={t("saveReminders")}
             onSubmit={async (values) => {
+                if (!recipients) return;
                 const language = formText(values, "language");
                 await save({
                     enabled: values.get("enabled") === "on",
-                    recipients: entered(values, "recipients"),
-                    include_workspace_members:
-                        values.get("include_workspace_members") === "on",
                     language: isLanguage(language) ? language : "en",
                     times: entered(values, "times"),
                     expected_revision: answer.revision,
-                    ...(recipients &&
-                        addressingFields(
-                            recipients.section,
-                            recipients.addresses,
-                        )),
+                    ...addressingFields(
+                        recipients.section,
+                        recipients.addresses,
+                    ),
                 });
             }}
         >

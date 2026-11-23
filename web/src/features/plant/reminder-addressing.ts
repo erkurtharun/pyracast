@@ -247,11 +247,17 @@ export function addressingFields(
     section: Section,
     addresses: AddressesAnswer,
 ): {
+    recipients: string[];
+    include_workspace_members: boolean;
     hide_recipients: boolean;
     address_roles: AddressRole[];
     member_roles?: MemberRole[];
 } {
     const filled = section.rows.filter((row) => row.text.trim());
+    const listed = {
+        recipients: filled.map((row) => row.text.trim()),
+        include_workspace_members: section.include,
+    };
     const address_roles = filled.flatMap(({ text, choice }) =>
         choice
             ? [
@@ -263,7 +269,8 @@ export function addressingFields(
               ]
             : [],
     );
-    if (section.hide) return { hide_recipients: true, address_roles };
+    if (section.hide)
+        return { ...listed, hide_recipients: true, address_roles };
     const typedKeys = new Set(filled.map((row) => addressKey(row.text)));
     const member_roles = addresses.members.flatMap((member) => {
         const typed = typedKeys.has(addressKey(member.address));
@@ -278,5 +285,5 @@ export function addressingFields(
             },
         ];
     });
-    return { hide_recipients: false, address_roles, member_roles };
+    return { ...listed, hide_recipients: false, address_roles, member_roles };
 }

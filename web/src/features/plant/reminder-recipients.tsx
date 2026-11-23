@@ -1,6 +1,6 @@
 "use client";
 import { useTranslations } from "next-intl";
-import { useEffect, useId, useRef, useState, type RefObject } from "react";
+import { useRef, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import { CheckboxField } from "@/ui/form";
 import { Notice } from "@/ui/ui";
@@ -8,60 +8,16 @@ import {
     ROLES,
     addressing,
     chosen,
-    initialSection,
-    unsaved,
     withDefaults,
     type Addressing,
-    type AddressesAnswer,
     type Choice,
     type ReminderAnswer,
     type Role,
     type Section,
 } from "./reminder-addressing";
 import styles from "./reminder-recipients.module.css";
-
-export type RecipientState = {
-    addresses: AddressesAnswer;
-    section: Section;
-    unsaved: boolean;
-    update: (section: Section) => void;
-};
-
-export function useRecipientSection(
-    answer: ReminderAnswer,
-): RecipientState | null {
-    const saved = JSON.stringify(answer);
-    const [edited, setEdited] = useState<{
-        saved: string;
-        section: Section;
-    } | null>(null);
-    if (!answer.addresses) return null;
-    const initial = initialSection(answer, answer.addresses);
-    const section = edited?.saved === saved ? edited.section : initial;
-    return {
-        addresses: answer.addresses,
-        section,
-        unsaved: unsaved(section, initial),
-        update: (next) => setEdited({ saved, section: next }),
-    };
-}
-
-export function useRowFocus(rows: { id: number }[]) {
-    const prefix = useId();
-    const pending = useRef<number | null>(null);
-    useEffect(() => {
-        if (pending.current !== null) {
-            document.getElementById(`${prefix}-${pending.current}`)?.focus();
-            pending.current = null;
-        }
-    }, [prefix, rows]);
-    return {
-        prefix,
-        focusRow: (id: number) => {
-            pending.current = id;
-        },
-    };
-}
+import type { RecipientState } from "./reminders";
+import { useRowFocus } from "./row-focus";
 
 function focusChecked(name: string) {
     const checked = [...document.getElementsByName(name)].find(
@@ -432,26 +388,5 @@ export function RecipientSection({
                 </button>
             )}
         </fieldset>
-    );
-}
-
-export function RecipientCount({ answer }: { answer: ReminderAnswer }) {
-    const t = useTranslations("Reminders");
-    return (
-        <>
-            <p className="recipient-count">
-                {t("recipientCountOnly", {
-                    count: answer.recipient_count,
-                    limit: answer.recipient_limit,
-                })}
-            </p>
-            <p className="fine">
-                {t(
-                    answer.hide_recipients
-                        ? "recipientsHidden"
-                        : "recipientsVisible",
-                )}
-            </p>
-        </>
     );
 }

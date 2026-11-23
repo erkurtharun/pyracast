@@ -73,6 +73,43 @@ test("a plant without a schedule opens unticked with the administrator in To, me
     ).toHaveCount(0);
 });
 
+test("a save before the recipients editor has loaded keeps every recipient and choice", async ({
+    page,
+}) => {
+    await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: TEAM,
+        includeMembers: true,
+        typed: { [OUTSIDE]: "cc" },
+    });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/_next/static/**/*.js", async (route) => {
+        const response = await route.fetch();
+        const body = await response.text();
+        if (body.includes('("roleGroup"')) await released;
+        await route.fulfill({ response, body });
+    });
+    await openReminders(page);
+    await expect(
+        page.getByRole("button", { name: "Save reminders", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole("radio")).toHaveCount(0);
+    const body = await save(page);
+    release();
+    expect(body).toMatchObject({
+        recipients: [OUTSIDE],
+        include_workspace_members: true,
+        hide_recipients: false,
+        address_roles: [{ address: OUTSIDE, role: "cc", memberships: [] }],
+        member_roles: [
+            { membership: 1, address: ADMIN, role: null },
+            { membership: 2, address: MEMBER, role: null },
+        ],
+    });
+    await expect(radio(page, OUTSIDE, "Copy")).toBeChecked();
+});
+
 test("a schedule saved hidden saves hidden until its addressing is reviewed and saved", async ({
     page,
 }) => {
