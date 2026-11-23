@@ -1,20 +1,17 @@
 # Google Cloud deployment
 
-This deployment prioritizes low initial cost. One Compute Engine VM runs Traefik,
-Next.js, the Django API, collection/calibration workers, a separate notification
-worker, the dispatcher, RabbitMQ and PostgreSQL. The default is an `e2-medium`
-(4 GiB RAM, one sustained vCPU exposed as two shared vCPUs) in `europe-west1-b`
-(Belgium), keeping the base price close to the US region while reducing latency
-for users in Türkiye.
-PostgreSQL and RabbitMQ use a persistent data disk. Hourly and pre-release database
-dumps go to private Cloud Storage with seven-day retention. The recovery-point
-target is one hour while scheduled backups succeed; there is no point-in-time
-recovery. Application and database availability depend on this one VM. Releases
-include a maintenance window.
+The deployment is chosen for a low initial cost. One Compute Engine VM (`e2-medium` in
+`europe-west1-b` by default) runs Traefik, Next.js, the Django API, the collection and
+calibration worker, the notification worker, the dispatcher, RabbitMQ and PostgreSQL under
+Docker Compose. PostgreSQL, RabbitMQ and the gateway's certificates live on a persistent data
+disk. Hourly and pre-release database dumps go to a private Cloud Storage bucket that keeps
+every generation seven days. The recovery-point target is one hour while hourly backups
+succeed; there is no point-in-time recovery and no failover, and a release has a maintenance
+window.
 
 ```mermaid
 flowchart LR
-    Browser -->|HTTPS / HTTP 3 or 2| Cloudflare
+    Browser -->|HTTPS| Cloudflare
     Cloudflare -->|HTTPS / HTTP 2| Traefik
     subgraph VM[Compute Engine · Docker Compose]
         Traefik --> Web[Next.js]
@@ -29,161 +26,101 @@ flowchart LR
     end
     SQL -->|Hourly and pre-release dumps| Backups[Private Cloud Storage]
     SM[Secret Manager] -->|VM identity, pinned version| VM
-    CI[GitHub Actions] -->|OIDC / IAP| VM
-    CI --> AR[Artifact Registry · immutable images]
+    GH[GitHub Release workflow] -->|OIDC / IAP| VM
+    GH --> AR[Artifact Registry · images by digest]
 ```
 
-Images and dependencies are pinned; containers run without root, with read-only
-filesystems and resource limits. GitHub deploys through
-[Workload Identity Federation](https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines),
-without a service-account key. Application containers use Distroless runtimes and
-target Linux amd64. Windows remains a native development and test platform.
+This page holds the operator's procedures. How each part works is in its flow page:
+[release-pipeline](flows/release-pipeline.md),
+[edge-gateway-and-tls](flows/edge-gateway-and-tls.md),
+[security-headers-and-proxy-trust](flows/security-headers-and-proxy-trust.md),
+[infrastructure-provisioning](flows/infrastructure-provisioning.md),
+[secret-provisioning](flows/secret-provisioning.md),
+[encryption-key-rotation](flows/encryption-key-rotation.md),
+[database-migration](flows/database-migration.md),
+[backup-and-restore-rehearsal](flows/backup-and-restore-rehearsal.md),
+[host-supervision-and-alerting](flows/host-supervision-and-alerting.md),
+[database-reset-and-restore](flows/database-reset-and-restore.md) and
+[dependency-and-code-scanning](flows/dependency-and-code-scanning.md).
 
-## Gateway and image security
+## Edge, gateway and images
 
-Traefik uses only file-based routing and public ACME certificate issuance. Its
-administration API, dashboard and Docker discovery are disabled. Static settings
-live in `deploy/compose.yaml`; routes and TLS policy live in `deploy/routes.yml`.
-Port 80 is public for ACME HTTP-01; port 443 accepts only the reviewed Cloudflare
-IPv4 ranges. Certificates persist on the data disk. Cloudflare Free proxies public
-HTTPS with **Full (strict)** origin encryption; Traefik retains a publicly trusted
-Let's Encrypt certificate. Cloudflare's edge may serve IPv6 visitors while the
-origin VM remains IPv4-only.
+Configure Cloudflare as the code expects:
 
-Enable HTTP/3, HTTP/2 and TLS 1.3 at Cloudflare, with TLS 1.2 as the minimum and
-0-RTT disabled. Keep [HTTP/2 to origin](https://developers.cloudflare.com/speed/optimization/protocol/http2-to-origin/)
-enabled; Traefik negotiates it through ALPN. Cloudflare's
-[HTTP/3 support](https://developers.cloudflare.com/speed/optimization/protocol/http3/)
-applies to visitors, not origin connections.
+- The DNS record is an **A record** to the `instance_ip` output and **Proxied**, with
+  **SSL/TLS → Full (strict)**: Traefik holds a publicly trusted Let's Encrypt certificate and
+  port 443 admits only the Cloudflare IPv4 ranges. Add no AAAA record; the VM is IPv4-only.
+- Edge HTTPS redirects stay off, so HTTP-01 challenges reach the public port 80; Traefik
+  redirects other HTTP requests itself.
+- HTTP/2 to origin on, TLS 1.2 as the minimum and 0-RTT off. Keep the visitor IP headers and
+  Pseudo IPv4 off: `src/pyracast/proxy.py` resolves the client from the address Cloudflare
+  appends. Add no Worker or other proxy without reviewing that chain, and no cache rule for
+  authentication, API or administration responses.
 
-Traefik accepts forwarded headers only from the published Cloudflare networks.
-Django trusts only the gateway's fixed container address; `pyracast/proxy.py`
-resolves the client the Cloudflare edge appended, removes every forwarding and
-Cloudflare identity header and hands the result to the application in an internal
-header the gateway strips from every request. Review changes to the official
-[IPv4](https://www.cloudflare.com/ips-v4) and [IPv6](https://www.cloudflare.com/ips-v6)
-lists against both `deploy/compose.yaml` and the Terraform ingress rules.
+The Cloudflare ranges are copied in `deploy/compose.yaml` (IPv4 and IPv6, for header trust) and
+in the Terraform firewall (IPv4). Review changes to the published
+[IPv4](https://www.cloudflare.com/ips-v4) and [IPv6](https://www.cloudflare.com/ips-v6) lists
+against both.
 
-`deploy/routes.yml` gives each client (the address Cloudflare appended) a request-rate
-and a concurrent-request budget per router, with a tighter rate on `/api/auth/`. Traefik
-builds a separate limiter for every router, including each router's copy on the
-loopback entrypoint, so a client that spends one router's budget keeps its budget on
-the others. Each router also limits the body size; an API body over its limit gets the
-API error body `request_too_large`. Rate and concurrency refusals are plain 429 answers. The gateway owns HSTS, `nosniff`, `Permissions-Policy`
-and `Cross-Origin-Opener-Policy`; the applications own CSP, `Referrer-Policy` and cache
-control, and both CSPs report violations to `/api/csp-reports/`.
+**Authenticated Origin Pulls** are off while `origin_pull_ca` is empty. To require them:
 
-Authenticated Origin Pulls stay off until the host names the authority of the edge's
-client certificate. To enable them: create a CA and a client certificate it signs,
-upload the certificate to Cloudflare as a zone-level Authenticated Origin Pulls
-certificate and turn the feature on (the edge then presents it; nothing changes yet),
-then set `origin_pull_ca` in `terraform.tfvars` to the CA's PEM, apply, run the startup
-script to refresh `/etc/pyracast/host.json` and release. First check from the VM that
-`curl https://DOMAIN/health/live/` answers `ok` through Cloudflare without a challenge.
-Before maintenance the installer refuses a value with no certificate or with any PEM
-block that does not load as an X.509 certificate. With origin pulls required, one
-request from the VM through Cloudflare (`deploy/edge_gate.py`, `/health/live/` for up to
-a minute) must reach the origin's answer: in an upgrade right after the new gateway
-starts, while the previous release still answers, so a failure resumes it before
-`migrate`; on a first installation, or when maintenance was already on, after the new
-release starts and before it becomes current, so a failure leaves maintenance on. A
-Cloudflare challenge of the VM fails at once and names the remedies: an edge rule that
-lets the host's health request through, or no origin pulls. Readiness, the resume of the
-previous release, the watchdog and the reset tool use the loopback-only port 8443, which
-never asks for the edge's certificate; between releases the watchdog reports
-`pyracast_origin_pull_unenforced` when port 443 stops refusing a handshake without one
-(`python3 /opt/pyracast/current/deploy/probe_origin_pull.py DOMAIN`). To go back, set
-`origin_pull_ca = ""`, apply, refresh `host.json` and release; the edge certificate can
-stay.
+1. From the VM, check that `curl https://DOMAIN/health/live/` answers `ok` through Cloudflare
+   without a challenge.
+2. Create a CA and a client certificate it signs, upload the certificate to Cloudflare as a
+   zone-level Authenticated Origin Pulls certificate and turn the feature on.
+3. Set `origin_pull_ca` in `terraform.tfvars` to the CA's PEM, apply, run the startup script
+   (`sudo google_metadata_script_runner startup`) to refresh `/etc/pyracast/host.json` and
+   release. The release refuses, before maintenance, a value that does not load as X.509
+   certificates.
 
-`deploy/gateway/` builds upstream Traefik as a pinned Go tool, verifying module
-checksums. Review dependency updates with the container build and HTTPS smoke
-test. After editing its module requirements, regenerate the locks without a local
-Go installation:
+With origin pulls required, each release asks `/health/live/` through the edge
+(`deploy/edge_gate.py`: up to 12 requests 5 seconds apart, until the origin answers `ok` or the
+edge answers a challenge) before the new release becomes current. In an upgrade that began
+without the maintenance marker it runs before `migrate`, so a failure starts the previous
+release again; otherwise a failure leaves maintenance on. A Cloudflare challenge of the VM
+fails at once and names the remedies: an edge rule that lets the host's health request through,
+or no origin pulls. Host probes use the loopback-only port 8443, which never asks for the edge's
+certificate. To go back, set `origin_pull_ca = ""`, apply, refresh `host.json` and release.
+
+`deploy/gateway/` builds Traefik from source as a pinned Go tool. After editing its module
+requirements, regenerate the locks without a local Go installation:
 
 ```bash
 docker build --target lockfiles --output type=local,dest=deploy/gateway deploy/gateway
 ```
 
-CI scans the exact backend, web, gateway, RabbitMQ and PostgreSQL images before
-merge, and Release scans them again from the verified archives before any cloud
-credential exists. All HIGH/CRITICAL findings block deployment, including unfixed
-findings, unless an entry of `deploy/image-scan-exceptions.json`, added by a reviewed
-change, accepts that vulnerability in that package of that one service with a reason and an
-end date. The gate prints every accepted finding with its end date; an expired, reasonless or
-no longer needed entry fails it. Every scan must also carry a package
-inventory and match the selected immutable image identity. Scan results reflect the
-vulnerability database at verification time.
+CI and Release scan all five images; a HIGH or CRITICAL finding blocks deployment unless a
+reviewed, dated entry of `deploy/image-scan-exceptions.json` accepts it for that package and
+service. `deploy/postgres/Dockerfile` runs PostgreSQL 18.7 on Alpine (musl): never mount an
+existing Debian data directory into it; move data with a tested dump and restore.
 
-`deploy/postgres/Dockerfile` uses stable PostgreSQL 18.7 on Alpine 3.24, with the
-unused root privilege-switching helper removed. PostgreSQL always runs as UID/GID
-70. Alpine uses musl rather than glibc; a new database uses its own locale behavior.
-Do not mount an existing Debian database directory into this image; use a tested
-logical dump and restore when moving existing data.
-`deploy/rabbitmq/Dockerfile` is the official RabbitMQ image without the base's `pebble`
-service manager, which the broker never runs but the scan counts; no production image
-comes from a public registry.
-
-Artifact Registry SHA tags locate builds; deployment, scanning and smoke tests use
-the resolved immutable digest. Tags remain mutable so cleanup can remove old
-artifacts. The policy selects versions older than 30 days for deletion, retains
-the 20 newest versions of each package and always keeps `production` tags. Image
-indexes, SBOMs and provenance can consume multiple versions per release; 20
-versions does not mean 20 complete releases. Release reads only the image
-identities from the VM's current `release.env` (four for a release from before the
-built broker image, which ran the public one), validates their repository and
-digests and verifies `production` retention tags before publishing. Access or
-malformed-release errors stop the release; only an absent current release is
-treated as first deployment. Successful deployment moves the five retention tags
-to the verified new digests. This preserves an older running version even after
-many failed builds. Cleanup starts in dry-run mode. Inspect its results and verify
-the live retention tags before setting `artifact_cleanup_dry_run = false` in
-`terraform.tfvars` and applying it. See the [cleanup policy rules](https://docs.cloud.google.com/artifact-registry/docs/repositories/cleanup-policy).
+Artifact Registry cleanup deletes versions older than 30 days, keeps the 20 newest of each
+package and always keeps `production` tags; each successful release moves the five `production`
+tags to its digests. Cleanup starts in dry-run mode: inspect its results and the live tags before
+setting `artifact_cleanup_dry_run = false`.
 
 ## What you need
 
-1. A Google Cloud project with billing enabled, and permission to provision its
-   network, VM, Cloud Storage, IAM, secrets and monitoring resources.
-2. A domain/subdomain whose DNS you can edit, such as `forecast.example.com`.
-3. A Google Workspace Gmail sender and an internal OAuth Desktop client with only
-   `gmail.send`, or an SMTP service with STARTTLS on port 587. Configure the mail
-   provider's SPF/DKIM/DMARC records. Console mail is rejected in production.
-4. Repository administration access to configure the GitHub `production`
-   environment and variables.
+1. A Google Cloud project with billing enabled and permission to provision its network, VM,
+   Cloud Storage, IAM, secrets and monitoring.
+2. A domain or subdomain whose DNS you can edit.
+3. A Google Workspace Gmail sender with an internal OAuth Desktop client limited to
+   `gmail.send`, or an SMTP service with STARTTLS on port 587. Configure the mail provider's
+   SPF, DKIM and DMARC records. Console mail is refused in production.
+4. Administration access to the GitHub repository, for the `production` environment and the
+   variables.
 
-Use Google Cloud Shell for infrastructure commands; this keeps cloud setup the same
-for Windows and Ubuntu developers. Application development still uses native
-Python 3.15.2 and uv. Small host bootstrap helpers use Ubuntu's system Python;
-the application always runs its pinned container interpreter. Infrastructure
-requires Terraform **1.17.2**; install that
-stable version using [HashiCorp's instructions](https://developer.hashicorp.com/terraform/install)
-and verify its published checksum. Do not use a service-account JSON key.
-
-For 730 hours/month in `europe-west1`, budget approximately **USD 37–42/month** for
-the default VM, 30 GiB standard boot disk, 30 GiB balanced data disk, one IPv4
-address, small backups, image storage and low traffic. This excludes tax, domain,
-mail/provider subscriptions, trial credits and commitments. The VM alone is about
-USD 26.91/month, the disks USD 4.20/month and IPv4 USD 3.65/month: a baseline of
-USD 34.76/month before backups, image storage and traffic. This conservatively
-prices both disks without Free Tier credits; allowances depend on billing-account
-usage. Verify current [VM](https://cloud.google.com/products/compute/pricing/general-purpose),
-[disk](https://cloud.google.com/compute/disks-image-pricing) and
-[network](https://cloud.google.com/vpc/pricing) prices before applying Terraform.
-Set a Billing budget and alerts; alerts do not cap spending. Measure memory during
-collection and calibration before resizing, and read the costliest statements from
-`pg_stat_statements` (preloaded, created by `bootstrap.sql`) as the `postgres` superuser;
-low HTTP traffic does not remove
-the always-on worker, broker and database footprint. This is a single-VM deployment
-with no automatic failover.
+Run infrastructure commands in Google Cloud Shell with Terraform **1.17.2** (verify its published
+checksum), never with a service-account JSON key. Application development uses native
+Python 3.15.2 and uv; the host helpers use Ubuntu's system Python. Set a Billing budget and
+alerts before applying Terraform.
 
 ## First setup
 
 ### 1. Create the infrastructure
 
-Clone this repository in Cloud Shell and work from its root. Replace the project
-name below. The state bucket must be globally unique and kept private; the person
-running Terraform needs access to it. It is intentionally separate from the
-application so destroying an environment cannot destroy its state.
+The state bucket must be globally unique and private, and stays separate from the application so
+destroying the environment cannot destroy its state:
 
 ```bash
 export PROJECT_ID=your-project-id
@@ -193,14 +130,11 @@ gcloud storage buckets update "gs://$PROJECT_ID-pyracast-tfstate" --project="$PR
 cp infra/terraform/terraform.tfvars.example infra/terraform/terraform.tfvars
 ```
 
-Edit `terraform.tfvars`: set `project_id`, `domain`, `acme_email` and your Google
-account in `operator_members`. Keep region and zone consistent. Secret replication
-is immutable: when moving an existing deployment, set `secret_replica_location`
-to its original region to retain its secrets and versions. Keep the existing state
-bucket in its original location; its location does not determine the VM region.
-The repository
-and owner numeric IDs already identify `erkurtharun/pyracast`; forks must change
-these IDs and the repository name.
+Edit `terraform.tfvars`: `project_id`, `domain`, `acme_email` (also the alert address; the host
+settings need its domain to be dot-separated labels) and your
+account in `operator_members`; keep region and zone consistent. Secret replication is
+immutable: when moving an existing deployment, set `secret_replica_location` to its original
+region. A fork changes `github_repository`, `github_repository_id` and `github_owner_id`.
 
 ```bash
 terraform -chdir=infra/terraform init \
@@ -210,77 +144,55 @@ terraform -chdir=infra/terraform apply production.tfplan
 terraform -chdir=infra/terraform output
 ```
 
-Create a Cloudflare **A record** for the configured domain pointing to `instance_ip`.
-Initially select **DNS only**. Keep edge HTTPS redirects disabled so HTTP-01
-challenges continue to reach port 80 during certificate renewal; Traefik redirects
-other HTTP requests itself. Do not add an origin AAAA record.
-Traefik obtains and renews its certificate through public port 80. After the release
-passes its local HTTPS certificate check, switch the record to **Proxied** and set
-**SSL/TLS → Overview → Full (strict)**. Then verify the public HTTPS site. DNS-only
-HTTPS access is blocked by the Cloudflare-only origin firewall. Keep Cloudflare
-Pseudo IPv4 disabled and retain visitor IP headers; do not add a Worker or another
-proxy without reviewing the trust chain. Do not configure cache rules that cache
-authentication, API or administration responses.
+Point the Cloudflare A record at `instance_ip` as **DNS only** until the first release passes its
+local HTTPS check, then switch it to **Proxied** with Full (strict) and verify the public site.
 
-SSH is accessible only through IAP. Terraform enables OS Login and grants the
-named operators access to this VM. The startup script runs at every boot and changes
-only what differs from Terraform's version: it installs the pinned Docker packages only
-when they differ and restarts Docker only when its own configuration changed, both only
-while no release holds the lock, and never restarts the application. After a `terraform apply`
-that changes it, run it with `sudo google_metadata_script_runner startup`. Wait for it
-to finish:
+SSH works only through IAP with OS Login. The startup script runs at every boot and changes only
+what differs from Terraform's version. When the pinned Docker packages or the Docker
+configuration changed, it restarts Docker, and with it the application, only while no release
+holds the lock. After an apply that changes it, run it again and check its journal:
 
 ```bash
-gcloud compute ssh pyracast --project="$PROJECT_ID" --zone=europe-west1-b --tunnel-through-iap
+gcloud compute ssh INSTANCE --project="$PROJECT_ID" --zone=ZONE --tunnel-through-iap
+sudo google_metadata_script_runner startup
 sudo journalctl -u google-startup-scripts.service --no-pager -n 80
-sudo docker compose version
 ```
+
+`INSTANCE` and `ZONE` are the `instance_name` and `zone` outputs.
 
 ### 2. Add secrets
 
-Run secret setup on your local Windows or Ubuntu workstation, with uv, an
-authenticated Google Cloud CLI and a browser. `deploy/host_secrets.py` keeps the files in
-the repository's ignored `secrets/` directory and never prints a value. `create`
-generates application encryption, broker and database keys and asks for the mail
-backend and sender; it refuses to overwrite existing files. `check` names, by file and
-key, problems of the file shape, required and known keys, role names, incomplete sign-in
-pairs and shared database passwords; the release still applies the settings' own checks
-(mail, ports, times). `set KEY` stores one runtime setting typed
-without echo (provider or EPIAS credentials). `rotate secret-key|runtime-password|owner-password`
-replaces a generated value; broker and database superuser passwords are not rotated this
-way. `drop-fallbacks` finishes a secret-key rotation. Weather is initially disabled.
+Prepare the secret files on a Windows or Ubuntu workstation with uv and an authenticated Google
+Cloud CLI. `deploy/host_secrets.py` keeps them in the ignored `secrets/` directory and never
+prints a value:
 
 ```bash
 uv run --locked python deploy/host_secrets.py create
 uv run --locked python deploy/host_secrets.py check
 ```
 
-For the Workspace sender, choose `gmail` and `info@pyracast.app`. Enable the Gmail
-API in the project. In **Google Auth Platform**, configure the application name
-**Pyracast**, its support/contact address, **Internal** audience and only
-`https://www.googleapis.com/auth/gmail.send`. Internal audience requires the
-project to belong to the sender's Workspace organization. A trial's standalone
-organization is different: use a separate, unbilled OAuth-only project under the
-Workspace organization in that case. Keep the application infrastructure and
-Secret Manager in the deployment project. Under **Clients → Create client**,
-select **Desktop app**, name it **Pyracast**, and save its JSON to the ignored local
-file `secrets/gmail-client.json`. Then run:
+`create` generates the encryption key and the broker and database passwords, asks for the mail
+backend and sender, and refuses to overwrite existing files. `check` names each problem by file
+and key. `set KEY` stores one runtime setting typed without echo (EPIAS credentials). `unset KEY`
+removes a key the application no longer reads, which `check` reports until then; it refuses a key
+the host contract knows or the file lacks. Run it once the release that stopped reading the key
+is live, then release the file as a runtime change ("Key rotation"). `rotate` and
+`drop-fallbacks` are under "Key rotation".
+
+For the Gmail sender, enable the Gmail API. In **Google Auth Platform** use an **Internal**
+audience and only `https://www.googleapis.com/auth/gmail.send`; Internal requires the OAuth
+project to belong to the sender's Workspace organization (otherwise use a separate, unbilled
+OAuth-only project there). Create a **Desktop app** client, save its JSON as
+`secrets/gmail-client.json` and run:
 
 ```bash
-uv run --locked python deploy/authorize_gmail.py --sender info@pyracast.app
+uv run --locked python deploy/authorize_gmail.py --sender SENDER
 ```
 
-Approve send access as `info@pyracast.app` in the browser. The helper uses a random
-loopback port, state and PKCE; it requests only `gmail.send` with offline access.
-It sends one check mail from the sender to itself and only then atomically adds the
-Gmail credentials/backend/sender to `secrets/runtime.json`, preserving the existing
-application keys. It does not upload secrets. Use `--no-browser` for a manually opened authorization URL, or `--replace`
-when deliberately replacing existing Gmail credentials. Do not print or paste the
-client JSON or refresh token. An external application left in **Testing** expires
-its Gmail refresh token after seven days; it is unsuitable for unattended delivery.
-
-For `smtp`, the secret helper instead asks for the SMTP host, login and verified
-sender. After completing the selected mail setup, upload the files:
+Approve send access as the sender. The helper sends one check mail from the sender to itself and
+only then adds the Gmail credentials to `secrets/runtime.json`
+([gmail-sender-authorization](flows/gmail-sender-authorization.md)). For `smtp`, `create` asks
+for the host, login and sender instead. Then upload the files:
 
 ```bash
 gcloud secrets versions add pyracast-runtime --project="$PROJECT_ID" --data-file=secrets/runtime.json
@@ -288,148 +200,60 @@ gcloud secrets versions add pyracast-migration --project="$PROJECT_ID" --data-fi
 gcloud secrets versions add pyracast-database --project="$PROJECT_ID" --data-file=secrets/database.json
 ```
 
-The first runtime and database versions are **1**, pinned in Terraform. The runtime
-secret is a JSON object of application settings and `RABBITMQ_DEFAULT_PASS`; the migration
-secret contains only `PGUSER` and `PGPASSWORD`; the database secret contains only
-`POSTGRES_PASSWORD`. Values never enter Terraform state,
-image layers or GitHub variables. The VM writes restricted files for each release
-under `/run/pyracast/releases/<release>`, so staging a new release never changes the
-running one; Compose reads them literally, without shell evaluation or `$` substitution.
-Preserve the Django encryption key separately from the database backup. After
-secure backup/upload, remove the local `secrets/` files. Do not paste secret values
-into issues, chat or workflow logs. Plant Solcast keys remain in the MFA-protected
-administration interface; optional shared EPIAS/weather credentials can be added
-to the runtime JSON when authorized.
+Terraform pins version **1** of each secret (`runtime_secret_version`, `database_secret_version`,
+`migration_secret_version`). Keep a copy of the encryption key apart from the database backups,
+then remove the local `secrets/` files. Never paste a secret into an issue, chat or workflow log.
+Plant Solcast keys are entered in the administration interface, not in these files.
 
-The first release initializes an empty PostgreSQL data directory. Every release
-applies [deploy/bootstrap.sql](../deploy/bootstrap.sql) through
-`deploy/bootstrap_database.py`, before maintenance and again after `migrate`; a
-second run changes nothing. It creates or converges `pyracast_owner` for migrations
-and `pyracast_app` for application DML, sets the owner's password from the secrets
-only when it differs (the runtime role's password: see "Key rotation" below), keeps
-the migration ledger read-only for `pyracast_app`,
-installs `btree_gist` and removes public schema creation. Neither application
-identity is a superuser or can create databases, and the superuser signs in only
-over the database container's local socket (`deploy/postgres/pg_hba.conf`).
-Existing databases require a reviewed import/ownership transfer and a restore
-rehearsal; provisioning is not a migration plan.
+Every release provisions the database with [deploy/bootstrap.sql](../deploy/bootstrap.sql): the
+schema owner `pyracast_owner` runs migrations, the runtime role `pyracast_app` has DML only, and
+the superuser signs in only over the database container's local socket
+([database-migration](flows/database-migration.md)). An existing database from elsewhere needs a
+reviewed import and a restore rehearsal.
 
 ### 3. Enable delivery
 
-Google and Microsoft sign-in are optional. Configure separate **Web** OAuth
-clients; the Gmail sender's Desktop client is not a sign-in client. Use these
-exact production redirect URIs:
+Google and Microsoft sign-in are optional and use their own **Web** OAuth clients:
 
 | Provider | Redirect URI | Application configuration |
 | --- | --- | --- |
-| Google | `https://pyracast.app/api/accounts/google/login/callback/` | External audience; identity scopes only (`openid`, `email`). Publish the audience for general access. |
-| Microsoft | `https://pyracast.app/api/accounts/microsoft/login/callback/` | Any organizational directory and personal Microsoft accounts; delegated `User.Read`; no implicit grant or public-client flow. |
+| Google | `https://DOMAIN/api/accounts/google/login/callback/` | External audience, published; scopes `openid` and `email` |
+| Microsoft | `https://DOMAIN/api/accounts/microsoft/login/callback/` | Organizational and personal accounts; delegated `User.Read`; no implicit grant or public-client flow |
 
-Add `PYRACAST_GOOGLE_CLIENT_ID`, `PYRACAST_GOOGLE_CLIENT_SECRET`,
-`PYRACAST_MICROSOFT_CLIENT_ID` and `PYRACAST_MICROSOFT_CLIENT_SECRET` to the runtime
-secret. Set both values for a provider or neither; a single value stops the
-application at startup. Keep
-client secrets on the backend, rotate them before expiry, and use separate clients
-for local development. Login does not request mailbox access or retain provider
-tokens. Account connections are managed in **Account settings → Connected
-accounts**.
+Store `PYRACAST_GOOGLE_CLIENT_ID` and `PYRACAST_GOOGLE_CLIENT_SECRET`, or the `MICROSOFT` pair, in
+the runtime secret: both of a pair or neither, since one alone stops the application at startup.
+Google's branding names the homepage `https://DOMAIN/`, the privacy policy
+`https://DOMAIN/privacy/` and the terms `https://DOMAIN/terms/`, with the domain verified as
+authorized. Rotate the client secrets before they expire.
 
-For Google **Branding**, use app name **Pyracast**, support/developer contact
-**info@pyracast.app**, homepage `https://pyracast.app/`, privacy policy
-`https://pyracast.app/privacy/` and terms `https://pyracast.app/terms/`.
-Add `pyracast.app` as an authorized domain and verify its ownership in Search Console
-with a project owner/editor account. Keep the public operator/contact details accurate.
-Publish the External audience and complete any requested brand verification; changing
-branding can require verifying and publishing the new draft. JavaScript origins are
-not needed for this backend authorization-code flow. These settings belong to the
-sign-in project, not the internal Gmail sender project.
+In GitHub, create the environment **production**, restrict its deployment branches to `main`
+and add reviewers if you want a human gate. Protect `main` with the `CI result` check. Add the
+values of `terraform -chdir=infra/terraform output -json github_environment_variables` as
+production environment variables. `PYRACAST_PUBLIC_ORIGIN` makes each release request
+`/api/session/` and `/app/` through Cloudflare once it is installed; while it is empty the run
+only warns. Add `GCP_DEPLOY_ENABLED=true` as a **repository** variable, since the authorization
+job runs outside the environment.
 
-In GitHub, create **Settings → Environments → production**. Restrict deployment
-branches to `main`; enable required reviewers if you want a human release gate.
-Protect `main` with the `CI result` check, which passes only when every other CI job
-passed or, for Sonar alone, was skipped. The workflow independently requires that check of the exact current `main`
-commit's CI run, or, while that run goes on with no job failed yet, its passed image job and
-the passed CI run of its one squash-merged pull request on the same tree and base; a change
-to what CI runs or reads, a failed test, stale commit, fork or pull-request run cannot deploy.
+Run **Actions → Release → Run workflow → main** after CI is green. Later CI runs on `main` start
+Release by themselves ([release-pipeline](flows/release-pipeline.md) has the authorization rule).
+On the VM the installer runs in the transient unit `pyracast-release-<sha>-<run>-<attempt>.service`,
+so a cancelled job or a dropped tunnel does not stop it: follow it with `journalctl -u` that unit.
+The installer checks configuration, secrets and the migration plan before it changes anything,
+drains the dispatcher and workers while the site serves, shows the maintenance notice, takes a
+dump and waits for its upload, migrates and promotes `/opt/pyracast/current` only after a local
+HTTPS readiness check. It keeps the serving and the previous release and prunes the others.
 
-Use `terraform -chdir=infra/terraform output -json github_environment_variables`
-to obtain the nonsecret values. Add the `GCP_*` values as **production environment
-variables**, configuring the optional variables only after the prerequisites below.
-`GCP_MIGRATION_SECRET` is the short secret ID (for example `pyracast-migration`)
-passed to `gcloud --secret`, without a `projects/.../secrets/` prefix. Set
-`migration_secret_version` in Terraform to the enabled version of that secret before
-adding `GCP_MIGRATION_SECRET_VERSION`; without that variable releases read `latest`.
-`PYRACAST_PUBLIC_ORIGIN` makes each release request `/api/session/` and `/app/`
-through Cloudflare after the install (without it the run warns that it did not); add
-it once a request from a GitHub runner reaches the site without a challenge.
-Add **`GCP_DEPLOY_ENABLED=true` as a repository variable**, because the initial
-authorization job runs before entering the production environment.
+Image artifacts expire after one day. To retry, re-run the failed Release while its artifact
+exists ("Re-run all jobs" for an early start, which refuses a partial re-run), otherwise run
+**Actions → CI → Run workflow → main**. To redeploy `main` (for example after a key rotation):
 
-Run **Actions → Release → Run workflow → main** after CI is green. Subsequent `main`
-CI runs start it once their images pass, and again when they succeed; it deploys a commit
-once, at the first start that the rule above admits. The workflow:
+1. Run CI on `main`; its automatic Release deploys.
+2. If that Release run's summary says "Nothing to release" (`main` differs from the deployed
+   commit only in unshipped paths, listed in `deploy/release_scope.py`), run
+   **Actions → Release → Run workflow → main** while that CI run's artifact is unexpired.
 
-1. Verifies the image artifact from that exact CI run and attempt, whose CI already
-   tested these exact images, and scans it again before any cloud credential exists,
-   rejecting HIGH/CRITICAL vulnerabilities. A run whose commit `main` has moved past,
-   or that another release has already deployed, ends as a skip before it downloads
-   anything; only the deploy job waits for another release, and it checks again before its
-   download and just before the transfer. A run that `main` passes after the scan's check
-   therefore ends cancelled, not skipped, and transfers nothing.
-2. Publishes the backend, web, gateway, PostgreSQL and RabbitMQ images without
-   rebuilding. OCI digests, SBOM and provenance are preserved; all five release
-   references are immutable.
-3. Transfers the release through IAP using a short-lived OIDC identity and starts the
-   installer in the transient unit `pyracast-release-<sha>-<run>-<attempt>.service`,
-   so a cancelled job or a dropped tunnel does not stop it; the job follows its journal
-   (`journalctl -u` that unit) and reconnects. The installer's interface is
-   `install-release.sh SHA BACKEND_IMAGE WEB_IMAGE GATEWAY_IMAGE POSTGRES_IMAGE RABBITMQ_IMAGE BUNDLE MIGRATION_JSON`.
-4. Checks configuration, that containers cannot reach the metadata server, database
-   provisioning and the owner's access, the migration plan, that every stored secret
-   decrypts with the release's staged secrets (`check_secrets` in the new image) and
-   the shipped systemd units; nothing the serving release reads changes before
-   maintenance. It then stops the dispatcher and drains workers while the site still
-   serves, starts the new gateway with its maintenance notice, stops the API and web
-   servers, gives the runtime role the release's password and probes it, takes a
-   database dump and waits for its off-host upload before upgrading
-   PostgreSQL/RabbitMQ, records the maintenance's recovery point, migrates with the
-   schema owner, and starts the tested
-   revision; "A release that fails during maintenance" below covers failures. The
-   plan step refuses a database whose migration ledger names Pyracast migrations that
-   are no longer in the release (a database from before the migration baseline); the
-   running release keeps serving until the database is reset.
-5. Promotes `current` only after container readiness checks and a local HTTPS request
-   verify the public certificate, routing and database health, then installs the
-   release's watchdog, backup and restore rehearsal units. Each build has its own release directory;
-   a redeploy never edits the live one. It records the serving and the previous
-   release in `/var/lib/pyracast/release-state.json` and, unless a restore rehearsal
-   runs, removes every other release directory, its staged secrets and the images no
-   kept release uses.
-
-Image artifacts expire after one day and are deleted after successful deployment.
-Retry a failed Release while its artifact remains available; otherwise run
-**Actions → CI → Run workflow → main**. A successful CI run on `main` triggers
-Release automatically, so nothing else is needed after a failed deployment.
-A re-run of an early Release whose CI run has ended deploys only when that whole run
-succeeded and fails visibly otherwise.
-Retry an early Release with **Re-run all jobs**: a partial re-run of it is refused, because
-its scan and deploy would act on the authorization of the earlier attempt.
-To redeploy `main`:
-
-1. Run CI on `main`. Its automatic Release deploys unless the classification
-   skips it.
-2. If that Release run's summary says "Nothing to release" (`main` differs from
-   the deployed commit only in unshipped paths; see "Verification boundary"
-   below), run **Actions → Release → Run workflow → main** while that CI run's
-   image artifact is unexpired (one day). Once it has expired, repeat step 1 and
-   dispatch Release after its automatic Release skipped again.
-When retrying CI, **Re-run failed jobs** is enough: each job reads the artifacts of the
-attempt that produced them, and Release, also when re-run, takes the newest images built
-up to the CI attempt that triggered it.
-
-Runtime and deployment accounts have separate secret access. The deploy account
-can administer this VM and therefore has a privileged production trust boundary;
-protect repository administration and the production environment accordingly.
+The deploy account can administer the VM; protect repository administration and the production
+environment as a production trust boundary.
 
 ### 4. Create the administrator and verify the service
 
@@ -442,237 +266,186 @@ docker compose --env-file deploy/release.env -f deploy/compose.yaml exec api \
   pyracast bootstrap_admin --email admin@example.com
 ```
 
-Verify mail first (below): the first sign-in mails a code to this address. The command asks
-for a new password and shows the authenticator setup once, in this terminal only; do not
-put it in logs or tickets. For an existing administrator the address must be verified on
-that account or be its only, primary address, so that it can sign in with it; otherwise the
-command stores nothing. A lost or compromised authenticator is removed with
-`pyracast reset_mfa --email ADDRESS --reason lost_device|compromised`, which ends the
-account's sessions, queues a notice that the notification worker mails to the account and
-writes an audit line; an administrator then
-runs `bootstrap_admin` again. Both commands take `--dry-run`.
-Run `pyracast check_mail --send-to YOUR_ADDRESS` in the `api` container to send one
-reminder-shaped test mail; without `--send-to` it only opens the transport, as the
-release does after each install (a failure is a warning in the release log). Exit
-codes: 0 accepted, 1 invalid `--send-to` address, 2 configuration invalid, 3 credentials
-rejected, 4 Gmail authorization revoked (run `authorize_gmail.py --replace`), 5 sender
-forbidden, 6 message rejected, 7 rate limited, 8 not sent, 9 outcome uncertain,
-10 preparation failed. Open the HTTPS site and test signup, verification mail,
-login, MFA and one authorized plant. Check the Cloud Monitoring notification address and confirm a test alert.
-Test an actual provider collection and mail acceptance separately; synthetic CI
-fixtures do not establish provider access or inbox delivery.
+Verify mail first: the first sign-in mails a code to this address. The command asks for a
+password and shows the authenticator setup once, in this terminal only. For an existing account
+the address must be verified on it, or be its only, primary address; otherwise nothing is
+stored. A lost or compromised authenticator is removed with
+`pyracast reset_mfa --email ADDRESS --reason lost_device|compromised`, which ends the account's
+sessions and mails it a notice; then run `bootstrap_admin` again. Both commands take `--dry-run`
+([platform-admin-bootstrap](flows/platform-admin-bootstrap.md)).
+
+`pyracast check_mail --send-to ADDRESS` in the `api` container sends one test mail; without
+`--send-to` it only opens the transport, as each release does (a failure is a warning in the
+release log). Exit codes: 0 accepted, 1 invalid `--send-to` address, 2 configuration invalid,
+3 credentials rejected, 4 Gmail authorization revoked (on the workstation, run
+`authorize_gmail.py --sender SENDER --replace` as in "Add secrets" and release the file as a
+runtime change), 5 sender forbidden, 6 message rejected, 7 rate limited, 8 not sent, 9 outcome
+uncertain, 10 preparation failed.
+
+Then test signup, verification mail, sign-in, MFA and one authorized plant on the public site,
+confirm the Cloud Monitoring notification channel and send a test alert (below). A real provider
+collection and inbox delivery are proven only here, not by CI.
 
 ## Operations and recovery
 
-- **Health and logs:** `/health/live/` checks HTTP process liveness without the
-  database; `/health/ready/` also checks PostgreSQL. They expose no operational
-  details and are not cached. HTTPS uptime alerts detect sustained API/database
-  failure. Container stdout/stderr goes to Cloud Logging with a bounded local
-  cache. Logging is best effort: the API logs in blocking mode, but the gcplogs
-  client can still drop entries on overflow or outage; the other containers log
-  nonblocking. `pyracast.security` lines, including those of `exec` commands, go to
-  the container stream through `PYRACAST_SECURITY_LOG_PATH`. The other application records and
-  warnings, and Gunicorn's error records, go to stderr, Gunicorn's access lines to stdout, so a
-  command's stdout carries only what it prints, such as the health check's JSON document that
-  the watchdog reads. Every record of the application
-  and of Gunicorn starts one line, `DATE TIME LEVEL LOGGER MESSAGE`, and indents every further
-  line (a line break in a message or traceback, or about 4 KiB of UTF-8), so text a request
-  carries never starts a line. Each line, at most 4096 bytes with its line break, is written by a
-  call of its own, so the lines of processes writing at once alternate but never mix. A sink
-  routes the lines whose logger is `pyracast.security`, and only those of the containers that
-  write them (`api`, `worker`, `notifications`, `dispatcher`, `migrate`), to the log bucket
-  `pyracast-security` in the Terraform region, which keeps them 365 days; `_Default` keeps its
-  own copy for 30 days, so recent lines are searched as usual.
-  For older ones, refine the Logs Explorer scope to that bucket or run `gcloud logging read
-  'FILTER' --bucket=pyracast-security --location=REGION --view=_AllLogs --freshness=365d`.
-  Storage beyond 30 days costs 0.01 USD per GiB a month; the volume is small. A line carries
-  the event, ids, counts, the client IP and a keyed `subject` instead of an email address, and
-  never a name; an erased account's lines keep its id, the client IP and the keyed `subject`
-  until they expire, the IP for the whole period because a security record needs it. Log-based alerts in
-  `monitoring.tf` count them; the release does not apply Terraform, so after a
-  change there run the `plan`/`apply` commands above and confirm the policies
-  under Monitoring → Alerting. Durable job/audit records remain in PostgreSQL. API logs omit query strings and
-  referrers; an access line is `... INFO gunicorn.access METHOD PATH STATUS SECONDS`. A 500 `server_error` answer carries a `request_id`; search the logs for its
-  `api_server_error` traceback. A 503 `request_timeout` reference identifies an
-  `api_request_timeout` traceback. Database error detail can appear in either log.
-  Inspect `docker compose ... ps`, `logs --tail 100` and
-  `journalctl -u pyracast.service`. Never run `compose config` without `--quiet`
-  or export container environment diagnostics: they can disclose secrets.
-- **Background delivery:** HTTP readiness does not prove dispatcher/queue health.
-  Run `docker compose ... exec api pyracast check_delivery_health` and inspect the
-  administration Operations screen. Alert on stale dispatch, failed collections,
-  uncertain email delivery, failed/stale backups and VM disk/memory pressure.
-  A worker that exhausts its five automatic retries stays stopped until restarted.
-  Do not automatically resend an email marked `uncertain`.
-- **Host supervision:** `pyracast-watchdog.timer` runs independent checks (capacity,
-  backup age, restore rehearsal, containers, delivery at most every five minutes, origin
-  certificate, origin-pull enforcement when required) within one deadline and ends each run
-  with a `pyracast_watchdog_heartbeat` whose
-  `state` is `ok`, `blocked`, `unit_failed` or `lock_busy`; a missing heartbeat
-  alerts. It restarts application containers only under the release lock and never
-  restarts or starts a stopped PostgreSQL or RabbitMQ; it only recreates missing
-  ones. The watchdog, backup and rehearsal units ship in
-  `deploy/systemd/` and are installed by each release and at boot; change them there,
-  not on the host.
-- **Planned host maintenance:** run `sudo systemctl stop pyracast` and wait before
-  restarting Docker, rebooting or stopping the VM. Workers get 660 seconds for
-  their existing 600-second drain and broker cleanup. Google host failure or a
-  forced console stop can interrupt that budget; DB leases and idempotency recover
-  safe work. No configuration can promise graceful completion after host failure.
-- **Failed deployment:** before stopping anything, the installer durably creates
-  `/var/lib/pyracast/release-blocked`; a first deployment initializes PostgreSQL
-  under the same block. Even after an abrupt host restart, systemd refuses automatic
-  application startup while this marker exists. Application containers retry
-  process failures up to five times; they rely on systemd for host startup so Docker
-  cannot bypass the migration block. "A release that fails during maintenance"
-  below says what each failure leaves and how to recover. A rerun of the verified
-  release after remediation also clears the marker on success. Never use
-  `migrate --fake` or automatically reverse migrations.
-- **Account erasure** cannot be undone. In the `api` container, `pyracast erase_account
-  --account ID` is a dry run that lists the rows erasure would change; take a backup
-  (`sudo systemctl start pyracast-backup.service`, then check the upload), then add
-  `--execute`. It anonymizes the account in place and refuses while the account
-  administers a workspace or is the last active platform administrator. The dry run
-  briefly takes the same locks as the erasure; a run that meets a held lock changes
-  nothing and says to run it again. An address another account holds verified is left out
-  (both runs print how many): its mail, invitations, sessions and cache entries age out
-  with retention or expiry, while its reminder entries that other members or an
-  administrator still hold and its delivery recipient rows stay. Backups keep the erased
-  data until they expire.
-- **Rollback:** prefer a reviewed Git revert on `main`, successful CI and Release.
-  This deploys the former behavior with the current database. Only do this after
-  confirming schema compatibility. An incompatible schema change needs a forward
-  fix or explicit database restore; moving an image tag does not undo a database.
-- **Backups:** the host's hourly timer uploads a custom-format PostgreSQL dump to
-  the private backup bucket; each release requires another successful dump before
-  migration, which `backup.py --kind prerelease` takes only under the release lock its
-  installer passes (`--lock-fd`). The hourly backup waits up to ten minutes for the
-  release lock and reports `pyracast_backup_skipped` when a release keeps the lock or stays blocked;
-  that skip exits 75, which `pyracast-backup.service` counts as success, while any
-  other failure leaves the unit failed.
-  The lock is `/var/lib/pyracast/release.lock` (root only), shared with the watchdog,
-  the reset tool and the stop of `pyracast.service`. Hourly backups and releases
-  exclude each other through it from the dump to the replacement of
-  `/var/lib/pyracast/last-backup.json`, so the pointer always names the newest
-  snapshot, with the row count of every table in the dump's snapshot and the boot
-  uptime it was written at: freshness is judged on uptime, which a clock correction
-  cannot move, and a backup of an earlier boot counts as at least as old as this boot.
-  A release waits up to its 300-second lock timeout for a running backup and
-  otherwise stops without changing anything. A dump stops before its disk has less
-  than 5 percent free. The bucket keeps object versions:
-  lifecycle cleanup deletes every generation seven days after its creation
-  (asynchronously), so a deleted or replaced dump stays recoverable until then. Find it
-  with `gcloud storage ls --all-versions gs://BUCKET/OBJECT` and copy
-  `gs://BUCKET/OBJECT#GENERATION` back to `gs://BUCKET/OBJECT`. Every read and write
-  of the bucket is in the Cloud Storage Data Access audit log. Check the last
-  successful upload, not just timer activation. A one-hour recovery point depends on successful hourly backups;
-  failures increase possible data loss, and there is no WAL/PITR recovery. Keep
-  the external encryption key separately. After restoring an older request ledger, suspend
-  provider collection for the remaining UTC quota day unless its complete ledger
-  can be recovered. A data disk or VM snapshot alone is not an off-host logical
-  backup or a restore test.
-- **Restore rehearsal:** `pyracast-rehearsal.timer` runs `deploy/rehearsal.py` an hour
-  after boot and every Sunday at 03:00. Without the release lock, it restores the backup
-  the pointer names, with its roles, owners and privileges, into a throwaway PostgreSQL
-  without network beside the site (bounded in memory, CPU, disk and one hour, and
-  removed on every exit), compares every table's row count with the pointer's, runs
-  `migrate --check` (`--plan` for a pre-release dump) and requires a stored secret to
-  decrypt. The outcome, with the recovery time or the failed step, goes to
-  `/var/lib/pyracast/last-rehearsal.json` and the operations log; the watchdog reports
-  a failed rehearsal, or none passed within eight days of uptime. A host without that
-  file starts the eight days at the watchdog's first check after the units are installed.
-  One rehearsal reads one release directory from start to end; everything it starts
-  carries the `pyracast.rehearsal` label. Run one at once with
-  `systemctl start pyracast-rehearsal.service`.
-- **Optional backup protection** is off until set in `terraform.tfvars` and applied.
-  `backup_retention_days` (up to 7): days each backup generation cannot be permanently
-  deleted, by an unlocked retention policy; an overwrite or a delete still makes the live
-  object noncurrent. No extra storage cost: the lifecycle keeps every generation seven
-  days anyway. `data_disk_snapshot_days` (up to 7) takes a daily data-disk snapshot and
-  `backup_daily_tier = true` keeps the first hourly backup of each UTC day for 30 days
-  under `daily/` once the startup script has run again; both cost storage. The daily tier
-  breaks the published seven-day statement: change
-  `web/src/features/public-site/legal-copy.ts` first. To restore a `daily/` object with
-  the helper, copy it to a `postgres/` name.
-- **Key rotation:** `deploy/host_secrets.py rotate` changes the local file (the
-  secret key keeps the previous one as its first fallback); add it as a numeric runtime
-  secret version, update Terraform's `runtime_secret_version`, apply it, and run the VM
-  startup script (it restarts nothing) to refresh `/etc/pyracast/host.json`, then
-  redeploy `main`: run CI on `main`; if its automatic Release skipped the
-  deployment ("Nothing to release"), dispatch Release while that run's image
-  artifact is unexpired (see the redeploy steps under the release procedure).
-  Django encryption rotation keeps the old key in `PYRACAST_SECRET_KEY_FALLBACKS`;
-  after that release, run `pyracast reencrypt_secrets --verify` in the `api`
-  container and remove the old key only once `pyracast check_secrets
-  --require-primary` exits 0: `deploy/host_secrets.py drop-fallbacks`, then add and
-  release that runtime secret version as above. Every release refuses, before maintenance, a key set
-  that cannot read a stored secret. `check_secrets` exits 1 when a secret is
-  unreadable or malformed (it names the rows, never values) and 2 under
-  `--require-primary` when one still needs a fallback key; `reencrypt_secrets` exits
-  1 or 2 for the same causes and then commits nothing. RabbitMQ's `RABBITMQ_DEFAULT_PASS`
-  only initializes a new data directory: existing broker passwords require a
-  coordinated `rabbitmqctl change_password` and application restart. Never delete
-  the broker data volume to rotate a password. A database password changed in the
-  secrets reaches its SQL role with the next release: the owner's in preflight (the
-  serving release does not use it), while the runtime role's password changes only after
-  that release has stopped the serving API and web servers, together with the secret
-  the new release starts with; a release that fails before `migrate` starts the
-  previous release with that secret too.
-- **Patching and storage:** review weekly Dependabot PRs, rebuild and test images;
-  exact image digests do not update themselves. The daily `Image rescan` workflow
-  rebuilds the release images from `main` and scans them; with
-  `image_rescan_reader = true` applied and the repository variable `GCP_IMAGE_RESCAN`
-  set to `terraform -chdir=infra/terraform output -raw image_rescan_setting`, it scans the deployed
-  `production` digests instead. A failed run needs an image update. Review Ubuntu security updates and
-  pinned Docker/Compose/PostgreSQL versions during planned maintenance. PostgreSQL
-  major upgrades need a separately rehearsed dump/restore or `pg_upgrade` procedure.
-  Each release keeps the serving and the previous release with their images and
-  removes the rest (the next one does while a rehearsal runs); never run volume
-  pruning in production. Monitor registry/backup/log retention and adjust
-  deliberately to control cost.
+Inspect the host from `/opt/pyracast/current` as root with
+`docker compose --env-file deploy/release.env -f deploy/compose.yaml` (`compose` below):
+`compose ps`, `compose logs --tail 100 SERVICE` and `journalctl -u pyracast.service`. Never run
+`compose config` without `--quiet` or print container environments: they hold secrets.
+
+- **Health and logs:** `/health/live/` is process liveness; `/health/ready/` also checks
+  PostgreSQL and is the uptime check. Container output goes to Cloud Logging through `gcplogs`.
+  The other containers log non-blocking and can drop lines under pressure; the API logs in
+  blocking mode, so every write of the API to stdout and stderr waits for the logging driver,
+  which can still drop entries when its own buffer overflows. A 500 `server_error` answer
+  carries a `request_id`: search for its `api_server_error` line; a 503 `request_timeout`
+  reference names an `api_request_timeout` line. `pyracast.security` lines are also kept 365
+  days in the log bucket `pyracast-security`
+  ([audit-trail](flows/audit-trail.md)); read older ones with
+  `gcloud logging read 'FILTER' --bucket=pyracast-security --location=REGION --view=_AllLogs --freshness=365d`.
+  Alert policies live in `infra/terraform/monitoring.tf`; the release does not apply Terraform,
+  so after a change there run `plan` and `apply`.
+- **Background delivery:** HTTP readiness does not prove the dispatcher or the queues. The
+  watchdog runs `pyracast check_delivery_health` in `api` at most every five minutes; run it by
+  hand and read the administration Operations screen. Never resend an email marked `uncertain`
+  automatically.
+- **Host supervision:** `pyracast-watchdog.timer` checks capacity, release block, backup age,
+  restore rehearsal, the service unit, containers, delivery, the origin certificate and origin
+  pulls, and ends each run with a heartbeat. It restarts failed application containers only under
+  the release lock and never restarts a stopped PostgreSQL or RabbitMQ; it only recreates missing
+  ones. The watchdog, backup and rehearsal units ship in `deploy/systemd/` and are installed by
+  each release and at boot: change them there, not on the host.
+- **Planned host maintenance:** run `sudo systemctl stop pyracast` and wait for it before
+  restarting Docker, rebooting or stopping the VM; workers get 660 seconds to drain. A host
+  failure or forced stop can cut that short; leases and idempotent jobs recover the work.
+- **Failed deployment:** before stopping anything the installer creates
+  `/var/lib/pyracast/release-blocked`, and `pyracast.service` refuses to start while it exists,
+  also after a reboot. Application containers restart on failure at most five times and are
+  started on boot only by that unit, so Docker cannot bypass the block. See "A release that fails
+  during maintenance". Never use `migrate --fake` or reverse migrations automatically.
+- **Rollback:** release a reviewed revert on `main` after confirming that the former code fits
+  the current schema. An incompatible schema needs a forward fix or a database restore; moving an
+  image tag does not undo a database.
+- **Account erasure** cannot be undone. In `api`, `pyracast erase_account --account ID` is a dry
+  run that lists what would change; take a backup
+  (`sudo systemctl start pyracast-backup.service`, then check its upload), then add `--execute`.
+  Backups keep the erased data until they expire ([account-erasure](flows/account-erasure.md)).
+- **Backups:** `pyracast-backup.timer` uploads an hourly custom-format dump; each release takes
+  another under its own lock before migrating. Releases, hourly backups, the watchdog's
+  recovery, the reset tool and the stop of `pyracast.service` share the root-only lock
+  `/var/lib/pyracast/release.lock`; the hourly backup waits up to ten minutes for it and skips
+  when it stays held or a release is blocked (exit 75, a success for the unit). `/var/lib/pyracast/last-backup.json` names
+  the newest verified dump. Check the last successful upload, not the timer. The bucket keeps
+  object versions and its lifecycle deletes every generation seven days after creation: find a
+  deleted or replaced dump with `gcloud storage ls --all-versions gs://BUCKET/OBJECT` and copy
+  `gs://BUCKET/OBJECT#GENERATION` back to `gs://BUCKET/OBJECT`. Bucket reads and writes are in the
+  Cloud Storage Data Access audit log. After restoring an older provider request ledger, keep
+  provider collection off for the rest of that UTC quota day unless its ledger can be recovered.
+  A disk or VM snapshot is not an off-host logical backup.
+- **Restore rehearsal:** `pyracast-rehearsal.timer` runs `deploy/rehearsal.py` an hour after boot
+  and every Sunday at 03:00. It restores the dump `last-backup.json` names into a throwaway
+  PostgreSQL without network, compares every table's row count, runs `migrate --check` (`--plan`
+  for a pre-release dump) and requires a stored secret to decrypt; the outcome goes to
+  `/var/lib/pyracast/last-rehearsal.json`. The watchdog reports a failed rehearsal, or none passed
+  within eight days of uptime. Run one now with `systemctl start pyracast-rehearsal.service`.
+- **Optional backup protection**, off until set in `terraform.tfvars` and applied:
+  `backup_retention_days` (up to 7) forbids permanent deletion of each generation for that many
+  days at no extra storage cost; `data_disk_snapshot_days` (up to 7) takes a daily data-disk
+  snapshot; `backup_daily_tier = true` keeps the first hourly backup of each UTC day for 30 days
+  under `daily/` once the startup script has run again. The daily tier breaks the published
+  seven-day statement: change `web/src/features/public-site/legal-copy.ts` first. To restore a
+  `daily/` object with the reset tool, copy it to a `postgres/` name.
+- **Key rotation:** `deploy/host_secrets.py rotate secret-key|runtime-password|owner-password`
+  changes the local file. A runtime change (`secret-key`, `runtime-password`, and `set`, `unset`
+  or `drop-fallbacks`) is uploaded as a new version of `pyracast-runtime`; set
+  `runtime_secret_version` to it, apply, run the startup script to refresh `host.json` and
+  redeploy `main` at once: the next start of `pyracast.service` reads the new version.
+  `owner-password` is uploaded as a new version of `pyracast-migration`; set
+  `migration_secret_version` and the `GCP_MIGRATION_SECRET_VERSION` variable to it, apply and
+  redeploy `main`: only the release reads the migration secret. The release sets the owner's
+  password before maintenance and the runtime role's once API and web have stopped. A new
+  secret key keeps the old one first in `PYRACAST_SECRET_KEY_FALLBACKS`; after that release run
+  `pyracast reencrypt_secrets --verify` in `api`, and once `pyracast check_secrets
+  --require-primary` exits 0, run `host_secrets.py drop-fallbacks` and release it as a runtime
+  change (upload, `runtime_secret_version`, apply, startup script, `main`).
+  `check_secrets` exits 1 when a secret is unreadable or malformed and 2 under
+  `--require-primary` when one still needs a fallback; `reencrypt_secrets` exits 1 or 2 for the
+  same causes and commits nothing. Every release refuses, before maintenance, a key set that
+  cannot read a stored secret. `RABBITMQ_DEFAULT_PASS` and `POSTGRES_PASSWORD` only initialize a
+  new data directory, so `rotate` refuses them: change them in a planned maintenance
+  (`rabbitmqctl change_password` and an application restart for the broker), never by deleting
+  a data volume ([encryption-key-rotation](flows/encryption-key-rotation.md)).
+- **Patching:** review the weekly Dependabot pull requests; image digests do not update
+  themselves. The daily `Image rescan` workflow scans images rebuilt from `main`, or the deployed
+  `production` digests once `image_rescan_reader = true` is applied and the repository variable
+  `GCP_IMAGE_RESCAN` holds `terraform -chdir=infra/terraform output -raw image_rescan_setting`; a
+  failed run needs an image update. Review Ubuntu updates and the pinned Docker packages in
+  planned maintenance. A PostgreSQL major upgrade needs its own rehearsed dump and restore. Never
+  prune volumes in production.
+
+### App worker
+
+A browser that opened the app keeps the service worker served at `/app/sw.js`
+(`web/public/app/sw.js`) until a successful update check installs another script. A document
+navigation under `/app/` asks for the address (a move inside an open window does not); a check
+that fails, offline, on an answer other than the script or on a script that does not run, leaves
+the installed worker until a later check succeeds. So every release serves the address, and the
+release a failed one falls back to serves it as well, since every release from the installable
+app on does. The address answers `text/javascript` with `no-store` and its own policy; the
+container smoke pins those headers, the manifest and the icons.
+
+- **Withdrawal:** a release whose change is exactly these edits:
+  1. move `web/public/app/sw.js` with `git mv` to `sw-previous.js` in `web/testing/`; it keeps the worker that browsers hold, which
+     the proof installs first;
+  2. `cp web/testing/sw-withdraw.js web/public/app/sw.js` serves the script that unregisters itself;
+  3. remove the registering component `worker-registration.tsx` in `web/src/lib/` with `git rm`,
+     and its import and `<WorkerRegistration />` from `web/src/app/app/layout.tsx`.
+
+  `web/tests/support/worker-state.ts` reads an address serving `sw-withdraw.js` as the withdrawn
+  state, and the model test and `npm run test:production` then prove it: a fresh visit registers
+  nothing, and a browser holding the previous worker loses its registration at its next successful
+  update check and keeps its open window. A revert of the withdrawal commit makes the worker active
+  again.
+- **Rollback:** a revert of the faulty change through CI and Release, never an older image and
+  never a revert of the worker as a whole.
+- **Watch:** CSP reports for `worker-src` and the status of `/app/sw.js` and the manifest. A device
+  without a connection rightly shows the notice, and a report keeps only the blocked origin and the
+  first segment of the page's path, so a notice or a `worker-src` report starts a withdrawal or a
+  rollback only when an online client confirms it while `/health/ready/` is green.
 
 ### Alert events
 
 The host scripts write these events to the `pyracast-operations` log; `deploy/operations_events.py`
-holds the list and the alerted ones have a policy in `monitoring.tf`. Lines carry ids, states and
-counts only. `sudo python3 /opt/pyracast/current/deploy/operations_events.py --test-alert EVENT`
-writes one sample line with `test: true` and changes nothing else; it exits 1 when the line could
-not be written. Never delete `release-blocked` by hand.
-
-Every alerted event has its own log-match policy, with its own hourly notification limit and a text
-pointing to its row below. Once Google charges for alerting (no sooner than 2027-09-01), each
-log-based policy costs 0.35 USD a month. Repeated restarts alert on a count instead: see
-`pyracast_runtime_restarted`. An alert on a count of lines (repeated restarts, each security
-alert) closes by itself once its window holds no line, so a later burst alerts again. Its window
-is a minute longer than it says (an hour, ten minutes), because the condition must hold for the
-minute Monitoring retests it; so the lines of the full hour or ten minutes count. The
-policies on counters (repeated restarts, the heartbeat, each security alert) then cost 0.35 USD a
-month each for their metric reference plus 0.50 USD per million points their condition returns,
-far below one cent a day for their one series; a log-match condition returns no points. A test alert of an event with its own policy opens an incident on
-that policy and uses its hourly notification limit; a test alert of any other event only writes
-the log line. Test lines never count as a watchdog heartbeat or a restart.
+holds the list with each event's severity and alert. A `match` event has its own log-match policy
+in `monitoring.tf` with at most one notification an hour; `pyracast_runtime_restarted` alerts
+through a threshold on its log-based metric, the heartbeat through its absence, and every other
+event raises no alert. Lines carry ids, states and counts only.
+`sudo python3 /opt/pyracast/current/deploy/operations_events.py --test-alert EVENT` writes one
+sample line with `test: true` and changes nothing else; it exits 1 when the line could not be
+written. A test line of an alerted event opens an incident on its policy; test lines never count
+as a heartbeat or a restart. Never delete `release-blocked` by hand.
 
 | Event | Means | Check first | Recover |
 | --- | --- | --- | --- |
-| `pyracast_watchdog_heartbeat` | One watchdog run ended; `state` says how. Its absence for 15 minutes alerts | `systemctl status pyracast-watchdog.timer` | Start the timer; a down VM needs a start |
-| `pyracast_watchdog_step_failed` | One watchdog check (`step`) timed out or raised; the line names only the step, the outcome and the error type | The other lines of the same run | Run that step by hand as listed below the table to see its error; the other checks still ran |
-| `pyracast_host_capacity` | Disk or memory is low | `df -h`, `free -m` | Free or grow the disk; find the process holding memory |
-| `pyracast_runtime_unhealthy` | A container stays unhealthy after the restart, PostgreSQL or RabbitMQ is unhealthy (`services`), or `pyracast.service` is failed or inactive while no release or stop holds the release lock (`unit_state`) | `docker compose ... ps`, `logs --tail 100 SERVICE`; `systemctl status pyracast.service` | Fix the cause; `systemctl restart pyracast` once it is gone |
+| `pyracast_watchdog_heartbeat` | One watchdog run ended; `state` is `ok`, `blocked`, `unit_failed` or `lock_busy`. Its absence for 15 minutes alerts | `systemctl status pyracast-watchdog.timer`, `journalctl -u pyracast-watchdog.service` | Start the timer; a down VM needs a start |
+| `pyracast_watchdog_step_failed` | One watchdog check (`step`) timed out or raised; the line names the step, the outcome and the error type | The other lines of the same run | Run that step by hand as listed below the table; the other checks still ran |
+| `pyracast_host_capacity` | A disk has less than 15 percent free or memory less than 10 percent available | `df -h / /var/lib/pyracast`, `free -m` | Free or grow the disk; find the process holding memory |
+| `pyracast_runtime_unhealthy` | A container stays unhealthy after the restart, PostgreSQL or RabbitMQ is unhealthy (`services`), or `pyracast.service` is failed or inactive while no release or stop holds the release lock (`unit_state`) | `compose ps`, `compose logs --tail 100 SERVICE`, `systemctl status pyracast.service` | Fix the cause; `systemctl restart pyracast` once it is gone |
 | `pyracast_runtime_restarted` | The watchdog restarted `services` and they recovered. One line notifies nobody; three runs that restart containers within an hour raise the repeated-restarts alert (counted in total, not per service). A test alert writes a test line, which that count leaves out, so it can neither raise nor hide the alert | The container's last exit: `docker inspect --format '{{.State.ExitCode}} {{.State.OOMKilled}} {{.State.FinishedAt}}' CONTAINER`; memory: `free -m`, `docker stats --no-stream`; the release that preceded the first restart: the release log, `readlink /opt/pyracast/current` | Fix what the exit names; if the loop began with a release, release a fix or revert |
 | `pyracast_delivery_unhealthy` | The delivery health check failed: `alarms` with counts, `dispatch_phases`, `broker_unreachable`, `missing_queues`; `outcome: unreadable` when it printed no report | The Operations page, `pyracast check_delivery_health` in `api` | Restart the worker or dispatcher it names; correct the data the check lists |
-| `pyracast_release_blocked` | A release has kept the site in maintenance for `hours` since the attempt that began the block; the marker records its revision and UTC start, which later attempts keep | "A release that fails during maintenance" below, the release log | Rerun the verified release or follow the printed recovery |
-| `pyracast_certificate_expiring` | The origin certificate renewal is failing | Gateway logs, port 80 reachability | Fix the ACME challenge; the gateway renews by itself |
-| `pyracast_origin_pull_unenforced` | Port 443 accepts a handshake without the edge certificate | Gateway logs, its edge TLS option | Redeploy the release; check `origin_pull_ca` |
+| `pyracast_release_blocked` | A release has kept the site in maintenance for `hours` since the attempt that began the block | "A release that fails during maintenance", the release log | Rerun the verified release or follow the printed recovery |
+| `pyracast_certificate_expiring` | The origin certificate has less than a quarter of its lifetime left: renewal is failing | Gateway logs, port 80 reachability | Fix the ACME challenge; the gateway renews by itself |
+| `pyracast_origin_pull_unenforced` | Origin pulls are required, but port 443 accepts a handshake without the edge certificate | Gateway logs, `python3 /opt/pyracast/current/deploy/probe_origin_pull.py DOMAIN` | Redeploy the release; check `origin_pull_ca` |
 | `pyracast_backup_succeeded` | A dump was uploaded | None | None |
 | `pyracast_backup_skipped` | A release held the lock or stayed blocked | Whether a release runs | None; the next hour backs up |
-| `pyracast_backup_failed` | A dump failed, was stopped, or the last verified one is older than 90 minutes | `journalctl -u pyracast-backup.service`, the bucket | Fix the cause; `systemctl start pyracast-backup.service`; release nothing before one succeeds |
+| `pyracast_backup_failed` | A dump failed or was stopped, or the last verified one is older than 90 minutes of uptime | `journalctl -u pyracast-backup.service`, the bucket | Fix the cause; `systemctl start pyracast-backup.service`; release nothing before one succeeds |
 | `pyracast_backup_setting_invalid` | `daily_backups` in `/etc/pyracast/host.json` is neither true nor false. An hourly run ends failed: one that took its backup kept it, a skipped one took none; a pre-release backup only warns | The file and `backup_daily_tier` in Terraform | Rewrite the file from Terraform's value with `sudo google_metadata_script_runner startup` |
 | `pyracast_backup_daily_copied` | The day's first backup was copied under `daily/` | None | None |
 | `pyracast_backup_daily_copy_failed` | The hourly dump succeeded, its daily copy did not (`error`) | The bucket and its IAM | The next hour retries |
 | `pyracast_rehearsal_passed` | A restore rehearsal passed | None | None |
-| `pyracast_rehearsal_failed` | A rehearsal failed in `step` | `journalctl -u pyracast-rehearsal.service` | Fix the step; `systemctl start pyracast-rehearsal.service` |
-| `pyracast_rehearsal_unhealthy` | The last rehearsal failed or none passed within eight days | `/var/lib/pyracast/last-rehearsal.json` | As for `pyracast_rehearsal_failed` |
-| `pyracast_secrets_failed` | A release's environment files were not prepared (`category`, `secret`) | The release log, `journalctl -u pyracast.service` | Fix the secret version or permission it names; release again |
+| `pyracast_rehearsal_failed` | A rehearsal failed in `step`; the watchdog then reports `pyracast_rehearsal_unhealthy` | `journalctl -u pyracast-rehearsal.service` | Fix the step; `systemctl start pyracast-rehearsal.service` |
+| `pyracast_rehearsal_unhealthy` | The last rehearsal failed or none passed within eight days of uptime | `/var/lib/pyracast/last-rehearsal.json` | As for `pyracast_rehearsal_failed` |
+| `pyracast_secrets_failed` | The environment files of a release, a service start or the reset tool were not prepared (`category`, `secret`) | The release log, `journalctl -u pyracast.service` | Fix the secret version or permission it names; release again |
 
 A failed watchdog step by hand, in `/opt/pyracast/current` with
 `compose=(docker compose --env-file deploy/release.env -f deploy/compose.yaml)`:
@@ -686,147 +459,101 @@ A failed watchdog step by hand, in `/opt/pyracast/current` with
 - `certificate`: `openssl s_client -connect 127.0.0.1:8443 -servername DOMAIN </dev/null | openssl x509 -noout -dates`.
 - `origin_pull`: `python3 deploy/probe_origin_pull.py DOMAIN --attempts 1`.
 
+### Other alerts
+
+| Alert | Means | Do |
+| --- | --- | --- |
+| HTTPS readiness failure | `/health/ready/` failed from at least two checker locations for five minutes | Check the VM, PostgreSQL and the latest release; check `/var/lib/pyracast/release-blocked` before restarting anything |
+| Watchdog heartbeat missing | No heartbeat for fifteen minutes | As for `pyracast_watchdog_heartbeat` |
+| Repeated container restarts | Three watchdog runs within an hour restarted containers | As for `pyracast_runtime_restarted` |
+| Security alerts (`sign_in_lockouts`, `second_factor_lockouts`, `authorization_refusals`, `csrf_refusals`, `invitation_limits`, `proxy_headers`, `admin_factor`) | `pyracast.security` lines of that event crossed their ten-minute threshold | Read those lines in the `pyracast-security` bucket for the clients, accounts or workspaces involved; for `proxy_headers` check the gateway and the peer address; for `admin_factor` confirm that the change was planned |
+
 ## Database reset and restore
 
-`deploy/reset_database.py` runs as root on the VM under the host's Python 3 and the
-standard library. Every subcommand takes the release lock without waiting, refuses
-before it changes anything unless the step before it verifiably succeeded, prints one
-`==>` line per step and ends by printing the next command. Exit status 0 means done,
-2 means refused ("Refused: ... No data was changed."), 1 means a step failed and 130
-means interrupted; both of the last name the command to run next. Run the commands
-inside `tmux` so that a dropped IAP session does not interrupt them.
+`deploy/reset_database.py` runs as root on the VM under the host's Python 3. Every subcommand
+takes the release lock without waiting, refuses before it changes anything unless the step before
+it verifiably succeeded, prints one `==>` line per step and ends with the next command. Exit 0
+means done, 2 refused ("Refused: ... No data was changed."), 1 a failed step and 130 an
+interruption; both of the last print the command to run next. Run it inside `tmux`, so a dropped
+IAP session does not interrupt it. The mechanism and every refusal are in
+[database-reset-and-restore](flows/database-reset-and-restore.md).
 
-`prepare` writes a maintenance identity into `/var/lib/pyracast/release-blocked` and
-records it in `/var/lib/pyracast/reset/session.json` with the verified object. The
-session belongs to that maintenance only: the installer keeps the marker's content
-and removes the marker after a successful release, so a later maintenance starts
-without one. Whoever changes the database during a maintenance first marks the
-session replaced, naming the object that holds the data the previous release served:
-`reset` and `restore` do, and so does a release before its `migrate` ("A release that
-fails during maintenance"). `reset` runs only on the object of the current session;
-once the session is replaced, `abort`, `prepare` and a `restore` of any other object
-refuse and name the `restore` command for that object.
+| Subcommand | Does |
+| --- | --- |
+| `prepare` | With the site ready and no marker: writes the marker with a new session identity, stops the application (the gateway keeps the maintenance notice), dumps the database, uploads it as `postgres/<stamp>-prereset-<uuid>.dump`, verifies it in a throwaway PostgreSQL against the live row counts, exports and uploads the Solcast snapshots, and prints the objects, their SHA-256, the release, its images and the runtime secret version |
+| `abort` | While the database is unchanged in this maintenance: checks `migrate --check` of the release in `/opt/pyracast/current`, starts it, probes readiness and removes the marker |
+| `reset --confirm OBJECT` | With the session's archive and export unchanged and no application container: purges every queue, drops and recreates database `pyracast`, applies `deploy/bootstrap.sql` and checks both roles. The marker stays |
+| `restore --confirm OBJECT` | Restores a verified archive (the host's copy, or downloaded and checked against the bucket) with owners and privileges, compares the row counts, checks the roles and `migrate --check`, starts the release in `/opt/pyracast/current` and removes the marker. Once the database changed in this maintenance it accepts only the session's object |
 
-| Subcommand | Requires | Does |
-| --- | --- | --- |
-| `prepare` | the release lock is free, no `release-blocked` marker, the site answers `/health/ready/` | writes the marker, stops the application in the installer's order (PostgreSQL, RabbitMQ and the gateway with its maintenance notice stay up), dumps the database into `/var/lib/pyracast/reset/`, uploads it as `postgres/<stamp>-prereset-<uuid>.dump`, restores it into a throwaway PostgreSQL without network, compares every table's row count with the live database, exports the Solcast forecast snapshots with their site parameters as `<archive>.solcast.jsonl.gz`, checks it against the database's count and uploads it too; records both objects' SHA-256 and the counts and opens the session; prints them with the release commit, its image digests, the runtime secret version and any earlier archives kept on the host |
-| `abort` | the marker; the session does not say the database changed in this maintenance; `migrate --check` of the release in `/opt/pyracast/current` passes on the database | writes the runtime secrets with that release, starts it with `docker compose --env-file deploy/release.env -f deploy/compose.yaml up --detach --wait`, probes `/health/ready/` and removes the marker and the session |
-| `reset --confirm OBJECT` | the marker, no running, restarting or paused application container, `OBJECT` is the session's archive and its file and Solcast export still have the recorded SHA-256, both database roles | writes the runtime secrets; purges every RabbitMQ queue, dead-letter queues included, and checks that none holds a message; marks the session replaced and syncs it; runs `DROP DATABASE pyracast WITH (FORCE)` and `CREATE DATABASE pyracast`; applies `deploy/bootstrap.sql`; checks that the owner can create a table, that the runtime role can connect and read but cannot write the migration ledger, and that the owner lost database `CREATE`. The marker stays |
-| `restore --confirm OBJECT` | the marker, no application container, `OBJECT` is the session's object once the database changed in this maintenance, a pre-reset archive's Solcast export still has the recorded SHA-256, the archive has applied migrations, both database roles | writes the runtime secrets; uses the archive `prepare` or a release kept on the host, or downloads `OBJECT` (a pre-reset archive with its Solcast export) from the backup bucket, checks each against the bucket's MD5 and size and verifies them in a throwaway PostgreSQL first; then purges the queues, recreates the database as `reset` does, restores the archive with its owners and privileges, applies `deploy/bootstrap.sql` again over the archive's privileges, compares every table's row count with the record, checks both roles and `migrate --check`, starts the release in `/opt/pyracast/current`, probes readiness and removes the marker and the session |
+When a start fails or is interrupted, `abort` and `restore` write the marker back, stop the
+application again and print every error, the state they observe and the next step.
 
-When the start, readiness or the service unit fails or is interrupted, `abort` and
-`restore` write the marker back and send each stop command of the installer's
-order, each even after an earlier step failed. Ctrl-C and SIGTERM wait until these
-steps were attempted and the report is printed (the command running at that moment
-still receives a terminal Ctrl-C and may fail), and a broken or closed console
-skips nothing and keeps the exit status. They then print every error with its
-captured output, any signal that arrived (exit status 130), the outcome of each
-stop command, the state they observe (whether the marker holds the session
-identity, which application containers still run) and the next step: the same
-command once no application container runs and the marker holds the identity,
-otherwise first the stop command or the identity to write back.
-Both render the environment files with the release they start, and after removing the
-marker they reset and start `pyracast.service`, which refused to start while it existed.
+### Reset the production database
 
-### One-time reset of the production database
+**What is gone:** every row: accounts, second factors and sessions, workspaces and invitations,
+plants, provider accounts with their keys, forecasts, the provider request ledger, observations,
+EPIAS data, calibrations, outages, change requests, reminders, audit events and rate-limit
+counters. Customers sign up again and the owner enters the provider account again; if the
+provider key was used that UTC day, the first plant is approved the next day. **What is kept:**
+host configuration, Secret Manager secrets, certificates, and the archive and Solcast export of
+step 1, whose live collections step 9 loads back.
 
-**What is gone:** every row of the database: users, second factors and sessions;
-workspaces, memberships and invitations; plants and their configurations; provider
-accounts with their encrypted keys; forecasts, the provider request ledger,
-observations, EPIAS data, calibrations, outages, change requests, reminders, audit
-events and rate-limit counters. The owner enters the provider account again and
-customers sign up again; if the provider key was used that UTC day, the first plant
-is approved the next day. **What is kept:** host configuration, Secret Manager
-secrets, certificates, and the archive and Solcast export of step 1; step 9 loads the
-export's live Solcast collections back. A restore starts the release in
-`/opt/pyracast/current` only after its `migrate --check` passes on the restored data.
+Run each command on the VM after `sudo -i`, inside `tmux`. `prepare` followed by `abort` at a
+quiet moment proves the dump, upload, verification and restart on the real host with a few
+minutes of downtime.
 
-Run each command on the VM through IAP after `sudo -i`, inside `tmux`. A dry run of
-steps 1 and 2 (`prepare`, then `abort`) at any quiet moment proves the dump, upload,
-verification and restart on the real host in about five minutes of downtime.
-
-1. Prepare. Type:
+1. Prepare:
 
    ```bash
    python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json prepare
    ```
 
-   Expect `==> Blocking automatic starts with /var/lib/pyracast/release-blocked`,
-   `==> Stopping dispatcher`, `==> Stopping worker, notifications`,
-   `==> Stopping api, web`, `==> Dumping database pyracast`,
-   `==> Uploading gs://BUCKET/postgres/...-prereset-....dump`,
-   `==> Restoring the archive into a throwaway PostgreSQL`,
-   `==> Exporting the Solcast snapshots` and its upload line, then
-   `Pre-reset archive verified: ...` with `Object:`, `SHA-256:`, `Archive:`,
-   `Solcast export:`, `Solcast SHA-256:`, `Solcast snapshots:` (0 is valid),
-   `Release commit:`, one `..._IMAGE=` line per image, `Runtime secret version:`,
-   the table and row totals and one `table count` line per table. Write these down.
-   The site is down from here. A refusal names its cause and changes nothing; any
-   later failure or an interruption ends with the `abort` command to run.
-2. To stop here instead, type the `abort` command `prepare` printed:
+   It ends with `Pre-reset archive verified: ...` and the object, archive and export lines;
+   write them down. The site is down from here. A later failure prints the `abort` command.
+2. To stop here instead:
 
    ```bash
    python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json abort
    ```
 
-   Expect `==> Writing the runtime secrets with /opt/pyracast/current/deploy/runtime_secrets.py`,
-   `==> Checking that the release in /opt/pyracast/current has every migration it needs applied`,
-   `==> Starting the release in /opt/pyracast/current` and
-   `The previous release serves again and the marker is removed.` After a dry run,
-   copy and verify its archive as in step 3 before deleting it in step 10.
-3. Copy both objects, the archive and the Solcast export, off the host and out of
-   the bucket's seven-day lifecycle, on your own machine:
-   `gcloud storage cp gs://BUCKET/OBJECT gs://BUCKET/EXPORT .`, then check that
-   `sha256sum` (Windows: `Get-FileHash -Algorithm SHA256`) shows each printed
-   SHA-256. The archive's provider keys decrypt only with the printed runtime
-   secret version.
-4. Reset. Type the command `prepare` printed, with the object name exactly as shown:
+   It ends with
+   `The previous release serves again and the marker is removed. Nothing else to do.`
+   The archive and export of step 1 stay in `/var/lib/pyracast/reset`; delete the directory as in
+   step 10 once you no longer need them.
+3. On your own machine, copy both objects out of the bucket's seven-day lifecycle:
+   `gcloud storage cp gs://BUCKET/OBJECT gs://BUCKET/EXPORT .`, and check that `sha256sum`
+   (Windows: `Get-FileHash -Algorithm SHA256`) shows each printed SHA-256. The archive's provider
+   keys decrypt only with the printed runtime secret version.
+4. Reset, with the object name exactly as printed:
 
    ```bash
    python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json reset --confirm OBJECT
    ```
 
-   Expect the runtime secrets line, `==> Purged N queues: ...`,
-   `==> Dropping and recreating database pyracast`,
-   `==> Applying deploy/bootstrap.sql`,
-   `==> Checking the owner and runtime roles`, then
-   `Database pyracast is empty, provisioned and reachable by both roles.`, the note
-   that the marker stays, and the `restore` command for step 6.
-5. Release: **Actions → Release → Run workflow → main**. It needs an unexpired
-   image artifact of the current `main` commit's CI run (one day); otherwise run
-   **Actions → CI → Run workflow → main** first. The installer migrates the empty
-   database, starts the services, probes readiness and removes the marker, which
-   ends the session.
-6. Only if step 5 fails before promotion, type the `restore` command `reset`
-   printed. That is the case when `/var/lib/pyracast/release-blocked` still exists
-   and `readlink -f /opt/pyracast/current` still names the release that served
-   before the reset, whether the run failed in preflight (no "Release failed during
-   maintenance." line) or later. Use the object of step 1, never the one in
-   `last-backup.json`: once the release has taken its own backup, that is a dump of
-   the empty database.
+   It ends with `Database pyracast is empty, provisioned and reachable by both roles.` and the
+   `restore` command for step 6.
+5. Release: **Actions → Release → Run workflow → main** (with an unexpired CI artifact of the
+   current `main` commit, otherwise run CI first). The installer migrates the empty database,
+   starts the services and removes the marker.
+6. Only if step 5 fails before promotion (`/var/lib/pyracast/release-blocked` still exists and
+   `readlink -f /opt/pyracast/current` still names the release that served before), run the
+   `restore` command `reset` printed, with the object of step 1, never the one in
+   `last-backup.json`, which may be a dump of the empty database:
 
    ```bash
    python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json restore --confirm OBJECT
    ```
 
-   Expect the runtime secrets line, the purge, recreate and role lines of step 4,
-   `==> Restoring <archive> with owners and privileges`, `==> Applying
-   deploy/bootstrap.sql` again, the role and migration check lines,
-   `==> Starting the release in /opt/pyracast/current`, and
-   `OBJECT is restored and the previous release serves again; the marker is removed.`
-   Production then serves the previous release with its data. A failure after
-   promotion prints "Release SHA is serving" instead: the new release already serves
-   the newly migrated database and the marker is gone, so `restore` refuses; run the
-   command the log names to finish the release. The erased data stays in the archive
-   of step 1.
-7. Create the first administrator as in "Create the administrator and verify the
-   service" above.
-8. The watchdog may report `last_verified_backup_older_than_90_minutes` once after
-   a long maintenance, until the next hourly backup.
-9. The provider's live endpoint reaches back only seven days. Once the plant's Solcast
-   binding is approved again with the same site and settings and its historical file is
-   imported, restore the export's live collections from `/opt/pyracast/current`, first
-   with `--dry-run`, then without it (`EXPORT` is the export of step 1 or your copy):
+   It ends with `OBJECT is restored and the previous release serves again; the marker is
+   removed.` A failure after promotion prints "Release SHA is serving" instead: run the command
+   it names to finish the release.
+7. Create the first administrator as in "Create the administrator and verify the service".
+8. The watchdog may report `last_verified_backup_older_than_90_minutes` once after a long
+   maintenance, until the next hourly backup.
+9. Once the plant's Solcast binding is approved again with the same site and settings and its
+   historical file is imported, load the export's live collections back from
+   `/opt/pyracast/current`, first with `--dry-run`, then without it (`EXPORT` is the export of
+   step 1 or your copy):
 
    ```bash
    docker compose --env-file deploy/release.env -f deploy/compose.yaml exec -T api \
@@ -834,85 +561,61 @@ verification and restart on the real host in about five minutes of downtime.
      --region-id REGION --binding-id BINDING --export - --dry-run < EXPORT
    ```
 
-   The export carries each snapshot's availability and job row. Each forecast and
-   estimated-actuals snapshot becomes a native collection of the binding, available from
-   its exported time, its job stored as it was (slot, target date, availability, retry
-   bound, attempts, last error). The summary names per
-   endpoint what is restored or skipped and why, and per local day whether native
-   estimated actuals are complete. A live row of another site or with other settings
-   refuses the whole run, naming the settings; a second run adds nothing. When the
-   provider site is the same and only its installation date was entered differently on
-   the new binding, add `--accept-recorded-difference installation_date` to both runs:
-   the summary and each restored row record both values. Never accept it when the
-   provider site's settings really changed. Imports and scaled copies are
-   skipped: import the source file again, and normalize the reference capacity again
-   from the restored source binding.
-10. Once your off-host copies show the printed SHA-256 values, delete the archives
-    and exports on the host; they hold every erased row:
+   The summary names per endpoint what is restored or skipped and why; a second run adds
+   nothing. When only the installation date was entered differently on the new binding, add
+   `--accept-recorded-difference installation_date` to both runs; never when the provider
+   site's settings really changed. Imports and scaled copies are not restored: import the source
+   file again and normalize the reference capacity again
+   ([provider-snapshot-restore](flows/provider-snapshot-restore.md)).
+10. Once your off-host copies show the printed SHA-256 values, delete the host copies; they hold
+    every erased row:
 
     ```bash
     rm -rf /var/lib/pyracast/reset
     ```
 
-An interrupted `prepare` is recovered with `abort`, then `prepare` again; running
-`prepare` while the marker exists refuses and names that `abort`. An interrupted
-`reset` or `restore` is run again, and a `reset` can always be followed by `restore`.
+An interrupted `prepare` is recovered with `abort`, then `prepare` again. An interrupted `reset`
+or `restore` is run again, and a `reset` can always be followed by `restore`.
 
 ### A release that fails during maintenance
 
-The Release run is red in every case below. The installer never restores an earlier
-password. A release it leaves serving runs as a restart of `pyracast.service` or a
-reboot would start it: with the secrets `/etc/pyracast/host.json` names, whose runtime
-password the runtime role has. It changes that password only while no API or web
-container runs, in a session that logs no statement text.
+The Release run is red, and the release log names the state and prints its recovery command,
+read from the maintenance session `/var/lib/pyracast/reset/session.json`. Before stopping
+anything an upgrade's installer creates the marker; right before `migrate` it records the one
+recovery point of the maintenance in that session (its own pre-release dump, kept on the host,
+or the object of a prepared reset), so recovery needs neither the bucket nor a token. On a
+failure it stops the application, and the gateway keeps the maintenance notice unless the log
+says otherwise. A failure before `migrate` of an upgrade that began without the marker starts the
+previous release again by itself.
 
-On a failure during maintenance the installer stops the application in the drain
-order. The gateway keeps the maintenance notice, unless the helper in
-`/opt/pyracast/current` predates the notice (the first upgrade to it): that helper's
-`restore` refuses beside the gateway, so the gateway and the notice stop too and the
-site is unreachable until recovery. Only if every stop succeeded does the runtime role
-get `host.json`'s secret. Before its record (below), in an upgrade that began without
-the marker, the installer then starts the previous release as `pyracast.service` does,
-probes readiness and removes the marker; a start that does not serve is stopped
-again.
+The installer never restores an earlier password: a release it leaves serving runs with the
+secrets `/etc/pyracast/host.json` names, as a restart of `pyracast.service` or a reboot would
+start it, and the runtime role's password changes only while no API or web container runs.
 
-Right before `migrate`, an upgrade records the maintenance's one recovery point in the
-helper's session (`/var/lib/pyracast/reset/session.json`): a session that holds the
-marker stays, a prepared reset's now marked replaced; without one, the database is
-unchanged in this maintenance and the session names this run's pre-release dump, which
-`backup.py` kept in `/var/lib/pyracast/reset` and the record restores into a throwaway
-PostgreSQL, compares with the dump's row counts and records for the helper. A dump
-without an applied migration is refused. A failure to record, or to keep the dump,
-exits before `migrate`. Every later run of the maintenance keeps that session and
-drops its own dump. Each run starts by deleting every pre-release file the held session
-does not name, and a run that fails before its record deletes its own dump again; while
-the session cannot be read, nothing is deleted. A successful release deletes the kept
-pre-release dumps, their records and the session file. The
-log names the state and prints its recovery, read from the session:
+| State | Marker | `current` | Running | Recovery |
+| --- | --- | --- | --- | --- |
+| Refused before the lock, the lock timed out, or preflight failed (staging, images, checks, provisioning, plan, `check_secrets`) | unchanged | unchanged | unchanged | fix the cause and release again; an earlier maintenance's recovery still applies |
+| Failed before `migrate`, previous release resumed | removed | previous | previous release | fix the cause and release again |
+| Failed; the database is unchanged in this maintenance | yes | previous | PostgreSQL, RabbitMQ and the notice, as the log says | `abort` |
+| Failed; the database changed (a release reached `migrate`, or a `reset` or `restore` ran) | yes | previous | PostgreSQL, RabbitMQ and the notice, as the log says | a forward fix, or `restore --confirm` the session's object |
+| The session file cannot be read | yes | previous | as above | none the helper accepts; the log names the file |
+| A stop or the password change failed: this row applies before the rows above | yes | previous | what `compose ps` lists | stop it, run the password command below, then the recovery of the session's row |
+| First installation failed after its marker | yes | none | PostgreSQL, the notice, as the log says | fix the cause and release again |
+| Failed after promotion | removed | new | new release | the printed command that finishes the release |
+| Killed or rebooted after the marker, before promotion | yes | previous | after a reboot PostgreSQL and RabbitMQ | release again; or stop the application, run the password command, then the recovery `python3 /opt/pyracast/releases/<release>/deploy/release_record.py /etc/pyracast/host.json recovery` prints |
+| Killed after `current` moved | yes | new | the new release, or after a reboot PostgreSQL and RabbitMQ | `bash /opt/pyracast/current/deploy/install-units.sh install /opt/pyracast/current && rm /var/lib/pyracast/release-blocked && systemctl start pyracast.service` |
 
-| State | Marker | `current` | Runtime password | Running | Recovery |
-| --- | --- | --- | --- | --- | --- |
-| Refused before the lock, or the lock timed out | unchanged | unchanged | unchanged | unchanged | none |
-| Preflight (staging, images, checks, provisioning, plan, `check_secrets`), or a first installation before its marker | none added | unchanged | unchanged | unchanged: the previous release, nothing on a first installation, or what an earlier maintenance left | fix the cause and release again; an earlier maintenance's recovery still applies |
-| Before the record, resumed | removed | previous | `host.json`'s | previous release | fix the cause and release again |
-| The session does not say the database changed in this maintenance | yes | previous | `host.json`'s | PostgreSQL and RabbitMQ unless their start failed; the notice if the log says it shows | `abort` |
-| The session says the database changed: a release reached `migrate`, or a `reset` or `restore` ran | session identity | previous | `host.json`'s | PostgreSQL and RabbitMQ unless their start failed; the notice if the log says it shows | a forward fix, or `restore --confirm` the session's object |
-| The session file cannot be read | yes | previous | `host.json`'s | PostgreSQL and RabbitMQ unless their start failed; the notice if the log says it shows | none the helper accepts; the log names the file |
-| A stop or the password change failed, at any stage: this row applies before the rows above | yes | previous | as the run left it | what `docker compose ... ps` lists | stop it, run the password command below, then the recovery of the session's row |
-| First installation, after its marker | yes | none | `host.json`'s, or not set yet | PostgreSQL unless its start failed; the notice if the log says it shows | fix the cause and release again |
-| After promotion | removed | new | `host.json`'s | new release | the printed command that finishes the release |
-| Killed or rebooted after the marker, before promotion | yes | previous | `host.json`'s once the run changed it | after a reboot PostgreSQL and RabbitMQ | release again; or stop the application, run the password command, then the recovery `python3 /opt/pyracast/releases/<release>/deploy/release_record.py /etc/pyracast/host.json recovery` prints |
-| Killed after `current` moved | yes | new | `host.json`'s | the new release, or after a reboot support only | `bash /opt/pyracast/current/deploy/install-units.sh install /opt/pyracast/current && rm /var/lib/pyracast/release-blocked && systemctl start pyracast.service` |
+The recovery commands are
+`python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json abort` and
+`python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json restore --confirm OBJECT`.
+`abort` refuses once the database changed in this maintenance or when `migrate --check` of the
+release in `current` fails; `restore` refuses while an application container runs. After
+promotion the new release serves the migrated database and `restore` refuses; the previous
+release and its images stay on the host for a reviewed rollback.
 
-A preflight refusal changes nothing the serving release reads; provisioning may have
-set the owner's password, which that release does not use. When the staged keys cannot
-read a stored secret, the run exits with `check_secrets`' status after it names the
-rows. During a key rotation `host.json` names a runtime secret the serving release does
-not run with until a release succeeds, so release right after changing it.
-
-The password command renders the release's secrets from `host.json` and needs nothing
-from `/run`, which a reboot empties; `<release>` is the release directory
-(`<sha>-<hash>`) the log names:
+The password command renders the release's secrets from `host.json` and needs nothing from
+`/run`, which a reboot empties; `<release>` is the release directory (`<sha>-<hash>`) the log
+names:
 
 ```bash
 python3 /opt/pyracast/releases/<release>/deploy/runtime_secrets.py /etc/pyracast/host.json \
@@ -923,102 +626,19 @@ python3 /opt/pyracast/releases/<release>/deploy/runtime_secrets.py /etc/pyracast
     switch-runtime /opt/pyracast/releases/<release> /run/pyracast/releases/<release>
 ```
 
-`abort` and `restore` run `python3 /opt/pyracast/current/deploy/reset_database.py
-/etc/pyracast/host.json`. `abort` starts the release in `current`; it refuses when the
-session says the database changed or that release's `migrate --check` fails on it.
-`restore --confirm` accepts only the session's object once the database changed, and
-restores the recorded copy on the host, so it needs neither the bucket, whose objects
-expire after seven days, nor a token. Both start PostgreSQL
-and RabbitMQ from the previous release's Compose file and refuse without the marker;
-`restore` also refuses while an application container runs. After promotion the new
-release serves the migrated database: `restore` refuses without the marker, and the
-previous release may not fit the schema. The release state file and pruning keep that
-release's directory and images for a reviewed rollback.
-
 ## Verification boundary
 
-`deploy/smoke.sh BACKEND_IMAGE WEB_IMAGE GATEWAY_IMAGE POSTGRES_IMAGE RABBITMQ_IMAGE` runs the actual production Compose
-services with disposable PostgreSQL, volumes and locally issued TLS certificates.
-HTTPS checks validate the certificate chain and hostname. It provisions the database
-twice, changes both roles' passwords while the server logs, samples and parses every
-statement and finds no verifier or password in that log, applies migrations under the restricted
-owner, provisions again, checks that
-the runtime role can neither create tables nor write the migration ledger and that
-the superuser cannot sign in over TCP, checks frontend/API/static
-routing, forged proxy headers (also from a simulated Cloudflare peer), the exact
-gateway headers, each router's body limit, and that each router refuses one client at
-its own rate budget (and each but the `/api/auth/` router at its own in-flight budget)
-while the next router still grants that client its whole budget, publishes one
-synthetic forecast through the real RabbitMQ worker, and exercises dispatcher and
-idle worker stop. Through the gateway it also checks the anonymous `/api/session/` JSON shape, that a
-wrong-password sign-in gets the normal 400 `email_password_mismatch` refusal and
-that the `/app/` workspace app shell loads. It takes an hourly backup of those rows
-and runs the restore rehearsal on it (a local directory stands in for the bucket),
-which must pass with a decrypted provider key and leave no throwaway behind.
-On those rows it runs `reset_database.py` `prepare`, checks that the gateway then
-answers 503 with `Retry-After` (the maintenance page for a navigation, the
-`maintenance` API error for an API call), then `abort`; `prepare`,
-`reset`, a refused `abort`, a pre-release dump of the empty database, `migrate` from zero under the
-restricted owner and a start; then the stop a failed release leaves and `restore`,
-after which ownership, privileges, stored rows and a stored password are back and
-the site is ready; last it requires the edge certificate, and the origin-pull probe
-passes with the edge's authority and fails with one Traefik cannot load while the
-loopback port still answers. `deploy/test-release.sh` runs the installer against a model of which
-secret each release starts with and which one the runtime role's password matches. It
-proves that a failure before `migrate` starts the previous release with the secret
-`host.json` names, that no password change happens while API or web run or after a
-failed stop, that the printed password command works after `/run` is emptied, that a
-reset session keeps its marker and is recovered with its own archive, that a second
-release in the same maintenance and a kill during `migrate` keep the first recovery
-point, that the previous release's helper runs the printed `restore` from the kept
-archive without the bucket and the printed `abort`, that a failed run leaves no
-pre-release dump the session does not name, that the next successful release deletes
-the kept pre-release files and pruning keeps the previous release, that a release whose job is
-cancelled during `migrate` still completes and can be followed again, and that with
-origin pulls required an upgrade whose edge request fails or is challenged resumes the
-previous release, while a first installation whose edge request fails stays in
-maintenance.
-`deploy/test-broker-rollback.sh BACKEND_IMAGE RABBITMQ_IMAGE` starts the public broker of
-the releases before the built one, the built broker and that public broker again on one
-data volume, and each keeps the queued work and accepts more: a failed release returns to
-the previous broker, and RabbitMQ does not guarantee downgrades.
-`tests/test_deployment_previous_helper.py` runs each recovery the installer prints
-through the current helper and two earlier ones on `main` (before the maintenance
-notice, and the one this release upgrades from), against a model of the database, also
-once the bucket lost the dump, and counts it only when the previous release serves
-again.
-`tests/test_operations_contracts.py` keeps the values that `deploy/`,
-`infra/terraform` and the workflows restate in agreement: worker queues, the
-watchdog and drain service lists, the shipped units and host paths, stop grace
-periods, alert event names,
-Cloudflare ranges, the gateway trust anchor, router prefixes, limits and header
-owners, timeouts, the CI result job and Gmail constants, and
-`tests/test_host_contract.py` holds `deploy/host_contract.py` to the `host.json` keys
-Terraform writes and the host scripts read, the variables `compose.yaml` reads and the
-settings the runtime secret carries. Change those values together with these tests; `tests/test_deployment_checks.py`
-runs every deployment check against the shipped Compose environment.
-It does not prove GCP IAM, backup upload/restore, the metadata firewall itself (each
-release probes it before maintenance), public
-DNS, ACME, Cloud Logging or live Gmail/SMTP/provider behavior. `compose.smoke.yaml` is test
-configuration only. Never apply it to a production Compose project.
+CI builds, scans and smoke-tests the exact production images on a disposable Compose stack
+(`deploy/smoke.sh`, whose TLS probes set TLS 1.2 as their floor), runs the installer against its failure modes (`deploy/test-release.sh`) and
+the broker downgrade (`deploy/test-broker-rollback.sh`), and validates Terraform without
+provisioning ([release-pipeline](flows/release-pipeline.md),
+[developer-quality-gate](flows/developer-quality-gate.md)). `tests/test_operations_contracts.py`
+and `tests/test_host_contract.py` keep the values that `deploy/`, `infra/terraform` and the
+workflows restate in agreement: change those values together with these tests.
+`deploy/compose.smoke.yaml` is test configuration only; never apply it to a production Compose
+project.
 
-CI also retains native Windows and Ubuntu quality, browser, scientific and package
-checks and validates Terraform without provisioning resources. BuildKit caches
-each image separately; PRs can read the main cache but cannot publish or deploy.
-Superseded CI runs are cancelled; production deployments remain serialized.
-An automatic release whose changes since the newest `production` deployment,
-when that deployment succeeded, lie only in unshipped paths (`docs/`, backend
-and web tests, `scripts/`, agent, scanner and Dependabot configuration, the root
-and `web/` Git ignore files and `web/.prettierignore`; the exact list is in
-`deploy/release_scope.py`) skips the `deploy` job and names that deployed commit
-in the run summary; any doubt deploys. The classification never skips a manual
-dispatch of Release, which still needs green CI and an unexpired artifact for
-the current `main` commit and is refused when `main` advanced after the
-dispatch; it is also how to redeploy after a manual recovery.
-Windows backend tests run in two groups, with complete test selection and the
-combined 100% coverage floor verified before release. Sonar starts when the Linux
-coverage reports are ready. Merged `main` still runs all checks because its source
-can differ from the PR's tested merge. Test timings are retained for seven days.
-The actual cloud
-deployment and restore exercise remain operator acceptance steps after project,
+CI does not prove GCP IAM, the real bucket upload, the metadata firewall itself (each release
+probes it before maintenance), public DNS, ACME, Cloud Logging or live Gmail, SMTP or provider
+behavior. These, and a restore on the real host, remain operator acceptance steps after project,
 DNS and mail configuration.

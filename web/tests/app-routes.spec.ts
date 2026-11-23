@@ -192,19 +192,21 @@ test("the document keeps its title while the workspace changes address", async (
         );
         expect(titles.length).toBeGreaterThan(0);
         expect(
-            titles.filter((title) => !/^1:\S.* \| Pyracast$/.test(title)),
+            titles.filter(
+                (title) => !/^1:(Pyracast|\S.* \| Pyracast)$/.test(title),
+            ),
         ).toEqual([]);
     };
     // The observer starts at the first title; the server head shows the document starts with it.
     const titledFromStart = async (address: string) => {
         const html = await (await page.goto(address))!.text();
         expect(html.match(/<title>[^<]*<\/title>/g)).toEqual([
-            "<title>Pyracast workspace | Pyracast</title>",
+            "<title>Pyracast</title>",
         ]);
         expect(html.indexOf("<title>")).toBeLessThan(html.indexOf("</head>"));
     };
     await titledFromStart("/app/w/1/");
-    await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
+    await expect(page).toHaveTitle("Plants · Sunfield Energy | Pyracast");
     await page.getByRole("button", { name: /East array/ }).click();
     await expect(page).toHaveURL(/\/plants\/\d+\/forecast\/$/);
     await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -213,13 +215,13 @@ test("the document keeps its title while the workspace changes address", async (
     await expect(page).toHaveURL(/\/plants\/\d+\/forecast\/$/);
     await page.getByRole("button", { name: "Account" }).click();
     await expect(page).toHaveURL("/app/account/");
-    await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
+    await expect(page).toHaveTitle("Account settings | Pyracast");
     await titlesKeptSinceFirst();
     await titledFromStart("/app/w/1/plants/11/unknown/");
     await expect(
         page.getByRole("heading", { name: "Page not found" }),
     ).toBeVisible();
-    await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
+    await expect(page).toHaveTitle("Pyracast");
     expect(await page.locator("title").count()).toBe(1);
     await titlesKeptSinceFirst();
     await page.route(
@@ -240,7 +242,7 @@ test("the document keeps its title while the workspace changes address", async (
     await expect(
         page.getByRole("heading", { name: "This page could not be displayed" }),
     ).toBeVisible();
-    await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
+    await expect(page).toHaveTitle("Pyracast");
     expect(await page.locator("title").count()).toBe(1);
     await titlesKeptSinceFirst();
 });
@@ -265,7 +267,7 @@ test("plant sections carry their own document title", async ({ page }) => {
     await expect(page).toHaveTitle("Settings · East array | Pyracast");
     await page.getByRole("button", { name: /All plants/ }).click();
     await expect(page).toHaveURL("/app/w/1/");
-    await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
+    await expect(page).toHaveTitle("Plants · Sunfield Energy | Pyracast");
     expect(await page.locator("title").count()).toBe(1);
 });
 

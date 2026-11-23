@@ -4,7 +4,7 @@ A workspace administrator opens the Members screen, sees the active members and 
 
 ## Entry points
 
-- `web/src/features/workspace/workspace-members.tsx` `WorkspaceMembers` at `/app/w/<tenant>/members/` (`MembersPage`, administrators only) renders `members/member-list.tsx` `MemberList`. The remove panel is one `removal` union (idle, confirming, pending, success, error) around `web/src/ui/action.tsx` `ConfirmAction`; the button shows only for viewers other than the signed-in user.
+- `web/src/features/workspace/workspace-members.tsx` `WorkspaceMembers` at `/app/w/<tenant>/members/` (`MembersPage`, administrators only) renders `web/src/features/workspace/members/member-list.tsx` `MemberList`. The remove panel is one `removal` union (idle, confirming, pending, success, error) around `web/src/ui/action.tsx` `ConfirmAction`; the button shows only for viewers other than the signed-in user.
 - Actor workspace administrator: `GET /api/tenants/{t}/members/` -> `pyracast.api.workspaces.WorkspaceMembersView` (active members and `plants_at_recipient_limit`); `DELETE /api/tenants/{t}/members/{u}/` -> `WorkspaceMemberView`, which calls `pyracast.accounts.operations.remove_workspace_member` (routes in `src/pyracast/urls.py`, both `ADMIN` in `ROUTE_POLICIES`).
 - Platform console: `GET|POST /admin/workspaces/{id}/members/{user_id}/removal/` (`pyracast.platform_admin.tenant_views.member_removal`) shows a confirmation page and calls the same operation with `platform=True`; the administrator is refused there, and a GET on someone who is no longer a member answers 404.
 - `pyracast.notifications.recipients.remove_member_recipients` is called only by that operation; no command, script or job removes members.
@@ -26,10 +26,14 @@ sequenceDiagram
         V-->>UI: "401 or 403 from session auth, CSRF or the route policy"
     end
     V->>Op: "actor, tenant_id, user_id"
-    Op->>DB: "BEGIN, check admin without a lock, lock the member's account rows, lock tenant, check admin again, read target membership"
+    Op->>DB: "BEGIN, check admin and the target without a lock"
+    opt target is the administrator or the actor
+        V-->>UI: "400 workspace_admin_not_removable, nothing locked"
+    end
+    Op->>DB: "lock the member's account rows, lock tenant, check admin again, read target membership"
     alt no membership here
         V-->>UI: "204 and nothing written"
-    else target role is admin or the actor
+    else target became the administrator meanwhile
         V-->>UI: "400 workspace_admin_not_removable, rollback"
     end
     Op->>DB: "read all EmailAddress rows and the primary email of the target"
@@ -83,7 +87,7 @@ sequenceDiagram
 
 ## Rules and invariants
 
-- Lock order is the member's account rows, Tenant, Region (pk order). Mail transmission in `pyracast.notifications.jobs` takes Tenant first, then Region and delivery, so removal cannot interleave with the transmit marker. The marker only fixes the recipients of the current attempt, whose send happens after it commits and may still reach the removed member; the revocation is still written, and a retry after a known not-sent outcome excludes the revoked address. Account rows come first so an address verified or an acceptance committed meanwhile is among the addresses read.
+- Removing the administrator, or oneself, is refused before any lock is taken, and checked again under the account and tenant locks. Lock order is the member's account rows (`FOR NO KEY UPDATE`), Tenant, Region (pk order), the backend's one order for a person and a workspace (`docs/ARCHITECTURE.md`). Mail transmission in `pyracast.notifications.jobs` takes Tenant first, then Region and delivery, so removal cannot interleave with the transmit marker. The marker only fixes the recipients of the current attempt, whose send happens after it commits and may still reach the removed member; the revocation is still written, and a retry after a known not-sent outcome excludes the revoked address. Account rows come first so an address verified or an acceptance committed meanwhile is among the addresses read.
 - Removal is idempotent and writes the audit row only when a membership was deleted. A workspace has one administrator, so "not the administrator" and "not yourself" are one rule. The `workspace_member_removed` security event is written after commit.
 - Invitation closing uses every `EmailAddress` row (verified or not) plus the primary email, case-insensitively, over the workspace's pending (open, unexpired) invitations. Recipient stripping uses verified addresses and the primary email (`recipient_key`, case-folded; a blank address is no key) and the rows tied to the membership; an address another active member holds stays on open deliveries, and an unverified alias saved as an external recipient stays.
 - Recipients are tied to the membership pk, so a rejoin gets a new pk and cannot revive an old slot. Terminal deliveries keep their history; the member's change requests stay pending for administrator review, and a rejoined member does not see them again.

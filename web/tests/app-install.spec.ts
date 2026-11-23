@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test, expect, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
+import { standInDisplayMode } from "./support/display-mode";
 import { accountWith, mockApi, sessionIdentity } from "./support/workspace";
 
 const manifest = JSON.parse(
@@ -9,7 +10,7 @@ const manifest = JSON.parse(
         path.resolve(__dirname, "../public/app/manifest.webmanifest"),
         "utf8",
     ),
-) as { theme_color: string };
+) as { name: string; theme_color: string };
 
 function installLinks(page: Page) {
     const head = page.locator("head");
@@ -17,10 +18,17 @@ function installLinks(page: Page) {
         manifest: head.locator('link[rel="manifest"]'),
         touchIcon: head.locator('link[rel="apple-touch-icon"]'),
         themeColour: head.locator('meta[name="theme-color"]'),
+        applicationName: head.locator('meta[name="application-name"]'),
+        homeScreenTitle: head.locator(
+            'meta[name="apple-mobile-web-app-title"]',
+        ),
+        launchCapability: head.locator(
+            'meta[name="mobile-web-app-capable"], meta[name="apple-mobile-web-app-capable"]',
+        ),
     };
 }
 
-test("workspace pages link the manifest, the touch icon and the theme colour", async ({
+test("workspace pages link the manifest, the touch icon, the theme colour and the app's name", async ({
     page,
 }) => {
     await mockApi(page);
@@ -41,6 +49,11 @@ test("workspace pages link the manifest, the touch icon and the theme colour", a
         "content",
         manifest.theme_color,
     );
+    for (const name of [links.applicationName, links.homeScreenTitle]) {
+        await expect(name).toHaveCount(1);
+        await expect(name).toHaveAttribute("content", manifest.name);
+    }
+    await expect(links.launchCapability).toHaveCount(0);
     await expect(page.locator('head link[rel="icon"]')).toHaveAttribute(
         "href",
         /^\/icon\.svg/,
@@ -59,7 +72,7 @@ for (const address of [
     "/terms/",
     "/tr/terms/",
 ]) {
-    test(`public ${address} links no manifest, touch icon or theme colour`, async ({
+    test(`public ${address} links no manifest, touch icon, theme colour or app name`, async ({
         page,
     }) => {
         await page.goto(address);
@@ -68,6 +81,8 @@ for (const address of [
         await expect(links.manifest).toHaveCount(0);
         await expect(links.touchIcon).toHaveCount(0);
         await expect(links.themeColour).toHaveCount(0);
+        await expect(links.applicationName).toHaveCount(0);
+        await expect(links.homeScreenTitle).toHaveCount(0);
     });
 }
 
@@ -249,11 +264,7 @@ test("a browser with neither the install event nor WebKit shows no install entry
 });
 
 test("an installed window shows no install entry", async ({ page }) => {
-    await page.addInitScript(() => {
-        const media = window.matchMedia.bind(window);
-        window.matchMedia = (query) =>
-            media(query === "(display-mode: standalone)" ? "all" : query);
-    });
+    await standInDisplayMode(page, "standalone");
     await openWorkspace(page);
     await expect(
         page.getByRole("button", { name: "Sign out", exact: true }),

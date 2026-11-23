@@ -5,6 +5,7 @@ import { api } from "@/lib/api/client";
 import { routes } from "@/lib/routes";
 import { sessionState, signOut, useSessionState } from "@/lib/session-client";
 import { AsyncButton } from "@/ui/form";
+import { usePageTitle } from "@/ui/page-title";
 import { InvitationDetails, type PreviewState } from "./invitation-preview";
 import { clearWorkspaceInvitation } from "./workspace-invitation";
 
@@ -16,6 +17,7 @@ export function AcceptInvitation({
     preview: PreviewState;
 }) {
     const t = useTranslations("WorkspaceMembers");
+    usePageTitle(t("joinWorkspace"));
     const { session } = useSessionState();
     const [accepting, setAccepting] = useState(false);
     const claimed = useRef(false);

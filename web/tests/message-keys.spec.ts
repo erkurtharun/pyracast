@@ -6,6 +6,12 @@ import { keyUse, unusedKeys } from "./support/message-keys";
 import { messages } from "../src/i18n/messages";
 
 const web = path.resolve(__dirname, "..");
+const flagProducers = {
+    "Forecast.qualityFlags": [
+        "web/src/flags.ts",
+        "src/pyracast/forecasts/flags.py",
+    ],
+};
 
 function tree(files: Record<string, string>): string {
     const root = mkdtempSync(path.join(tmpdir(), "message-keys-"));
@@ -21,11 +27,38 @@ test("every message key is read by a screen or names a code the server or a scre
     expect(unusedKeys(web, messages.en)).toEqual([]);
 });
 
+test("a value of a shared enumeration labels a key only where its producer names the member", () => {
+    expect(
+        unusedKeys(web, {
+            Outages: { proposalReasons: { throttled: "throttled" } },
+            Calibrations: { status_messages: { curtailed: "curtailed" } },
+        }),
+    ).toEqual([
+        "Outages.proposalReasons.throttled",
+        "Calibrations.status_messages.curtailed",
+    ]);
+});
+
+test("a literal of the fit module labels a calibration status only where a fit result returns it", () => {
+    expect(
+        unusedKeys(web, {
+            Calibrations: {
+                status_messages: {
+                    censored_training: "censored_training",
+                    insufficient: "insufficient",
+                    ready: "ready",
+                    rejected: "rejected",
+                },
+            },
+        }),
+    ).toEqual(["Calibrations.status_messages.censored_training"]);
+});
+
 test("every translation call names its namespace and keys in a form the key check reads", () => {
     expect(keyUse(web).unresolved).toEqual([]);
 });
 
-test("a code named only in a comment, a docstring or a migration labels nothing", () => {
+test("a code named only in a comment, a docstring or a module that is not its producer labels nothing", () => {
     const root = tree({
         "web/src/flags.ts": [
             "declare function useCodeLabel(namespace: string): (code: string) => string;",
@@ -46,21 +79,126 @@ test("a code named only in a comment, a docstring or a migration labels nothing"
     });
     try {
         expect(
-            unusedKeys(path.join(root, "web"), {
-                Forecast: {
-                    qualityFlags: {
-                        provider_error: "provider error",
-                        weather_request_failed: "weather request failed",
-                        unvalidated: "unvalidated",
-                        stale: "stale",
-                        stale_source: "stale source",
+            unusedKeys(
+                path.join(root, "web"),
+                {
+                    Forecast: {
+                        qualityFlags: {
+                            provider_error: "provider error",
+                            weather_request_failed: "weather request failed",
+                            unvalidated: "unvalidated",
+                            stale: "stale",
+                            stale_source: "stale source",
+                        },
                     },
                 },
-            }),
+                flagProducers,
+            ),
         ).toEqual([
             "Forecast.qualityFlags.provider_error",
             "Forecast.qualityFlags.weather_request_failed",
         ]);
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("a code a screen writes as a template literal without substitution labels its key", () => {
+    const root = tree({
+        "web/src/flags.ts": [
+            "declare function useCodeLabel(namespace: string): (code: string) => string;",
+            'export const label = useCodeLabel("Forecast.qualityFlags");',
+            "export const state = `stale`;",
+        ].join("\n"),
+        "src/pyracast/forecasts/flags.py": "FLAGS = []\n",
+    });
+    try {
+        expect(
+            unusedKeys(
+                path.join(root, "web"),
+                {
+                    Forecast: { qualityFlags: { stale: "stale" } },
+                },
+                flagProducers,
+            ),
+        ).toEqual([]);
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("an enumeration value labels its key only where the producer references its member in code", () => {
+    const root = tree({
+        "web/src/reasons.ts": [
+            "declare function useCodeLabel(namespace: string): (code: string) => string;",
+            'export const label = useCodeLabel("Outages.proposalReasons");',
+        ].join("\n"),
+        "src/pyracast/errors.py": [
+            "class ErrorCode(TextChoices):",
+            '    BUSY = "busy"',
+            '    LIMIT = "pending_request_limit", "Limit"',
+            '    THROTTLED = "throttled"',
+            "",
+            'OTHER = "unrelated"',
+        ].join("\n"),
+        "src/pyracast/policy.py": [
+            "# ErrorCode.THROTTLED is retired.",
+            "def refusal():",
+            '    """Returns ErrorCode.BUSY when busy."""',
+            "    return ErrorCode.LIMIT",
+        ].join("\n"),
+    });
+    try {
+        expect(
+            unusedKeys(
+                path.join(root, "web"),
+                {
+                    Outages: {
+                        proposalReasons: {
+                            busy: "busy",
+                            pending_request_limit: "limit",
+                            throttled: "throttled",
+                            unrelated: "unrelated",
+                        },
+                    },
+                },
+                {
+                    "Outages.proposalReasons": [
+                        {
+                            module: "src/pyracast/policy.py",
+                            enumeration: "ErrorCode",
+                            definedIn: "src/pyracast/errors.py",
+                        },
+                    ],
+                },
+            ),
+        ).toEqual([
+            "Outages.proposalReasons.busy",
+            "Outages.proposalReasons.throttled",
+            "Outages.proposalReasons.unrelated",
+        ]);
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("a code labels its key only where a module named as the family's producer holds it", () => {
+    const root = tree({
+        "web/src/flags.ts": [
+            "declare function useCodeLabel(namespace: string): (code: string) => string;",
+            'export const label = useCodeLabel("Calibrations.values");',
+        ].join("\n"),
+        "src/pyracast/plants/numerics.py": 'EXCLUSIONS = {"quality": 0}\n',
+        "src/pyracast/plants/models.py": 'STATES = ["valid", "outage"]\n',
+    });
+    try {
+        expect(
+            unusedKeys(
+                path.join(root, "web"),
+                { Calibrations: { values: { quality: "q", valid: "v" } } },
+                { "Calibrations.values": ["src/pyracast/plants/numerics.py"] },
+            ),
+        ).toEqual(["Calibrations.values.valid"]);
     } finally {
         rmSync(root, { recursive: true, force: true });
     }

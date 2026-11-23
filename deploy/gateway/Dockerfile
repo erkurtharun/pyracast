@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
-FROM golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9 AS source
+FROM golang:1.27.4-trixie@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d AS source
 WORKDIR /src
 COPY go.mod go.sum ./
 COPY pkg/config/dynamic/ext ./pkg/config/dynamic/ext
@@ -19,7 +19,7 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
     -o /out/traefik github.com/traefik/traefik/v3/cmd/traefik \
     && cp "$(go env GOMODCACHE)/github.com/traefik/traefik/v3@$version/LICENSE.md" /out/LICENSE.md
 
-FROM gcr.io/distroless/static-debian13:nonroot@sha256:aafe993665bf6200db38a02c11a9351e782a84b6a45e7f33b6695638c88e3931 AS runtime
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5 AS runtime
 WORKDIR /
 COPY --from=build --chown=0:0 --chmod=0555 /out/traefik /traefik
 COPY --from=build /out/LICENSE.md /usr/share/licenses/traefik/LICENSE.md
