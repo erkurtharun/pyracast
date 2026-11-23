@@ -29,6 +29,7 @@ def placed(
         (Candidate("a@example.com", chosen=CC, typed=TO, counts=False), CC),
         (Candidate("a@example.com", chosen=TO, typed=BCC, counts=False), BCC),
         (Candidate("a@example.com", member=True), None),
+        (Candidate("a@example.com", member=True, chosen=TO, typed=CC, tied_hidden=True), BCC),
     ],
 )
 def test_hidden_wins_then_the_member_choice_then_a_typed_choice_that_counts(
