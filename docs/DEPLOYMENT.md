@@ -634,11 +634,13 @@ fixtures do not establish provider access or inbox delivery.
 ### App worker
 
 A browser that opened the app keeps the service worker served at `/app/sw.js`
-(`web/public/app/sw.js`) and fetches that address again at every navigation under `/app/`, so
-every release serves it: an answer other than the script leaves the installed worker in place
-for good. The release a failed one falls back to serves it as well, since every release from
-the installable app on does. The address answers `text/javascript` with `no-store` and its own
-policy; the container smoke pins those headers, the manifest and the icons.
+(`web/public/app/sw.js`) until a successful update check installs another script. A document
+navigation under `/app/` asks for the address (a move inside an open window does not); a check
+that fails, offline, on an answer other than the script or on a script that does not run, leaves
+the installed worker until a later check succeeds. So every release serves the address, and the
+release a failed one falls back to serves it as well, since every release from the installable
+app on does. The address answers `text/javascript` with `no-store` and its own policy; the
+container smoke pins those headers, the manifest and the icons.
 
 - **Withdrawal:** a release whose change is exactly these edits in `web/`:
   1. `git mv public/app/sw.js testing/sw-previous.js` keeps the worker that browsers hold, which
@@ -649,13 +651,14 @@ policy; the container smoke pins those headers, the manifest and the icons.
 
   `web/testing/worker-state.ts` reads an address serving `sw-withdraw.js` as the withdrawn state,
   and the model test and `npm run test:production` then prove it: a fresh visit registers nothing,
-  and a browser holding the previous worker loses its registration at its next update and keeps
-  its open window. A revert of the withdrawal commit makes the worker active again.
+  and a browser holding the previous worker loses its registration at its next successful update
+  check and keeps its open window. A revert of the withdrawal commit makes the worker active again.
 - **Rollback:** a revert of the faulty change through CI and Release, never an older image and
   never a revert of the worker as a whole.
-- **Watch:** CSP reports for `worker-src` and the status of `/app/sw.js` and the manifest. A
-  `worker-src` report from the application's own registration, or the worker's notice reported
-  while `/health/ready/` is green, starts a withdrawal or a rollback.
+- **Watch:** CSP reports for `worker-src` and the status of `/app/sw.js` and the manifest. A device
+  without a connection rightly shows the notice, and a report keeps only the blocked origin and the
+  first segment of the page's path, so a notice or a `worker-src` report starts a withdrawal or a
+  rollback only when an online client confirms it while `/health/ready/` is green.
 
 ### Alert events
 
