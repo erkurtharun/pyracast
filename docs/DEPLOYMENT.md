@@ -640,11 +640,17 @@ for good. The release a failed one falls back to serves it as well, since every 
 the installable app on does. The address answers `text/javascript` with `no-store` and its own
 policy; the container smoke pins those headers, the manifest and the icons.
 
-- **Withdrawal:** a release that copies `web/testing/sw-withdraw.js` over
-  `web/public/app/sw.js` and removes the registering module (`web/src/lib/worker-registration.tsx`
-  and its mount in `web/src/app/app/layout.tsx`). Each browser installs it at its next navigation
-  or update check; it unregisters itself and reloads no window. `npm run test:production` in
-  `web/` proves this path against a production build.
+- **Withdrawal:** a release whose change is exactly these edits in `web/`:
+  1. `git mv public/app/sw.js testing/sw-previous.js` keeps the worker that browsers hold, which
+     the proof installs first;
+  2. `cp testing/sw-withdraw.js public/app/sw.js` serves the script that unregisters itself;
+  3. `git rm src/lib/worker-registration.tsx`, and remove its import and `<WorkerRegistration />`
+     from `src/app/app/layout.tsx`.
+
+  `web/testing/worker-state.ts` reads an address serving `sw-withdraw.js` as the withdrawn state,
+  and the model test and `npm run test:production` then prove it: a fresh visit registers nothing,
+  and a browser holding the previous worker loses its registration at its next update and keeps
+  its open window. A revert of the withdrawal commit makes the worker active again.
 - **Rollback:** a revert of the faulty change through CI and Release, never an older image and
   never a revert of the worker as a whole.
 - **Watch:** CSP reports for `worker-src` and the status of `/app/sw.js` and the manifest. A

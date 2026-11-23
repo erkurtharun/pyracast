@@ -1,18 +1,18 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 
 const WORKER_ADDRESS = "/app/sw.js";
 const CONTROL_PREFIX = "/__front/";
 const UNAVAILABLE = "No server answers behind the test front.";
-const withdrawal = readFileSync(
-    path.resolve(import.meta.dirname, "sw-withdraw.js"),
-);
+const SCRIPT_FILES = new Map([
+    ["withdrawal", "sw-withdraw.js"],
+    ["previous", "sw-previous.js"],
+]);
 
-type Script = "worker" | "withdrawal";
-type State = { script: Script; upstream: URL };
+type State = { script: string; upstream: URL };
 const initial: State = {
-    script: "worker",
+    script: "build",
     upstream: new URL(required("FRONT_UPSTREAM")),
 };
 let state = { ...initial };
@@ -33,9 +33,20 @@ async function bodyOf(request: http.IncomingMessage) {
     return Buffer.concat(chunks).toString("utf8");
 }
 
+function scriptFile(script: string) {
+    const file = SCRIPT_FILES.get(script);
+    return file === undefined
+        ? undefined
+        : path.resolve(import.meta.dirname, file);
+}
+
+function servable(script: string) {
+    const file = scriptFile(script);
+    return script === "build" || (file !== undefined && existsSync(file));
+}
+
 function apply(setting: string, value: string) {
-    if (setting === "script" && (value === "worker" || value === "withdrawal"))
-        state.script = value;
+    if (setting === "script" && servable(value)) state.script = value;
     else if (setting === "upstream" && URL.canParse(value))
         state.upstream = new URL(value);
     else return false;
@@ -70,10 +81,13 @@ function withoutBodyHeaders(headers: http.IncomingHttpHeaders) {
 }
 
 function forward(request: http.IncomingMessage, response: http.ServerResponse) {
-    const withdrawn =
-        state.script === "withdrawal" && pathOf(request) === WORKER_ADDRESS;
+    const file =
+        pathOf(request) === WORKER_ADDRESS
+            ? scriptFile(state.script)
+            : undefined;
+    const replacement = file === undefined ? undefined : readFileSync(file);
     const headers = { ...request.headers };
-    if (withdrawn) {
+    if (replacement) {
         delete headers["if-none-match"];
         delete headers["if-modified-since"];
     }
@@ -87,7 +101,7 @@ function forward(request: http.IncomingMessage, response: http.ServerResponse) {
         },
         (answer) => {
             const status = answer.statusCode ?? 502;
-            if (!withdrawn) {
+            if (!replacement) {
                 response.writeHead(status, answer.headers);
                 answer.pipe(response);
                 return;
@@ -96,9 +110,9 @@ function forward(request: http.IncomingMessage, response: http.ServerResponse) {
             response
                 .writeHead(status, {
                     ...withoutBodyHeaders(answer.headers),
-                    "content-length": String(withdrawal.length),
+                    "content-length": String(replacement.length),
                 })
-                .end(withdrawal);
+                .end(replacement);
         },
     );
     upstream.on("error", () => {
