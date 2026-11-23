@@ -40,10 +40,6 @@ ESCAPED_NAME = 'u&"'
 ACQUIRING_WORD = re.compile(
     r"(?<![\w$])(?:insert|update|delete|merge|truncate|copy|lock|share)(?![\w$])"
 )
-UNREPORTED_ROWS_WORD = re.compile(
-    r"(?<![\w$])(?:offset|conflict|merge|truncate|copy|lock)(?![\w$])"
-)
-LEVEL_WORD = re.compile(r"(?<![\w$])(?:select|insert|update|delete|share)(?![\w$])")
 LATER_STATEMENT = re.compile(r";\s*\S")
 SAVEPOINT_WORD = re.compile(r"(?<![\w$])(?:savepoint|release|rollback)(?![\w$])")
 SAVEPOINT_CONTROL = re.compile(
@@ -83,15 +79,6 @@ def acquired_tables(sql: str) -> frozenset[str]:
     if ESCAPED_NAME in text:
         return GUARDED
     return frozenset(GUARDED_TABLE.findall(text))
-
-
-def locks_only_reported_rows(sql: str) -> bool:
-    text = sql.casefold()
-    if UNREPORTED_ROWS_WORD.search(text):
-        return False
-    words = LEVEL_WORD.findall(text)
-    selects = words.count("select")
-    return selects <= 1 and len(words) - selects <= 1
 
 
 def proven_persons(sql: str, params: Any, rows: int) -> frozenset[object] | None:
@@ -157,8 +144,7 @@ def lock_order() -> Iterator[LockOrder]:
         result = execute(sql, params, many, context)
         several = LATER_STATEMENT.search(sql) is not None
         rows = -1 if several else context["cursor"].rowcount
-        nothing = rows == 0 and locks_only_reported_rows(sql)
-        acquired = frozenset() if nothing else acquired_tables(sql)
+        acquired = acquired_tables(sql)
         proven = None if many else proven_persons(sql, params, rows)
         if proven is not None:
             order.locked.add(PERSON)
@@ -497,6 +483,11 @@ STEPS: dict[str, Callable[[User, User, Tenant], object]] = {
             pk=RawSQL("(select id from auth_user where id = %s for update)", (bob.pk,)),
         ).update(first_name="Renamed")
     ),
+    "lock bob through a viewer membership, skipping locked rows": lambda alice, bob, tenant: list(
+        User.objects.select_for_update(skip_locked=True).filter(
+            pk=bob.pk, membership__role=WorkspaceRole.VIEWER
+        )
+    ),
     "lock bob on an empty page": lambda alice, bob, tenant: list(
         User.objects.select_for_update().filter(pk=bob.pk)[1:2]
     ),
@@ -517,7 +508,10 @@ STEPS: dict[str, Callable[[User, User, Tenant], object]] = {
     "lock bob by key": lambda alice, bob, tenant: list(
         User.objects.select_for_update().filter(pk=bob.pk)
     ),
-    "write alice": lambda alice, bob, tenant: User.objects.filter(pk=alice.pk).update(
+    "lock bob while active": lambda alice, bob, tenant: list(
+        User.objects.select_for_update().filter(pk=bob.pk, is_active=True)
+    ),
+    "write alice":lambda alice, bob, tenant: User.objects.filter(pk=alice.pk).update(
         first_name="Renamed"
     ),
     "write bob": lambda alice, bob, tenant: User.objects.filter(pk=bob.pk).update(
@@ -618,6 +612,10 @@ def test_a_person_row_is_held_only_after_a_whole_id_filter_matched_it(
         "lock bob on an empty page",
         "lock bob through an upsert that updates nothing",
         "write a missing person through a subquery locking bob",
+        "write a missing person",
+        "write a missing person by name",
+        "lock a missing person",
+        "lock bob through a viewer membership, skipping locked rows",
     ],
 )
 def test_an_unproven_person_lock_or_write_after_a_workspace_lock_is_late(step: str) -> None:
@@ -682,13 +680,16 @@ def test_a_rollback_to_a_savepoint_keeps_the_person_rows_locked_before_it() -> N
     )
 
 
-@pytest.mark.parametrize(
-    "step", ["write a missing person", "write a missing person by name", "lock a missing person"]
-)
-def test_a_person_lock_or_write_after_a_workspace_lock_that_matched_no_row_is_not_late(
-    step: str,
-) -> None:
-    assert late_statements("lock workspace", step) == 0
+def test_a_person_lock_that_reports_no_row_after_a_workspace_lock_is_late() -> None:
+    alice, bob, tenant = alice_bob_and_workspace()
+    User.objects.filter(pk=bob.pk).update(is_active=False)
+
+    with lock_order() as order:
+        in_one_transaction(
+            (alice, bob, tenant), "lock alice by key", "lock workspace", "lock bob while active"
+        )
+
+    assert len(order.late) == 1
 
 
 def test_a_person_write_that_matched_no_row_is_no_evidence_of_a_person_lock() -> None:
