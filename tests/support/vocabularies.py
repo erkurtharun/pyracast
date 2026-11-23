@@ -39,9 +39,13 @@ from pyracast.incidents.models import PlantIncident
 from pyracast.incidents.operations import save_incident
 from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
 from pyracast.notifications.models import (
+    DeliveryRecipient,
     NotificationDelivery,
     PreparedMessageFormat,
     PreparedMessageKind,
+    RecipientRole,
+    ReminderMemberRole,
+    ReminderRecipient,
     ReminderSchedule,
 )
 from pyracast.notifications.operations import configure_reminders
@@ -74,7 +78,7 @@ from tests.support.domain import NOW, make_system, provider_key
 from tests.support.epias_api import archive_source
 from tests.support.incident_calibration import incident
 from tests.support.metering import connected
-from tests.support.notifications import configured, ready
+from tests.support.notifications import chosen, configured, ready
 from tests.support.plant_operations import make_plant, saved_actuals, snapshot_for
 
 OUTSIDE = "xx"
@@ -348,6 +352,19 @@ def _notification_delivery(monkeypatch: pytest.MonkeyPatch) -> models.Model:
     return ready()
 
 
+def _reminder_recipient(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    return ReminderRecipient.objects.get(schedule=configured()[1])
+
+
+def _member_role(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    system, schedule = configured()
+    return chosen(schedule, system.member, RecipientRole.TO)
+
+
+def _delivery_recipient(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    return DeliveryRecipient.objects.get(delivery=ready())
+
+
 def _outbound_mail(monkeypatch: pytest.MonkeyPatch) -> models.Model:
     system = make_system()
     invite_workspace_member(system.member, system.tenant.pk, "guest@example.com")
@@ -412,6 +429,9 @@ STORED_VOCABULARIES = (
     StoredVocabulary(PlantEvent, "action", _plant_event),
     StoredVocabulary(PlantIncident, "kind", _plant_incident),
     StoredVocabulary(ReminderSchedule, "language", _reminder_schedule),
+    StoredVocabulary(ReminderRecipient, "role", _reminder_recipient),
+    StoredVocabulary(ReminderMemberRole, "role", _member_role),
+    StoredVocabulary(DeliveryRecipient, "role", _delivery_recipient),
     StoredVocabulary(NotificationDelivery, "status", _notification_delivery),
     StoredVocabulary(NotificationDelivery, "language", _notification_delivery),
     StoredVocabulary(
