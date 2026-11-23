@@ -11,6 +11,7 @@ from django.contrib.auth.models import User
 from django.db import connection, transaction
 from django.db.models import BooleanField, Case, Q, Value, When
 from django.db.models.expressions import RawSQL
+from psycopg.pq import TransactionStatus
 
 from pyracast.accounts.invitations import accept_workspace_invitation, invitation_digest
 from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
@@ -112,7 +113,6 @@ class LockOrder:
 
 @dataclass
 class _Transaction:
-    outer: object = None
     workspace: bool = False
     open_person_cursor: bool = False
     held_persons: frozenset[object] = frozenset()
@@ -152,9 +152,8 @@ def lock_order() -> Iterator[LockOrder]:
         execute: Callable[..., Any], sql: str, params: Any, many: bool, context: dict[str, Any]
     ) -> Any:
         nonlocal state
-        outer = connection.atomic_blocks[0] if connection.atomic_blocks else None
-        if outer is None or outer is not state.outer:
-            state = _Transaction(outer=outer)
+        if connection.connection.info.transaction_status is TransactionStatus.IDLE:
+            state = _Transaction()
         result = execute(sql, params, many, context)
         rows = -1 if LATER_STATEMENT.search(sql) else context["cursor"].rowcount
         nothing = rows == 0 and locks_only_reported_rows(sql)
@@ -168,7 +167,7 @@ def lock_order() -> Iterator[LockOrder]:
         workspace = bool(acquired & WORKSPACE)
         late_person = PERSON in acquired and state.workspace and not already_held
         late_workspace = workspace and state.open_person_cursor
-        if outer is not None and (late_person or late_workspace):
+        if connection.in_atomic_block and (late_person or late_workspace):
             order.late.append(sql)
         if proven is not None:
             state.held_persons |= proven
@@ -525,15 +524,25 @@ STEPS: dict[str, Callable[[User, User, Tenant], object]] = {
 }
 
 
-def detected(*steps: str) -> LockOrder:
+def alice_bob_and_workspace() -> tuple[User, User, Tenant]:
     alice = User.objects.create(username="alice")
     bob = User.objects.create(username="bob")
     tenant = Tenant.objects.create(name="Workspace")
     Membership.objects.create(tenant=tenant, user=alice)
+    return alice, bob, tenant
 
-    with lock_order() as order, transaction.atomic():
-        for step in steps:
-            STEPS[step](alice, bob, tenant)
+
+@transaction.atomic
+def in_one_transaction(people: tuple[User, User, Tenant], *steps: str) -> None:
+    for step in steps:
+        STEPS[step](*people)
+
+
+def detected(*steps: str) -> LockOrder:
+    people = alice_bob_and_workspace()
+
+    with lock_order() as order:
+        in_one_transaction(people, *steps)
 
     return order
 
@@ -605,6 +614,16 @@ def test_a_person_row_is_held_only_after_a_whole_id_filter_matched_it(
 )
 def test_an_unproven_person_lock_or_write_after_a_workspace_lock_is_late(step: str) -> None:
     assert late_statements("lock alice by key", "lock workspace", step) == 1
+
+
+def test_a_person_locked_in_a_committed_transaction_is_not_held_in_the_next() -> None:
+    people = alice_bob_and_workspace()
+
+    with lock_order() as order:
+        in_one_transaction(people, "lock alice by key")
+        in_one_transaction(people, "lock workspace", "write alice")
+
+    assert len(order.late) == 1
 
 
 def test_a_workspace_lock_while_a_person_locking_cursor_is_open_is_late() -> None:
