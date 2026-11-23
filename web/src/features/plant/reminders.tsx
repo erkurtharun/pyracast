@@ -21,6 +21,7 @@ import {
 import { Resource } from "@/ui/resource";
 import { Empty, Notice } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
+import { useCanManageWorkspace } from "@/ui/workspace-access";
 type ReminderSchedule = components["schemas"]["ReminderOutput"];
 type Delivery = ReminderSchedule["deliveries"][number];
 type Outcome = Pick<Delivery, "scheduled_for" | "status" | "last_error">;
@@ -87,17 +88,22 @@ function useRowFocus(rows: { id: number }[]) {
         },
     };
 }
-function DeliveryTimes({ data }: { data: ReminderSchedule }) {
+function DeliveryTimes({
+    times,
+    limit,
+}: {
+    times: string[];
+    limit: number | null;
+}) {
     const t = useTranslations("Reminders");
 
     const [rows, setRows] = useState(() =>
-        (data.times.length ? data.times : [""]).map((value, id) => ({
+        (times.length ? times : [""]).map((value, id) => ({
             id,
             value,
         })),
     );
     const { prefix, focusRow } = useRowFocus(rows);
-    const limit = data.daily_reminder_limit;
     return (
         <fieldset className="reminder-recipients">
             <legend>{t("deliveryTimes")}</legend>
@@ -175,7 +181,13 @@ function DeliveryTimes({ data }: { data: ReminderSchedule }) {
         </fieldset>
     );
 }
-function RecipientFields({ data }: { data: ReminderSchedule }) {
+function RecipientFields({
+    data,
+    edited,
+}: {
+    data: ReminderSchedule;
+    edited: Edited;
+}) {
     const t = useTranslations("Reminders");
     if (!data.addresses)
         return (
@@ -186,33 +198,42 @@ function RecipientFields({ data }: { data: ReminderSchedule }) {
                 })}
             </p>
         );
-    return <RecipientRows data={data} addresses={data.addresses} />;
+    return (
+        <RecipientRows
+            data={data}
+            members={data.addresses.workspace_recipients}
+            edited={edited}
+        />
+    );
 }
 function RecipientRows({
     data,
-    addresses,
+    members,
+    edited,
 }: {
     data: ReminderSchedule;
-    addresses: NonNullable<ReminderSchedule["addresses"]>;
+    members: string[];
+    edited: Edited;
 }) {
     const t = useTranslations("Reminders");
     const [rows, setRows] = useState(() =>
-        (addresses.recipients.length ? addresses.recipients : [""]).map(
-            (value, id) => ({
-                id,
-                value,
-            }),
-        ),
+        (edited.addresses?.recipients.length
+            ? edited.addresses.recipients
+            : [""]
+        ).map((value, id) => ({
+            id,
+            value,
+        })),
     );
     const { prefix, focusRow } = useRowFocus(rows);
     const [includeMembers, setIncludeMembers] = useState(
-        data.include_workspace_members,
+        edited.include_workspace_members,
     );
     // A hint only: the server decides the limit and which addresses count.
     const count = new Set(
         [
             ...rows.map((row) => row.value.trim()).filter(Boolean),
-            ...(includeMembers ? addresses.workspace_recipients : []),
+            ...(includeMembers ? members : []),
         ].map((email) => email.toLowerCase()),
     ).size;
     return (
@@ -244,12 +265,12 @@ function RecipientRows({
             <details className="reminder-members">
                 <summary>
                     {t("workspaceMembers", {
-                        count: addresses.workspace_recipients.length,
+                        count: members.length,
                     })}
                 </summary>
-                {addresses.workspace_recipients.length ? (
+                {members.length ? (
                     <ul>
-                        {addresses.workspace_recipients.map((email) => (
+                        {members.map((email) => (
                             <li key={email}>{email}</li>
                         ))}
                     </ul>
@@ -343,6 +364,16 @@ function entered(form: FormData, name: string) {
         .filter(Boolean);
 }
 
+type Edited = Pick<
+    ReminderSchedule,
+    "enabled" | "times" | "include_workspace_members" | "language" | "revision"
+> & {
+    addresses: Pick<
+        NonNullable<ReminderSchedule["addresses"]>,
+        "recipients"
+    > | null;
+};
+
 function ReminderSettings({ scope, region }: ReminderProps) {
     const t = useTranslations("Reminders");
     const resource = useApiQuery(PATH, { path: scope });
@@ -350,6 +381,8 @@ function ReminderSettings({ scope, region }: ReminderProps) {
         <Resource resource={resource} loading={t("loadingEmailReminders")}>
             {(data) => (
                 <ReminderPanel
+                    // Edits read without addresses would save an empty recipient list.
+                    key={data.addresses ? "addresses" : "count"}
                     scope={scope}
                     region={region}
                     data={data}
@@ -360,7 +393,6 @@ function ReminderSettings({ scope, region }: ReminderProps) {
     );
 }
 
-// The fields show the schedule they opened with, a save's answer or a Reload, never a background read.
 function ReminderPanel({
     scope,
     region,
@@ -372,18 +404,19 @@ function ReminderPanel({
 }) {
     const t = useTranslations("Reminders");
     const refresh = useRefresh();
+    const canManage = useCanManageWorkspace();
     const format = useFormat();
     const label = useLabel();
     const headingId = useId();
     const time = (value: string | null | undefined) =>
         format.time(value, region.timezone);
-    const [form, setForm] = useState({
-        generation: 0,
-        saves: 0,
-        stale: false,
-        schedule: data,
-    });
-    const { schedule } = form;
+    const [form, setForm] = useState<{
+        generation: number;
+        saves: number;
+        stale: boolean;
+        edited: Edited;
+    }>({ generation: 0, saves: 0, stale: false, edited: data });
+    const { edited } = form;
     return (
         <>
             <section className="panel" aria-labelledby={headingId}>
@@ -418,7 +451,7 @@ function ReminderPanel({
                                 ...shown,
                                 generation: shown.generation + 1,
                                 stale: false,
-                                schedule: current,
+                                edited: current,
                             }));
                         }}
                     >
@@ -427,6 +460,7 @@ function ReminderPanel({
                 )}
                 <ActionForm
                     key={form.generation}
+                    permitted={canManage && !!data.addresses}
                     submit={t("saveReminders")}
                     onSubmit={async (values) => {
                         const language = formText(values, "language");
@@ -445,7 +479,7 @@ function ReminderPanel({
                                         ? language
                                         : "en",
                                     times: entered(values, "times"),
-                                    expected_revision: schedule.revision,
+                                    expected_revision: edited.revision,
                                 },
                             });
                         } catch (error) {
@@ -463,7 +497,7 @@ function ReminderPanel({
                             ...current,
                             saves: current.saves + 1,
                             stale: false,
-                            schedule: saved,
+                            edited: saved,
                         }));
                         await refresh.workspace(scope.tenant_id);
                     }}
@@ -472,17 +506,20 @@ function ReminderPanel({
                         <CheckboxField
                             label={t("enableForecastEmailsForThisPlant")}
                             name="enabled"
-                            defaultChecked={schedule.enabled}
+                            defaultChecked={edited.enabled}
                         />
                         {region.status !== "approved" && (
                             <Notice>{t("approvalRequired")}</Notice>
                         )}
-                        <DeliveryTimes data={schedule} />
-                        <RecipientFields data={schedule} />
+                        <DeliveryTimes
+                            times={edited.times}
+                            limit={data.daily_reminder_limit}
+                        />
+                        <RecipientFields data={data} edited={edited} />
                         <Select
                             label={t("emailLanguage")}
                             name="language"
-                            defaultValue={schedule.language}
+                            defaultValue={edited.language}
                             required
                         >
                             <option value="en">English</option>
@@ -493,10 +530,10 @@ function ReminderPanel({
                             <p className="fine">
                                 {t("reminderPolicy", {
                                     limit:
-                                        schedule.daily_reminder_limit == null
+                                        data.daily_reminder_limit == null
                                             ? "?"
                                             : format.number(
-                                                  schedule.daily_reminder_limit,
+                                                  data.daily_reminder_limit,
                                               ),
                                 })}
                             </p>

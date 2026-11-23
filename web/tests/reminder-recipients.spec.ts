@@ -182,7 +182,7 @@ async function reminderApi(
     dailyLimit = 10,
     members: string[] = [user.email],
     includeMembers = false,
-    viewer: () => boolean = () => false,
+    viewer: (method: string) => boolean = () => false,
 ) {
     await mockApi(page);
     let revision = 0;
@@ -233,7 +233,7 @@ async function reminderApi(
             revision++;
         }
         const recipientsNow = effective(saved);
-        const administrator = !viewer();
+        const administrator = !viewer(route.request().method());
         await route.fulfill({
             json: {
                 enabled: saved.enabled,
@@ -1103,6 +1103,274 @@ test("a read answered while a save runs updates the last email but leaves the fi
         page.getByText("Saved successfully.", { exact: true }),
     ).toBeVisible();
     await expect(address).toHaveValue("typed@example.test");
+});
+
+async function workspaceRole(page: Page, role: () => "admin" | "viewer") {
+    await page.route("**/api/tenants/", (route) =>
+        route.fulfill({
+            json: paged([
+                tenantRow({ id: 1, name: "Sunfield Energy", role: role() }),
+            ]),
+        }),
+    );
+}
+
+const countOnly = (count: string) =>
+    `${count} of at most 5. Only the workspace administrator sees the addresses.`;
+
+test("a read that answers without addresses removes every address from the open form and withdraws Save", async ({
+    page,
+}) => {
+    await page.clock.install();
+    let demoted = false;
+    await reminderApi(
+        page,
+        ["kept@example.test"],
+        5,
+        true,
+        {},
+        10,
+        ["member@example.test", "second@example.test"],
+        true,
+        () => demoted,
+    );
+    await openReminders(page);
+    const address = page.getByLabel("Email address 1", { exact: true });
+    await expect(address).toHaveValue("kept@example.test");
+    await expect(
+        page.getByText("Workspace members (2)", { exact: true }),
+    ).toBeVisible();
+    demoted = true;
+    await page.clock.runFor(5_000);
+    await focusWindow(page);
+    await expect(
+        page.getByText(countOnly("3 recipients"), { exact: true }),
+    ).toBeVisible();
+    for (const email of [
+        "kept@example.test",
+        "member@example.test",
+        "second@example.test",
+    ])
+        await expect(page.getByText(email)).toHaveCount(0);
+    await expect(address).toHaveCount(0);
+    await expect(
+        page.getByRole("button", { name: "Save reminders" }),
+    ).toHaveCount(0);
+    await expect(
+        page.getByRole("button", { name: "Members", exact: true }),
+    ).toBeVisible();
+});
+
+test("after a promotion Save waits for a read with addresses, which shows the saved recipients that a save then keeps", async ({
+    page,
+}) => {
+    await page.clock.install();
+    let role: "admin" | "viewer" = "viewer";
+    await reminderApi(
+        page,
+        ["kept@example.test"],
+        5,
+        false,
+        {},
+        10,
+        [user.email],
+        false,
+        () => role === "viewer",
+    );
+    await workspaceRole(page, () => role);
+    await openReminders(page);
+    await expect(
+        page.getByText(countOnly("1 recipient"), { exact: true }),
+    ).toBeVisible();
+    const save = page.getByRole("button", { name: "Save reminders" });
+    await expect(save).toHaveCount(0);
+    let hold = true;
+    const heldRead = Promise.withResolvers<void>();
+    const releaseRead = Promise.withResolvers<void>();
+    await page.route("**/reminders/", async (route) => {
+        if (route.request().method() === "GET" && hold) {
+            hold = false;
+            heldRead.resolve();
+            await releaseRead.promise;
+        }
+        return route.fallback();
+    });
+    role = "admin";
+    await page.clock.runFor(5_000);
+    await focusWindow(page);
+    await heldRead.promise;
+    try {
+        await expect(
+            page.getByRole("button", { name: "Members", exact: true }),
+        ).toBeVisible();
+        await expect(save).toHaveCount(0);
+    } finally {
+        releaseRead.resolve();
+    }
+    const address = page.getByLabel("Email address 1", { exact: true });
+    await expect(address).toHaveValue("kept@example.test");
+    const outgoing = page.waitForRequest(
+        (request) =>
+            request.method() === "PUT" && request.url().endsWith("/reminders/"),
+    );
+    await save.click();
+    expect((await outgoing).postDataJSON()).toMatchObject({
+        enabled: false,
+        recipients: ["kept@example.test"],
+        include_workspace_members: false,
+        expected_revision: 0,
+    });
+    await expect(
+        page.getByText("Saved successfully.", { exact: true }),
+    ).toBeVisible();
+    await expect(address).toHaveValue("kept@example.test");
+});
+
+test("a save answered after a read without addresses shows no address", async ({
+    page,
+}) => {
+    await page.clock.install();
+    let demoted = false;
+    await reminderApi(
+        page,
+        ["kept@example.test"],
+        5,
+        true,
+        {},
+        10,
+        ["member@example.test"],
+        true,
+        (method) => demoted && method === "GET",
+    );
+    const saving = Promise.withResolvers<void>();
+    const answerSave = Promise.withResolvers<void>();
+    await page.route("**/reminders/", async (route) => {
+        if (route.request().method() === "PUT") {
+            saving.resolve();
+            await answerSave.promise;
+        }
+        return route.fallback();
+    });
+    await openReminders(page);
+    const address = page.getByLabel("Email address 1", { exact: true });
+    await expect(address).toHaveValue("kept@example.test");
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    await saving.promise;
+    demoted = true;
+    await page.clock.runFor(5_000);
+    await focusWindow(page);
+    const recipients = page.getByText(countOnly("2 recipients"), {
+        exact: true,
+    });
+    await expect(recipients).toBeVisible();
+    const saved = page.waitForResponse(
+        (response) =>
+            response.request().method() === "PUT" &&
+            response.url().endsWith("/reminders/"),
+    );
+    const readAfterSave = page.waitForResponse((response) =>
+        readOfReminders(response.request()),
+    );
+    answerSave.resolve();
+    expect(
+        ((await (await saved).json()) as { addresses: unknown }).addresses,
+    ).not.toBeNull();
+    await readAfterSave;
+    await expect(recipients).toBeVisible();
+    await expect(address).toHaveCount(0);
+    for (const email of ["kept@example.test", "member@example.test"])
+        await expect(page.getByText(email)).toHaveCount(0);
+});
+
+test("a later read moves the member list and the limits while the typed fields and the opening revision stay", async ({
+    page,
+}) => {
+    await page.clock.install();
+    await reminderApi(
+        page,
+        ["kept@example.test"],
+        1,
+        true,
+        {},
+        1,
+        ["member@example.test"],
+        true,
+    );
+    const first = page.waitForResponse((response) =>
+        readOfReminders(response.request()),
+    );
+    await openReminders(page);
+    const shown = (await (await first).json()) as Record<string, unknown>;
+    const address = page.getByLabel("Email address 1", { exact: true });
+    await expect(address).toHaveValue("kept@example.test");
+    const exceeded = page.getByText(/^Sending is paused above 1 recipients/);
+    await expect(exceeded).toBeVisible();
+    const addTime = page.getByRole("button", { name: /Add time/ });
+    await expect(addTime).toBeDisabled();
+    await address.fill("typed@example.test");
+    const time = page.getByLabel("Delivery time 1", { exact: true });
+    await time.fill("09:15");
+    const enabled = page.getByLabel("Enable forecast emails for this plant", {
+        exact: true,
+    });
+    await enabled.uncheck();
+    let moved = false;
+    await page.route("**/reminders/", (route) =>
+        route.request().method() === "GET" && moved
+            ? route.fulfill({
+                  json: {
+                      ...shown,
+                      revision: 1,
+                      recipient_limit: 5,
+                      recipient_limit_exceeded: false,
+                      daily_reminder_limit: 3,
+                      workspace_member_count: 2,
+                      addresses: {
+                          recipients: ["kept@example.test"],
+                          workspace_recipients: [
+                              "member@example.test",
+                              "second@example.test",
+                          ],
+                      },
+                  },
+              })
+            : route.fallback(),
+    );
+    moved = true;
+    await page.clock.runFor(5_000);
+    await focusWindow(page);
+    await expect(
+        page.getByText("Workspace members (2)", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("second@example.test")).toHaveCount(1);
+    await expect(page.getByText("3 / 5", { exact: true })).toBeVisible();
+    await expect(exceeded).toHaveCount(0);
+    await expect(
+        page.getByRole("button", { name: "Add address", exact: true }),
+    ).toBeEnabled();
+    await expect(page.getByText("1 / 3", { exact: true })).toBeVisible();
+    await expect(addTime).toBeEnabled();
+    await page.getByText("Reminder details", { exact: true }).click();
+    await expect(page.getByText(/Daily limit: 3\.$/)).toBeVisible();
+    await expect(address).toHaveValue("typed@example.test");
+    await expect(time).toHaveValue("09:15");
+    await expect(enabled).not.toBeChecked();
+    await expect(
+        page.getByLabel("Include workspace members", { exact: true }),
+    ).toBeChecked();
+    const outgoing = page.waitForRequest(
+        (request) =>
+            request.method() === "PUT" && request.url().endsWith("/reminders/"),
+    );
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    expect((await outgoing).postDataJSON()).toEqual({
+        enabled: false,
+        recipients: ["typed@example.test"],
+        include_workspace_members: true,
+        language: "en",
+        times: ["09:15"],
+        expected_revision: 0,
+    });
 });
 
 for (const width of [320, 390]) {
