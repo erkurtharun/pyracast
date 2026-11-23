@@ -1,7 +1,6 @@
 import { expect, test, type Page } from "./support/test";
 import { answer, mockApi, paged } from "./support/workspace";
 import {
-    answerConsumed,
     changedNotice,
     expiredNotice,
     firstAccount,
@@ -11,6 +10,7 @@ import {
     markDocument,
     markedTenantRequests,
     navigationType,
+    outstandingAnswers,
     refuseReload,
     restoreFromCache,
     secondUser,
@@ -408,6 +408,22 @@ const calibrationInForce = answer("CalibrationAutomationOutput", {
     last_attempt: null,
 });
 
+function heldAfter(holding: () => boolean) {
+    let reach!: () => void;
+    const reached = new Promise<void>((resolve) => (reach = resolve));
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    return {
+        reached,
+        release,
+        pass: async () => {
+            if (!holding()) return;
+            reach();
+            await released;
+        },
+    };
+}
+
 test("an action still running when another user's session arrives sends nothing for that session", async ({
     page,
 }) => {
@@ -415,17 +431,10 @@ test("an action still running when another user's session arrives sends nothing 
     await mockApi(page);
     await serveSession(page, () => account);
     let reset = false;
-    let reachList!: () => void;
-    const listReached = new Promise<void>((resolve) => (reachList = resolve));
-    let releaseList!: () => void;
-    const listReleased = new Promise<void>(
-        (resolve) => (releaseList = resolve),
-    );
+    const list = heldAfter(() => reset);
+    const automation = heldAfter(() => reset);
     await page.route("**/plants/21/calibrations/", async (route) => {
-        if (reset) {
-            reachList();
-            await listReleased;
-        }
+        await list.pass();
         await route.fulfill({ json: paged([calibrationRun]) });
     });
     await page.route("**/plants/21/calibrations/40/", (route) =>
@@ -435,9 +444,10 @@ test("an action still running when another user's session arrives sends nothing 
         reset = true;
         return route.fulfill({ json: {} });
     });
-    await page.route("**/plants/21/calibration/automation/", (route) =>
-        route.fulfill({ json: calibrationInForce }),
-    );
+    await page.route("**/plants/21/calibration/automation/", async (route) => {
+        await automation.pass();
+        await route.fulfill({ json: calibrationInForce });
+    });
     await page.goto("/app/");
     await page.getByRole("button", { name: /East array/ }).click();
     await page
@@ -451,17 +461,21 @@ test("an action still running when another user's session arrives sends nothing 
         "Active",
     );
     await markDocument(page);
-    const { settled } = await answerConsumed(page, "/plants/21/calibrations/");
+    const outstanding = await outstandingAnswers(page);
     const reload = await holdReload(page);
     const observe = await tagObserver(page);
     await page.getByRole("button", { name: "Reset to baseline" }).click();
     await page.getByRole("button", { name: "Reset to baseline" }).click();
-    await listReached;
+    await Promise.all([list.reached, automation.reached]);
     account = { user: secondUser, tag: "tag-b" };
     await observe("tag-b");
     await reload.reached;
-    releaseList();
-    await settled;
+    const automationOnly = outstanding(1);
+    list.release();
+    await automationOnly;
+    const none = outstanding(0);
+    automation.release();
+    await none;
     reload.release();
     await expect(
         page.getByRole("heading", { name: "Calibration history" }),

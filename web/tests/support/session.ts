@@ -96,33 +96,61 @@ export async function refuseReload(page: Page) {
     return { refused };
 }
 
-// Every reaction queued once an answer's body was read runs before the document's next task. The
-// document calls back, because an evaluation waits while a navigation is pending.
-export async function answerConsumed(page: Page, path: string) {
-    let settle!: () => void;
-    const settled = new Promise<void>((resolve) => (settle = resolve));
-    await page.exposeFunction("answerSettled", () => settle());
-    await page.evaluate((path) => {
+// Every reaction queued once an API answer's body was read, or its request failed, runs before the
+// document's next task, which reports how many API answers it still awaits. The document calls
+// back, because an evaluation waits while a navigation is pending.
+export async function outstandingAnswers(page: Page) {
+    const waiting: { count: number; resolve: () => void }[] = [];
+    await page.exposeFunction("answersOutstanding", (count: number) => {
+        for (const waiter of waiting.filter((item) => item.count === count)) {
+            waiting.splice(waiting.indexOf(waiter), 1);
+            waiter.resolve();
+        }
+    });
+    await page.evaluate(() => {
+        let outstanding = 0;
+        const settle = () => {
+            outstanding--;
+            setTimeout(() =>
+                (
+                    window as unknown as {
+                        answersOutstanding: (count: number) => void;
+                    }
+                ).answersOutstanding(outstanding),
+            );
+        };
         const send = window.fetch.bind(window);
         window.fetch = async (input, init) => {
-            const response = await send(input, init);
-            if (!response.url.endsWith(path)) return response;
+            const address = new URL(
+                input instanceof Request ? input.url : String(input),
+                window.location.href,
+            );
+            if (!address.pathname.startsWith("/api/")) return send(input, init);
+            outstanding++;
+            let response: Response;
+            try {
+                response = await send(input, init);
+            } catch (error) {
+                settle();
+                throw error;
+            }
+            if (response.status === 204) {
+                settle();
+                return response;
+            }
             const body = response.json.bind(response);
             response.json = async () => {
                 try {
                     return (await body()) as unknown;
                 } finally {
-                    setTimeout(() =>
-                        (
-                            window as unknown as { answerSettled: () => void }
-                        ).answerSettled(),
-                    );
+                    settle();
                 }
             };
             return response;
         };
-    }, path);
-    return { settled };
+    });
+    return (count: number) =>
+        new Promise<void>((resolve) => waiting.push({ count, resolve }));
 }
 
 export function isMarked(page: Page) {
