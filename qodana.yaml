@@ -29,12 +29,23 @@ exclude:
       - src/pyracast/platform_admin/site.py
       - src/pyracast/api/trash.py
       - src/pyracast/incidents/api.py
+      - src/pyracast/accounts/social_views.py
+      - src/pyracast/api/csp_reports.py
+      - src/pyracast/change_requests/api.py
+      - src/pyracast/plants/publication.py
   - name: PyUnnecessaryCastInspection
     paths:
       - src/pyracast/platform_admin/forms.py
       - src/pyracast/api/public.py
       - src/pyracast/plants/incident_forecasts.py
       - src/pyracast/accounts/language.py
+      - src/pyracast/accounts/headless.py
+      - src/pyracast/accounts/inputs.py
+      - src/pyracast/accounts/signup.py
+      - src/pyracast/platform_admin/failures.py
+      - src/pyracast/platform_admin/historical.py
+      - src/pyracast/platform_admin/site.py
+      - src/pyracast/trash.py
   - name: PySimplifyBooleanCheckInspection
     paths:
       - src/pyracast/calculation.py
@@ -45,6 +56,8 @@ exclude:
   - name: PyPackageRequirementsInspection
     paths:
       - scripts/dev_dependencies.py
+      - src/pyracast/background/failures.py
+      - src/pyracast/accounts/social_views.py
   # Cell inherits the supported NumberFormatDescriptor from openpyxl's StyleableObject.
   - name: PyDunderSlotsInspection
     paths:

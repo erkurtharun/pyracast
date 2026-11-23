@@ -120,6 +120,8 @@ def test_regional_forecast_selects_the_normalized_copy_of_the_same_vintage(
     body = response.json()
     assert body["binding_id"] == target.pk
     assert body["result"]["reference_capacity_normalization"]["factor"] == 1000
+    members = list(body["result"])
+    assert members[members.index("reference_capacity_normalization") + 1] == "provenance"
 
 
 @pytest.mark.parametrize("normalized_primary", [False, True])

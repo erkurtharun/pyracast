@@ -1,11 +1,11 @@
 # Create a synthetic demo plant locally
 
-A developer runs `pyracast fixture_demo --username <administrator>` against a local debug database. The command creates, or resumes, the operator's demo workspace with a location, a plant, a fixture provider account and binding, validates and approves them and runs the first forecast collection in the same process, with no RabbitMQ, no provider request and no weather request. The outcome is an approved location with one published forecast for tomorrow, the plant's archived forecast and a printed API path to read it.
+A developer runs `pyracast fixture_demo --username <administrator>` against a local debug database. The command creates, or resumes, the operator's demo workspace with a location, a plant, a fixture provider account and binding, validates and approves them and runs the first forecast collection in the same process, with no RabbitMQ and no provider request. The outcome is an approved location with one published forecast for tomorrow, the plant's archived forecast and a printed API path to read it.
 
 ## Entry points
 
 - Command `fixture_demo` (`src/pyracast/forecasts/management/commands/fixture_demo.py` `Command.handle` and `run_demo`, started through `pyracast.cli.main`). Option `--username` (required). Actor: a developer with an active staff superuser account, as `bootstrap_admin` creates it. No screen and no endpoint.
-- Documented only in `README.md` section "First administrator and demo", after `bootstrap_admin`; the command itself never checks MFA. Steps in order: `submit_region`, `create_plant`, `create_account`, `configure_binding`, `validate_binding`, `approve_region`, `collect` (`submit_region` and `configure_binding` in `pyracast/regions/operations.py`; `create_plant` in `pyracast/plants/operations.py`; `create_account` in `pyracast/connections/operations.py`; `validate_binding` in `pyracast/forecasts/validation.py`; `approve_region` in `pyracast/plants/approval.py`; `collect` in `pyracast/forecasts/jobs/collect.py` with the plant publication hooks `PUBLICATION` of `pyracast/plants/publication.py`), with `FixtureProvider` (`pyracast/providers.py`) and `calculate` (`pyracast/calculation.py`).
+- Documented only in `README.md` section "First administrator and demo", after `bootstrap_admin`; the command itself never checks MFA. Steps in order: `submit_region`, `create_plant`, `create_account`, `configure_binding`, `validate_binding`, `approve_region`, `collect` (`submit_region` and `configure_binding` in `src/pyracast/regions/operations.py`; `create_plant` in `src/pyracast/plants/operations.py`; `create_account` in `src/pyracast/connections/operations.py`; `validate_binding` in `src/pyracast/forecasts/validation.py`; `approve_region` in `src/pyracast/plants/approval.py`; `collect` in `src/pyracast/forecasts/jobs/collect.py` with the plant publication hooks `PUBLICATION` of `src/pyracast/plants/publication.py`), with `FixtureProvider` (`src/pyracast/providers.py`) and `calculate` (`src/pyracast/calculation.py`).
 
 ## Sequence
 
@@ -83,7 +83,6 @@ sequenceDiagram
 - Every operation commits on its own: no command transaction and no cleanup. A rerun finds the workspace by the user's identity and its admin membership, then the region, plant, binding and job of an earlier run, completes what is missing and prints the same path. Another workspace with the same name is never joined, because the lookup requires the actor's admin membership, and concurrent runs for one operator serialize on the user row.
 - `approve_region` sets `target_date` to tomorrow in the region zone, so the printed path reads tomorrow.
 - The job's `scheduled_for` is the approval time. `claim` accepts it because `available_at` is not in the future and no schedule row exists, so no later slot supersedes it unless a default collection time passes between approval and collection.
-- `collect` gets no weather provider, so no Open-Meteo call happens. The worker (`pyracast/forecasts/runtime.py` `deliver`) also skips weather for non-Solcast accounts.
 - The result is an ordinary approved region: `enqueue_due` (flow `forecast-collection-scheduling`) schedules it and `adapter_for` returns `FixtureProvider`, so a running dispatcher keeps producing fixture forecast and nightly `estimated_actuals` jobs, spending the account's quota of 10 per UTC day.
 
 ## Tests
