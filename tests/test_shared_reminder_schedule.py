@@ -46,7 +46,11 @@ def test_transfer_preserves_one_shared_schedule_and_its_deliveries(
     new_client.force_login(replacement)
     url = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/"
     original = old_client.get(url).json()
-    assert new_client.get(url).json() == {**original, "addresses": None}
+    assert new_client.get(url).json() == {
+        **original,
+        "hidden_by_departure": None,
+        "addresses": None,
+    }
     assert original["addresses"]["recipients"] == ["original@example.com"]
     assert original["language"] == "tr"
     reassign_workspace_admin(
@@ -91,6 +95,7 @@ def test_transfer_preserves_one_shared_schedule_and_its_deliveries(
     administrator_view = new_client.get(url).json()
     assert old_client.get(url).json() == {
         **administrator_view,
+        "hidden_by_departure": None,
         "addresses": None,
         "deliveries": [
             {**delivery, "recipients": None, "recipient_roles": None}

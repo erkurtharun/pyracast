@@ -42,7 +42,7 @@ from pyracast.notifications.models import (
     ReminderRecipientTie,
     ReminderSchedule,
 )
-from pyracast.notifications.recipients import recipient_key
+from pyracast.notifications.recipients import hide_visible_schedules, recipient_key
 from pyracast.regions.models import Region
 
 # Mail that names an address the account changed away from or removed, beside its current one.
@@ -449,6 +449,10 @@ def _erase(account_id: int) -> Erasure:
         Region.objects.filter(pk__in=regions, tenant_id__in=list(workspaces)), no_key=True
     )
     changes: Counter[str] = Counter()
+    if hidden := hide_visible_schedules(
+        list(Membership.objects.filter(user_id=account_id).values_list("tenant_id", flat=True))
+    ):
+        changes["notifications.ReminderSchedule"] += len(hidden)
     _forget_recipients(account_id, addresses, list(locked_regions), changes)
     _forget_mail(account_id, addresses, changes)
     _forget_sessions(account, addresses, changes)

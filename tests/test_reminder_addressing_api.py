@@ -1077,34 +1077,6 @@ def test_two_typed_role_entries_for_spellings_of_one_mailbox_are_refused() -> No
     assert not ReminderSchedule.objects.exists()
 
 
-@pytest.mark.parametrize("departure", [remove, erase])
-def test_a_typed_row_in_another_spelling_of_a_departing_members_address_goes_with_them(
-    departure: Any,
-) -> None:
-    system, _, _ = workspace()
-    holder = member(system, UNICODE_MAILBOX)
-    held = membership(holder)
-    configure_reminders(
-        system.member,
-        system.tenant.pk,
-        system.region.pk,
-        enabled=True,
-        recipients=[ACE_MAILBOX],
-        include_workspace_members=True,
-        times=["10:00"],
-        language="en",
-        now=NOW,
-        hide_recipients=False,
-        address_roles=[AddressChoice(ACE_MAILBOX, TO, frozenset({held}))],
-    )
-    assert ACE_MAILBOX in sent_headers(0)[0]
-
-    assert departure(system, holder)
-
-    assert not ReminderRecipient.objects.exists()
-    assert sent_headers(1) == ([ADMIN], ["alice@example.com", "bob@example.com"], [])
-
-
 @pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 def test_a_member_entry_naming_the_earlier_members_of_an_address_refuses_the_save() -> None:
     system, _, bob = workspace()

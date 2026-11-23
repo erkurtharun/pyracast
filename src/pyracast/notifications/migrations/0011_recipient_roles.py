@@ -26,6 +26,20 @@ class Migration(migrations.Migration):
             field=models.BooleanField(default=True),
         ),
         migrations.AddField(
+            model_name="reminderschedule",
+            name="hidden_by_departure",
+            field=models.BooleanField(default=False),
+        ),
+        migrations.AddConstraint(
+            model_name="reminderschedule",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    ("hidden_by_departure", False), ("hide_recipients", True), _connector="OR"
+                ),
+                name="reminderschedule_hidden_by_departure_chk",
+            ),
+        ),
+        migrations.AddField(
             model_name="reminderrecipient",
             name="role",
             field=models.CharField(blank=True, choices=ROLES, default="", max_length=3),

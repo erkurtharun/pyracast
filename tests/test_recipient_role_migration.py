@@ -89,7 +89,11 @@ def test_existing_schedules_stay_hidden_and_their_rows_carry_no_visible_role(
 
     forward()
 
-    assert ReminderSchedule.objects.get(pk=schedule_id).hide_recipients is True
+    schedule = ReminderSchedule.objects.get(pk=schedule_id)
+    assert (schedule.hide_recipients, schedule.hidden_by_departure) == (True, False)
+    assert "reminderschedule_hidden_by_departure_chk" in constraints(
+        "notifications_reminderschedule"
+    )
     assert list(
         ReminderRecipient.objects.filter(schedule_id=schedule_id).values_list(
             "address", "role", "role_members"
@@ -116,7 +120,7 @@ def test_the_migration_reverses_to_the_previous_schema_and_keeps_every_row(
     system, apps = previous
     schedule_id, delivery_id = legacy_rows(system, apps)
     forward()
-    ReminderSchedule.objects.filter(pk=schedule_id).update(hide_recipients=False)
+    ReminderSchedule.objects.filter(pk=schedule_id).update(hidden_by_departure=True)
     ReminderRecipient.objects.filter(schedule_id=schedule_id).update(role="to")
     ReminderMemberRole.objects.create(
         schedule_id=schedule_id,
@@ -126,7 +130,9 @@ def test_the_migration_reverses_to_the_previous_schema_and_keeps_every_row(
 
     migrate(*PREVIOUS)
 
-    assert "hide_recipients" not in columns("notifications_reminderschedule")
+    assert {"hide_recipients", "hidden_by_departure"}.isdisjoint(
+        columns("notifications_reminderschedule")
+    )
     assert "role" not in columns("notifications_reminderrecipient")
     assert "role" not in columns("notifications_deliveryrecipient")
     assert "role_members" not in columns("notifications_reminderrecipient")

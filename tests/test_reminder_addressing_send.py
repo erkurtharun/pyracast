@@ -402,8 +402,21 @@ def test_a_member_who_left_and_joined_again_follows_the_default() -> None:
         expires_at=timezone.now() + timedelta(days=7),
     )
     accept_workspace_invitation(alice, "again")
+    assert "alice@example.com" in headers(sent_on(0))[2]
+    configure_reminders(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        enabled=True,
+        recipients=["boss@example.com", "outside@example.com"],
+        include_workspace_members=True,
+        times=["10:00"],
+        language="en",
+        now=NOW,
+        hide_recipients=False,
+    )
 
-    assert "alice@example.com" in headers(sent_on())[1]
+    assert "alice@example.com" in headers(sent_on(1))[1]
 
 
 def test_a_typed_to_whose_tied_member_gave_the_address_up_is_sent_hidden() -> None:

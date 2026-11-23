@@ -11008,6 +11008,10 @@
                     "hide_recipients": {
                         "type": "boolean"
                     },
+                    "hidden_by_departure": {
+                        "type": "boolean",
+                        "nullable": true
+                    },
                     "language": {
                         "$ref": "#/components/schemas/LanguageEnum"
                     },
@@ -11053,6 +11057,7 @@
                     "daily_reminder_limit",
                     "deliveries",
                     "enabled",
+                    "hidden_by_departure",
                     "hide_recipients",
                     "include_workspace_members",
                     "language",

@@ -461,6 +461,18 @@ def delivery_roles(delivery: NotificationDelivery) -> list[tuple[str, RecipientR
     return [(row.address, RecipientRole(row.role)) for row in _envelope(delivery)]
 
 
+def hide_visible_schedules(tenant_ids: Collection[int]) -> set[int]:
+    """Hides every visible schedule of the workspaces until an administrator saves again."""
+    visible = ReminderSchedule.objects.filter(
+        region__tenant_id__in=tenant_ids, hide_recipients=False
+    )
+    hidden = set(visible.values_list("pk", flat=True))
+    ReminderSchedule.objects.filter(pk__in=hidden).update(
+        hide_recipients=True, hidden_by_departure=True, revision=F("revision") + 1
+    )
+    return hidden
+
+
 def remove_member_recipients(tenant_id: int, membership_id: int, emails: set[str]) -> None:
     list(
         Region.objects.select_for_update()
@@ -468,6 +480,7 @@ def remove_member_recipients(tenant_id: int, membership_id: int, emails: set[str
         .order_by("pk")
         .values_list("pk", flat=True)
     )
+    hidden = hide_visible_schedules([tenant_id])
     rows = ReminderRecipient.objects.filter(schedule__region__tenant_id=tenant_id)
     keys = {key for address in emails if (key := recipient_key(address))}
     keys.update(rows.filter(ties__membership_id=membership_id).values_list("key", flat=True))
@@ -478,7 +491,7 @@ def remove_member_recipients(tenant_id: int, membership_id: int, emails: set[str
         ReminderRecipient.objects.filter(pk__in=removed).values_list("schedule_id", flat=True)
     )
     ReminderRecipient.objects.filter(pk__in=removed).delete()
-    ReminderSchedule.objects.filter(pk__in=changed).update(revision=F("revision") + 1)
+    ReminderSchedule.objects.filter(pk__in=changed - hidden).update(revision=F("revision") + 1)
     _revoke_unauthorized(tenant_id, membership_id, keys)
 
 

@@ -52,6 +52,7 @@ class ReminderSchedule(models.Model):
     enabled = models.BooleanField(default=False)
     include_workspace_members = models.BooleanField(default=False)
     hide_recipients = models.BooleanField(default=True)
+    hidden_by_departure = models.BooleanField(default=False)
     times = models.JSONField(default=list)
     effective_from = models.DateTimeField()
     language = models.CharField(max_length=2, choices=Language, default=Language.EN)
@@ -62,6 +63,10 @@ class ReminderSchedule(models.Model):
             models.UniqueConstraint(fields=("region",), name="%(class)s_region_uniq"),
             choices_check("language", Language),
             json_shape_check("times", "array", TIME_ITEMS),
+            models.CheckConstraint(
+                condition=models.Q(hidden_by_departure=False) | models.Q(hide_recipients=True),
+                name="%(class)s_hidden_by_departure_chk",
+            ),
         )
 
     def __str__(self) -> str:

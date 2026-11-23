@@ -157,6 +157,7 @@ class ReminderOutput(serializers.Serializer[ReminderOverview]):
     revision = serializers.IntegerField()
     include_workspace_members = serializers.BooleanField()
     hide_recipients = serializers.BooleanField()
+    hidden_by_departure = serializers.BooleanField(allow_null=True)
     language = serializers.ChoiceField(choices=Language.choices)
     times = serializers.ListField(child=serializers.CharField())
     recipient_limit = serializers.IntegerField()

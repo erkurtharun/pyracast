@@ -3054,6 +3054,7 @@ export interface components {
             revision: number;
             include_workspace_members: boolean;
             hide_recipients: boolean;
+            hidden_by_departure: boolean | null;
             language: components["schemas"]["LanguageEnum"];
             times: string[];
             recipient_limit: number;

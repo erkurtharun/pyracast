@@ -166,6 +166,7 @@ CUSTOMER_FIELDS = {
     "ghi_wm2",
     "has_usable_password",
     "health",
+    "hidden_by_departure",
     "hide_recipients",
     "historical_configuration_assumed",
     "history_local_time",

@@ -1032,6 +1032,7 @@ erDiagram
         bigint region_id FK "references regions_region.id"
         integer revision
         boolean hide_recipients
+        boolean hidden_by_departure
     }
     notifications_notificationdelivery ||--o{ notifications_deliveryrecipient : "delivery_id"
     connections_sitebinding ||--o{ notifications_notificationdelivery : "binding_id"
@@ -1106,6 +1107,7 @@ erDiagram
 
 #### `notifications_reminderschedule`
 
+- `reminderschedule_hidden_by_departure_chk`: `CHECK ((NOT "hidden_by_departure" OR "hide_recipients"))`
 - `reminderschedule_language_chk`: `CHECK ("language" IN ('en', 'tr'))`
 - `reminderschedule_region_uniq`: `UNIQUE ("region_id")`
 - `reminderschedule_times_chk`: `CHECK ((jsonb_typeof("times") = 'array' AND NOT (jsonb_path_exists("times", 'strict $[*] ? (@.type() != "string" || !(@ like_regex "^([01][0-9]|2[0-3]):[0-5][0-9]$"))'::jsonpath, '{}', true))))`

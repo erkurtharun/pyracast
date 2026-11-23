@@ -96,6 +96,7 @@ class ReminderOverview:
     revision: int
     include_workspace_members: bool
     hide_recipients: bool
+    hidden_by_departure: bool | None
     language: str
     times: list[str]
     recipient_limit: int
@@ -248,6 +249,7 @@ def reminder_overview(
         revision=schedule.revision,
         include_workspace_members=schedule.include_workspace_members,
         hide_recipients=sent_hidden(schedule.hide_recipients) and schedule.pk is not None,
+        hidden_by_departure=schedule.hidden_by_departure if administrator else None,
         language=schedule.language,
         times=list(schedule.times),
         recipient_limit=limit,
