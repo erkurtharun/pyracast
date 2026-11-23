@@ -1,5 +1,6 @@
-// Colours and spacing for places that cannot read CSS custom properties: SVG presentation attributes, generated images and the QR code.
 export const qrColours = { background: "#ffffff", foreground: "#000000" };
+
+export const appWindowColour = "#143c32";
 
 export const illustrationColours = {
     forecast: "#28664e",

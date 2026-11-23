@@ -1,12 +1,15 @@
 {
     "Bootstrap": {
+        "title": "Pyracast açılamadı",
         "retry": "Tekrar dene",
         "loading": "Yükleniyor…"
     },
     "AppError": {
         "title": "Bu sayfa görüntülenemedi",
         "description": "Bu sayfa gösterilirken bir sorun oluştu. Tekrar deneyin; sorun sürerse sayfayı yenileyin.",
-        "retry": "Tekrar dene"
+        "retry": "Tekrar dene",
+        "reload": "Sayfayı yenile",
+        "start": "Başlangıç ekranına git"
     },
     "Language": {
         "label": "Dil",
