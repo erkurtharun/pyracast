@@ -236,7 +236,7 @@ async function expectReceivedManifest(page: Page, reference: string) {
 for (const address of addresses)
     test(`${address.name} serves the manifest link, the touch icon and the app's name as children of head ${
         address.layout === "app" ? "with" : "without"
-    } the theme colour, and the browser receives the checked-in manifest and processes it with the app's identity, start, scope and display, all at the requested address`, async ({
+    } the theme colour, and the browser receives the checked-in manifest and processes it with the app's identity, start, scope and display, with the page at the requested address before and after the live checks`, async ({
         page,
         baseURL,
     }) => {
