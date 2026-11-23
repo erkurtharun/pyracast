@@ -11,7 +11,7 @@ from django.db.models.signals import pre_save
 from pyracast.connections import operations
 from pyracast.connections.models import ProviderAccount
 from pyracast.connections.operations import create_account
-from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
+from pyracast.connections.secrets import api_key_fingerprints, decrypt_api_key, encrypt_secret
 from pyracast.errors import ConflictError
 from pyracast.forecasts.models import RequestPurpose
 from pyracast.forecasts.quota import QuotaExceededError, reserve_account_request
@@ -194,6 +194,50 @@ def test_another_identity_inserted_before_the_commit_keeps_the_key_refused(
         "strasse"
     ]
     assert AuditEvent.objects.filter(action="provider_account_created").count() == 1
+
+
+def test_the_requested_identity_given_the_key_during_recovery_is_returned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
+    refuse = operations._refuse_shared_key
+    fingerprint = api_key_fingerprints(provider_key())[0]
+    holder: list[ProviderAccount] = []
+    requested: list[ProviderAccount] = []
+
+    def account(identity: str, key: str) -> ProviderAccount:
+        return ProviderAccount.objects.create(
+            provider="fixture",
+            external_account_id=identity,
+            encrypted_api_key=encrypt_secret(key),
+            api_key_fingerprint=api_key_fingerprints(key)[0],
+            authorization_reference="race",
+            authorized_by=admin,
+            authorized_at=NOW,
+        )
+
+    def move_the_key() -> ProviderAccount:
+        ProviderAccount.objects.filter(pk=holder[0].pk).update(
+            api_key_fingerprint=api_key_fingerprints(provider_key("OTHER"))[0]
+        )
+        return account("strasse", provider_key())
+
+    def interleave(*args: Any, **kwargs: Any) -> None:
+        if not holder:
+            refuse(*args, **kwargs)
+            holder.append(committed_elsewhere(lambda: account("other", provider_key())))
+        else:
+            requested.append(committed_elsewhere(move_the_key))
+            refuse(*args, **kwargs)
+
+    monkeypatch.setattr(operations, "_refuse_shared_key", interleave)
+
+    returned = create_with_one_key(admin, "Straße")
+
+    assert returned == requested[0].pk
+    assert ProviderAccount.objects.get(api_key_fingerprint=fingerprint).pk == returned
+    assert ProviderAccount.objects.count() == 2
+    assert not AuditEvent.objects.filter(action="provider_account_created").exists()
 
 
 def test_account_index_uses_builtin_unicode_collation() -> None:

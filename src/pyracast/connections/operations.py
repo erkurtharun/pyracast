@@ -97,7 +97,9 @@ def create_account(
                 existing = accounts.first()
                 if existing is None:
                     _refuse_shared_key(fingerprints, other_than=accounts)
-                    raise
+                    existing = accounts.first()
+                    if existing is None:
+                        raise
             else:
                 created.refresh_from_db(fields=("provider", "external_account_id"))
                 record_audit(
