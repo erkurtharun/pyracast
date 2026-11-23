@@ -17,6 +17,7 @@
         "api:generate": "uv run --locked python ../scripts/generate_api_schema.py && openapi-typescript openapi.json -o src/lib/schema.d.ts && prettier --write --ignore-path ../.gitignore openapi.json src/lib/schema.d.ts",
         "check": "npm run check:static && npm test",
         "test:integration": "playwright test --config playwright.integration.config.ts",
+        "test:production": "playwright test --config playwright.production.config.ts",
         "test:coverage": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON testing/run-coverage.mjs",
         "budget": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON testing/check-bundle-budget.mjs",
         "knip": "knip",

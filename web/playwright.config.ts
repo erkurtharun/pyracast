@@ -16,7 +16,11 @@ export default defineConfig({
         ? [["list"], ["./testing/coverage-reporter.ts"]]
         : "list",
     outputDir: coverage ? "coverage/test-results" : "test-results",
-    use: { baseURL: serverOrigin(coverage), trace: "retain-on-failure" },
+    use: {
+        baseURL: serverOrigin(coverage),
+        trace: "retain-on-failure",
+        serviceWorkers: "block",
+    },
     projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
     webServer: webServer(run),
 });
