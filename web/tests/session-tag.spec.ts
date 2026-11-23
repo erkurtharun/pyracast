@@ -12,6 +12,7 @@ let {
     authRequest,
     isCurrent,
     loadSession,
+    NotSentError,
     observedTagKey,
     sessionOwner,
     sessionState,
@@ -27,6 +28,7 @@ function startDocument() {
         authRequest,
         isCurrent,
         loadSession,
+        NotSentError,
         observedTagKey,
         sessionOwner,
         sessionState,
@@ -305,7 +307,7 @@ test("a read waiting for its busy retry sends nothing after the sign-out was con
     answer(reply, reply, reply);
     const read = api.get("/api/tenants/").catch((failure) => failure);
     await signOut();
-    expect(sessionState().replaced).toBe(true);
+    expect(sessionState().retired).toBe("signedOutHere");
     release();
     expect(await read).toMatchObject(notSent);
     expect(sent()).toEqual([
@@ -351,13 +353,13 @@ for (const outcome of ["refused", "confirmed"] as const) {
         ]);
         if (outcome === "refused") {
             expect(ended).toMatchObject({ status: 403, code: "csrf_failed" });
+            expect(sessionState().retired).toBeUndefined();
             expect(sessionState()).toMatchObject({
-                replaced: false,
                 signOut: { status: "failed" },
             });
         } else {
             expect(ended).toBeUndefined();
-            expect(sessionState().replaced).toBe(true);
+            expect(sessionState().retired).toBe("signedOutHere");
         }
     });
 }
@@ -373,13 +375,13 @@ test("a sign-out answered 200 with a signed-out body fails and keeps the documen
     expect(failed).toMatchObject({
         message: "The server returned an invalid response. Please try again.",
     });
+    expect(sessionState().retired).toBeUndefined();
     expect(sessionState()).toMatchObject({
-        replaced: false,
         signOut: { status: "failed" },
     });
     expect(sent()).toEqual(["DELETE /api/auth/browser/v1/auth/session a"]);
     await signOut();
-    expect(sessionState().replaced).toBe(true);
+    expect(sessionState().retired).toBe("signedOutHere");
     expect(sent()).toEqual([
         "DELETE /api/auth/browser/v1/auth/session a",
         "DELETE /api/auth/browser/v1/auth/session a",
@@ -416,6 +418,101 @@ test("a request queued behind the sign-out sends nothing after the sign-out was 
     await ending;
     expect(await read).toMatchObject(notSent);
     expect(sent()).toEqual(["DELETE /api/auth/browser/v1/auth/session a"]);
+});
+
+test("a read refused after the document adopted another session during this tab's sign-out is told the session changed", async () => {
+    adoptSession(session("a"));
+    const { gate, release } = held();
+    answer(changed, async () => {
+        await gate;
+        return json(session("b", 2));
+    });
+    let adopted: Promise<unknown> | undefined;
+    Object.assign(globalThis.window.localStorage, {
+        setItem: (key: string, value: string) => {
+            stored.set(key, value);
+            adopted ??= authRequest("account/providers", "GET").catch(
+                (failure) => failure,
+            );
+        },
+    });
+    const ending = signOut().catch((failure) => failure);
+    const first = authRequest("account/providers", "GET").catch(
+        (failure) => failure,
+    );
+    while (calls.length < 2) await drained();
+    const second = authRequest("account/providers", "GET").catch(
+        (failure) => failure,
+    );
+    release();
+    expect(await ending).toMatchObject({ code: "session_changed" });
+    expect(await first).toMatchObject(notSent);
+    expect(await second).toMatchObject(notSent);
+    expect(await adopted).toMatchObject({ code: "session_changed" });
+    expect(sent()).toEqual([
+        "DELETE /api/auth/browser/v1/auth/session a",
+        "GET /api/session/ null",
+    ]);
+});
+
+test("a request prepared after this tab's confirmed sign-out is told it was not sent", async () => {
+    adoptSession(session("a"));
+    answer(signedOutAnswer);
+    await signOut();
+    const saving = await api
+        .post("/api/tenants/{tenant_id}/sites/", site)
+        .catch((failure) => failure);
+    const reading = await authRequest("account/providers", "GET").catch(
+        (failure) => failure,
+    );
+    expect(saving).toMatchObject(notSent);
+    expect(reading).toMatchObject(notSent);
+    expect(sent()).toEqual(["DELETE /api/auth/browser/v1/auth/session a"]);
+});
+
+test("a document retired by its own sign-out keeps telling a waiting request it was not sent after reading another session", async () => {
+    adoptSession(session("a"));
+    const { gate, release } = held();
+    answer(
+        async () => {
+            await gate;
+            return json(
+                errorBody("session_busy", "Busy.", { retry_after: 0 }),
+                429,
+            );
+        },
+        signedOutAnswer,
+        () => json(session("b", 2)),
+    );
+    const read = api.get("/api/tenants/").catch((failure) => failure);
+    await signOut();
+    expect((await loadSession()).session_tag).toBe("b");
+    release();
+    expect(await read).toMatchObject(notSent);
+    expect(sent()).toEqual([
+        "GET /api/tenants/ a",
+        "DELETE /api/auth/browser/v1/auth/session a",
+        "GET /api/session/ null",
+    ]);
+});
+
+test("an answer that arrives after this tab's confirmed sign-out is withheld as a changed session, not as unsent", async () => {
+    adoptSession(session("a"));
+    const { gate, release } = held();
+    answer(async () => {
+        await gate;
+        return json({ results: [], count: 0, next: null, previous: null });
+    }, signedOutAnswer);
+    const read = api.get("/api/tenants/").catch((failure) => failure);
+    await signOut();
+    release();
+    const withheld = await read;
+    expect(withheld).toMatchObject({ code: "session_changed" });
+    expect(withheld).not.toBeInstanceOf(NotSentError);
+    expect(sent()).toEqual([
+        "GET /api/tenants/ a",
+        "DELETE /api/auth/browser/v1/auth/session a",
+    ]);
 });
 
 test("V2: a sign-out is never sent a second time for another account", async () => {

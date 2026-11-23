@@ -18,11 +18,13 @@ let serial: Promise<unknown> = Promise.resolve();
 export type Tag = string | undefined;
 type SessionCheck = {
     tag: () => Tag;
+    shows: (tag: string) => boolean;
     refusal: (request: LaneRequest, tag: string) => ApiError | undefined;
     confirm: () => Promise<Tag>;
 };
 let session: SessionCheck = {
     tag: () => undefined,
+    shows: () => true,
     refusal: () => undefined,
     confirm: () => Promise.resolve(undefined),
 };
@@ -76,16 +78,23 @@ function exchange(request: LaneRequest, tag: Tag): Promise<Exchange> {
 
 // Sends a request for the session this tab adopted. A refusal for a changed session is repeated
 // once when a session read sent after it shows the same session under a renewed key, and never
-// for another session. An answer that arrives after the tab adopted another session is not
-// delivered.
+// for another session. An answer that arrives after the document retired or adopted another
+// session is not delivered.
 export async function prepared(request: LaneRequest): Promise<Exchange> {
     if (request.url === SESSION_READ) return exchange(request, undefined);
     const tag = sessionTag();
+    refuse(request, tag);
     let answer = await exchange(request, tag);
     if (refusedAsChanged(answer) && (await confirmed()) === tag)
         answer = await exchange(request, tag);
-    if (tag !== undefined && sessionTag() !== tag) throw changedSession();
+    if (tag !== undefined && !session.shows(tag)) throw changedSession();
     return answer;
+}
+
+function refuse(request: LaneRequest, tag: Tag) {
+    const refused =
+        tag === undefined ? undefined : session.refusal(request, tag);
+    if (refused) throw refused;
 }
 
 async function confirmed(): Promise<Tag> {
@@ -116,9 +125,7 @@ async function attempt(request: LaneRequest, tag: Tag, retried = false) {
 }
 
 async function deliver(request: LaneRequest, tag: Tag): Promise<Exchange> {
-    const refused =
-        tag === undefined ? undefined : session.refusal(request, tag);
-    if (refused) throw refused;
+    refuse(request, tag);
     const { method, url, body } = request;
     const t = browserErrors();
     let response: Response;

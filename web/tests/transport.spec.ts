@@ -463,7 +463,10 @@ test("a confirmed sign-out ends the document without reading the session", async
     adoptSession(signedIn("token"));
     answer(() => json({ status: 401, meta: { is_authenticated: false } }, 401));
     await signOut();
-    expect(sessionState()).toMatchObject({ replaced: true, ended: false });
+    expect(sessionState()).toMatchObject({
+        retired: "signedOutHere",
+        ended: false,
+    });
     expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
         "DELETE /api/auth/browser/v1/auth/session",
     ]);
@@ -484,8 +487,8 @@ for (const [name, body] of [
         answer(() => json(body, 401));
         const error = await signOut().catch((failure) => failure);
         expect(error).toBeInstanceOf(ApiError);
+        expect(sessionState().retired).toBeUndefined();
         expect(sessionState()).toMatchObject({
-            replaced: false,
             signOut: { status: "failed" },
             session: { csrf_token: "token" },
         });
@@ -497,7 +500,10 @@ test("a sign-out refused for a key another tab renewed signs out the renewed ses
     adoptSession(signedIn("token"));
     answer(changed, () => json(signedIn("rotated")), signedOutAnswer);
     await signOut();
-    expect(sessionState()).toMatchObject({ ended: false, replaced: true });
+    expect(sessionState()).toMatchObject({
+        ended: false,
+        retired: "signedOutHere",
+    });
     expect(
         calls.map((call) => `${call.method} ${call.url} ${call.token}`),
     ).toEqual([

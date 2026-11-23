@@ -43,7 +43,7 @@ clearInvitationWith(clearWorkspaceInvitation);
 export function AppRoot({ children }: { children: ReactNode }) {
     const [client] = useState(createQueryClient);
     const { session, failure, fail, clear, retry } = useSessionBootstrap();
-    const { replaced, signOut: leaving } = useSessionState();
+    const { retired, signOut: leaving } = useSessionState();
     const handoff = useLanguageHandoff(session);
     const language = useSessionLanguage(session, handoff.status !== "ready");
     const ready =
@@ -52,7 +52,7 @@ export function AppRoot({ children }: { children: ReactNode }) {
         language.status === "ready";
     useFocusSessionRead(ready);
     const restored = useRestoredDocument();
-    const ending = replaced || restored;
+    const ending = retired !== undefined || restored;
     useDocumentReload(ending);
     const current = useCurrentSession(session, ready, fail, clear);
     const unconfirmed = useSessionUnconfirmed();

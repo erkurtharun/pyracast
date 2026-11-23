@@ -19,11 +19,12 @@ export type SignOutState =
     | { status: "idle" }
     | { status: "pending"; keepInvitation: boolean }
     | { status: "failed"; keepInvitation: boolean; error: unknown };
+type Retirement = "signedOutHere" | "otherOwner";
 type SessionState = {
     session?: Session;
     ended: boolean;
     changed: boolean;
-    replaced: boolean;
+    retired?: Retirement;
     signOut: SignOutState;
 };
 type Confirmation = {
@@ -50,7 +51,6 @@ type PreviousEnd = { notice?: "ended" | "changed"; clearInvitation: boolean };
 let state: SessionState = {
     ended: false,
     changed: false,
-    replaced: false,
     signOut: { status: "idle" },
 };
 let confirmation: Confirmation = { sentAt: 0, covered: false };
@@ -65,7 +65,6 @@ let generation = 0;
 let adopted: { mark: Mark; session: Session } | undefined;
 let confirming: Promise<Tag> | undefined;
 let signingOut = false;
-let signedOutHere = false;
 let clearTabInvitation = () => {};
 const listeners = new Set<() => void>();
 
@@ -243,7 +242,9 @@ export function adoptSession(session: Session, sentAt?: number) {
         state = {
             ...state,
             session,
-            replaced: state.replaced || owner !== documentOwner,
+            retired:
+                state.retired ??
+                (owner === documentOwner ? undefined : "otherOwner"),
         };
     if (sentAt !== undefined) confirm(sentAt);
     setCsrfToken(session.csrf_token);
@@ -353,8 +354,7 @@ export async function signOut({ keepInvitation = false } = {}) {
         if (!signedOutBy(ended))
             throw new ApiError(browserErrors()("invalidResponse"));
         if (shown) {
-            signedOutHere = true;
-            state = { ...state, replaced: true };
+            state = { ...state, retired: state.retired ?? "signedOutHere" };
             notify();
             return;
         }
@@ -368,18 +368,26 @@ export async function signOut({ keepInvitation = false } = {}) {
     }
 }
 
-// A document whose session was replaced sends nothing tagged before its reload; the session read
-// it may still need is never tagged.
 function documentTag(): Tag {
-    if (state.replaced) throw changedSession();
     return tagOf(state.session);
 }
 
-// The lane releases a queued request when the sign-out's answer arrives, before signOut reads it.
+function shows(tag: string) {
+    return state.retired === undefined && tagOf(state.session) === tag;
+}
+
+function notSent() {
+    return new NotSentError(browserErrors()("notSentSigningOut"));
+}
+
+// A retired document sends nothing tagged before its reload; the session read it may still need is
+// never tagged. The lane releases a queued request when the sign-out's answer arrives, before
+// signOut reads it.
 function refusal(request: LaneRequest, tag: string) {
-    if ((signingOut && !isSignOut(request)) || signedOutHere)
-        return new NotSentError(browserErrors()("notSentSigningOut"));
-    if (state.replaced || tagOf(state.session) !== tag) return changedSession();
+    if (state.retired === "signedOutHere") return notSent();
+    if (state.retired === "otherOwner" || tagOf(state.session) !== tag)
+        return changedSession();
+    if (signingOut && !isSignOut(request)) return notSent();
     return undefined;
 }
 
@@ -392,6 +400,7 @@ function isSignOut({ method, url }: LaneRequest) {
 // replaced the one those requests carried.
 confirmSessionWith({
     tag: documentTag,
+    shows,
     refusal,
     confirm: () => {
         confirming ??= startRead()
