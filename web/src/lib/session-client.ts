@@ -380,9 +380,7 @@ function notSent() {
     return new NotSentError(browserErrors()("notSentSigningOut"));
 }
 
-// A retired document sends nothing tagged before its reload; the session read it may still need is
-// never tagged. The lane releases a queued request when the sign-out's answer arrives, before
-// signOut reads it.
+// Work admitted before the sign-out began can still reach the send while the sign-out is pending.
 function refusal(request: LaneRequest, tag: string) {
     if (state.retired === "signedOutHere") return notSent();
     if (state.retired === "otherOwner" || tagOf(state.session) !== tag)

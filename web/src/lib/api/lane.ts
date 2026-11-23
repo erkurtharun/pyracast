@@ -76,10 +76,7 @@ function exchange(request: LaneRequest, tag: Tag): Promise<Exchange> {
     return result;
 }
 
-// Sends a request for the session this tab adopted. A refusal for a changed session is repeated
-// once when a session read sent after it shows the same session under a renewed key, and never
-// for another session. An answer that arrives after the document retired or adopted another
-// session is not delivered.
+// The server refuses a stale tag before any view runs, so one repeat applies nothing twice.
 export async function prepared(request: LaneRequest): Promise<Exchange> {
     if (request.url === SESSION_READ) return exchange(request, undefined);
     const tag = sessionTag();
