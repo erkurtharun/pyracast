@@ -27,6 +27,7 @@ async function mockMembers(page: Page) {
 test("refresh and Back keep the workspace, the view and the forecast date", async ({
     page,
 }) => {
+    await page.clock.setFixedTime(new Date("2026-11-19T12:00:00Z"));
     await mockApi(page);
     await mockMembers(page);
     await page.goto("/app/");
