@@ -776,12 +776,13 @@ export interface components {
                   )
                 | null;
             eligible: boolean;
-            membership: number | null;
+            memberships: number[];
         };
         AddressRoleInput: {
             /** Format: email */
             address: string;
             role: components["schemas"]["RecipientRoleEnum"];
+            memberships: number[];
         };
         AddressRoleOutput: {
             /** Format: email */

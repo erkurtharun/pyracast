@@ -1,12 +1,13 @@
 import json
-import time
 from datetime import timedelta
+from io import StringIO
 from itertools import count
 from typing import Any
 
 import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
+from django.core.management import call_command
 from django.test import Client
 from django.utils import timezone
 
@@ -29,7 +30,12 @@ from pyracast.notifications.models import (
     ReminderRecipient,
     ReminderSchedule,
 )
-from pyracast.notifications.operations import AddressChoice, MemberChoice, configure_reminders
+from pyracast.notifications.operations import (
+    MAX_RECIPIENT_LIMIT,
+    AddressChoice,
+    MemberChoice,
+    configure_reminders,
+)
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.models import AuditEvent
 from tests.support.concurrency import committed_elsewhere, paused_in
@@ -415,28 +421,28 @@ def test_a_typed_to_whose_tied_member_gave_the_address_up_is_answered_without_a_
     ]
 
 
-def test_a_reassignment_cannot_commit_between_a_save_and_its_answer(
+def test_a_reassignment_waits_for_a_save_and_its_answer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, alice, bob = workspace()
 
-    def save() -> tuple[int, Any, float]:
+    def save() -> tuple[int, list[str]]:
         response = visible_save(system, alice, bob)
-        return response.status_code, response.json()["addresses"], time.monotonic()
+        return response.status_code, [
+            row["kind"] for row in response.json()["addresses"]["members"]
+        ]
 
-    def reassign() -> float:
-        reassign_workspace_admin(
+    def reassign() -> bool:
+        return reassign_workspace_admin(
             system.admin, system.tenant.pk, alice.pk, expected_admin_id=system.member.pk
         )
-        return time.monotonic()
 
-    (status, addresses, answered), reassigned = paused_in(
-        monkeypatch, views, "reminder_overview", save, reassign
-    )
+    (status, kinds), reassigned = paused_in(monkeypatch, views, "reminder_overview", save, reassign)
 
     assert status == 200
-    assert addresses is not None
-    assert answered < reassigned
+    assert kinds == ["administrator", "member", "member"]
+    assert reassigned
+    assert Membership.objects.get(user=alice).role == WorkspaceRole.ADMIN
 
 
 def save_naming(system: System, user: User) -> str:
@@ -900,3 +906,18 @@ def test_a_visible_send_interrupted_after_its_marker_answers_its_roles_and_is_no
     ((status, roles),) = history_roles(system)
     assert status == "uncertain"
     assert roles[0] == {"address": "boss@example.com", "role": "to"}
+
+
+def test_the_published_role_lists_carry_their_bounds() -> None:
+    output = StringIO()
+    call_command("spectacular", format="openapi-json", stdout=output)
+    schemas = json.loads(output.getvalue())["components"]["schemas"]
+    lists = schemas["ReminderInput"]["properties"]
+    entry = schemas["AddressRoleInput"]["properties"]["memberships"]
+
+    assert [lists[name].get("maxItems") for name in ("address_roles", "member_roles")] == [
+        MAX_RECIPIENT_LIMIT,
+        MAX_RECIPIENT_LIMIT,
+    ]
+    assert (entry.get("maxItems"), entry["items"].get("minimum")) == (MAX_RECIPIENT_LIMIT, 1)
+    assert schemas["MemberRoleInput"]["properties"]["membership"].get("minimum") == 1

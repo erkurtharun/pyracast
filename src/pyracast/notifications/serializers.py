@@ -61,10 +61,11 @@ class ReminderInput(InputSerializer):
     )
     expected_revision = serializers.IntegerField(min_value=0)
     hide_recipients = serializers.BooleanField(required=False)
-    address_roles: serializers.ListSerializer[dict[str, Any]] = serializers.ListSerializer(
+    # A list field publishes its bound as maxItems; a list serializer's bound is not published.
+    address_roles = serializers.ListField(
         child=AddressRoleInput(), required=False, max_length=MAX_RECIPIENT_LIMIT
     )
-    member_roles: serializers.ListSerializer[dict[str, Any]] = serializers.ListSerializer(
+    member_roles = serializers.ListField(
         child=MemberRoleInput(), required=False, max_length=MAX_RECIPIENT_LIMIT
     )
 

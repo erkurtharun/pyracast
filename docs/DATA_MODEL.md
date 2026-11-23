@@ -1014,6 +1014,7 @@ erDiagram
         text key
         bigint schedule_id FK "references notifications_reminderschedule.id"
         varchar_3 role
+        bigint_array role_members
     }
     notifications_reminderrecipienttie {
         bigint id PK
@@ -1090,6 +1091,7 @@ erDiagram
 
 - `remindermemberrole_role_chk`: `CHECK ("role" IN ('to', 'cc', 'bcc'))`
 - `remindermemberrole_schedule_membership_uniq`: `UNIQUE ("schedule_id", "membership_id")`
+- `remindermemberrole_workspace_guard`: `TRIGGER BEFORE INSERT OR UPDATE FOR EACH ROW EXECUTE FUNCTION guard_remindermemberrole_workspace()`
 
 #### `notifications_reminderrecipient`
 

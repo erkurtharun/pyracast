@@ -5665,12 +5665,14 @@
                     "eligible": {
                         "type": "boolean"
                     },
-                    "membership": {
-                        "type": "integer",
-                        "nullable": true
+                    "memberships": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
                     }
                 },
-                "required": ["address", "eligible", "membership", "role"]
+                "required": ["address", "eligible", "memberships", "role"]
             },
             "AddressRoleInput": {
                 "type": "object",
@@ -5682,9 +5684,17 @@
                     },
                     "role": {
                         "$ref": "#/components/schemas/RecipientRoleEnum"
+                    },
+                    "memberships": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer",
+                            "minimum": 1
+                        },
+                        "maxItems": 32767
                     }
                 },
-                "required": ["address", "role"]
+                "required": ["address", "memberships", "role"]
             },
             "AddressRoleOutput": {
                 "type": "object",
@@ -10806,13 +10816,15 @@
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/AddressRoleInput"
-                        }
+                        },
+                        "maxItems": 32767
                     },
                     "member_roles": {
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/MemberRoleInput"
-                        }
+                        },
+                        "maxItems": 32767
                     }
                 },
                 "required": [
