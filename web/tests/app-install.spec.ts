@@ -22,6 +22,9 @@ function installLinks(page: Page) {
         homeScreenTitle: head.locator(
             'meta[name="apple-mobile-web-app-title"]',
         ),
+        launchCapability: head.locator(
+            'meta[name="mobile-web-app-capable"], meta[name="apple-mobile-web-app-capable"]',
+        ),
     };
 }
 
@@ -50,6 +53,7 @@ test("workspace pages link the manifest, the touch icon, the theme colour and th
         await expect(name).toHaveCount(1);
         await expect(name).toHaveAttribute("content", manifest.name);
     }
+    await expect(links.launchCapability).toHaveCount(0);
     await expect(page.locator('head link[rel="icon"]')).toHaveAttribute(
         "href",
         /^\/icon\.svg/,
@@ -262,7 +266,7 @@ test("a browser with neither the install event nor WebKit shows no install entry
 });
 
 test("an installed window shows no install entry", async ({ page }) => {
-    await standInDisplayMode(page, true);
+    await standInDisplayMode(page, "standalone");
     await openWorkspace(page);
     await expect(
         page.getByRole("button", { name: "Sign out", exact: true }),

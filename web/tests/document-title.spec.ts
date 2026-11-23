@@ -1,5 +1,9 @@
 import { test, expect, type Page } from "./support/test";
-import { setStandalone, standInDisplayMode } from "./support/display-mode";
+import {
+    installedModes,
+    setDisplayMode,
+    standInDisplayMode,
+} from "./support/display-mode";
 import { mockApi, user } from "./support/workspace";
 
 const copy = {
@@ -71,7 +75,7 @@ for (const language of languages) {
     test(`in an installed window a screen's title leaves the app's name to the window in ${name}`, async ({
         page,
     }) => {
-        await standInDisplayMode(page, true);
+        await standInDisplayMode(page, "standalone");
         await signIn(page, language);
         await openPortfolio(page, language);
         await expect(page).toHaveTitle(`${plants} · ${workspace}`);
@@ -82,18 +86,19 @@ for (const language of languages) {
     });
 }
 
-test("a screen's title follows a change of display mode while it is open", async ({
-    page,
-}) => {
-    await standInDisplayMode(page, false);
-    await signIn(page, "en");
-    await page.goto("/app/w/1/plants/11/forecast/");
-    await expect(page).toHaveTitle(`Forecast · ${plant} | Pyracast`);
-    await setStandalone(page, true);
-    await expect(page).toHaveTitle(`Forecast · ${plant}`);
-    await setStandalone(page, false);
-    await expect(page).toHaveTitle(`Forecast · ${plant} | Pyracast`);
-});
+for (const mode of installedModes)
+    test(`a screen's title follows a change between a browser tab and a ${mode} window while it is open`, async ({
+        page,
+    }) => {
+        await standInDisplayMode(page, "browser");
+        await signIn(page, "en");
+        await page.goto("/app/w/1/plants/11/forecast/");
+        await expect(page).toHaveTitle(`Forecast · ${plant} | Pyracast`);
+        await setDisplayMode(page, mode);
+        await expect(page).toHaveTitle(`Forecast · ${plant}`);
+        await setDisplayMode(page, "browser");
+        await expect(page).toHaveTitle(`Forecast · ${plant} | Pyracast`);
+    });
 
 for (const [address, title] of [
     ["/app/w/1/members/", `Members · ${workspace}`],
