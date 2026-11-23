@@ -394,20 +394,28 @@ def record_roles(
     )
 
 
-def delivery_addresses(delivery: NotificationDelivery) -> list[str]:
-    """The envelope once the transmit marker is set, otherwise the rows not revoked."""
+def _envelope(delivery: NotificationDelivery) -> list[DeliveryRecipient]:
     return [
-        row.address
+        row
         for row in delivery.recipient_rows.all()
         if delivery.transmit_started_at is not None or not row.revoked
     ]
 
 
+def delivery_addresses(delivery: NotificationDelivery) -> list[str]:
+    """The envelope once the transmit marker is set, otherwise the rows not revoked."""
+    return [row.address for row in _envelope(delivery)]
+
+
 def delivery_roles(delivery: NotificationDelivery) -> list[tuple[str, RecipientRole]] | None:
-    """Each envelope address with its header, once the transmit marker is set."""
-    if delivery.transmit_started_at is None:
+    """Each address with its header, only for a message that reached or may have reached its
+    recipients: a rejected one showed no header to anyone."""
+    if delivery.status not in (
+        NotificationDeliveryStatus.SENT,
+        NotificationDeliveryStatus.UNCERTAIN,
+    ):
         return None
-    return [(row.address, RecipientRole(row.role)) for row in delivery.recipient_rows.all()]
+    return [(row.address, RecipientRole(row.role)) for row in _envelope(delivery)]
 
 
 def remove_member_recipients(tenant_id: int, membership_id: int, emails: set[str]) -> None:

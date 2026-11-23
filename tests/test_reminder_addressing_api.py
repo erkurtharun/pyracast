@@ -16,23 +16,26 @@ from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, Wo
 from pyracast.accounts.operations import reassign_workspace_admin, remove_workspace_member
 from pyracast.erasure import erase_account
 from pyracast.errors import ConflictError
+from pyracast.mail.errors import NotSentError
 from pyracast.notifications import operations, views
 from pyracast.notifications import recipients as recipient_rows
 from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.models import (
+    DeliveryRecipient,
+    NotificationDelivery,
     NotificationSettings,
     RecipientRole,
     ReminderMemberRole,
     ReminderRecipient,
     ReminderSchedule,
 )
-from pyracast.notifications.operations import MemberChoice, configure_reminders
+from pyracast.notifications.operations import AddressChoice, MemberChoice, configure_reminders
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.models import AuditEvent
 from tests.support.concurrency import committed_elsewhere, paused_in
 from tests.support.domain import NOW, System, make_system
 from tests.support.notification_groups import member
-from tests.support.notification_transmission import replying
+from tests.support.notification_transmission import OpeningBackend, replying
 from tests.support.notifications import (
     SLOT,
     StatementHook,
@@ -536,12 +539,16 @@ def test_an_address_confirmed_after_a_saves_read_of_people_leaves_the_save_one_p
             language="en",
             now=NOW,
             hide_recipients=False,
+            address_roles=[AddressChoice("bob@example.com", TO, frozenset({membership(bob)}))],
             member_roles=[MemberChoice(membership(bob), "bob@example.com", CC)],
         )
 
     assert hook.fired
     assert User.objects.get(pk=bob.pk).email == "bob.new@example.com"
     assert ties(schedule) == {"bob@example.com": [membership(bob)]}
+    assert list(ReminderRecipient.objects.values_list("role", "role_members")) == [
+        ("to", [membership(bob)])
+    ]
     assert stored_roles(system)[1] == {"bob.new@example.com": "cc"}
     assert events(system) == [
         {"schedule_revision": 1, "visible_recipients": 3, "visible_outside": 0}
@@ -814,3 +821,82 @@ def test_a_changed_role_alone_advances_the_revision_and_writes_the_event() -> No
     )
 
     assert (revision(system), len(events(system))) == (before[0] + 1, before[1] + 1)
+
+
+def history_roles(system: System) -> list[Any]:
+    deliveries = client_for(system.member).get(url(system)).json()["deliveries"]
+    return [(delivery["status"], delivery["recipient_roles"]) for delivery in deliveries]
+
+
+def rejected(message: Any) -> None:
+    raise NotSentError("rejected")
+
+
+def test_a_rejected_attempt_answers_no_roles_before_or_after_its_retry_is_claimed() -> None:
+    system, alice, bob = workspace()
+    visible_save(system, alice, bob)
+    (delivery_id,) = enqueue_due(SLOT)
+    with replying(rejected):
+        assert not process_notification(delivery_id, SLOT)
+    assert DeliveryRecipient.objects.filter(delivery_id=delivery_id, role=TO).exists()
+
+    assert history_roles(system) == [("retry", None)]
+
+    seen: list[Any] = []
+
+    def refused_at_opening() -> None:
+        seen.append(history_roles(system))
+        raise OSError("connection refused")
+
+    try:
+        with replying(lambda message: None):
+            OpeningBackend.action = refused_at_opening
+            while (delivery := NotificationDelivery.objects.get(pk=delivery_id)).status == "retry":
+                process_notification(delivery_id, delivery.available_at)
+    finally:
+        OpeningBackend.action = None
+
+    assert seen
+    assert all(roles == [("sending", None)] for roles in seen)
+    assert history_roles(system) == [("failed", None)]
+
+
+def test_a_retry_that_is_sent_answers_its_own_roles() -> None:
+    system, alice, bob = workspace()
+    visible_save(system, alice, bob)
+    (delivery_id,) = enqueue_due(SLOT)
+    with replying(rejected):
+        assert not process_notification(delivery_id, SLOT)
+    ReminderRecipient.objects.filter(key="boss@example.com").update(role=BCC)
+
+    with replying(lambda message: None):
+        delivery = NotificationDelivery.objects.get(pk=delivery_id)
+        assert process_notification(delivery_id, delivery.available_at)
+
+    ((status, roles),) = history_roles(system)
+    assert status == "sent"
+    assert {"address": "boss@example.com", "role": "bcc"} in roles
+    assert [entry["role"] for entry in roles].count("to") == 1
+
+
+def test_a_visible_send_interrupted_after_its_marker_answers_its_roles_and_is_not_sent_again() -> (
+    None
+):
+    system, alice, bob = workspace()
+    visible_save(system, alice, bob)
+    (delivery_id,) = enqueue_due(SLOT)
+
+    transmitted: list[Any] = []
+
+    def interrupted(message: Any) -> None:
+        transmitted.append(message)
+        raise RuntimeError("connection lost after DATA")
+
+    with replying(interrupted):
+        assert not process_notification(delivery_id, SLOT)
+        assert not process_notification(delivery_id, SLOT + timedelta(minutes=5))
+
+    assert len(transmitted) == 1
+    ((status, roles),) = history_roles(system)
+    assert status == "uncertain"
+    assert roles[0] == {"address": "boss@example.com", "role": "to"}
