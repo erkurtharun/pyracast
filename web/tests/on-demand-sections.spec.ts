@@ -1,5 +1,6 @@
 import { cadence } from "../src/lib/api/query";
 import { errorBody } from "./support/errors";
+import { isMarked, markDocument } from "./support/session";
 import { expect, test, type Page } from "./support/test";
 import { mockApi, paged, plant, region, user } from "./support/workspace";
 
@@ -777,9 +778,11 @@ test("a language whose catalogue is still loading when the session ends elsewher
     await expect(
         page.getByRole("heading", { name: "Plants", exact: true }),
     ).toBeVisible();
+    await markDocument(page);
     await page.getByLabel("Language", { exact: true }).selectOption("tr");
     await turkish.reached;
     await endSessionElsewhere(page);
+    expect(await isMarked(page)).toBe(false);
     await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
     await expect(
         page.getByRole("button", { name: "Reload page", exact: true }),
@@ -791,6 +794,7 @@ test("a language whose catalogue is still loading when the session ends elsewher
         page.getByRole("heading", { name: "Welcome back" }),
     ).toBeVisible();
     expect(written).toEqual([]);
+    turkish.release();
 });
 
 test("a catalogue that cannot be loaded offers a retry that loads the page again", async ({
