@@ -1,4 +1,5 @@
 import logging
+from collections import Counter
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager
@@ -21,6 +22,7 @@ from pyracast.accounts.audit import logger as security_logger
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
 from pyracast.errors import DomainError, ErrorCode
+from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.history import automatic_outlook
 from pyracast.plants.models import (
@@ -1167,15 +1169,27 @@ def history_behind_every_day_but_today(system: System, copies: range) -> None:
             )
 
 
-@pytest.mark.parametrize("copies", [range(0), range(1, 10)], ids=["ordinary", "tenfold-history"])
+@pytest.mark.parametrize(
+    ("copies", "per_stressed_day"),
+    [(range(0), 2), (range(1, 19), 20)],
+    ids=["ordinary", "tenfold-history"],
+)
 def test_the_days_read_takes_at_most_25_single_day_forecast_reads(
-    monkeypatch: pytest.MonkeyPatch, copies: range
+    monkeypatch: pytest.MonkeyPatch, copies: range, per_stressed_day: int
 ) -> None:
     system, plant = make_plant(monkeypatch)
     usable_calibration(system, plant)
     forecast_window(system)
     older_sources(system, plant, range(1))
     history_behind_every_day_but_today(system, copies)
+    acquisitions = Counter(
+        ForecastSnapshot.objects.filter(
+            job__target_date__range=(TODAY - timedelta(days=7), TODAY + timedelta(days=14))
+        ).values_list("job__target_date", flat=True)
+    )
+    assert acquisitions.pop(TODAY) == 2
+    assert acquisitions == dict.fromkeys(acquisitions, per_stressed_day)
+    assert len(acquisitions) == 21
     for offset in range(1, 31):
         metered(system, plant, TODAY - timedelta(days=offset))
     client = client_for(system.member)
