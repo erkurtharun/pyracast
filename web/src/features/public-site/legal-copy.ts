@@ -38,7 +38,7 @@ function privacyEnglish(operator: PublicOperator): LegalContent {
         kind: "privacy",
         title: "Privacy policy",
         intro: "How Pyracast handles your account and solar forecasting data.",
-        updated: "2026-11-21",
+        updated: "2026-11-23",
         sections: [
             {
                 id: "operator",
@@ -86,7 +86,7 @@ function privacyEnglish(operator: PublicOperator): LegalContent {
                 id: "sharing",
                 title: "Who receives information",
                 paragraphs: [
-                    "Workspace members access shared records according to their roles; the operator accesses them for administration and support. Selected recipients receive configured messages.",
+                    "Workspace members access shared records according to their roles; the operator accesses them for administration and support. Selected recipients receive configured messages. A reminder can show recipients' addresses to the other recipients of that reminder, including recipients outside the workspace; the workspace administrator chooses whose address is shown.",
                     "Hosting, traffic security, email, sign-in and forecast or production data providers process information needed for those functions, including relevant plant identifiers and coordinates. Processing may occur abroad. Authorities may receive legally required disclosures.",
                 ],
             },
@@ -122,7 +122,7 @@ function privacyTurkish(operator: PublicOperator): LegalContent {
         kind: "privacy",
         title: "Gizlilik politikası",
         intro: "Pyracast hesap bilgilerinizi ve güneş enerjisi tahmin verilerini nasıl işler?",
-        updated: "2026-11-21",
+        updated: "2026-11-23",
         sections: [
             {
                 id: "operator",
@@ -170,7 +170,7 @@ function privacyTurkish(operator: PublicOperator): LegalContent {
                 id: "sharing",
                 title: "Bilgiler kimlere aktarılır?",
                 paragraphs: [
-                    "Çalışma alanı üyeleri rollerinin izin verdiği kayıtlara erişir. İşletmeci hizmet yönetimi ve destek için kayıtlara erişir. Seçilen alıcılar, ayarlanan mesajları alır.",
+                    "Çalışma alanı üyeleri rollerinin izin verdiği kayıtlara erişir. İşletmeci hizmet yönetimi ve destek için kayıtlara erişir. Seçilen alıcılar, ayarlanan mesajları alır. Bir hatırlatıcı, alıcıların adreslerini o hatırlatıcının diğer alıcılarına, çalışma alanı dışındakiler dahil, gösterebilir; kimin adresinin gösterileceğini çalışma alanı yöneticisi belirler.",
                     "Barındırma, trafik güvenliği, e-posta, giriş ve tahmin veya üretim verisi hizmetleri sunan sağlayıcılar, ilgili işlevler için gereken bilgileri işler; bunlara ilgili santral kimlikleri ve koordinatları da dahildir. İşlemler yurt dışında da gerçekleşebilir. Kanunen gerekli bilgiler yetkili mercilerle paylaşılabilir.",
                 ],
             },
