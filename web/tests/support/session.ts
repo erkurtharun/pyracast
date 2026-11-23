@@ -96,6 +96,35 @@ export async function refuseReload(page: Page) {
     return { refused };
 }
 
+// Every reaction queued once an answer's body was read runs before the document's next task. The
+// document calls back, because an evaluation waits while a navigation is pending.
+export async function answerConsumed(page: Page, path: string) {
+    let settle!: () => void;
+    const settled = new Promise<void>((resolve) => (settle = resolve));
+    await page.exposeFunction("answerSettled", () => settle());
+    await page.evaluate((path) => {
+        const send = window.fetch.bind(window);
+        window.fetch = async (input, init) => {
+            const response = await send(input, init);
+            if (!response.url.endsWith(path)) return response;
+            const body = response.json.bind(response);
+            response.json = async () => {
+                try {
+                    return (await body()) as unknown;
+                } finally {
+                    setTimeout(() =>
+                        (
+                            window as unknown as { answerSettled: () => void }
+                        ).answerSettled(),
+                    );
+                }
+            };
+            return response;
+        };
+    }, path);
+    return { settled };
+}
+
 export function isMarked(page: Page) {
     return page.evaluate(() => "documentMarker" in window);
 }
@@ -155,7 +184,6 @@ export function liveRegion(page: Page) {
     return page.locator("[data-live-region]");
 }
 
-// Leaves the members screen with an announcement that names an address.
 export async function announceResentInvitation(page: Page) {
     let rows = [answer("InvitationOutput", invitee)];
     await page.route("**/api/tenants/1/members/", (route) =>

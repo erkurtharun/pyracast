@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "./support/test";
 import { answer, mockApi, paged } from "./support/workspace";
 import {
+    answerConsumed,
     changedNotice,
     expiredNotice,
     firstAccount,
@@ -420,16 +421,12 @@ test("an action still running when another user's session arrives sends nothing 
     const listReleased = new Promise<void>(
         (resolve) => (releaseList = resolve),
     );
-    let answerList!: () => void;
-    const listAnswered = new Promise<void>((resolve) => (answerList = resolve));
     await page.route("**/plants/21/calibrations/", async (route) => {
-        const held = reset;
-        if (held) {
+        if (reset) {
             reachList();
             await listReleased;
         }
         await route.fulfill({ json: paged([calibrationRun]) });
-        if (held) answerList();
     });
     await page.route("**/plants/21/calibrations/40/", (route) =>
         route.fulfill({ json: calibrationRun }),
@@ -454,6 +451,7 @@ test("an action still running when another user's session arrives sends nothing 
         "Active",
     );
     await markDocument(page);
+    const { settled } = await answerConsumed(page, "/plants/21/calibrations/");
     const reload = await holdReload(page);
     const observe = await tagObserver(page);
     await page.getByRole("button", { name: "Reset to baseline" }).click();
@@ -463,7 +461,7 @@ test("an action still running when another user's session arrives sends nothing 
     await observe("tag-b");
     await reload.reached;
     releaseList();
-    await listAnswered;
+    await settled;
     reload.release();
     await expect(
         page.getByRole("heading", { name: "Calibration history" }),
