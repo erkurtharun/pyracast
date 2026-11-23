@@ -77,20 +77,25 @@ function onlyInHead(attributes: Record<string, string>): ServedTag {
     return { head: [attributes], elsewhere: 0 };
 }
 
-function resolvedPath(page: Page, href: string | null | undefined) {
-    return new URL(href ?? "", page.url()).pathname;
+function resolvedPath(reference: string, href: string | null | undefined) {
+    return new URL(href ?? "", reference).pathname;
 }
 
 type Layout = "root" | "app";
 
-async function expectServedHead(page: Page, html: string, layout: Layout) {
+async function expectServedHead(
+    page: Page,
+    html: string,
+    layout: Layout,
+    reference: string,
+) {
     const served = await readServedHead(page, html);
     for (const [tag, attributes] of Object.entries(installHead))
         expect(served[tag as HeadTag], tag).toEqual(onlyInHead(attributes));
     expect(served.launchCapability).toEqual(absent);
     expect(served.favicon.elsewhere).toBe(0);
     expect(
-        served.favicon.head.map(({ href }) => resolvedPath(page, href)),
+        served.favicon.head.map(({ href }) => resolvedPath(reference, href)),
     ).toEqual(["/icon.svg"]);
     expect(served.themeColour).toEqual(
         layout === "app"
@@ -99,7 +104,7 @@ async function expectServedHead(page: Page, html: string, layout: Layout) {
     );
 }
 
-async function expectLiveHead(page: Page, layout: Layout) {
+async function expectLiveHead(page: Page, layout: Layout, reference: string) {
     const head = page.locator("head");
     const tag = (name: HeadTag) => head.locator(headTags[name]);
     await expect(tag("manifest")).toHaveCount(1);
@@ -113,9 +118,9 @@ async function expectLiveHead(page: Page, layout: Layout) {
     }
     await expect(tag("launchCapability")).toHaveCount(0);
     await expect(tag("favicon")).toHaveCount(1);
-    expect(resolvedPath(page, await tag("favicon").getAttribute("href"))).toBe(
-        "/icon.svg",
-    );
+    expect(
+        resolvedPath(reference, await tag("favicon").getAttribute("href")),
+    ).toBe("/icon.svg");
     if (layout === "app")
         await expect(tag("themeColour")).toHaveAttribute(
             "content",
@@ -200,19 +205,20 @@ async function visit(
     if (session) await mockApi(page, { anonymous: session === "anonymous" });
     const response = (await page.goto(address))!;
     expect(response.request().redirectedFrom()).toBeNull();
-    expect(response.url()).toBe(new URL(address, baseURL).href);
+    const reference = new URL(address, baseURL).href;
+    expect(response.url()).toBe(reference);
     const served = await response.text();
     await expect(shown(page)).toBeVisible();
-    return served;
+    return { reference, served };
 }
 
-async function expectReceivedManifest(page: Page) {
+async function expectReceivedManifest(page: Page, reference: string) {
     const browser = await page.context().newCDPSession(page);
     const found = await browser.send("Page.getAppManifest", {});
-    expect(found.url).toBe(new URL(manifestAddress, page.url()).href);
+    expect(found.url).toBe(new URL(manifestAddress, reference).href);
     expect(found.errors).toEqual([]);
     expect(found.data).toBe(manifestText);
-    const app = new URL("/app/", page.url()).href;
+    const app = new URL("/app/", reference).href;
     expect({
         id: found.manifest.id,
         startUrl: found.manifest.startUrl,
@@ -230,14 +236,16 @@ async function expectReceivedManifest(page: Page) {
 for (const address of addresses)
     test(`${address.name} serves the manifest link, the touch icon and the app's name as children of head ${
         address.layout === "app" ? "with" : "without"
-    } the theme colour, and the browser receives the checked-in manifest and processes it with the app's identity, start, scope and display`, async ({
+    } the theme colour, and the browser receives the checked-in manifest and processes it with the app's identity, start, scope and display, all at the requested address`, async ({
         page,
         baseURL,
     }) => {
-        const served = await visit(page, baseURL, address);
-        await expectServedHead(page, served, address.layout);
-        await expectLiveHead(page, address.layout);
-        await expectReceivedManifest(page);
+        const { reference, served } = await visit(page, baseURL, address);
+        await expectServedHead(page, served, address.layout, reference);
+        expect(page.url()).toBe(reference);
+        await expectLiveHead(page, address.layout, reference);
+        await expectReceivedManifest(page, reference);
+        expect(page.url()).toBe(reference);
     });
 
 test("a served head tag is selected by its relation or name as HTML reads them and counts only as a child of head, not in body or in script text", async ({
