@@ -5,6 +5,7 @@ import {
     type Page,
 } from "@playwright/test";
 import { accessibilityViolations } from "../tests/support/accessibility";
+import { mockApi } from "../tests/support/workspace";
 
 const NOTICE_POLICY =
     "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'";
@@ -183,6 +184,30 @@ test("a navigation the server does not answer shows the notice, which returns to
     await page.getByRole("link", { name: "Try again" }).click();
     expect((await returned).status()).toBe(200);
     await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
+});
+
+test("an invitation opened without a connection asks to open the link again and returns without its token", async ({
+    page,
+    context,
+    baseURL,
+}) => {
+    await mockApi(page, { anonymous: true });
+    await controlled(page);
+    await context.setOffline(true);
+    await page.goto("/app/invitation/#token=invite-secret");
+    for (const sentence of [
+        "If you came here from an invitation link, open that link again from the email.",
+        "Buraya bir davet bağlantısıyla geldiyseniz bağlantıyı e-postadan yeniden açın.",
+    ])
+        await expect(page.getByText(sentence)).toBeVisible();
+    await context.setOffline(false);
+    await page.getByRole("link", { name: "Try again" }).click();
+    await expect(
+        page.getByText(
+            "This invitation link can no longer be used. Ask the workspace administrator to send it again.",
+        ),
+    ).toBeVisible();
+    expect(page.url()).toBe(`${baseURL}/app/invitation/`);
 });
 
 test("a 503 page of the server reaches the window as served", async ({

@@ -18,11 +18,13 @@ a { color: inherit; }
 <h1>Pyracast cannot be reached</h1>
 <p>The server did not answer. Try again in a moment.</p>
 <p><a href="">Try again</a></p>
+<p>If you came here from an invitation link, open that link again from the email.</p>
 </section>
 <section lang="tr">
 <h1>Pyracast'e ulaşılamıyor</h1>
 <p>Sunucu yanıt vermedi. Biraz sonra tekrar deneyin.</p>
 <p><a href="">Tekrar dene</a></p>
+<p>Buraya bir davet bağlantısıyla geldiyseniz bağlantıyı e-postadan yeniden açın.</p>
 </section>
 </main>
 </body>

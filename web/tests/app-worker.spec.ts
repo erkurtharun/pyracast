@@ -206,6 +206,12 @@ test("the notice says the server cannot be reached in both languages with a link
     expect(body).toContain("Pyracast cannot be reached");
     expect(body).toContain("Pyracast'e ulaşılamıyor");
     expect(body).not.toMatch(/offline|çevrimdışı/i);
+    expect(body).toContain(
+        "<p>If you came here from an invitation link, open that link again from the email.</p>",
+    );
+    expect(body).toContain(
+        "<p>Buraya bir davet bağlantısıyla geldiyseniz bağlantıyı e-postadan yeniden açın.</p>",
+    );
     const links = [...body.matchAll(/<a\s([^>]*)>([^<]+)<\/a>/g)].map(
         ([, attributes, text]) => [attributes, text],
     );
