@@ -20,11 +20,11 @@ from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
 from pyracast.errors import DomainError, ErrorCode
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants import api as plants_api
-from pyracast.plants import plant_days as plant_days_module
+from pyracast.plants.history import automatic_outlook
 from pyracast.plants.models import Plant, PlantConfiguration, ProductionObservation
 from pyracast.plants.operations import create_plant
 from pyracast.plants.parameters import PlantParameters
+from pyracast.plants.plant_days import plant_days
 from pyracast.regions.models import Region
 from pyracast.regions.operations import submit_region
 from tests.support.domain import NOW, System
@@ -425,14 +425,12 @@ def test_a_damaged_past_day_is_refused_while_every_other_day_is_answered(
 
 
 def failing_on(monkeypatch: pytest.MonkeyPatch, day: date, error: Exception) -> None:
-    outlook = plant_days_module.automatic_outlook
-
     def failing(plant: Plant, target_date: date, resolution_minutes: int) -> dict[str, object]:
         if target_date == day:
             raise error
-        return outlook(plant, target_date, resolution_minutes)
+        return automatic_outlook(plant, target_date, resolution_minutes)
 
-    monkeypatch.setattr(plant_days_module, "automatic_outlook", failing)
+    monkeypatch.setattr("pyracast.plants.plant_days.automatic_outlook", failing)
 
 
 @pytest.mark.parametrize("fault", [KeyError, TypeError, ValueError, ArithmeticError])
@@ -679,7 +677,6 @@ def test_an_exhausted_forecast_budget_leaves_the_days_read_answering(
 
 def held_read(monkeypatch: pytest.MonkeyPatch, outcome: Exception | None) -> tuple[Event, Event]:
     entered, release = Event(), Event()
-    read = plants_api.plant_days
 
     def held(*scope: Any) -> object:
         if not entered.is_set():
@@ -687,9 +684,9 @@ def held_read(monkeypatch: pytest.MonkeyPatch, outcome: Exception | None) -> tup
             assert release.wait(30)
             if outcome is not None:
                 raise outcome
-        return read(*scope)
+        return plant_days(*scope)
 
-    monkeypatch.setattr(plants_api, "plant_days", held)
+    monkeypatch.setattr("pyracast.plants.api.plant_days", held)
     return entered, release
 
 
