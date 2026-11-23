@@ -185,7 +185,42 @@
         "dailyEmail": "Daily email: {state}",
         "lastEmail": "Last email: {status} (scheduled {scheduled}).",
         "noEmailYet": "No email has been scheduled yet.",
-        "reloadReminders": "Reload reminders"
+        "reloadReminders": "Reload reminders",
+        "hideRecipients": "Hide recipients from each other",
+        "hiddenHelper": "Everyone is in hidden copy (Bcc). No recipient sees another address.",
+        "hiddenToday": "Every recipient is hidden today. You can address the administrator directly and keep members in copy.",
+        "reviewAddressing": "Review addressing",
+        "addressingRule": "Unless you choose otherwise: the workspace administrator is in To, other members are in Copy (in To while nobody else is), other addresses are Hidden.",
+        "roleKey": "To: addressed directly. Copy (Cc): kept informed. Every recipient sees both, and a reply to all reaches them. Hidden (Bcc): receives the email; no other recipient sees the address.",
+        "membersJoinInCopy": "New members join in Copy automatically.",
+        "roles": {
+            "to": "To",
+            "cc": "Copy",
+            "bcc": "Hidden"
+        },
+        "kinds": {
+            "administrator": "Workspace administrator",
+            "member": "Member"
+        },
+        "roleGroup": "How {address} receives the email",
+        "defaultRole": "Default",
+        "chosenRole": "Set by you",
+        "useDefault": "Use default",
+        "useDefaultFor": "Use the default for {address}",
+        "useDefaults": "Use the defaults for everyone",
+        "whoSeesWhat": "Who sees what",
+        "summaryTo": "To: {addresses}",
+        "summaryCopy": "Copy: {addresses}",
+        "summaryHidden": "Hidden: {count, plural, one {# address} other {# addresses}}",
+        "summarySentence": "Everyone who receives the email, hidden addresses included, sees the To and Copy addresses.",
+        "notSavedYet": "Not saved yet. Saving shows the To and Copy addresses to every recipient.",
+        "outsideWarning": "{address} does not belong to a workspace member and will be visible to every recipient.",
+        "noToWarning": "Nobody is in To: the email goes out with Copy addresses only.",
+        "allHiddenWarning": "All recipients are hidden: the email shows no recipient address.",
+        "setUnderOtherAddresses": "Set under Other addresses",
+        "notReceiving": "Not receiving: its member is not active.",
+        "recipientsHidden": "Recipients cannot see each other's addresses.",
+        "recipientsVisible": "Recipients may see each other's addresses in the email; the workspace administrator decides."
     },
     "Outages": {
         "plantOutages": "Plant outages",

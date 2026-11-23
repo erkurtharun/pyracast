@@ -1,6 +1,12 @@
 import { expect, type Page } from "@playwright/test";
 import { errorBody } from "./errors";
 
+import type {
+    AddressRole,
+    MemberRole,
+    ReminderAnswer,
+    Role,
+} from "../../src/features/plant/reminder-addressing";
 import type { components } from "../../src/lib/schema";
 
 type Schemas = components["schemas"];
@@ -293,23 +299,11 @@ export async function mockApi(
                           paged([]),
                       );
         else if (path.endsWith("/reminders/"))
-            data = answer("ReminderOutput", {
-                enabled: false,
-                state: "paused_by_user",
-                revision: 0,
-                language: "en",
-                include_workspace_members: false,
-                addresses: {
-                    recipients: [user.email],
-                    workspace_recipients: [user.email],
-                },
-                recipient_limit: 5,
-                recipient_count: 1,
-                workspace_member_count: 1,
-                recipient_limit_exceeded: false,
-                times: ["08:00"],
-                daily_reminder_limit: 10,
+            data = reminderAnswer(reminderStore({}), people([user.email]), {
+                limit: 5,
+                dailyLimit: 10,
                 deliveries: [],
+                administrator: true,
             });
         else if (path.endsWith("/location-change-requests/"))
             data = answer("PaginatedLocationChangeOutputList", paged([]));
@@ -347,4 +341,464 @@ export async function mockApi(
         else throw new Error(`Unmocked API: ${method} ${path}`);
         await route.fulfill({ json: data });
     });
+}
+
+type Delivery = Schemas["ReminderDeliveryOutput"];
+type TypedChoice = { role: Role; members: number[] };
+export type ReminderPerson = {
+    membership: number;
+    address: string;
+    administrator?: boolean;
+    active?: boolean;
+    choice?: Role | null;
+};
+type ReminderStore = {
+    enabled: boolean;
+    recipients: string[];
+    times: string[];
+    language: Schemas["LanguageEnum"];
+    include_workspace_members: boolean;
+    hide_recipients: boolean;
+    typed: Map<string, TypedChoice>;
+    revision: number;
+};
+type ReminderPayload = Omit<Schemas["ReminderInput"], "address_roles"> & {
+    address_roles?: AddressRole[];
+    member_roles?: MemberRole[];
+};
+export type ReminderOptions = {
+    recipients?: string[];
+    limit?: number;
+    enabled?: boolean;
+    deliveries?: Partial<Delivery>[];
+    dailyLimit?: number;
+    members?: (string | ReminderPerson)[];
+    includeMembers?: boolean;
+    viewer?: () => boolean;
+    hidden?: boolean;
+    typed?: Record<string, Role | TypedChoice>;
+};
+
+const keyOf = (address: string) => address.trim().toLowerCase();
+const sameIds = (left: number[], right: number[]) =>
+    left.join() === [...right].sort((a, b) => a - b).join();
+
+function people(members: (string | ReminderPerson)[]): ReminderPerson[] {
+    return members.map((member, index) =>
+        typeof member === "string"
+            ? {
+                  membership: index + 1,
+                  address: member,
+                  administrator: keyOf(member) === keyOf(user.email),
+              }
+            : member,
+    );
+}
+
+function reminderStore(
+    options: ReminderOptions,
+    persons: ReminderPerson[] = [],
+): ReminderStore {
+    const recipients = options.recipients ?? [user.email];
+    return {
+        enabled: options.enabled ?? false,
+        recipients,
+        times: ["08:00"],
+        language: "en",
+        include_workspace_members: options.includeMembers ?? false,
+        hide_recipients: options.hidden ?? false,
+        typed: new Map(
+            Object.entries(options.typed ?? {}).map(([address, choice]) => [
+                keyOf(address),
+                typeof choice === "string"
+                    ? {
+                          role: choice,
+                          members: holders(persons, address).map(
+                              (person) => person.membership,
+                          ),
+                      }
+                    : choice,
+            ]),
+        ),
+        revision: 0,
+    };
+}
+
+function holders(persons: ReminderPerson[], address: string) {
+    return persons
+        .filter(
+            (person) =>
+                person.active !== false &&
+                keyOf(person.address) === keyOf(address),
+        )
+        .sort((a, b) => a.membership - b.membership);
+}
+
+function memberChoice(members: ReminderPerson[]): Role | null {
+    const chosen = new Set(
+        members.flatMap((member) => (member.choice ? [member.choice] : [])),
+    );
+    if (chosen.has("bcc") || chosen.size > 1) return "bcc";
+    return [...chosen][0] ?? null;
+}
+
+function typedChoice(
+    store: ReminderStore,
+    address: string,
+    members: ReminderPerson[],
+): Role | null {
+    const typed = store.typed.get(keyOf(address));
+    if (!typed) return null;
+    if (typed.role === "bcc") return "bcc";
+    return sameIds(
+        typed.members,
+        members.map((member) => member.membership),
+    )
+        ? typed.role
+        : null;
+}
+
+function explicitRole(
+    store: ReminderStore,
+    persons: ReminderPerson[],
+    address: string,
+): Role | null {
+    const members = holders(persons, address);
+    const c = memberChoice(members);
+    const t = store.recipients.some((item) => keyOf(item) === keyOf(address))
+        ? typedChoice(store, address, members)
+        : null;
+    if (c === "bcc" || t === "bcc") return "bcc";
+    return c ?? t;
+}
+
+function eligible(persons: ReminderPerson[], address: string) {
+    const tied = persons.filter(
+        (person) => keyOf(person.address) === keyOf(address),
+    );
+    return !tied.length || tied.some((person) => person.active !== false);
+}
+
+function workspaceMembers(persons: ReminderPerson[]) {
+    const groups = new Map<string, ReminderPerson[]>();
+    for (const person of [...persons].sort(
+        (a, b) => a.membership - b.membership,
+    ))
+        if (person.active !== false)
+            groups.set(keyOf(person.address), [
+                ...(groups.get(keyOf(person.address)) ?? []),
+                person,
+            ]);
+    return [...groups.values()];
+}
+
+function effective(store: ReminderStore, persons: ReminderPerson[]) {
+    return [
+        ...new Map(
+            [
+                ...store.recipients.filter((address) =>
+                    eligible(persons, address),
+                ),
+                ...(store.include_workspace_members
+                    ? workspaceMembers(persons).map(
+                          (group) => group[0]!.address,
+                      )
+                    : []),
+            ].map((address) => [keyOf(address), address]),
+        ).values(),
+    ];
+}
+
+function placements(store: ReminderStore, persons: ReminderPerson[]): Role[] {
+    const list = effective(store, persons);
+    if (store.hide_recipients) return list.map(() => "bcc");
+    const placed = list.map((address) => {
+        const members = holders(persons, address);
+        const role = explicitRole(store, persons, address);
+        if (role) return role;
+        if (!store.include_workspace_members || !members.length) return "bcc";
+        return members.some((member) => member.administrator) ? "to" : null;
+    });
+    const fallback: Role = placed.includes("to") ? "cc" : "to";
+    return placed.map((role) => role ?? fallback);
+}
+
+function reminderAnswer(
+    store: ReminderStore,
+    persons: ReminderPerson[],
+    {
+        limit,
+        dailyLimit,
+        deliveries,
+        administrator,
+    }: {
+        limit: number;
+        dailyLimit: number;
+        deliveries: Partial<Delivery>[];
+        administrator: boolean;
+    },
+): ReminderAnswer {
+    const list = effective(store, persons);
+    const roles = placements(store, persons);
+    const groups = workspaceMembers(persons);
+    return {
+        enabled: store.enabled,
+        revision: store.revision,
+        state: !store.enabled
+            ? "paused_by_user"
+            : list.length > limit
+              ? "over_recipient_limit"
+              : list.length
+                ? "sending"
+                : "no_recipients",
+        times: store.times,
+        language: store.language,
+        include_workspace_members: store.include_workspace_members,
+        hide_recipients: store.hide_recipients,
+        addresses: administrator
+            ? {
+                  recipients: store.recipients,
+                  workspace_recipients: groups.map(
+                      (group) => group[0]!.address,
+                  ),
+                  members: groups.map((group) => ({
+                      membership: group[0]!.membership,
+                      address: group[0]!.address,
+                      kind: group.some((member) => member.administrator)
+                          ? "administrator"
+                          : "member",
+                      role: memberChoice(group),
+                  })),
+                  added: store.recipients.map((address) => ({
+                      address,
+                      role: explicitRole(store, persons, address),
+                      eligible: eligible(persons, address),
+                      memberships: holders(persons, address).map(
+                          (member) => member.membership,
+                      ),
+                  })),
+              }
+            : null,
+        recipient_limit: limit,
+        recipient_count: list.length,
+        workspace_member_count: groups.length,
+        recipient_limit_exceeded: list.length > limit,
+        daily_reminder_limit: dailyLimit,
+        deliveries: deliveries.map((delivery, index) => {
+            const row: Delivery = {
+                id: index + 1,
+                recipient_count: list.length,
+                recipients: administrator ? list : null,
+                recipient_roles: null,
+                scheduled_for: "2026-01-01T08:00:00Z",
+                collected_at: null,
+                source_age_seconds: null,
+                stale: false,
+                sent_at: "2026-01-01T08:00:00Z",
+                status: "sent",
+                late: false,
+                last_error: "",
+                forecast_status: null,
+                forecast_complete: null,
+                ...delivery,
+            };
+            const reached = row.status === "sent" || row.status === "uncertain";
+            return "recipient_roles" in delivery
+                ? row
+                : {
+                      ...row,
+                      recipient_roles:
+                          row.recipients && reached
+                              ? row.recipients.map((address, at) => ({
+                                    address,
+                                    role: roles[at]!,
+                                }))
+                              : null,
+                  };
+        }),
+    };
+}
+
+const repeated = (values: string[]) =>
+    new Set(values.map(keyOf)).size !== values.length;
+
+// The server's refusals, in its order of checks.
+function refused(
+    submitted: ReminderPayload,
+    stored: ReminderStore,
+    count: number,
+    current: number,
+    limit: number,
+) {
+    if (repeated(submitted.recipients))
+        return {
+            code: "duplicate_recipients",
+            field: "recipients",
+            message: "Recipient addresses must be distinct (case-insensitive).",
+        } as const;
+    if (
+        submitted.enabled &&
+        !submitted.recipients.length &&
+        !submitted.include_workspace_members
+    )
+        return {
+            code: "recipient_required",
+            field: "recipients",
+            message: "Add a recipient or include the workspace members.",
+        } as const;
+    if (repeated(submitted.times))
+        return {
+            code: "duplicate_reminder_times",
+            field: "times",
+            message: "Use each delivery time once.",
+        } as const;
+    if (submitted.enabled && !submitted.times.length)
+        return {
+            code: "reminder_time_required",
+            field: "times",
+            message: "Add at least one delivery time to turn reminders on.",
+        } as const;
+    const typed = submitted.address_roles ?? [];
+    if (
+        repeated(typed.map((entry) => entry.address)) ||
+        typed.some(
+            (entry) =>
+                !submitted.recipients.some(
+                    (address) => keyOf(address) === keyOf(entry.address),
+                ),
+        )
+    )
+        return {
+            code: "invalid_request",
+            field: "address_roles",
+            message: "Name each typed address once.",
+        } as const;
+    const named = submitted.member_roles ?? [];
+    if (
+        repeated(named.map((entry) => String(entry.membership))) ||
+        repeated(named.map((entry) => entry.address))
+    )
+        return {
+            code: "invalid_request",
+            field: "member_roles",
+            message: "Name each member once.",
+        } as const;
+    const unchangedPause =
+        !submitted.enabled &&
+        submitted.include_workspace_members ===
+            stored.include_workspace_members &&
+        submitted.language === stored.language &&
+        submitted.recipients.join() === stored.recipients.join() &&
+        [...submitted.times].sort().join() === [...stored.times].sort().join();
+    if (count > limit && !(count < current || unchangedPause))
+        return {
+            code: "recipient_limit_exceeded",
+            field: "recipients",
+            message: `This plant allows at most ${limit} distinct recipient addresses in total.`,
+        } as const;
+    return null;
+}
+
+function stored(
+    payload: ReminderPayload,
+    before: ReminderStore,
+    persons: ReminderPerson[],
+): ReminderStore {
+    const typed = new Map<string, TypedChoice>();
+    for (const address of payload.recipients) {
+        const members = holders(persons, address).map(
+            (member) => member.membership,
+        );
+        if (!payload.address_roles) {
+            const kept = before.typed.get(keyOf(address));
+            if (kept) typed.set(keyOf(address), kept);
+            continue;
+        }
+        const entry = payload.address_roles.find(
+            (item) => keyOf(item.address) === keyOf(address),
+        );
+        if (entry?.role === "bcc")
+            typed.set(keyOf(address), { role: "bcc", members: [] });
+        else if (entry && sameIds(members, entry.memberships))
+            typed.set(keyOf(address), { role: entry.role, members });
+    }
+    for (const entry of payload.member_roles ?? [])
+        for (const member of holders(persons, entry.address))
+            member.choice = entry.role;
+    return {
+        enabled: payload.enabled,
+        recipients: payload.recipients,
+        times: [...payload.times].sort(),
+        language: payload.language,
+        include_workspace_members: payload.include_workspace_members,
+        hide_recipients: payload.hide_recipients ?? true,
+        typed,
+        revision: before.revision + 1,
+    };
+}
+
+const changed = () =>
+    errorBody(
+        "reminder_schedule_changed",
+        "The email reminders changed. Reload before saving.",
+    );
+
+export async function reminderApi(page: Page, options: ReminderOptions = {}) {
+    await mockApi(page);
+    const limit = options.limit ?? 5;
+    const persons = people(options.members ?? [user.email]);
+    let store = reminderStore(options, persons);
+    await page.route("**/reminders/", async (route) => {
+        if (route.request().method() === "PUT") {
+            const payload = route.request().postDataJSON() as ReminderPayload;
+            expect(["en", "tr"]).toContain(payload.language);
+            if (payload.expected_revision !== store.revision)
+                return route.fulfill({ status: 409, json: changed() });
+            const refusal = refused(
+                payload,
+                store,
+                effective({ ...store, ...payload }, persons).length,
+                effective(store, persons).length,
+                limit,
+            );
+            if (refusal)
+                return route.fulfill({
+                    status: 400,
+                    json: errorBody(refusal.code, refusal.message, {
+                        fields: { [refusal.field]: refusal.message },
+                    }),
+                });
+            if (
+                (payload.member_roles ?? []).some(
+                    (entry) =>
+                        !holders(persons, entry.address).some(
+                            (member) => member.membership === entry.membership,
+                        ),
+                )
+            )
+                return route.fulfill({ status: 409, json: changed() });
+            store = stored(payload, store, persons);
+        }
+        await route.fulfill({
+            json: reminderAnswer(store, persons, {
+                limit,
+                dailyLimit: options.dailyLimit ?? 10,
+                deliveries: options.deliveries ?? [{}],
+                administrator: !(options.viewer ?? (() => false))(),
+            }),
+        });
+    });
+    return { persons };
+}
+
+export async function openReminders(page: Page) {
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Email reminders", exact: true })
+        .click();
 }

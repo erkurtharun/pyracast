@@ -185,7 +185,42 @@
         "dailyEmail": "Günlük e-posta: {state}",
         "lastEmail": "Son e-posta: {status} (planlanan {scheduled}).",
         "noEmailYet": "Henüz planlanmış e-posta yok.",
-        "reloadReminders": "Hatırlatıcıları yeniden yükle"
+        "reloadReminders": "Hatırlatıcıları yeniden yükle",
+        "hideRecipients": "Alıcıları birbirinden gizle",
+        "hiddenHelper": "Herkes gizli kopyadadır (Bcc). Hiçbir alıcı başka bir adresi görmez.",
+        "hiddenToday": "Bugün tüm alıcılar gizli. Yöneticiyi doğrudan alıcı yapıp üyeleri bilgiye ekleyebilirsiniz.",
+        "reviewAddressing": "Adreslemeyi gözden geçir",
+        "addressingRule": "Siz değiştirmedikçe: çalışma alanı yöneticisi Kime, diğer üyeler Bilgi (Kime'de kimse yoksa Kime), diğer adresler Gizli olur.",
+        "roleKey": "Kime: doğrudan alıcı. Bilgi (Cc): bilgi için eklenir. İkisini de her alıcı görür; tümünü yanıtla bu adreslere ulaşır. Gizli (Bcc): e-postayı alır; adresini başka alıcı görmez.",
+        "membersJoinInCopy": "Yeni üyeler kendiliğinden Bilgi'ye eklenir.",
+        "roles": {
+            "to": "Kime",
+            "cc": "Bilgi",
+            "bcc": "Gizli"
+        },
+        "kinds": {
+            "administrator": "Çalışma alanı yöneticisi",
+            "member": "Üye"
+        },
+        "roleGroup": "{address} e-postayı nasıl alır",
+        "defaultRole": "Varsayılan",
+        "chosenRole": "Sizin seçiminiz",
+        "useDefault": "Varsayılanı kullan",
+        "useDefaultFor": "{address} için varsayılanı kullan",
+        "useDefaults": "Herkes için varsayılanı kullan",
+        "whoSeesWhat": "Kim neyi görür",
+        "summaryTo": "Kime: {addresses}",
+        "summaryCopy": "Bilgi: {addresses}",
+        "summaryHidden": "Gizli: {count, number} adres",
+        "summarySentence": "E-postayı alan herkes, gizli adresler dahil, Kime ve Bilgi adreslerini görür.",
+        "notSavedYet": "Henüz kaydedilmedi. Kaydedince Kime ve Bilgi adreslerini her alıcı görür.",
+        "outsideWarning": "{address} bir çalışma alanı üyesine ait değil ve her alıcıya görünecek.",
+        "noToWarning": "Kime'de kimse yok: e-posta yalnızca Bilgi adresleriyle gider.",
+        "allHiddenWarning": "Tüm alıcılar gizli: e-postada alıcı adresi görünmez.",
+        "setUnderOtherAddresses": "Diğer adresler bölümünde ayarlanır",
+        "notReceiving": "Almıyor: bağlı olduğu üye aktif değil.",
+        "recipientsHidden": "Alıcılar birbirinin adresini göremez.",
+        "recipientsVisible": "Alıcılar e-postada birbirinin adresini görebilir; buna çalışma alanı yöneticisi karar verir."
     },
     "Outages": {
         "plantOutages": "Santral kesintileri",
