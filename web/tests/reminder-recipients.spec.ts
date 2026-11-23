@@ -221,6 +221,15 @@ test("automatic-only recipients persist without capturing the saving administrat
         members: ["member@example.test"],
         includeMembers: true,
         hidden: false,
+        deliveries: [
+            {
+                recipients: ["member@example.test"],
+                recipient_roles: [
+                    { address: "member@example.test", role: "to" },
+                ],
+                recipient_count: 1,
+            },
+        ],
     });
     await openReminders(page);
     const address = page.getByLabel("Email address 1", { exact: true });
