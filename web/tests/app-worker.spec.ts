@@ -6,6 +6,11 @@ import { expect, test } from "@playwright/test";
 const SCOPE = "https://pyracast.test/app/";
 const NOTICE_POLICY =
     "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'";
+const SOURCE = path.resolve(__dirname, "../src");
+const REGISTERING = {
+    mentions: ["lib/worker-registration.tsx"],
+    importers: ["app/app/layout.tsx"],
+};
 
 type Listener = (event: object) => void;
 
@@ -237,16 +242,19 @@ test("the withdrawal script unregisters on activate, claims nothing and navigate
     expect(withdrawal.calls).toEqual(["unregister"]);
 });
 
-test("only the registering module of the app layout mentions a worker", () => {
-    const source = path.resolve(__dirname, "../src");
-    const registering = readdirSync(source, { recursive: true })
+function sourcesContaining(text: string) {
+    return readdirSync(SOURCE, { recursive: true })
         .map(String)
         .filter((file) => /\.(?:ts|tsx)$/.test(file))
         .filter((file) =>
-            readFileSync(path.join(source, file), "utf8").includes(
-                "serviceWorker",
-            ),
+            readFileSync(path.join(SOURCE, file), "utf8").includes(text),
         )
         .map((file) => file.split(path.sep).join("/"));
-    expect(registering).toEqual(["lib/worker-registration.tsx"]);
+}
+
+test("only the registering module mentions a worker and only the app layout mounts it", () => {
+    expect({
+        mentions: sourcesContaining("serviceWorker"),
+        importers: sourcesContaining("@/lib/worker-registration"),
+    }).toEqual(REGISTERING);
 });

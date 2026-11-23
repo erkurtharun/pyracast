@@ -10,8 +10,15 @@ import { mockApi } from "../tests/support/workspace";
 const NOTICE_POLICY =
     "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'";
 const PLANT_ADDRESS = "/app/w/1/plants/2/forecast/";
+const FRESH_VISITS: [string, string[]][] = [
+    ["/", []],
+    ["/tr/", []],
+    ["/privacy/", []],
+    ["/app/", ["/app/sw.js"]],
+];
 
 type Marked = Window & { marker?: string; violations?: string[] };
+type Probed = Window & { attempts?: string[]; effects?: Promise<void> };
 
 async function controlled(page: Page, address = "/app/") {
     await page.goto(address);
@@ -40,6 +47,41 @@ function switchFront(
 
 test.afterEach(async ({ request }) => {
     await request.delete("/__front/state");
+});
+
+test("a fresh visit makes no registration attempt outside the app layout", async ({
+    page,
+}) => {
+    await page.addInitScript(() => {
+        const probed = window as Probed;
+        const attempts: string[] = [];
+        probed.attempts = attempts;
+        const container = navigator.serviceWorker;
+        const register = container.register.bind(container);
+        container.register = (url, options) => {
+            attempts.push(String(url));
+            return register(url, options);
+        };
+        probed.effects = new Promise((resolve) => {
+            // React calls this hook, production builds included, once the effects of a commit ran.
+            Object.defineProperty(window, "__REACT_DEVTOOLS_GLOBAL_HOOK__", {
+                value: {
+                    supportsFiber: true,
+                    inject: () => 1,
+                    onCommitFiberRoot: () => undefined,
+                    onPostCommitFiberRoot: () => resolve(),
+                },
+            });
+        });
+    });
+    for (const [address, attempted] of FRESH_VISITS) {
+        await page.goto(address);
+        await page.evaluate(() => (window as Probed).effects);
+        expect(
+            await page.evaluate(() => (window as Probed).attempts),
+            address,
+        ).toEqual(attempted);
+    }
 });
 
 test("the worker controls the app pages and no other page", async ({
