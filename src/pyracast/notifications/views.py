@@ -14,6 +14,8 @@ from pyracast.notifications.operations import configure_reminders, get_reminder_
 from pyracast.notifications.overview import reminder_overview
 from pyracast.notifications.serializers import ReminderInput, ReminderOutput
 
+CONFLICT = {"$ref": "#/components/schemas/Error"}
+
 
 def _saved_answer(
     request: Request, tenant_id: int, region_id: int, *, keep: bool
@@ -42,12 +44,12 @@ class RemindersView(APIView):
             overview = reminder_overview(schedule, now, administrator=administrator)
         return Response(ReminderOutput(overview).data)
 
-    @extend_schema(request=ReminderInput, responses=ReminderOutput)
+    @extend_schema(request=ReminderInput, responses={200: ReminderOutput, 409: CONFLICT})
     def put(self, request: Request, tenant_id: int, region_id: int) -> Response:
         return Response(_saved_answer(request, tenant_id, region_id, keep=True))
 
 
 class ReminderPreviewView(APIView):
-    @extend_schema(request=ReminderInput, responses=ReminderOutput)
+    @extend_schema(request=ReminderInput, responses={200: ReminderOutput, 409: CONFLICT})
     def post(self, request: Request, tenant_id: int, region_id: int) -> Response:
         return Response(_saved_answer(request, tenant_id, region_id, keep=False))
