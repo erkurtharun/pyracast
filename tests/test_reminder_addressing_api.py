@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from datetime import timedelta
 from io import StringIO
 from typing import Any
@@ -47,6 +48,8 @@ from tests.support.notifications import (
     StatementHook,
     after_statement,
     chosen,
+    confirmed_put,
+    disclosed,
     moved,
     pending_address_change,
     ties,
@@ -106,9 +109,7 @@ def put_body(system: System, changes: dict[str, Any]) -> dict[str, Any]:
 
 
 def put(system: System, **changes: Any) -> Any:
-    return client_for(system.member).put(
-        url(system), put_body(system, changes), content_type="application/json"
-    )
+    return confirmed_put(client_for(system.member), url(system), put_body(system, changes))
 
 
 def stored_roles(system: System) -> tuple[dict[str, str], dict[str, str]]:
@@ -136,19 +137,19 @@ def to_for(address: str, *members: User) -> list[dict[str, Any]]:
     return [{"address": address, "role": "to", "memberships": [membership(m) for m in members]}]
 
 
+def visible_changes(alice: User, bob: User) -> dict[str, Any]:
+    return {
+        "hide_recipients": False,
+        "address_roles": [{"address": "boss@example.com", "role": "to", "memberships": []}],
+        "member_roles": [
+            {"memberships": [membership(alice)], "address": alice.email, "role": "bcc"},
+            {"memberships": [membership(bob)], "address": bob.email, "role": "cc"},
+        ],
+    }
+
+
 def visible_save(system: System, alice: User, bob: User, **changes: Any) -> Any:
-    return put(
-        system,
-        **{
-            "hide_recipients": False,
-            "address_roles": [{"address": "boss@example.com", "role": "to", "memberships": []}],
-            "member_roles": [
-                {"memberships": [membership(alice)], "address": alice.email, "role": "bcc"},
-                {"memberships": [membership(bob)], "address": bob.email, "role": "cc"},
-            ],
-        }
-        | changes,
-    )
+    return put(system, **visible_changes(alice, bob) | changes)
 
 
 def test_a_plant_without_a_schedule_answers_the_visible_default() -> None:
@@ -461,9 +462,14 @@ def test_a_reassignment_waits_for_a_save_and_its_answer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, alice, bob = workspace()
+    body = put_body(system, visible_changes(alice, bob))
+    previewed = client_for(system.member).post(
+        f"{url(system)}preview/", body, content_type="application/json"
+    )
+    body["disclosure"] = previewed.json()["disclosure"]
 
     def save() -> tuple[int, list[str]]:
-        response = visible_save(system, alice, bob)
+        response = client_for(system.member).put(url(system), body, content_type="application/json")
         return response.status_code, [
             row["kind"] for row in response.json()["addresses"]["members"]
         ]
@@ -481,24 +487,29 @@ def test_a_reassignment_waits_for_a_save_and_its_answer(
     assert Membership.objects.get(user=alice).role == WorkspaceRole.ADMIN
 
 
-def save_naming(system: System, user: User) -> str:
-    try:
-        configure_reminders(
-            system.member,
-            system.tenant.pk,
-            system.region.pk,
-            enabled=True,
-            recipients=[],
-            include_workspace_members=True,
-            times=["10:00"],
-            language="en",
-            now=NOW,
-            hide_recipients=False,
-            member_roles=[MemberChoice(frozenset({membership(user)}), user.email, BCC)],
-        )
-    except ConflictError as error:
-        return error.code
-    return "saved"
+def save_naming(system: System, user: User) -> Callable[[], str]:
+    settings: dict[str, Any] = {
+        "enabled": True,
+        "recipients": [],
+        "include_workspace_members": True,
+        "times": ["10:00"],
+        "language": "en",
+        "now": NOW,
+        "hide_recipients": False,
+        "member_roles": [MemberChoice(frozenset({membership(user)}), user.email, BCC)],
+    }
+    digest = disclosed(system.member, system.tenant.pk, system.region.pk, **settings)
+
+    def run() -> str:
+        try:
+            configure_reminders(
+                system.member, system.tenant.pk, system.region.pk, disclosure=digest, **settings
+            )
+        except ConflictError as error:
+            return error.code
+        return "saved"
+
+    return run
 
 
 def remove(system: System, user: User) -> str:
@@ -541,8 +552,7 @@ def test_a_save_racing_a_member_deletion_ends_without_the_members_choice(
         CC,
     )
 
-    def saving() -> str:
-        return save_naming(system, alice)
+    saving = save_naming(system, alice)
 
     def deleting() -> str:
         return str(deletion(system, alice))
@@ -568,21 +578,22 @@ def test_an_address_confirmed_after_a_saves_read_of_people_leaves_the_save_one_p
     system, _, bob = workspace()
     confirm = pending_address_change(bob, "bob.new@example.com")
     hook = StatementHook("account_emailaddress", lambda: committed_elsewhere(confirm))
+    settings: dict[str, Any] = {
+        "enabled": True,
+        "recipients": ["bob@example.com"],
+        "include_workspace_members": True,
+        "times": ["10:00"],
+        "language": "en",
+        "now": NOW,
+        "hide_recipients": False,
+        "address_roles": [AddressChoice("bob@example.com", TO, frozenset({membership(bob)}))],
+        "member_roles": [MemberChoice(frozenset({membership(bob)}), "bob@example.com", CC)],
+    }
+    digest = disclosed(system.member, system.tenant.pk, system.region.pk, **settings)
 
     with after_statement(hook):
         schedule = configure_reminders(
-            system.member,
-            system.tenant.pk,
-            system.region.pk,
-            enabled=True,
-            recipients=["bob@example.com"],
-            include_workspace_members=True,
-            times=["10:00"],
-            language="en",
-            now=NOW,
-            hide_recipients=False,
-            address_roles=[AddressChoice("bob@example.com", TO, frozenset({membership(bob)}))],
-            member_roles=[MemberChoice(frozenset({membership(bob)}), "bob@example.com", CC)],
+            system.member, system.tenant.pk, system.region.pk, disclosure=digest, **settings
         )
 
     assert hook.fired

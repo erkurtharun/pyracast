@@ -1082,7 +1082,7 @@ def test_a_row_committed_after_erasure_locked_its_table_is_not_deleted(
 
 
 def test_erasure_compares_addresses_by_one_case_rule_beyond_ascii_letters() -> None:
-    # The sign-up form accepts both and stores them lower-cased by Python.
+    # Stored directly: the sign-up form refuses both, since neither is a plain address.
     own, held = "İlker@Exämple.com", "Beyza@Exämple.com"
     person = person_with(own.lower())
     holder = User.objects.create_user(username="holder", email="holder@example.com")

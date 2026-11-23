@@ -9,6 +9,7 @@ import httpx
 import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
+from django.core.mail import EmailMessage
 from django.core.validators import validate_email
 from django.test import Client, override_settings
 from django.utils import timezone
@@ -28,6 +29,7 @@ from pyracast.notifications.models import (
     ReminderSchedule,
 )
 from pyracast.notifications.operations import invalid_recipient_region_ids
+from pyracast.notifications.recipients import carries_exactly, serialized_headers
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.notifications.serializers import ReminderInput
 from pyracast.regions.models import AuditEvent
@@ -37,11 +39,13 @@ from tests.support.notifications import (
     SENDER,
     SLOT,
     chosen,
+    confirmed_put,
     mailboxes,
     moved,
     parsed,
     smtp_wire,
     store,
+    ties,
 )
 
 TO, CC, BCC = RecipientRole.TO, RecipientRole.CC, RecipientRole.BCC
@@ -56,6 +60,11 @@ DISPLAY_NAME = "Ops <ops@example.com>"
 PARENTHESES = "ops@example.com\uff08x\uff09"
 ESCAPED_SPACE, QUOTED_SPACE = '"a\\ b"@example.com', '"a b"@example.com'
 LITERAL, FULL_WIDTH_LITERAL = "ops@[192.0.2.1]", "ops@\uff3b192.0.2.\uff10\uff11\uff3d"
+OPENING, CLOSING, HIDDEN = "=?utf-8?q?alice@example.org", "bob?=@example.net", "alice@example.org"
+LOWERED_ENCODED_WORD = "=?utf-16?b?YQ==?=@example.com"
+KELVIN_DOMAIN = "ops@\u212aelvin.com"
+REMOVED_SPECIALS = "!#$%&'*/=?^`{|}~"
+INVALID = "Enter a valid email address."
 
 
 def long_unicode_address() -> str:
@@ -93,6 +102,13 @@ REFUSED = {
     "underscore": "x@ex_ample.com",
     "quoted backslash and tab": '"a\\\tb"@example.com',
     "65-octet local part": "a" * 65 + "@example.com",
+    **{
+        f"{special!r} inside a local part": f"a{special}b@example.com"
+        for special in REMOVED_SPECIALS
+    },
+    "an encoded word opening": OPENING,
+    "an encoded word closing": CLOSING,
+    "an encoded word lower-casing changes": LOWERED_ENCODED_WORD,
 }
 REFUSED_IDS = list(REFUSED)
 
@@ -128,11 +144,11 @@ def workspace() -> System:
     return system
 
 
-def person(system: System, address: str, *, also: str = "") -> User:
-    """A member whose verified primary address was stored by other means than the product."""
+def person(system: System, address: str, *, also: str = "", primary_verified: bool = True) -> User:
+    """A member whose primary address was stored by other means than the product."""
     user = User.objects.create(username=f"held-{User.objects.count()}", email=address)
     Membership.objects.create(tenant=system.tenant, user=user)
-    EmailAddress.objects.create(user=user, email=address, verified=True, primary=True)
+    EmailAddress.objects.create(user=user, email=address, verified=primary_verified, primary=True)
     if also:
         EmailAddress.objects.create(user=user, email=also, verified=True, primary=False)
     return user
@@ -170,8 +186,11 @@ def body_of(system: System, **changes: Any) -> dict[str, Any]:
 def request(system: System, suffix: str = "", **changes: Any) -> Any:
     client = Client()
     client.force_login(system.member)
-    send = client.post if suffix else client.put
-    return send(url(system, suffix), body_of(system, **changes), content_type="application/json")
+    if not suffix:
+        return confirmed_put(client, url(system), body_of(system, **changes))
+    return client.post(
+        url(system, suffix), body_of(system, **changes), content_type="application/json"
+    )
 
 
 def send_on(day: int = 0) -> int:
@@ -184,6 +203,11 @@ def send_on(day: int = 0) -> int:
 def refused_fields(response: Any) -> list[str]:
     assert response.status_code == 400, response.content
     return sorted({name.split(".")[0] for name in response.json()["fields"]})
+
+
+def field_errors(response: Any) -> dict[str, str]:
+    assert response.status_code == 400, response.content
+    return dict(response.json()["fields"])
 
 
 def error_codes(errors: Any) -> set[str]:
@@ -257,10 +281,19 @@ def test_a_role_entry_naming_an_address_that_is_not_plain_is_refused_at_its_fiel
         for suffix in ("preview/", "")
     }
 
-    assert {place: refused_fields(response) for place, response in answers.items()} == {
-        (name, suffix): [name] for name, suffix in answers
+    assert {place: field_errors(response) for place, response in answers.items()} == {
+        (name, suffix): {f"{name}.0.address": INVALID} for name, suffix in answers
     }
     assert not ReminderSchedule.objects.exists()
+    for name, entry in entries.items():
+        serializer = ReminderInput(
+            data=body_of(system, recipients=["ops@example.com"], **{name: entry})
+        )
+        assert not serializer.is_valid()
+        assert list(serializer.errors) == [name]
+        assert list(serializer.errors[name]) == [0]
+        assert list(serializer.errors[name][0]) == ["address"]
+        assert error_codes(serializer.errors[name][0]["address"]) == {validate_email.code}
 
 
 def typed_roles() -> list[tuple[str, RecipientRole]]:
@@ -270,6 +303,10 @@ def typed_roles() -> list[tuple[str, RecipientRole]]:
         ("ops@xn--mnchen-3ya.de", BCC),
         (DISTINCT[0], TO),
         (DISTINCT[1], CC),
+        ("First.Last+tag@example.com", TO),
+        ("ops_team-1@mail.example.net", CC),
+        ("a.b_c+d-e@Example.ORG", BCC),
+        ("x.y@xn--bcher-kva.de", BCC),
     ]
 
 
@@ -356,6 +393,67 @@ def test_the_gmail_request_carries_each_plain_address_as_typed(
         typed_as(CC),
         typed_as(BCC),
     ]
+
+
+@pytestdb
+def test_an_all_hidden_gmail_message_carries_every_plain_address_in_its_hidden_list(
+    gmail_requests: list[bytes],
+) -> None:
+    system = workspace()
+    addresses = [address for address, _ in typed_roles()]
+    saved = request(
+        system, include_workspace_members=False, recipients=addresses, hide_recipients=True
+    )
+    assert saved.status_code == 200, saved.content
+
+    delivery_id = send_on()
+
+    assert NotificationDelivery.objects.get(pk=delivery_id).status == "sent"
+    (raw,) = gmail_requests
+    message = parsed(raw)
+    assert (message["To"], message["Cc"], message["Bcc"]) == (None, None, ", ".join(addresses))
+    assert [mailboxes(message, name) for name in ("To", "Cc", "Bcc")] == [[], [], addresses]
+
+
+def composed(to: list[str], cc: list[str], bcc: list[str]) -> EmailMessage:
+    return EmailMessage("Reminder", "Body", SENDER, to=to, cc=cc, bcc=bcc)
+
+
+def test_two_addresses_read_back_as_one_encoded_word_differ_from_their_placement() -> None:
+    message = composed([OPENING, CLOSING], [], [HIDDEN])
+
+    read = serialized_headers(message)
+
+    rewritten = ["alice@example.org", "bob@example.net"]
+    assert read == {
+        "smtp 7bit": (rewritten, [], []),
+        "smtp 8bit": (rewritten, [], []),
+        "gmail": (rewritten, [], [HIDDEN]),
+    }
+    assert not carries_exactly(message, ([OPENING, CLOSING], [], [HIDDEN]))
+
+
+def test_an_all_hidden_gmail_message_of_such_addresses_differs_in_its_hidden_list() -> None:
+    message = composed([], [], [OPENING, CLOSING])
+
+    read = serialized_headers(message)
+
+    assert read["gmail"] == ([], [], ["alice@example.org", "bob@example.net"])
+    assert read["smtp 7bit"] == read["smtp 8bit"] == ([], [], [])
+    assert not carries_exactly(message, ([], [], [OPENING, CLOSING]))
+
+
+def test_several_plain_addresses_read_back_exactly_in_every_serialization() -> None:
+    to, cc, bcc = (typed_as(role) for role in (TO, CC, BCC))
+    message = composed(to, cc, bcc)
+
+    assert serialized_headers(message) == {
+        "smtp 7bit": (to, cc, []),
+        "smtp 8bit": (to, cc, []),
+        "gmail": (to, cc, bcc),
+    }
+    assert carries_exactly(message, (to, cc, bcc))
+    assert carries_exactly(composed([], [], bcc + to), ([], [], bcc + to))
 
 
 @pytestdb
@@ -536,7 +634,7 @@ def test_a_hidden_member_moving_to_an_address_that_is_not_plain_skips_the_list_u
 @pytestdb
 @pytest.mark.parametrize("hide", [True, False])
 def test_an_account_address_that_is_not_plain_skips_only_a_list_that_reads_people(
-    hide: bool,
+    gmail_requests: list[bytes], hide: bool
 ) -> None:
     system = workspace()
     person(system, KELVIN)
@@ -550,15 +648,26 @@ def test_an_account_address_that_is_not_plain_skips_only_a_list_that_reads_peopl
 
     with smtp_wire() as script:
         delivery_id = send_on()
+    over_gmail = send_on(1)
 
     if hide:
         (transaction,) = script.transactions
+        message = parsed(transaction.data)
+        assert (message["To"], message["Cc"], message["Bcc"]) == (None, None, None)
+        assert (mailboxes(message, "To"), mailboxes(message, "Cc")) == ([], [])
         assert transaction.recipients == ["outside@example.com"]
+        (raw,) = gmail_requests
+        assert [mailboxes(parsed(raw), name) for name in ("To", "Cc", "Bcc")] == [
+            [],
+            [],
+            ["outside@example.com"],
+        ]
         assert answer(system)["state"] == "sending"
         assert invalid_recipient_region_ids() == set()
     else:
-        assert script.transactions == []
+        assert (script.transactions, gmail_requests) == ([], [])
         assert skipped_as_invalid(delivery_id)
+        assert skipped_as_invalid(over_gmail)
         assert answer(system)["state"] == "invalid_recipient"
         assert invalid_recipient_region_ids() == {system.region.pk}
 
@@ -575,7 +684,7 @@ def test_a_member_holding_a_quoted_local_part_skips_the_list_until_they_hold_a_p
         recipients=[ESCAPED_SPACE],
         address_roles=[{"address": ESCAPED_SPACE, "role": "bcc", "memberships": []}],
     )
-    assert refused_fields(typed) == ["address_roles", "recipients"]
+    assert field_errors(typed) == {"recipients": INVALID, "address_roles.0.address": INVALID}
     moved(holder, ESCAPED_SPACE)
 
     assert skipped_send(0, system) == []
@@ -600,7 +709,7 @@ def test_a_member_holding_an_address_literal_skips_the_list_until_they_hold_a_pl
         recipients=["outside@example.com", FULL_WIDTH_LITERAL],
         address_roles=[{"address": FULL_WIDTH_LITERAL, "role": "to", "memberships": []}],
     )
-    assert refused_fields(typed) == ["address_roles", "recipients"]
+    assert field_errors(typed) == {"recipients": INVALID, "address_roles.0.address": INVALID}
 
     assert skipped_send(0, system) == ([] if include else ["outside@example.com"])
 
@@ -626,6 +735,65 @@ def test_a_member_with_a_verified_address_that_is_not_plain_skips_the_list(
     assert request(system).status_code == 200
 
     assert skipped_send(0, system) == ([ADMIN, primary] if primary.isascii() else [])
+
+
+@pytestdb
+@pytest.mark.parametrize(
+    ("primary", "other"),
+    [("tsst@example.com", "t\u017fst@example.com"), ("t\u017fst@example.com", "tsst@example.com")],
+    ids=["plain primary", "plain verified address"],
+)
+def test_a_member_whose_only_verified_address_is_the_other_spelling_skips_the_list(
+    gmail_requests: list[bytes], primary: str, other: str
+) -> None:
+    system = workspace()
+    person(system, primary, also=other, primary_verified=False)
+    assert request(system).status_code == 200
+
+    assert skipped_send(0, system) == [ADMIN]
+    over_gmail = send_on(1)
+
+    assert gmail_requests == []
+    assert skipped_as_invalid(over_gmail)
+
+
+@pytestdb
+def test_a_member_address_that_is_not_plain_ties_no_typed_look_alike() -> None:
+    system = workspace()
+    person(system, STRASSE_CAPITAL)
+    person(system, KELVIN_DOMAIN)
+
+    saved = request(
+        system,
+        include_workspace_members=False,
+        recipients=["ops@strasse.de", "ops@kelvin.com"],
+        hide_recipients=True,
+    )
+
+    assert saved.status_code == 200, saved.content
+    assert ties(ReminderSchedule.objects.get(region=system.region)) == {}
+    assert [row["memberships"] for row in saved.json()["addresses"]["added"]] == [[], []]
+
+
+@pytestdb
+@pytest.mark.parametrize(
+    ("stored", "plain"), [(STRASSE_CAPITAL, "ops@strasse.de"), (KELVIN_DOMAIN, "ops@kelvin.com")]
+)
+def test_a_typed_row_that_is_not_plain_passes_no_choice_to_its_plain_look_alike(
+    stored: str, plain: str
+) -> None:
+    system = workspace()
+    first = request(system, include_workspace_members=False, recipients=["outside@example.com"])
+    assert first.status_code == 200, first.content
+    store(ReminderSchedule.objects.get(region=system.region), [stored])
+    ReminderRecipient.objects.update(role=TO)
+
+    replaced = request(system, include_workspace_members=False, recipients=[plain])
+
+    assert replaced.status_code == 200, replaced.content
+    assert list(ReminderRecipient.objects.values_list("address", "role", "role_members")) == [
+        (plain, "", [])
+    ]
 
 
 @pytestdb
@@ -659,6 +827,78 @@ def test_a_recipient_that_is_not_plain_is_refused_before_the_role_entries_are_ch
     assert not serializer.is_valid()
     assert list(serializer.errors) == ["recipients"]
     assert [error.code for error in serializer.errors["recipients"]] == [validate_email.code]
+
+
+def typed_by_other_means(system: System) -> int:
+    first = request(system, include_workspace_members=False, recipients=["outside@example.com"])
+    assert first.status_code == 200, first.content
+    store(ReminderSchedule.objects.get(region=system.region), [OPENING, CLOSING, HIDDEN])
+    ReminderRecipient.objects.filter(address__in=[OPENING, CLOSING]).update(role=TO)
+    ReminderRecipient.objects.filter(address=HIDDEN).update(role=BCC)
+    return enqueue_due(SLOT)[-1]
+
+
+def frozen_by_other_means(system: System, frozen: dict[str, str]) -> int:
+    """Queued for plain current addresses; then the frozen rows' texts are rewritten in place."""
+    saved = request(
+        system,
+        include_workspace_members=False,
+        recipients=list(frozen),
+        hide_recipients=True,
+    )
+    assert saved.status_code == 200, saved.content
+    delivery_id = enqueue_due(SLOT)[-1]
+    for key, text in frozen.items():
+        DeliveryRecipient.objects.filter(delivery_id=delivery_id, key=key).update(address=text)
+    return delivery_id
+
+
+V1_FROZEN = {"a@example.org": OPENING, "b@example.net": CLOSING, HIDDEN: HIDDEN}
+SHARP_S_FROZEN = {"ops@strasse.de": STRASSE_CAPITAL}
+
+
+@pytestdb
+@pytest.mark.parametrize("transport", ["smtp", "gmail"])
+@pytest.mark.parametrize(
+    "queued",
+    [
+        pytest.param(typed_by_other_means, id="typed rows"),
+        pytest.param(lambda system: frozen_by_other_means(system, V1_FROZEN), id="frozen rows"),
+        pytest.param(
+            lambda system: frozen_by_other_means(system, SHARP_S_FROZEN),
+            id="frozen sharp s beside its plain key",
+        ),
+    ],
+)
+def test_a_list_whose_texts_are_not_plain_is_skipped_before_the_transmit_marker(
+    gmail_requests: list[bytes], transport: str, queued: Any
+) -> None:
+    system = workspace()
+    delivery_id = queued(system)
+    before = list(
+        DeliveryRecipient.objects.filter(delivery_id=delivery_id)
+        .order_by("pk")
+        .values_list("address", "role")
+    )
+
+    with smtp_wire() as script:
+        if transport == "smtp":
+            process_notification(delivery_id, SLOT)
+    if transport == "gmail":
+        process_notification(delivery_id, SLOT)
+
+    assert (script.transactions, gmail_requests) == ([], [])
+    assert skipped_as_invalid(delivery_id)
+    assert NotificationDelivery.objects.get(pk=delivery_id).transmit_started_at is None
+    assert set(role for _, role in before) <= {BCC}
+    assert (
+        list(
+            DeliveryRecipient.objects.filter(delivery_id=delivery_id)
+            .order_by("pk")
+            .values_list("address", "role")
+        )
+        == before
+    )
 
 
 @pytestdb

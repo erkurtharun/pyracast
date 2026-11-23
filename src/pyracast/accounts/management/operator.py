@@ -6,6 +6,7 @@ from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
+from django.core.validators import validate_email
 from django.db import connection
 from django.db.models import Q, QuerySet
 
@@ -18,9 +19,20 @@ SHARED_ADDRESS = "The address belongs to more than one account. Resolve that fir
 OPERATOR_LOCK = 0x50594F50
 
 
-def operator_address(value: str) -> str:
+def lookup_address(value: str) -> str:
+    address = value.strip().lower()
     try:
-        return plain_address(value.strip()).lower()
+        validate_email(address)
+    except ValidationError:
+        raise CommandError(INVALID_ADDRESS) from None
+    if len(address) > 254:
+        raise CommandError(INVALID_ADDRESS)
+    return address
+
+
+def acquired_address(value: str) -> str:
+    try:
+        return plain_address(value.strip().lower())
     except ValidationError:
         raise CommandError(INVALID_ADDRESS) from None
 

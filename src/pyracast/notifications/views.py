@@ -12,7 +12,11 @@ from rest_framework.views import APIView
 from pyracast.db import read_snapshot
 from pyracast.notifications.operations import configure_reminders, get_reminder_schedule
 from pyracast.notifications.overview import reminder_overview
-from pyracast.notifications.serializers import ReminderInput, ReminderOutput
+from pyracast.notifications.serializers import (
+    ReminderInput,
+    ReminderOutput,
+    ReminderPreviewOutput,
+)
 
 CONFLICT = {"$ref": "#/components/schemas/Error"}
 
@@ -25,9 +29,15 @@ def _saved_answer(
     now = timezone.now()
     with transaction.atomic():
         schedule = configure_reminders(
-            cast(User, request.user), tenant_id, region_id, now=now, **data.validated_data
+            cast(User, request.user),
+            tenant_id,
+            region_id,
+            now=now,
+            preview=not keep,
+            **data.validated_data,
         )
-        answer = ReminderOutput(reminder_overview(schedule, now, administrator=True)).data
+        overview = reminder_overview(schedule, now, administrator=True)
+        answer = (ReminderOutput if keep else ReminderPreviewOutput)(overview).data
         if not keep:
             transaction.set_rollback(True)
     return answer
@@ -50,6 +60,6 @@ class RemindersView(APIView):
 
 
 class ReminderPreviewView(APIView):
-    @extend_schema(request=ReminderInput, responses={200: ReminderOutput, 409: CONFLICT})
+    @extend_schema(request=ReminderInput, responses={200: ReminderPreviewOutput, 409: CONFLICT})
     def post(self, request: Request, tenant_id: int, region_id: int) -> Response:
         return Response(_saved_answer(request, tenant_id, region_id, keep=False))

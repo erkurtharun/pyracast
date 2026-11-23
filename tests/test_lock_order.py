@@ -29,7 +29,7 @@ from tests.support.domain import NOW, System, make_system
 from tests.support.metering import connect, connected
 from tests.support.notification_groups import group, member
 from tests.support.notification_transmission import replying
-from tests.support.notifications import SLOT, chosen
+from tests.support.notifications import SLOT, chosen, disclosed
 from tests.support.plant_operations import request_run
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -210,18 +210,21 @@ def test_a_transaction_locks_a_person_before_any_workspace_row(
 
 def reminder_save(system: System) -> Callable[[], object]:
     membership = Membership.objects.get(user=system.member).pk
+    settings: dict[str, Any] = {
+        "enabled": True,
+        "recipients": ["ops@example.com"],
+        "include_workspace_members": True,
+        "times": ["10:00"],
+        "language": "en",
+        "now": NOW,
+        "hide_recipients": False,
+        "member_roles": [
+            MemberChoice(frozenset({membership}), system.member.email, RecipientRole.CC)
+        ],
+    }
+    digest = disclosed(system.member, system.tenant.pk, system.region.pk, **settings)
     return lambda: configure_reminders(
-        system.member,
-        system.tenant.pk,
-        system.region.pk,
-        enabled=True,
-        recipients=["ops@example.com"],
-        include_workspace_members=True,
-        times=["10:00"],
-        language="en",
-        now=NOW,
-        hide_recipients=False,
-        member_roles=[MemberChoice(frozenset({membership}), system.member.email, RecipientRole.CC)],
+        system.member, system.tenant.pk, system.region.pk, disclosure=digest, **settings
     )
 
 

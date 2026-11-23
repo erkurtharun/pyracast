@@ -1,11 +1,18 @@
+import hashlib
+import json
+import string
 from collections import defaultdict
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from email import policy
+from email.parser import BytesParser
 
+from django.core.mail import EmailMessage
 from django.db.models import Case, F, Q, Value, When
 
 from pyracast.accounts.addresses import is_plain
 from pyracast.accounts.models import Membership, WorkspaceRole
+from pyracast.mail.policy import wire_policy
 from pyracast.notifications.addressing import Candidate, members_choice, roles, sent_hidden
 from pyracast.notifications.models import (
     DeliveryRecipient,
@@ -27,9 +34,12 @@ OPEN_DELIVERIES = (
 )
 
 
+_ASCII_LOWER = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
+
+
 def recipient_key(address: str) -> str:
-    """The identity of an address: for a plain one, its lower-cased text."""
-    return address.strip().casefold()
+    """The identity of an address: its exact text with only `A`-`Z` lower-cased."""
+    return address.translate(_ASCII_LOWER)
 
 
 @dataclass(frozen=True)
@@ -140,7 +150,7 @@ def _workspace(people: Sequence[Person]) -> Workspace:
         frozenset(person.membership for person in people if person.active),
         {
             key: Member(
-                found[0].primary.strip(),
+                found[0].primary,
                 tuple(person.membership for person in found),
                 any(person.administrator for person in found),
             )
@@ -286,12 +296,13 @@ def typed_choices(schedule: ReminderSchedule) -> list[TypedRow]:
     return [(address, choice, frozenset(ties)) for address, choice, ties in found.values()]
 
 
-def stored_choices(schedule: ReminderSchedule) -> Choices:
+def member_choices(schedule: ReminderSchedule) -> dict[int, RecipientRole]:
     chosen = ReminderMemberRole.objects.filter(schedule_id=schedule.pk)
-    return choices(
-        typed_choices(schedule),
-        {pk: RecipientRole(role) for pk, role in chosen.values_list("membership_id", "role")},
-    )
+    return {pk: RecipientRole(role) for pk, role in chosen.values_list("membership_id", "role")}
+
+
+def stored_choices(schedule: ReminderSchedule) -> Choices:
+    return choices(typed_choices(schedule), member_choices(schedule))
 
 
 def candidates(addresses: Sequence[str], members: Workspace, choices: Choices) -> list[Candidate]:
@@ -333,9 +344,10 @@ def placements(
     )
 
 
-def headers(
-    addresses: Sequence[str], placed: Sequence[RecipientRole]
-) -> tuple[list[str], list[str], list[str]]:
+Headers = tuple[list[str], list[str], list[str]]
+
+
+def headers(addresses: Sequence[str], placed: Sequence[RecipientRole]) -> Headers:
     """`To`, `Cc` and `Bcc`, each key once in its address's text at its first placement."""
     found: dict[RecipientRole, list[str]] = {role: [] for role in RecipientRole}
     keys: set[str] = set()
@@ -344,6 +356,58 @@ def headers(
             keys.add(key)
             found[role].append(address)
     return found[RecipientRole.TO], found[RecipientRole.CC], found[RecipientRole.BCC]
+
+
+def disclosure_digest(
+    schedule: ReminderSchedule,
+    members: Workspace,
+    addresses: Sequence[str],
+    read: Choices | None = None,
+) -> str:
+    """A digest of the mode and the exact `To` and `Cc` lists the configuration places."""
+    to, cc, _ = headers(addresses, placements(schedule, members, addresses, read))
+    shown = {"hidden": sent_hidden(schedule.hide_recipients), "to": to, "cc": cc}
+    canonical = json.dumps(shown, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("ascii")).hexdigest()
+
+
+def _lists(raw: bytes) -> tuple[list[str] | None, ...]:
+    """Each header's addr-specs, `[]` when absent, `None` when repeated, empty or defective."""
+    parsed = BytesParser(policy=policy.default).parsebytes(raw, headersonly=True)
+    found: list[list[str] | None] = []
+    for name in ("To", "Cc", "Bcc"):
+        values = parsed.get_all(name) or []
+        if not values:
+            found.append([])
+        elif len(values) > 1 or values[0].defects or not values[0].addresses:
+            found.append(None)
+        else:
+            found.append([address.addr_spec for address in values[0].addresses])
+    return tuple(found)
+
+
+def serialized_headers(message: EmailMessage) -> dict[str, tuple[list[str] | None, ...]]:
+    """`To`, `Cc` and `Bcc` read back from the bytes each transport writes: SMTP under either
+    body type, and Gmail, which also writes the hidden list into the message."""
+    seven_bit = message.message(policy=wire_policy(eight_bit=False))
+    eight_bit = message.message(policy=wire_policy(eight_bit=True))
+    found = {"smtp 7bit": _lists(seven_bit.as_bytes()), "smtp 8bit": _lists(eight_bit.as_bytes())}
+    if message.bcc:
+        eight_bit["Bcc"] = ", ".join(message.bcc)
+    found["gmail"] = _lists(eight_bit.as_bytes())
+    return found
+
+
+def carries_exactly(message: EmailMessage, placed: Headers) -> bool:
+    """Whether every address is plain and the envelope and every serialization carry exactly
+    the placed `To`, `Cc` and `Bcc`, in order."""
+    to, cc, bcc = placed
+    if not all(is_plain(address) for address in (*to, *cc, *bcc)):
+        return False
+    if list(message.recipients()) != [*to, *cc, *bcc]:
+        return False
+    expected = {"smtp 7bit": (to, cc, []), "smtp 8bit": (to, cc, []), "gmail": (to, cc, bcc)}
+    return serialized_headers(message) == expected
 
 
 def planned_recipients(

@@ -316,6 +316,9 @@ msgstr "Bu santral daha az alıcı adresine izin verir."
 msgid "The email reminders changed. Reload before saving."
 msgstr "E-posta hatırlatıcıları değişti. Kaydetmeden önce yeniden yükleyin."
 
+msgid "The visible recipients changed. Review them again before saving."
+msgstr "Görünür alıcılar değişti. Kaydetmeden önce yeniden gözden geçirin."
+
 msgid "Reminders can be turned on once the plant is approved."
 msgstr "Hatırlatmalar santral onaylandıktan sonra açılabilir."
 

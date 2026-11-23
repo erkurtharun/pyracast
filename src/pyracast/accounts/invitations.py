@@ -211,7 +211,7 @@ def invite_workspace_member(
     authorize_workspace_admin(actor, tenant_id, platform=platform)
     if admin_role and has_workspace_admin(tenant_id):
         raise ConflictError(ErrorCode.WORKSPACE_ADMIN_CHANGED)
-    email = plain_address(email.strip()).lower()
+    email = plain_address(email.strip().lower())
     if Membership.objects.filter(tenant_id=tenant_id, user__email__iexact=email).exists():
         raise DomainError(ErrorCode.INVITATION_MEMBER_EXISTS)
     now = timezone.now()

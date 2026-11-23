@@ -27,7 +27,14 @@ from tests.support.concurrency import committed_elsewhere, paused_in
 from tests.support.domain import NOW, System, make_system
 from tests.support.notification_groups import member
 from tests.support.notification_transmission import replying
-from tests.support.notifications import SLOT, chosen, moved, pending_address_change
+from tests.support.notifications import (
+    SLOT,
+    chosen,
+    confirmed_put,
+    disclosed,
+    moved,
+    pending_address_change,
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -82,8 +89,11 @@ def save(system: System, suffix: str = "", **changes: Any) -> Any:
         else 0,
         "hide_recipients": False,
     } | changes
-    send = client.post if suffix else client.put
-    response = send(url(system, suffix), body, content_type="application/json")
+    response = (
+        client.post(url(system, suffix), body, content_type="application/json")
+        if suffix
+        else confirmed_put(client, url(system), body)
+    )
     assert response.status_code == 200, response.content
     return response.json()
 
@@ -469,18 +479,20 @@ def test_the_database_refuses_a_departure_mark_on_a_visible_schedule() -> None:
 
 
 def saving(system: System) -> Callable[[], str]:
+    settings: dict[str, Any] = {
+        "enabled": True,
+        "recipients": [],
+        "include_workspace_members": True,
+        "times": ["10:00"],
+        "language": "en",
+        "now": NOW,
+        "hide_recipients": False,
+    }
+    digest = disclosed(system.member, system.tenant.pk, system.region.pk, **settings)
+
     def run() -> str:
         configure_reminders(
-            system.member,
-            system.tenant.pk,
-            system.region.pk,
-            enabled=True,
-            recipients=[],
-            include_workspace_members=True,
-            times=["10:00"],
-            language="en",
-            now=NOW,
-            hide_recipients=False,
+            system.member, system.tenant.pk, system.region.pk, disclosure=digest, **settings
         )
         return "saved"
 
@@ -503,7 +515,8 @@ def test_a_save_racing_a_departure_ends_with_the_mode_the_later_one_leaves(
     save_first: bool,
 ) -> None:
     system, alice, _ = workspace()
-    save(system, hide_recipients=True)
+    hidden = {"memberships": [membership(alice)], "address": alice.email, "role": "bcc"}
+    save(system, hide_recipients=True, member_roles=[hidden])
 
     def departing() -> str:
         return "departed" if departure(system, alice) else ""

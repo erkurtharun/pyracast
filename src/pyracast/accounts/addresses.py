@@ -7,8 +7,7 @@ from django.core.validators import validate_email
 
 ADDRESS_MAX_OCTETS = 254
 LOCAL_MAX_OCTETS = 64
-_ATOM = r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+"
-_DOT_ATOM = re.compile(rf"{_ATOM}(?:\.{_ATOM})*")
+_LOCAL = re.compile(r"[A-Za-z0-9_+-]+(?:\.[A-Za-z0-9_+-]+)*")
 _LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
 
 
@@ -24,7 +23,7 @@ def is_plain(text: str) -> bool:
     labels = domain.split(".")
     if not (
         len(local) <= LOCAL_MAX_OCTETS
-        and _DOT_ATOM.fullmatch(local)
+        and _LOCAL.fullmatch(local)
         and len(labels) >= 2
         and all(_LABEL.fullmatch(label) for label in labels)
         and not labels[-1].isdigit()
@@ -38,7 +37,6 @@ def is_plain(text: str) -> bool:
 
 
 def plain_address(text: str) -> str:
-    """The text unchanged if it is a plain address, otherwise the invalid-address error."""
     if not is_plain(text):
         raise ValidationError(validate_email.message, code=validate_email.code)
     return text

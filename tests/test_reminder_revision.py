@@ -7,11 +7,12 @@ from django.test import Client
 from pyracast.accounts.operations import remove_workspace_member
 from pyracast.errors import DomainError
 from pyracast.notifications.models import RecipientRole
-from pyracast.notifications.operations import AddressChoice, configure_reminders
+from pyracast.notifications.operations import AddressChoice
 from pyracast.regions.models import AuditEvent
 from pyracast.trash import restore_region, trash_region
 from tests.support.domain import NOW, System, make_system
 from tests.support.notification_groups import member
+from tests.support.notifications import confirmed_save
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -115,7 +116,7 @@ def save(system: System, **changes: Any) -> None:
         "times": ["10:00"],
         "language": "en",
     } | changes
-    configure_reminders(system.member, system.tenant.pk, system.region.pk, now=NOW, **values)
+    confirmed_save(system.member, system.tenant.pk, system.region.pk, now=NOW, **values)
 
 
 def test_each_saved_change_is_audited_once_and_an_unchanged_save_not_at_all() -> None:

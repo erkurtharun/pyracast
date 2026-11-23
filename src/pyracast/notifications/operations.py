@@ -33,9 +33,11 @@ from pyracast.notifications.recipients import (
     TypedChoice,
     Workspace,
     choices,
+    disclosure_digest,
     effective,
     explicit_recipients,
     grouped_recipients,
+    member_choices,
     placements,
     planned_recipients,
     reads_people,
@@ -301,6 +303,29 @@ def _typed_choices(
     ]
 
 
+def _check_disclosure(
+    schedule: ReminderSchedule,
+    members: Workspace,
+    planned: Sequence[Explicit],
+    addresses: Sequence[str],
+    roles: Sequence[TypedChoice],
+    decided: dict[int, RecipientRole | None],
+    submitted: str | None,
+) -> None:
+    """The administrator's preview digest binds the visible result about to be saved."""
+    chosen = member_choices(schedule)
+    for pk, role in decided.items():
+        if role is None:
+            chosen.pop(pk, None)
+        else:
+            chosen[pk] = role
+    read = choices(
+        [(row.address, role, row.ties) for row, role in zip(planned, roles, strict=True)], chosen
+    )
+    if submitted != disclosure_digest(schedule, members, addresses, read):
+        raise ConflictError(ErrorCode.REMINDER_DISCLOSURE_CHANGED)
+
+
 def _audit_details(schedule: ReminderSchedule, resolved: Resolved) -> dict[str, int]:
     visible = [
         address
@@ -333,9 +358,12 @@ def configure_reminders(
     hide_recipients: bool = True,
     address_roles: Sequence[AddressChoice] | None = None,
     member_roles: Sequence[MemberChoice] | None = None,
+    disclosure: str | None = None,
+    preview: bool = False,
 ) -> ReminderSchedule:
     """`expected_revision` is the revision the administrator's form was read at; a schedule
-    changed since then is refused instead of overwritten."""
+    changed since then is refused instead of overwritten. A visible result is saved only with
+    the `disclosure` of its preview; a preview binds nothing."""
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
     if language not in Language.values:
@@ -384,14 +412,16 @@ def configure_reminders(
         stored_typed = typed_choices(schedule)
         stored_roles = [choice for _, choice, _ in stored_typed]
         roles = _typed_choices(planned, choices(stored_typed, {}), address_roles or ())
+        mode = schedule.hide_recipients != hide_recipients or schedule.hidden_by_departure
+        schedule.hide_recipients = hide_recipients
+        if not preview and not sent_hidden(hide_recipients):
+            _check_disclosure(schedule, members, planned, addresses, roles, decided, disclosure)
         rows = store_recipients(schedule, explicit, planned, roles=roles, stored_roles=stored_roles)
         chosen = store_member_choices(schedule, decided)
-        mode = schedule.hide_recipients != hide_recipients or schedule.hidden_by_departure
-        schedule.enabled, schedule.times, schedule.language, schedule.hide_recipients = (
+        schedule.enabled, schedule.times, schedule.language = (
             enabled,
             list(submitted.times),
             language,
-            hide_recipients,
         )
         schedule.hidden_by_departure = False
         configured = created or submitted != stored or mode or roles != stored_roles or chosen

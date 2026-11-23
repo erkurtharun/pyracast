@@ -41,6 +41,7 @@ from tests.support.notifications import (
     after_statement,
     candidates,
     chosen,
+    confirmed_save,
     mailboxes,
     moved,
     parsed,
@@ -433,7 +434,7 @@ def test_a_member_who_left_and_joined_again_follows_the_default() -> None:
     assert remove_workspace_member(system.member, system.tenant.pk, alice.pk)
     joined_again(system, alice)
     assert "alice@example.com" in headers(sent_on(0))[2]
-    configure_reminders(
+    confirmed_save(
         system.member,
         system.tenant.pk,
         system.region.pk,

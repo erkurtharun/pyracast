@@ -16,7 +16,7 @@ from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.authorization import requires_admin_mfa
 from pyracast.accounts.inputs import sign_in_password
-from pyracast.accounts.management.operator import OperatorCommand, operator_address
+from pyracast.accounts.management.operator import OperatorCommand, acquired_address
 from pyracast.accounts.mfa import MFAAdapter
 
 INACTIVE = "The account with this address is inactive. Nothing was changed."
@@ -64,7 +64,7 @@ class Command(OperatorCommand):
         parser.add_argument("--dry-run", action="store_true")
 
     def handle(self, *args: Any, **options: Any) -> None:
-        address = operator_address(options["email"])
+        address = acquired_address(options["email"])
         account = self.eligible(address)
         if options["dry_run"]:
             plan = (

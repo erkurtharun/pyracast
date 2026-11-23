@@ -7,7 +7,8 @@ from django.db.models import Model
 from django.test import Client
 from django.utils import timezone
 
-from pyracast.accounts.models import Membership, WorkspaceRole
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
+from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.models import (
     DeliveryRecipient,
@@ -20,10 +21,11 @@ from pyracast.notifications.models import (
 )
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.models import AuditEvent
+from tests.support.concurrency import behind_open_transaction
 from tests.support.domain import NOW, System, make_system
 from tests.support.notification_groups import member
 from tests.support.notification_transmission import replying
-from tests.support.notifications import SLOT
+from tests.support.notifications import SLOT, confirmed_put, pending_address_change
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -97,7 +99,7 @@ def preview(system: System, payload: dict[str, Any]) -> Any:
 
 
 def save(system: System, payload: dict[str, Any]) -> Any:
-    return client_for(system.member).put(url(system), payload, content_type="application/json")
+    return confirmed_put(client_for(system.member), url(system), payload)
 
 
 def with_a_sent_delivery(system: System, alice: User, bob: User) -> dict[str, Any]:
@@ -135,8 +137,9 @@ def test_a_preview_answers_what_the_save_then_answers_and_writes_nothing(arrange
     assert previewed.status_code == 200, previewed.content
     assert stored() == before
     assert previewed.json()["revision"] == payload["expected_revision"] + 1
-    saved = save(system, payload)
-    assert (saved.status_code, saved.json()) == (200, previewed.json())
+    answer = previewed.json()
+    saved = save(system, payload | {"disclosure": answer.pop("disclosure")})
+    assert (saved.status_code, saved.json()) == (200, answer)
     assert stored() != before
 
 
@@ -195,3 +198,164 @@ def test_a_viewer_is_refused_a_preview_and_nothing_is_written() -> None:
 
     assert (response.status_code, response.json()["code"]) == (403, "workspace_admin_required")
     assert stored() == before
+
+
+def members_only(system: System, **changes: Any) -> dict[str, Any]:
+    return {
+        "enabled": True,
+        "include_workspace_members": True,
+        "language": "en",
+        "recipients": [],
+        "times": ["10:00"],
+        "expected_revision": revision(system),
+        "hide_recipients": False,
+    } | changes
+
+
+def revision(system: System) -> int:
+    schedule = ReminderSchedule.objects.filter(region=system.region).first()
+    return schedule.revision if schedule else 0
+
+
+def disclosure(system: System, payload: dict[str, Any]) -> str:
+    answered = preview(system, payload)
+    assert answered.status_code == 200, answered.content
+    digest: str = answered.json()["disclosure"]
+    return digest
+
+
+def put_as(user: User, system: System, payload: dict[str, Any]) -> Any:
+    return client_for(user).put(url(system), payload, content_type="application/json")
+
+
+def test_a_visible_save_with_its_previews_disclosure_is_stored_and_recorded() -> None:
+    system, _, _ = workspace()
+    payload = members_only(system)
+    digest = disclosure(system, payload)
+
+    saved = put_as(system.member, system, payload | {"disclosure": digest})
+
+    assert saved.status_code == 200, saved.content
+    assert "disclosure" not in saved.json()
+    schedule = ReminderSchedule.objects.get(region=system.region)
+    assert (schedule.hide_recipients, schedule.revision) == (False, 1)
+    assert AuditEvent.objects.filter(action="reminder_schedule_updated").count() == 1
+
+
+def changed_holder(system: System, alice: User, bob: User) -> User:
+    pending_address_change(bob, "bob.new@example.com")()
+    return system.member
+
+
+def joined_member(system: System, alice: User, bob: User) -> User:
+    member(system, "carol@example.com")
+    return system.member
+
+
+def reassigned(system: System, alice: User, bob: User) -> User:
+    assert reassign_workspace_admin(
+        system.admin, system.tenant.pk, alice.pk, expected_admin_id=system.member.pk
+    )
+    return alice
+
+
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+@pytest.mark.parametrize("change", [changed_holder, joined_member, reassigned])
+def test_a_change_of_people_after_the_preview_refuses_the_visible_save(change: Any) -> None:
+    system, alice, bob = workspace()
+    assert (
+        confirmed_put(client_for(system.member), url(system), members_only(system)).status_code
+        == 200
+    )
+    payload = members_only(system)
+    digest = disclosure(system, payload)
+    saver = change(system, alice, bob)
+    before = stored()
+
+    refused = put_as(saver, system, payload | {"disclosure": digest})
+
+    assert (refused.status_code, refused.json()["code"]) == (409, "reminder_disclosure_changed")
+    assert stored() == before
+
+
+@pytest.mark.parametrize("given", [{}, {"disclosure": "0" * 64}])
+def test_a_visible_save_without_its_previews_disclosure_is_refused(given: dict[str, str]) -> None:
+    system, _, _ = workspace()
+    before = stored()
+
+    refused = put_as(system.member, system, members_only(system) | given)
+
+    assert (refused.status_code, refused.json()["code"]) == (409, "reminder_disclosure_changed")
+    assert stored() == before
+
+
+@pytest.mark.parametrize("given", [{}, {"disclosure": "0" * 64}])
+def test_a_hidden_save_needs_no_disclosure(given: dict[str, str]) -> None:
+    system, _, _ = workspace()
+
+    saved = put_as(system.member, system, members_only(system, hide_recipients=True) | given)
+
+    assert saved.status_code == 200, saved.content
+    assert ReminderSchedule.objects.get(region=system.region).revision == 1
+
+
+def test_a_malformed_disclosure_is_refused_at_its_field() -> None:
+    system, _, _ = workspace()
+
+    refused = put_as(system.member, system, members_only(system, disclosure="A" * 64))
+
+    assert refused.status_code == 400, refused.content
+    assert list(refused.json()["fields"]) == ["disclosure"]
+
+
+def test_the_disclosure_follows_the_visible_lists_and_their_order() -> None:
+    system, _, _ = workspace()
+    to: list[dict[str, Any]] = [
+        {"address": address, "role": "to", "memberships": []} for address in ("x@a.org", "y@a.org")
+    ]
+
+    first = members_only(system, include_workspace_members=False, recipients=["x@a.org", "y@a.org"])
+    swapped = first | {"recipients": ["y@a.org", "x@a.org"]}
+    digests = [
+        disclosure(system, first | {"address_roles": to}),
+        disclosure(system, first | {"address_roles": to}),
+        disclosure(system, swapped | {"address_roles": to}),
+        disclosure(system, first),
+    ]
+
+    assert digests[0] == digests[1]
+    assert len({digests[0], digests[2], digests[3]}) == 3
+    assert all(len(digest) == 64 and int(digest, 16) >= 0 for digest in digests)
+
+
+def test_a_hidden_preview_answers_a_disclosure_and_the_get_and_a_viewer_answer_none() -> None:
+    system, alice, _ = workspace()
+    payload = members_only(system, hide_recipients=True)
+
+    previewed = preview(system, payload)
+    assert confirmed_put(client_for(system.member), url(system), payload).status_code == 200
+    Membership.objects.filter(user=alice).update(role=WorkspaceRole.VIEWER)
+    answers = [client_for(user).get(url(system)).json() for user in (system.member, alice)]
+
+    assert len(previewed.json()["disclosure"]) == 64
+    assert ["disclosure" in answer for answer in answers] == [False, False]
+    assert answers[1]["addresses"] is None
+
+
+def test_a_change_committed_while_the_save_waits_for_its_lock_refuses_it() -> None:
+    system, _, _ = workspace()
+    payload = members_only(system)
+    digest = disclosure(system, payload)
+
+    def join() -> None:
+        Tenant.objects.select_for_update().get(pk=system.tenant.pk)
+        member(system, "carol@example.com")
+
+    def save_previewed() -> tuple[int, str]:
+        response = put_as(system.member, system, payload | {"disclosure": digest})
+        return response.status_code, response.json().get("code", "")
+
+    _, refused = behind_open_transaction(join, save_previewed)
+
+    assert refused == (409, "reminder_disclosure_changed")
+    assert not ReminderSchedule.objects.exists()

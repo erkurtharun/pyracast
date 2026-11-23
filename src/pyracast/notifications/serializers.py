@@ -33,6 +33,8 @@ from pyracast.notifications.overview import (
 )
 from pyracast.notifications.recipients import recipient_key
 
+DISCLOSURE = r"^[0-9a-f]{64}$"
+
 
 class AddressRoleInput(InputSerializer):
     address = serializers.EmailField(max_length=RECIPIENT_MAX_LENGTH)
@@ -79,6 +81,7 @@ class ReminderInput(InputSerializer):
     member_roles = serializers.ListField(
         child=MemberRoleInput(), required=False, max_length=MAX_RECIPIENT_LIMIT
     )
+    disclosure = serializers.RegexField(DISCLOSURE, required=False)
 
     def validate_recipients(self, value: list[str]) -> list[str]:
         for address in value:
@@ -183,6 +186,10 @@ class ReminderOutput(serializers.Serializer[ReminderOverview]):
     daily_reminder_limit = serializers.IntegerField(allow_null=True)
     addresses = ReminderAddressesOutput(allow_null=True)
     deliveries = ReminderDeliveryOutput(many=True)
+
+
+class ReminderPreviewOutput(ReminderOutput):
+    disclosure = serializers.RegexField(DISCLOSURE)
 
 
 class ReminderOutcomeOutput(serializers.Serializer[ReminderOutcome]):

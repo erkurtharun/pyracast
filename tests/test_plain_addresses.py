@@ -1,8 +1,13 @@
+import time
 from io import StringIO
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from allauth.account.models import EmailAddress
+from allauth.mfa.models import Authenticator
+from allauth.mfa.totp.internal import auth as totp_auth
+from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
 from django.contrib.auth.models import User
 from django.core import mail
 from django.core.exceptions import ValidationError
@@ -11,20 +16,25 @@ from django.core.management.base import CommandError
 from django.core.validators import validate_email
 from django.test import Client, override_settings
 
-from pyracast.accounts.addresses import plain_address
+from pyracast.accounts.addresses import is_plain, plain_address
 from pyracast.accounts.models import OutboundMail, Tenant, WorkspaceInvitation
 from pyracast.mail import smtp
 from pyracast.notifications.recipients import recipient_key
-from tests.support.admin_mfa_bootstrap import Terminal
+from tests.support.admin_mfa_bootstrap import (
+    NEW_PASSWORD,
+    Terminal,
+    enrollment_secret,
+    run,
+)
 from tests.support.api import verified_admin
-from tests.support.auth_lifecycle import PASSWORD, submit
+from tests.support.auth_lifecycle import PASSWORD, submit, totp_code
 from tests.support.company_registration import signup
 from tests.support.notifications import smtp_wire
 from tests.support.social_accounts import PROVIDERS, begin, complete, serve_provider_profile
 from tests.support.workspaces import administered_workspace, post, signed_in
 
 LOCAL_MAIL = {"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
-SPECIALS = "!#$%&'*+/=?^_`{|}~-"
+REMOVED_SPECIALS = "!#$%&'*/=?^`{|}~"
 LONGEST = "a" * 64 + "@" + ".".join(["b" * 63, "c" * 63, "d" * 57, "com"])
 
 ACCEPTED = {
@@ -32,8 +42,11 @@ ACCEPTED = {
     "64-octet local part": "a" * 64 + "@example.com",
     "63-octet label": "ops@" + "b" * 63 + ".com",
     "254 octets": LONGEST,
-    "every dot-atom special": f"a{SPECIALS}z@example.com",
-    "dotted local part": "first.last.name@example.com",
+    "dot inside a local part": "first.last.name@example.com",
+    "underscore inside a local part": "first_last@example.com",
+    "plus inside a local part": "first+tag@example.com",
+    "hyphen inside a local part": "first-last@example.com",
+    "each of the four together": "a.b_c+d-e@example.com",
     "digits and hyphens inside labels": "ops@mail-1.example-2.com",
     "all-digit inner label": "ops@123.example.com",
     "ace label": "ops@xn--bcher-kva.de",
@@ -76,6 +89,14 @@ REFUSED = {
     "nul": "ops\x00@example.com",
     "carriage return": "ops@exa\rmple.com",
     "line feed": "ops@example.com\n",
+    **{
+        f"{special!r} inside a local part": f"a{special}b@example.com"
+        for special in REMOVED_SPECIALS
+    },
+    "an encoded word opening across two addresses": "=?utf-8?q?alice@example.org",
+    "an encoded word closing across two addresses": "bob?=@example.net",
+    "an encoded word that lower-casing changes": "=?utf-16?b?YQ==?=@example.com",
+    "kelvin sign in the domain": "ops@\u212aelvin.com",
 }
 
 
@@ -89,6 +110,28 @@ def test_a_plain_address_is_kept_as_typed_keyed_by_its_lower_case_and_sent_uncha
         configured = mail.mailers["default"]
         assert isinstance(configured, smtp.EmailBackend)
         assert configured.prep_address(address) == address
+
+
+@pytest.mark.parametrize("address", list(ACCEPTED.values()), ids=list(ACCEPTED))
+def test_a_plain_address_stays_plain_in_lower_and_in_upper_case(address: str) -> None:
+    assert (is_plain(address.lower()), is_plain(address.upper())) == (True, True)
+
+
+@pytest.mark.parametrize(
+    "address",
+    [*ACCEPTED.values(), *REFUSED.values()],
+    ids=[*(f"accepted {name}" for name in ACCEPTED), *(f"refused {name}" for name in REFUSED)],
+)
+def test_an_address_and_its_identity_are_both_plain_or_both_not(address: str) -> None:
+    assert is_plain(recipient_key(address)) == is_plain(address)
+
+
+def test_the_identity_lower_cases_only_ascii_letters_of_the_exact_text() -> None:
+    assert [recipient_key(text) for text in ("Ops@\u212aelvin.COM", " A@B.de", "\u0130@X.de")] == [
+        "ops@\u212aelvin.com",
+        " a@b.de",
+        "\u0130@x.de",
+    ]
 
 
 def test_the_longest_plain_address_has_254_octets() -> None:
@@ -115,7 +158,9 @@ ACCEPTED_BY_DJANGO = [
     '"ops"@example.com',
     "ops@[192.0.2.1]",
     "t\u017fst@example.com",
+    "=?utf-16?b?YQ==?=@example.com",
 ]
+SUBMITTED, STORED = " New.Member+Tag@Example.COM ", "new.member+tag@example.com"
 INVALID = "Enter a valid email address."
 accounts = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 
@@ -199,6 +244,26 @@ def test_the_console_refuses_to_invite_an_address_that_is_not_plain(address: str
     assert not Tenant.objects.filter(name="Plain only").exists()
 
 
+@accounts
+def test_an_invitation_stores_the_lower_cased_address() -> None:
+    tenant, administrator = administered_workspace()
+    client, _ = verified_admin()
+
+    over_the_api = post(
+        signed_in(administrator), f"/api/tenants/{tenant.pk}/invitations/", {"email": SUBMITTED}
+    )
+    WorkspaceInvitation.objects.all().delete()
+    over_the_console = client.post(
+        f"/admin/workspaces/{tenant.pk}/invitations/new/", {"email": SUBMITTED, "language": "en"}
+    )
+
+    assert over_the_api.status_code == 201, over_the_api.content
+    assert over_the_console.status_code == 302
+    stored = WorkspaceInvitation.objects.get().email
+    assert (stored, is_plain(stored)) == (STORED, True)
+    assert over_the_api.json()["email"] == STORED
+
+
 @pytest.fixture
 def oauth_profile(monkeypatch: pytest.MonkeyPatch) -> Any:
     with override_settings(SOCIALACCOUNT_PROVIDERS=PROVIDERS, MAILERS=LOCAL_MAIL):
@@ -241,8 +306,9 @@ def test_an_address_a_provider_supplies_that_is_not_plain_is_never_offered_or_st
     assert offered == []
     assert response.status_code in {200, 401}, response.content
     user = User.objects.get()
-    assert user.email == "owner@example.com"
-    assert list(EmailAddress.objects.values_list("email", flat=True)) == ["owner@example.com"]
+    held = [user.email, *EmailAddress.objects.values_list("email", flat=True)]
+    assert held == ["owner@example.com", "owner@example.com"]
+    assert all(is_plain(address) for address in held)
 
 
 @accounts
@@ -259,6 +325,38 @@ def test_the_administrator_bootstrap_refuses_an_address_that_is_not_plain(addres
     assert str(refused.value) == INVALID
     assert terminal.asked == 0
     assert not User.objects.exists()
+
+
+@accounts
+def test_the_administrator_bootstrap_stores_the_lower_cased_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    moment = time.time()
+    monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: moment))
+
+    def code(shown: str) -> str:
+        return totp_code(enrollment_secret(shown), moment)
+
+    run("bootstrap_admin", [NEW_PASSWORD, NEW_PASSWORD, code], email=SUBMITTED)
+
+    user = User.objects.get()
+    held = [user.email, *EmailAddress.objects.values_list("email", flat=True)]
+    assert held == [STORED, STORED]
+    assert all(is_plain(address) for address in held)
+
+
+@accounts
+def test_a_second_factor_reset_finds_an_account_whose_address_is_not_plain() -> None:
+    held = "ops@b\u00fccher.de"
+    user = User.objects.create_user(username="held", email=held, is_staff=True)
+    EmailAddress.objects.create(user=user, email=held, primary=True, verified=True)
+    TOTP.activate(user, generate_totp_secret())
+
+    shown, terminal = run("reset_mfa", [], email=held, reason="lost_device", dry_run=True)
+
+    assert shown.startswith(f"Dry run: would remove 1 second factor and end 0 sessions of {held}.")
+    assert terminal.asked == 0
+    assert Authenticator.objects.filter(user=user).count() == 1
 
 
 @accounts

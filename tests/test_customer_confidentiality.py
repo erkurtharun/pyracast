@@ -123,6 +123,7 @@ CUSTOMER_FIELDS = {
     "declared_configuration_id",
     "deleted_at",
     "deliveries",
+    "disclosure",
     "disconnected_at",
     "delivery_status",
     "duration_seconds",

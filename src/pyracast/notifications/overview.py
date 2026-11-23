@@ -22,6 +22,7 @@ from pyracast.notifications.recipients import (
     candidates,
     delivery_addresses,
     delivery_roles,
+    disclosure_digest,
     effective,
     explicit_recipients,
     placements,
@@ -113,6 +114,7 @@ class ReminderOverview:
     daily_reminder_limit: int | None
     addresses: ReminderAddresses | None
     deliveries: list[ReminderDelivery]
+    disclosure: str | None = None
 
 
 @dataclass(frozen=True)
@@ -211,7 +213,8 @@ def _delivery(
 
 def _addresses(
     schedule: ReminderSchedule, assessment: Assessment, members: Workspace
-) -> ReminderAddresses:
+) -> tuple[ReminderAddresses, str]:
+    """The administrator's addresses and the `disclosure` digest of the placements they show."""
     explicit = assessment.explicit
     choices = stored_choices(schedule)
     typed = candidates([row.address for row in explicit], members, choices)
@@ -224,7 +227,7 @@ def _addresses(
     def placement(address: str) -> RecipientRole:
         return placed.get(recipient_key(address), RecipientRole.BCC)
 
-    return ReminderAddresses(
+    shown = ReminderAddresses(
         [row.address for row in explicit],
         list(members.addresses),
         [
@@ -248,6 +251,7 @@ def _addresses(
             for row, candidate in zip(explicit, typed, strict=True)
         ],
     )
+    return shown, disclosure_digest(schedule, members, sent, choices)
 
 
 def reminder_overview(
@@ -258,6 +262,9 @@ def reminder_overview(
     members = workspace(schedule.region.tenant_id)
     (assessment,) = assess([schedule], members, limit)
     binding = schedule.region.approved_binding
+    addresses, disclosure = (
+        _addresses(schedule, assessment, members) if administrator else (None, None)
+    )
     deliveries = (
         NotificationDelivery.objects.filter(schedule__region_id=schedule.region_id)
         .defer("prepared_message")
@@ -279,10 +286,11 @@ def reminder_overview(
         workspace_member_count=len(members.addresses),
         recipient_limit_exceeded=len(assessment.recipients) > limit,
         daily_reminder_limit=binding.provider_account.daily_quota if binding else None,
-        addresses=_addresses(schedule, assessment, members) if administrator else None,
+        addresses=addresses,
         deliveries=[
             _delivery(delivery, now, administrator=administrator) for delivery in deliveries
         ],
+        disclosure=disclosure,
     )
 
 

@@ -36,6 +36,7 @@ from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.preparation import prepare_delivery
 from pyracast.notifications.recipients import (
     Resolved,
+    carries_exactly,
     headers,
     narrow_recipients,
     placements,
@@ -120,6 +121,13 @@ def _lock_workspace(delivery_id: int) -> None:
         Tenant.objects.select_for_update().filter(pk=tenant_id).first()
 
 
+def _skip(delivery: NotificationDelivery, reason: str) -> bool:
+    delivery.status, delivery.last_error = NotificationDeliveryStatus.SKIPPED, reason
+    release(delivery)
+    delivery.save()
+    return False
+
+
 def _mark_transmit(
     delivery_id: int, token: uuid.UUID, now: datetime, message: EmailMultiAlternatives
 ) -> bool:
@@ -136,17 +144,15 @@ def _mark_transmit(
             _recover_interrupted(delivery, now)
             return False
         if resolved is None or now - delivery.scheduled_for > MAX_LATENESS:
-            delivery.status = NotificationDeliveryStatus.SKIPPED
-            delivery.last_error = reason or NotificationDeliveryError.DELIVERY_DEADLINE_EXCEEDED
-            release(delivery)
-            delivery.save()
-            return False
-        delivery.transmit_started_at = now
-        delivery.save(update_fields=("transmit_started_at",))
+            return _skip(delivery, reason or NotificationDeliveryError.DELIVERY_DEADLINE_EXCEEDED)
         addresses = resolved.addresses
         placed = placements(delivery.schedule, resolved.members, addresses)
+        message.to, message.cc, message.bcc = sent = headers(addresses, placed)
+        if not carries_exactly(message, sent):
+            return _skip(delivery, NotificationDeliveryError.INVALID_RECIPIENT)
+        delivery.transmit_started_at = now
+        delivery.save(update_fields=("transmit_started_at",))
         record_roles(delivery, addresses, placed)
-        message.to, message.cc, message.bcc = headers(addresses, placed)
         return True
 
 
