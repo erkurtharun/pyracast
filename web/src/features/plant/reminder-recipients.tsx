@@ -3,13 +3,18 @@ import { useTranslations } from "next-intl";
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import type { components } from "@/lib/schema";
+import type { RegionScope } from "@/lib/api";
+import { api } from "@/lib/api/client";
+import { ApiError } from "@/lib/api/errors";
 import { CheckboxField } from "@/ui/form";
 import { Notice } from "@/ui/ui";
-import { ApiError } from "@/lib/api/errors";
 import {
+    addressingOf,
+    committedDraft,
     filled,
     memberKey,
-    type Addresses,
+    settled,
+    type AddedRow,
     type Answer,
     type Choice,
     type Draft,
@@ -17,12 +22,12 @@ import {
     type TypedRow,
 } from "./reminder-draft";
 import styles from "./reminder-recipients.module.css";
-import type { RecipientState } from "./reminders";
+import type { Outcome, RecipientState } from "./reminders";
 import { useRowFocus } from "./row-focus";
 
-type Schemas = components["schemas"];
-type MemberRow = Schemas["MemberAddressOutput"];
-type AddedRow = Schemas["AddedAddressOutput"];
+type MemberRow = components["schemas"]["MemberAddressOutput"];
+const PREVIEW =
+    "/api/tenants/{tenant_id}/regions/{region_id}/reminders/preview/";
 const ROLES = ["to", "cc", "bcc"] as const satisfies readonly Role[];
 const visibleRole = (role: Role) => role !== "bcc";
 
@@ -33,54 +38,65 @@ function focusChecked(name: string) {
     checked?.focus();
 }
 
-type Preview =
+type Status =
     | { status: "answered"; answer: Answer }
     | { status: "checking" }
     | { status: "refused"; message: string }
     | { status: "failed"; retry: () => void };
-type Basis = { addresses: Addresses; recipients: string[] };
 
-function previewOf({ base, unsaved, preview }: RecipientState): Preview {
-    if (!unsaved) return { status: "answered", answer: base };
-    if (preview.current && preview.data?.answer.addresses)
-        return { status: "answered", answer: preview.data.answer };
-    const error = preview.error;
-    if (error instanceof ApiError && [400, 409].includes(error.status)) {
-        const fields = Object.values(error.fields);
+function outcomeOf(error: unknown): Outcome {
+    return error instanceof ApiError && [400, 409].includes(error.status)
+        ? { status: "refused", error }
+        : { status: "failed" };
+}
+
+function useCheck(recipients: RecipientState, scope: RegionScope) {
+    const { generation, unsaved, base, draft, check, record } = recipients;
+    const asked = useRef(-1);
+    const ask = () => {
+        asked.current = generation;
+        void api
+            .post(PREVIEW, {
+                path: scope,
+                body: {
+                    enabled: base.enabled,
+                    times: base.times,
+                    language: base.language,
+                    expected_revision: base.revision,
+                    ...addressingOf(draft),
+                },
+            })
+            .then(
+                (answer) => record(generation, { status: "answered", answer }),
+                (error: unknown) => record(generation, outcomeOf(error)),
+            );
+    };
+    useEffect(() => {
+        if (unsaved && !check && asked.current !== generation) ask();
+    });
+    return () => {
+        record(generation, null);
+        ask();
+    };
+}
+
+function statusOf(
+    { present, check }: RecipientState,
+    retry: () => void,
+): Status {
+    if (present) return { status: "answered", answer: present };
+    if (check?.status === "refused") {
+        const fields = Object.values(check.error.fields);
         return {
             status: "refused",
-            message: fields.length ? fields.join(" ") : error.message,
+            message: fields.length ? fields.join(" ") : check.error.message,
         };
     }
-    if (error) return { status: "failed", retry: preview.retry };
+    if (check?.status === "failed") return { status: "failed", retry };
     return { status: "checking" };
 }
 
-// The last answer the rows are drawn from; while the present draft is checked it is an earlier one.
-function basisOf({ addresses, unsaved, preview }: RecipientState): Basis {
-    const answered = preview.data?.answer.addresses;
-    return unsaved && answered && preview.data
-        ? { addresses: answered, recipients: preview.data.body.recipients }
-        : { addresses, recipients: addresses.recipients };
-}
-
-// The answer has one entry per sent text, in order.
-function answersOf(rows: TypedRow[], basis: Basis) {
-    const used = new Set<number>();
-    const answers = new Map<number, AddedRow>();
-    for (const row of filled(rows)) {
-        const at = basis.recipients.findIndex(
-            (text, index) => !used.has(index) && text === row.text.trim(),
-        );
-        const added = basis.addresses.added[at];
-        if (at < 0 || !added) continue;
-        used.add(at);
-        answers.set(row.id, added);
-    }
-    return answers;
-}
-
-type Shown = { checked: Role; set: boolean };
+type Shown = { checked: Role; set: boolean } | null;
 type TypedView = {
     row: TypedRow;
     added: AddedRow | undefined;
@@ -88,39 +104,38 @@ type TypedView = {
     shown: Shown | undefined;
 };
 
-function rowsOf(draft: Draft, basis: Basis, preview: Preview) {
-    const current = preview.status === "answered";
-    const answers = answersOf(draft.rows, basis);
-    const membersByKey = new Map(
-        basis.addresses.members.map((member) => [
-            memberKey(member.memberships),
-            member,
-        ]),
+function rowsOf({ draft, known, addresses }: RecipientState, status: Status) {
+    const present =
+        status.status === "answered" ? status.answer.addresses : null;
+    const answered = new Map(
+        filled(draft.rows).map((row, index) => [row.id, present?.added[index]]),
     );
-    const shownAs = (
-        answered: { role: Choice; placement: Role },
-        decision: { role: Choice } | undefined,
-    ): Shown =>
-        current
-            ? { checked: answered.placement, set: answered.role !== null }
-            : {
-                  checked: decision?.role ?? answered.placement,
-                  set: (decision ? decision.role : answered.role) !== null,
-              };
+    const members = (present ?? addresses).members;
+    const membersByKey = new Map(
+        members.map((member) => [memberKey(member.memberships), member]),
+    );
+    const shownAs = (answer: { role: Choice; placement: Role }): Shown =>
+        present
+            ? { checked: answer.placement, set: answer.role !== null }
+            : null;
     const typed: TypedView[] = draft.rows.map((row) => {
-        const added = answers.get(row.id);
+        const learnt = known[row.id];
+        const added = !settled(row)
+            ? undefined
+            : present
+              ? answered.get(row.id)
+              : learnt?.text === row.committed.trim()
+                ? learnt.added
+                : undefined;
         const member =
-            added?.memberships.length && added.eligible
+            added?.eligible && added.memberships.length
                 ? membersByKey.get(memberKey(added.memberships))
                 : undefined;
         return {
             row,
             added,
             member,
-            shown:
-                added?.eligible && !draft.hide
-                    ? shownAs(added, draft.typed[row.id])
-                    : undefined,
+            shown: added?.eligible && !draft.hide ? shownAs(added) : undefined,
         };
     });
     const merged = new Set(
@@ -128,20 +143,20 @@ function rowsOf(draft: Draft, basis: Basis, preview: Preview) {
             item.member ? [memberKey(item.member.memberships)] : [],
         ),
     );
-    const members =
-        draft.include && !draft.hide
-            ? basis.addresses.members.map((member) => {
-                  const key = memberKey(member.memberships);
-                  return {
-                      member,
-                      key,
-                      shown: merged.has(key)
-                          ? undefined
-                          : shownAs(member, draft.members[key]),
-                  };
-              })
-            : [];
-    return { typed, members };
+    return {
+        typed,
+        members:
+            draft.include && !draft.hide
+                ? members.map((member) => {
+                      const key = memberKey(member.memberships);
+                      return {
+                          member,
+                          key,
+                          shown: merged.has(key) ? undefined : shownAs(member),
+                      };
+                  })
+                : [],
+    };
 }
 
 function summaryOf(
@@ -150,14 +165,14 @@ function summaryOf(
 ) {
     const placed = [
         ...members.flatMap(({ member, shown }) =>
-            shown ? [{ address: member.address, role: member.placement }] : [],
+            shown ? [{ address: member.address, role: shown.checked }] : [],
         ),
         ...typed.flatMap(({ added, shown }) =>
             added && shown
                 ? [
                       {
                           address: added.address,
-                          role: added.placement,
+                          role: shown.checked,
                           outside: !added.memberships.length,
                       },
                   ]
@@ -206,7 +221,7 @@ function Placement({
                             type="radio"
                             name={name}
                             value={value}
-                            checked={shown.checked === value}
+                            checked={shown?.checked === value}
                             onChange={() => onChoose(value)}
                         />
                         {t(`roles.${value}`)}
@@ -215,8 +230,8 @@ function Placement({
             </fieldset>
             <span className={styles.state}>
                 {children}
-                {t(shown.set ? "chosenRole" : "defaultRole")}
-                {shown.set && (
+                {shown && t(shown.set ? "chosenRole" : "defaultRole")}
+                {shown?.set && (
                     <button
                         type="button"
                         className="text-button"
@@ -231,18 +246,18 @@ function Placement({
     );
 }
 
-function CheckState({ preview }: { preview: Preview }) {
+function CheckState({ status }: { status: Status }) {
     const t = useTranslations("Reminders");
-    if (preview.status === "refused")
-        return <p className={styles.warning}>{preview.message}</p>;
-    if (preview.status !== "failed") return null;
+    if (status.status === "refused")
+        return <p className={styles.warning}>{status.message}</p>;
+    if (status.status !== "failed") return null;
     return (
         <>
             <p>{t("checkFailed")}</p>
             <button
                 type="button"
                 className="button secondary"
-                onClick={preview.retry}
+                onClick={status.retry}
             >
                 {t("checkAgain")}
             </button>
@@ -251,33 +266,36 @@ function CheckState({ preview }: { preview: Preview }) {
 }
 
 function Summary({
-    recipients,
-    preview,
+    unsaved,
+    status,
     rows,
     heading,
-    held,
+    hold,
 }: {
-    recipients: RecipientState;
-    preview: Preview;
+    unsaved: boolean;
+    status: Status;
     rows: ReturnType<typeof rowsOf>;
     heading: RefObject<HTMLHeadingElement | null>;
-    held: ReactNode;
+    hold: string | undefined;
 }) {
     const t = useTranslations("Reminders");
-    const { unsaved } = recipients;
     const view =
-        preview.status === "answered"
-            ? summaryOf(rows, preview.answer.recipient_count)
+        status.status === "answered"
+            ? summaryOf(rows, status.answer.recipient_count)
             : null;
     return (
         <div className={styles.summary}>
-            <h3 tabIndex={-1} ref={heading}>
+            <h3 tabIndex={-1} ref={heading} aria-describedby={hold}>
                 {t("whoSeesWhat")}
             </h3>
-            {held}
             <div aria-live="polite">
-                {preview.status === "checking" && <p>{t("checking")}</p>}
-                <CheckState preview={preview} />
+                {hold && (
+                    <p className={styles.unsaved} id={hold}>
+                        {t("saveWaitsForCheck")}
+                    </p>
+                )}
+                {status.status === "checking" && <p>{t("checking")}</p>}
+                <CheckState status={status} />
                 {view && (
                     <>
                         {view.to.length > 0 && (
@@ -317,37 +335,25 @@ function Summary({
                                     {t("allHiddenWarning")}
                                 </p>
                             )}
-                    </>
-                )}
-                {unsaved && (
-                    <p className={styles.unsaved}>
-                        {t("notSavedYet")}
-                        {view && view.to.length + view.cc.length > 0 && (
-                            <> {t("savingShowsAddresses")}</>
+                        {unsaved && (
+                            <p className={styles.unsaved}>
+                                {t("notSavedYet")}
+                                {view.to.length + view.cc.length > 0 && (
+                                    <> {t("savingShowsAddresses")}</>
+                                )}
+                            </p>
                         )}
-                    </p>
+                    </>
                 )}
             </div>
         </div>
     );
 }
 
-export function RecipientSection({
-    recipients,
-    heading,
-    held,
-}: {
-    recipients: RecipientState;
-    heading: RefObject<HTMLHeadingElement | null>;
-    held: ReactNode;
-}) {
-    const t = useTranslations("Reminders");
-    const { base, draft, update } = recipients;
-    const preview = previewOf(recipients);
-    const basis = basisOf(recipients);
-    const { prefix, focusRow } = useRowFocus(draft.rows);
-    const pendingFocus = useRef<string | null>(null);
+// A field left during a press commits at that press's end, so its row does not move under the pointer.
+function useDeferredCommit(commit: (id: number) => void) {
     const pressed = useRef(false);
+    const pending = useRef<(() => void) | null>(null);
     useEffect(() => {
         const down = () => (pressed.current = true);
         const up = () => (pressed.current = false);
@@ -358,115 +364,130 @@ export function RecipientSection({
             document.removeEventListener("pointerdown", down, true);
             document.removeEventListener("pointerup", up, true);
             document.removeEventListener("pointercancel", up, true);
+            pending.current?.();
         };
     }, []);
+    return (id: number) => {
+        if (!pressed.current) return commit(id);
+        pending.current?.();
+        const stop = () => {
+            document.removeEventListener("click", done, true);
+            document.removeEventListener("pointercancel", done, true);
+            pending.current = null;
+        };
+        const done = () => {
+            stop();
+            commit(id);
+        };
+        document.addEventListener("click", done, true);
+        document.addEventListener("pointercancel", done, true);
+        pending.current = stop;
+    };
+}
+
+export function RecipientSection({
+    recipients,
+    scope,
+    heading,
+    hold,
+}: {
+    recipients: RecipientState;
+    scope: RegionScope;
+    heading: RefObject<HTMLHeadingElement | null>;
+    hold: string | undefined;
+}) {
+    const t = useTranslations("Reminders");
+    const { base, addresses, draft, update } = recipients;
+    const status = statusOf(recipients, useCheck(recipients, scope));
+    const present = status.status === "answered" ? status.answer : null;
+    const { prefix, focusRow } = useRowFocus(draft.rows);
+    const pendingFocus = useRef<string | null>(null);
+    const commitOnBlur = useDeferredCommit((id) =>
+        update((now) => committedDraft(now, id)),
+    );
     useEffect(() => {
-        if (preview.status !== "answered" || !pendingFocus.current) return;
+        if (!present || !pendingFocus.current) return;
         focusChecked(pendingFocus.current);
         pendingFocus.current = null;
     });
-    const rows = rowsOf(draft, basis, preview);
+    const rows = rowsOf(recipients, status);
     const visible = !draft.hide;
-    const counted =
-        preview.status === "answered" ? preview.answer : recipients.base;
     const groupName = (key: string) => `${prefix}-role-${key}`;
     const setRows = (change: (rows: TypedRow[]) => TypedRow[]) =>
         update((now) => {
-            const next = change(now.rows);
+            const committed = committedDraft(now);
+            const next = change(committed.rows);
             const kept = new Set(next.map((row) => row.id));
             return {
-                ...now,
+                ...committed,
                 rows: next,
                 typed: Object.fromEntries(
-                    Object.entries(now.typed).filter(([id]) =>
+                    Object.entries(committed.typed).filter(([id]) =>
                         kept.has(Number(id)),
                     ),
                 ),
             };
         });
-    const commit = (id: number, text: string) =>
-        update((now) => {
-            const row = now.rows.find((item) => item.id === id);
-            if (!row || row.text.trim() === text.trim()) return now;
-            const typed = { ...now.typed };
-            delete typed[id];
-            return {
-                ...now,
-                rows: now.rows.map((item) =>
-                    item.id === id ? { ...item, text } : item,
-                ),
-                typed,
-            };
-        });
-    // Committing during a press would move the control under the pointer before its click lands.
-    const commitOnBlur = (id: number, input: HTMLInputElement) => {
-        const apply = () => commit(id, input.value);
-        if (!pressed.current) return apply();
-        document.addEventListener("click", apply, {
-            capture: true,
-            once: true,
-        });
-    };
-    const chooseMember = (member: MemberRow, role: Choice) =>
-        update((now) => ({
-            ...now,
-            members: {
-                ...now.members,
-                [memberKey(member.memberships)]: {
-                    memberships: member.memberships,
-                    address: member.address,
-                    role,
-                },
-            },
-        }));
-    const typedDecision = (
-        added: AddedRow,
-        member: MemberRow | undefined,
-        role: Choice,
-    ) => ({
-        role,
-        memberships: added.memberships,
-        ...(member && {
-            member: {
+    const memberChoice = (now: Draft, member: MemberRow, role: Choice) => {
+        const key = memberKey(member.memberships);
+        const stored = addresses.members.find(
+            (item) => memberKey(item.memberships) === key,
+        );
+        const unchanged =
+            stored &&
+            (role === null
+                ? stored.role === null
+                : stored.memberships.length === 1 && stored.role === role);
+        const members = { ...now.members };
+        if (unchanged) delete members[key];
+        else
+            members[key] = {
                 memberships: member.memberships,
                 address: member.address,
-            },
-        }),
-    });
-    const chooseTyped = (
-        id: number,
-        added: AddedRow,
-        member: MemberRow | undefined,
-        role: Choice,
-    ) =>
-        update((now) => ({
-            ...now,
-            typed: { ...now.typed, [id]: typedDecision(added, member, role) },
-        }));
-    const choose = (name: string, apply: (role: Choice) => void) => {
-        return (role: Choice) => {
-            if (role === null) pendingFocus.current = name;
-            apply(role);
-        };
+                role,
+            };
+        return { ...now, members };
     };
+    const typedChoice = (
+        now: Draft,
+        { row, added, member }: TypedView,
+        role: Choice,
+    ): Draft =>
+        added
+            ? {
+                  ...now,
+                  typed: {
+                      ...now.typed,
+                      [row.id]: {
+                          role,
+                          memberships: added.memberships,
+                          ...(member && {
+                              member: {
+                                  memberships: member.memberships,
+                                  address: member.address,
+                              },
+                          }),
+                      },
+                  },
+              }
+            : now;
+    const choose =
+        (name: string, apply: (now: Draft, role: Choice) => Draft) =>
+        (role: Choice) => {
+            if (role === null) pendingFocus.current = name;
+            update((now) => apply(now, role));
+        };
     const focusSummary = (change: (draft: Draft) => Draft) => {
         flushSync(() => update(change));
         heading.current?.focus();
     };
     const withDefaults = (now: Draft): Draft => {
-        const members = { ...now.members };
-        for (const { member, key, shown } of rows.members)
-            if (shown?.set)
-                members[key] = {
-                    memberships: member.memberships,
-                    address: member.address,
-                    role: null,
-                };
-        const typed = { ...now.typed };
-        for (const { row, added, member, shown } of rows.typed)
-            if (added && shown?.set)
-                typed[row.id] = typedDecision(added, member, null);
-        return { ...now, members, typed };
+        let next = now;
+        for (const { member, shown } of rows.members)
+            if (shown?.set) next = memberChoice(next, member, null);
+        for (const item of rows.typed)
+            if (item.shown?.set) next = typedChoice(next, item, null);
+        return next;
     };
     const anySet =
         rows.members.some((item) => item.shown?.set) ||
@@ -475,20 +496,18 @@ export function RecipientSection({
         <fieldset className="reminder-recipients">
             <legend>{t("emailRecipients")}</legend>
             <span className="recipient-count fine" aria-live="polite">
-                {t("quotaCount", {
-                    count: counted.recipient_count,
-                    limit: counted.recipient_limit,
-                })}
+                {present &&
+                    t("quotaCount", {
+                        count: present.recipient_count,
+                        limit: present.recipient_limit,
+                    })}
             </span>
             <p className="fine">{t("groupPrivacy")}</p>
-            {counted.recipient_count > counted.recipient_limit && (
+            {present && present.recipient_count > present.recipient_limit && (
                 <Notice>
-                    {t(
-                        counted.recipient_limit_exceeded
-                            ? "recipientLimitExceeded"
-                            : "recipientLimit",
-                        { limit: counted.recipient_limit },
-                    )}
+                    {t("recipientLimitExceeded", {
+                        limit: present.recipient_limit,
+                    })}
                 </Notice>
             )}
             {base.hide_recipients && draft.hide && (
@@ -552,21 +571,25 @@ export function RecipientSection({
                                             {t(`kinds.${member.kind}`)}
                                         </span>
                                     </span>
-                                    {shown ? (
+                                    {shown === undefined ? (
+                                        <span className={styles.state}>
+                                            {t("setUnderOtherAddresses")}
+                                        </span>
+                                    ) : (
                                         <Placement
                                             name={groupName(`m-${key}`)}
                                             address={member.address}
                                             shown={shown}
                                             onChoose={choose(
                                                 groupName(`m-${key}`),
-                                                (role) =>
-                                                    chooseMember(member, role),
+                                                (now, role) =>
+                                                    memberChoice(
+                                                        now,
+                                                        member,
+                                                        role,
+                                                    ),
                                             )}
                                         />
-                                    ) : (
-                                        <span className={styles.state}>
-                                            {t("setUnderOtherAddresses")}
-                                        </span>
                                     )}
                                 </li>
                             ))}
@@ -579,12 +602,12 @@ export function RecipientSection({
                 <details className="reminder-members">
                     <summary>
                         {t("workspaceMembers", {
-                            count: basis.addresses.workspace_recipients.length,
+                            count: addresses.workspace_recipients.length,
                         })}
                     </summary>
-                    {basis.addresses.workspace_recipients.length ? (
+                    {addresses.workspace_recipients.length ? (
                         <ul>
-                            {basis.addresses.workspace_recipients.map(
+                            {addresses.workspace_recipients.map(
                                 (email, index) => (
                                     <li key={index}>{email}</li>
                                 ),
@@ -596,87 +619,103 @@ export function RecipientSection({
                 </details>
             )}
             <p className="recipient-label">{t("otherAddresses")}</p>
-            {rows.typed.map(({ row, added, member, shown }, index) => (
-                <div className={styles.entry} key={row.id}>
-                    <div className="recipient-row">
-                        <label
-                            className="field"
-                            htmlFor={`${prefix}-${row.id}`}
-                        >
-                            {t("emailAddress", { index: index + 1 })}
-                            <input
-                                id={`${prefix}-${row.id}`}
-                                name="recipients"
-                                type="email"
-                                autoCapitalize="none"
-                                autoCorrect="off"
-                                defaultValue={row.text}
-                                onBlur={(event) =>
-                                    commitOnBlur(row.id, event.target)
-                                }
-                            />
-                        </label>
-                        {draft.rows.length > 1 && (
-                            <button
-                                className="button secondary"
-                                type="button"
-                                aria-label={t("removeEmailAddress", {
-                                    index: index + 1,
-                                })}
-                                onClick={() => {
-                                    const neighbour =
-                                        draft.rows[index + 1] ??
-                                        draft.rows[index - 1];
-                                    if (neighbour) focusRow(neighbour.id);
-                                    setRows((now) =>
-                                        now.filter(
-                                            (other) => other.id !== row.id,
-                                        ),
-                                    );
-                                }}
+            {rows.typed.map((item, index) => {
+                const { row, added, member, shown } = item;
+                return (
+                    <div className={styles.entry} key={row.id}>
+                        <div className="recipient-row">
+                            <label
+                                className="field"
+                                htmlFor={`${prefix}-${row.id}`}
                             >
-                                <span aria-hidden="true">&times;</span>
-                            </button>
+                                {t("emailAddress", { index: index + 1 })}
+                                <input
+                                    id={`${prefix}-${row.id}`}
+                                    name="recipients"
+                                    type="email"
+                                    autoCapitalize="none"
+                                    autoCorrect="off"
+                                    value={row.text}
+                                    onChange={(event) => {
+                                        const text = event.target.value;
+                                        update(
+                                            (now) => ({
+                                                ...now,
+                                                rows: now.rows.map((item) =>
+                                                    item.id === row.id
+                                                        ? { ...item, text }
+                                                        : item,
+                                                ),
+                                            }),
+                                            false,
+                                        );
+                                    }}
+                                    onBlur={() => commitOnBlur(row.id)}
+                                />
+                            </label>
+                            {draft.rows.length > 1 && (
+                                <button
+                                    className="button secondary"
+                                    type="button"
+                                    aria-label={t("removeEmailAddress", {
+                                        index: index + 1,
+                                    })}
+                                    onClick={() => {
+                                        const neighbour =
+                                            draft.rows[index + 1] ??
+                                            draft.rows[index - 1];
+                                        if (neighbour) focusRow(neighbour.id);
+                                        setRows((now) =>
+                                            now.filter(
+                                                (other) => other.id !== row.id,
+                                            ),
+                                        );
+                                    }}
+                                >
+                                    <span aria-hidden="true">&times;</span>
+                                </button>
+                            )}
+                        </div>
+                        {present && added && !added.eligible && (
+                            <p className="fine">{t("addsNoRecipient")}</p>
                         )}
+                        {visible &&
+                            !added &&
+                            settled(row) &&
+                            row.committed.trim() !== "" &&
+                            status.status === "checking" && (
+                                <p className="fine">{t("checkingAddress")}</p>
+                            )}
+                        {added && shown !== undefined && (
+                            <Placement
+                                name={groupName(`t-${row.id}`)}
+                                address={added.address}
+                                shown={shown}
+                                onChoose={choose(
+                                    groupName(`t-${row.id}`),
+                                    (now, role) => typedChoice(now, item, role),
+                                )}
+                            >
+                                {member && (
+                                    <span className="field-hint">
+                                        {t(`kinds.${member.kind}`)}
+                                    </span>
+                                )}
+                            </Placement>
+                        )}
+                        {added &&
+                            shown &&
+                            !added.memberships.length &&
+                            visibleRole(shown.checked) && (
+                                <p className={styles.warning}>
+                                    {t("outsideWarning", {
+                                        address: added.address,
+                                    })}
+                                </p>
+                            )}
                     </div>
-                    {added && !added.eligible && (
-                        <p className="fine">{t("notReceiving")}</p>
-                    )}
-                    {visible &&
-                        !added &&
-                        row.text.trim() &&
-                        preview.status === "checking" && (
-                            <p className="fine">{t("checkingAddress")}</p>
-                        )}
-                    {added && shown && (
-                        <Placement
-                            name={groupName(`t-${row.id}`)}
-                            address={added.address}
-                            shown={shown}
-                            onChoose={choose(groupName(`t-${row.id}`), (role) =>
-                                chooseTyped(row.id, added, member, role),
-                            )}
-                        >
-                            {member && (
-                                <span className="field-hint">
-                                    {t(`kinds.${member.kind}`)}
-                                </span>
-                            )}
-                        </Placement>
-                    )}
-                    {added &&
-                        shown &&
-                        preview.status === "answered" &&
-                        !added.memberships.length &&
-                        visibleRole(added.placement) && (
-                            <p className={styles.warning}>
-                                {t("outsideWarning", {
-                                    address: added.address,
-                                })}
-                            </p>
-                        )}
-                </div>
-            ))}
+                );
+            })}
             <button
                 className="button secondary"
                 type="button"
@@ -684,19 +723,19 @@ export function RecipientSection({
                     const id =
                         Math.max(-1, ...draft.rows.map((row) => row.id)) + 1;
                     focusRow(id);
-                    setRows((now) => [...now, { id, text: "" }]);
+                    setRows((now) => [...now, { id, text: "", committed: "" }]);
                 }}
             >
                 {t("addAddress")}
             </button>
-            {!visible && <CheckState preview={preview} />}
+            {!visible && <CheckState status={status} />}
             {visible && (
                 <Summary
-                    recipients={recipients}
-                    preview={preview}
+                    unsaved={recipients.unsaved}
+                    status={status}
                     rows={rows}
                     heading={heading}
-                    held={held}
+                    hold={hold}
                 />
             )}
             {visible && anySet && (

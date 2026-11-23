@@ -1,7 +1,6 @@
 "use client";
 import {
     hashKey,
-    keepPreviousData,
     partialMatchKey,
     QueryClient,
     useQuery,
@@ -182,37 +181,6 @@ export function useApiList<P extends ListPath>(
         polling,
         (url) => fetchList(url) as Promise<Fetched<Answer<P, "get">>>,
     );
-}
-
-export function useApiAnswer<P extends PathFor<"post">, B>(
-    path: P,
-    options: RequestOptions<P, "post"> & { body: B },
-    enabled: boolean,
-) {
-    const owner = useOwner();
-    const locale = useLocale();
-    const { body, ...request } = options;
-    const query = useQuery({
-        queryKey: [...keys.request(owner, path, request, locale), body],
-        queryFn: async () => ({
-            body,
-            answer: await send<Answer<P, "post">>({
-                method: "POST",
-                url: buildUrl(path, options),
-                body,
-            }),
-        }),
-        enabled,
-        staleTime: Infinity,
-        refetchOnWindowFocus: false,
-        placeholderData: keepPreviousData,
-    });
-    return {
-        data: query.data,
-        current: query.isSuccess && !query.isPlaceholderData,
-        error: query.error,
-        retry: () => void query.refetch(),
-    };
 }
 
 // Pass `mounted` only when no read of it was running as the change was answered: a read running now started afterwards and stands instead of being cancelled and repeated.

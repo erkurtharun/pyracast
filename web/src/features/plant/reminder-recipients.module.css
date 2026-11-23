@@ -120,6 +120,7 @@
     font-size: 14px;
 }
 .warning {
+    overflow-wrap: anywhere;
     color: var(--amber-714);
     font-weight: 550;
 }

@@ -3,10 +3,11 @@ import type { components } from "@/lib/schema";
 type Schemas = components["schemas"];
 export type Answer = Schemas["ReminderOutput"];
 export type Addresses = Schemas["ReminderAddressesOutput"];
+export type AddedRow = Schemas["AddedAddressOutput"];
 export type Role = Schemas["RecipientRoleEnum"];
 export type Choice = Role | null;
 type MemberRole = Schemas["MemberRoleInput"];
-export type Addressing = Pick<
+type Addressing = Pick<
     Schemas["ReminderInput"],
     | "recipients"
     | "include_workspace_members"
@@ -15,7 +16,7 @@ export type Addressing = Pick<
     | "member_roles"
 >;
 
-export type TypedRow = { id: number; text: string };
+export type TypedRow = { id: number; text: string; committed: string };
 type TypedDecision = {
     role: Choice;
     memberships: number[];
@@ -32,18 +33,25 @@ export type Draft = {
 export const memberKey = (memberships: number[]) => memberships.join(",");
 
 export function initialDraft(answer: Answer, addresses: Addresses): Draft {
-    const rows = addresses.recipients.map((text, id) => ({ id, text }));
+    const rows = addresses.recipients.map((text, id) => ({
+        id,
+        text,
+        committed: text,
+    }));
     return {
         hide: answer.hide_recipients,
         include: answer.include_workspace_members,
-        rows: rows.length ? rows : [{ id: 0, text: "" }],
+        rows: rows.length ? rows : [{ id: 0, text: "", committed: "" }],
         members: {},
         typed: {},
     };
 }
 
 export const filled = (rows: TypedRow[]) =>
-    rows.filter((row) => row.text.trim());
+    rows.filter((row) => row.committed.trim());
+
+export const settled = (row: TypedRow) =>
+    row.text.trim() === row.committed.trim();
 
 export function addressingOf(draft: Draft): Addressing {
     const rows = filled(draft.rows);
@@ -63,14 +71,14 @@ export function addressingOf(draft: Draft): Addressing {
             });
         return [
             {
-                address: row.text.trim(),
+                address: row.committed.trim(),
                 role: decision.role,
                 memberships: decision.memberships,
             },
         ];
     });
     return {
-        recipients: rows.map((row) => row.text.trim()),
+        recipients: rows.map((row) => row.committed.trim()),
         include_workspace_members: draft.include,
         hide_recipients: draft.hide,
         ...(address_roles.length > 0 && { address_roles }),
@@ -81,17 +89,18 @@ export function addressingOf(draft: Draft): Addressing {
 export const sameAddressing = (left: Draft, right: Draft) =>
     JSON.stringify(addressingOf(left)) === JSON.stringify(addressingOf(right));
 
-export function withTexts(draft: Draft, texts: string[]): Draft {
-    if (texts.length !== draft.rows.length) return draft;
-    const edited = draft.rows.filter(
-        (row, index) => texts[index]!.trim() !== row.text.trim(),
+export function committedDraft(draft: Draft, only?: number): Draft {
+    const changed = draft.rows.filter(
+        (row) => !settled(row) && (only === undefined || row.id === only),
     );
-    if (!edited.length) return draft;
+    if (!changed.length) return draft;
     const typed = { ...draft.typed };
-    for (const row of edited) delete typed[row.id];
+    for (const row of changed) delete typed[row.id];
     return {
         ...draft,
-        rows: draft.rows.map((row, index) => ({ ...row, text: texts[index]! })),
+        rows: draft.rows.map((row) =>
+            changed.includes(row) ? { ...row, committed: row.text } : row,
+        ),
         typed,
     };
 }
