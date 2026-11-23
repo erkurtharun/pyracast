@@ -10,7 +10,7 @@
         "build": "next build",
         "start": "next start --hostname 127.0.0.1",
         "typecheck": "next typegen && tsc --noEmit",
-        "lint": "eslint .",
+        "lint": "eslint . && cd .. && eslint --config web/eslint/console-scripts.config.mjs src/pyracast/regions/static/pyracast",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
         "test": "playwright test",

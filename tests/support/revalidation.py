@@ -187,7 +187,8 @@ class Run:
 def run_revalidations(
     system: System, slots: Iterable[datetime], start: datetime, until: datetime
 ) -> list[Run]:
-    """Runs each revalidation when it is due and the dispatcher at every forecast slot."""
+    """Runs each revalidation when it is due and the dispatcher at every forecast slot and after
+    each revalidation."""
     rounds = sorted(slot + offset for slot in slots for offset in ROUND_OFFSETS)
     claim = account(system).revalidation_due_at
     at: datetime | None = start
@@ -203,6 +204,7 @@ def run_revalidations(
         assert_current_plants_keep_their_forecasts(system, at)
         dispatch_round(at)
         assert_current_plants_keep_their_forecasts(system, at)
+        rounds = sorted({*rounds, *(at + offset for offset in ROUND_OFFSETS[1:])})
         claim = account(system).revalidation_due_at
         runs.append(Run(at, outcome, claim, len(current_plants(system))))
         at = claim

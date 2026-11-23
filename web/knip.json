@@ -5,7 +5,8 @@
         "tests/**/*.spec.ts",
         "integration/**/*.spec.ts",
         "testing/coverage-reporter.ts",
-        "testing/server-coverage.ts"
+        "testing/server-coverage.ts",
+        "eslint/console-scripts.config.mjs"
     ],
     "project": [
         "src/**/*.{ts,tsx}",
