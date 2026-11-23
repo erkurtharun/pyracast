@@ -134,8 +134,17 @@ export default defineConfig([
         rules: { "pyracast/design-tokens": "error" },
     },
     {
+        files: ["src/**/*.{ts,tsx}", "**/*.css"],
+        plugins: { pyracast },
+        rules: { "pyracast/brand-source": "error" },
+    },
+    {
         files: ["src/styles/tokens.{ts,css}"],
         rules: { "pyracast/design-tokens": "off" },
+    },
+    {
+        files: ["src/styles/tokens.ts"],
+        rules: { "pyracast/brand-source": "off" },
     },
     // Inline directives could switch a rule off; no source file needs one.
     { linterOptions: { noInlineConfig: true } },

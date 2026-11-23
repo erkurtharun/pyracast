@@ -1,25 +1,71 @@
-export function Brand() {
+import { brand } from "@/styles/tokens";
+
+type Surface = "light" | "dark";
+
+const viewBox = { width: 518, height: 101 };
+
+const letterA =
+    "M860 0 813 154H805Q725 53 644.0 16.5Q563 -20 436 -20Q273 -20 181.5 68.0Q90 156 90 317Q90 488 217.0 575.0Q344 662 604 670L795 676V735Q795 841 745.5 893.5Q696 946 592 946Q507 946 429.0 921.0Q351 896 279 862L203 1030Q293 1077 400.0 1101.5Q507 1126 602 1126Q813 1126 920.5 1034.0Q1028 942 1028 745V0ZM510 160Q638 160 715.5 231.5Q793 303 793 432V528L651 522Q485 516 409.5 466.5Q334 417 334 315Q334 241 378.0 200.5Q422 160 510 160Z";
+
+const wordmark: readonly (readonly [number, string])[] = [
+    [
+        0,
+        "M729 -20Q519 -20 403 131H389Q403 -9 403 -39V-492H168V1106H358Q366 1075 391 958H403Q513 1126 733 1126Q940 1126 1055.5 976.0Q1171 826 1171 555Q1171 284 1053.5 132.0Q936 -20 729 -20ZM672 934Q532 934 467.5 852.0Q403 770 403 590V555Q403 353 467.0 262.5Q531 172 676 172Q798 172 864.0 272.0Q930 372 930 557Q930 743 864.5 838.5Q799 934 672 934Z",
+    ],
+    [
+        1226,
+        "M0 1106H256L481 479Q532 345 549 227H557Q566 282 590.0 360.5Q614 439 844 1106H1098L625 -147Q496 -492 195 -492Q117 -492 43 -475V-289Q96 -301 164 -301Q334 -301 403 -104L444 0Z",
+    ],
+    [
+        2274,
+        "M729 1126Q800 1126 846 1116L823 897Q773 909 719 909Q578 909 490.5 817.0Q403 725 403 578V0H168V1106H352L383 911H395Q450 1010 538.5 1068.0Q627 1126 729 1126Z",
+    ],
+    [3107, letterA],
+    [
+        4245,
+        "M614 -20Q363 -20 232.5 126.5Q102 273 102 547Q102 826 238.5 976.0Q375 1126 633 1126Q808 1126 948 1061L877 872Q728 930 631 930Q344 930 344 549Q344 363 415.5 269.5Q487 176 625 176Q782 176 922 254V49Q859 12 787.5 -4.0Q716 -20 614 -20Z",
+    ],
+    [5209, letterA],
+    [
+        6347,
+        "M911 315Q911 153 793.0 66.5Q675 -20 455 -20Q234 -20 100 47V250Q295 160 463 160Q680 160 680 291Q680 333 656.0 361.0Q632 389 577.0 419.0Q522 449 424 487Q233 561 165.5 635.0Q98 709 98 827Q98 969 212.5 1047.5Q327 1126 524 1126Q719 1126 893 1047L817 870Q638 944 516 944Q330 944 330 838Q330 786 378.5 750.0Q427 714 590 651Q727 598 789.0 554.0Q851 510 881.0 452.5Q911 395 911 315Z",
+    ],
+    [
+        7294,
+        "M580 170Q666 170 752 197V20Q713 3 651.5 -8.5Q590 -20 524 -20Q190 -20 190 332V928H39V1032L201 1118L281 1352H426V1106H741V928H426V336Q426 251 468.5 210.5Q511 170 580 170Z",
+    ],
+];
+
+export function Brand({
+    surface,
+    height = 30,
+}: {
+    surface: Surface;
+    height?: number;
+}) {
+    const ink = surface === "light" ? brand.forest : brand.cream;
     return (
-        <div className="brand">
-            <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true">
-                <circle
-                    cx="14"
-                    cy="14"
-                    r="5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                />
-                <path
-                    d="M14 2v4m0 16v4M2 14h4m16 0h4M5.5 5.5l3 3m11 11 3 3m0-17-3 3m-11 11-3 3"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                />
-            </svg>{" "}
-            pyracast
-            <span className="brand-dot">.</span>
-        </div>
+        <svg
+            className="brand"
+            width={Math.round((height * viewBox.width) / viewBox.height)}
+            height={height}
+            viewBox={`0 0 ${viewBox.width} ${viewBox.height}`}
+            role="img"
+            aria-label="Pyracast"
+        >
+            <g transform="translate(6 5) scale(.77)">
+                <path fill={brand.amber} d="M0 48a48 48 0 0 1 96 0Z" />
+                <path fill={ink} d="M0 53H99L86 72H21V112H0Z" />
+            </g>
+            <g transform="translate(106 72) scale(.05 -.05)" fill={ink}>
+                {wordmark.map(([offset, path]) => (
+                    <path
+                        key={offset}
+                        transform={`translate(${offset} 0)`}
+                        d={path}
+                    />
+                ))}
+            </g>
+        </svg>
     );
 }

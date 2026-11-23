@@ -4,6 +4,7 @@ import {
     socialImageColours as colours,
     socialImageSpacing as spacing,
 } from "@/styles/tokens";
+import { Brand } from "@/ui/brand";
 
 export function createSocialImage(language: Language) {
     return new ImageResponse(
@@ -19,11 +20,7 @@ export function createSocialImage(language: Language) {
                 color: colours.text,
             }}
         >
-            <div
-                style={{ display: "flex", alignItems: "center", fontSize: 48 }}
-            >
-                pyracast<span style={{ color: colours.accent }}>.</span>
-            </div>
+            <Brand surface="dark" height={64} />
             <div
                 style={{
                     display: "flex",

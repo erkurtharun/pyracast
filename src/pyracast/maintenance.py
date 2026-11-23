@@ -27,10 +27,10 @@ PAGE = f"""<!doctype html>
 <meta http-equiv="refresh" content="{RETRY_AFTER_SECONDS}">
 <title>Pyracast maintenance</title>
 <style>
-body {{ margin: 0; font-family: system-ui, sans-serif; background: #f6f7f9; color: #1d2430; }}
+body {{ margin: 0; font-family: system-ui, sans-serif; background: #f9f7f2; color: #1d2430; }}
 main {{ max-width: 34rem; margin: 15vh auto; padding: 0 1rem; }}
 section + section {{ margin-top: 2rem; padding-top: 2rem; border-top: 1px solid #d6dae1; }}
-@media (prefers-color-scheme: dark) {{ body {{ background: #11151c; color: #e6e9ef; }} }}
+@media (prefers-color-scheme: dark) {{ body {{ background: #051e1f; color: #f4f2e8; }} }}
 </style>
 </head>
 <body>

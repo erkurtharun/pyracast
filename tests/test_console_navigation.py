@@ -1,4 +1,6 @@
 import json
+import re
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -11,6 +13,10 @@ from tests.support.admin_setup import admin_system, setup_input
 from tests.support.api import verified_admin
 
 pytestmark = pytest.mark.django_db
+ROOT = Path(__file__).resolve().parents[1]
+ARTWORK = json.loads(
+    (ROOT / "web" / "tests" / "support" / "brand-artwork.json").read_text(encoding="utf-8")
+)
 DEEP_LINK = "/admin/plants/7/?tab=review"
 HOSTILE = [
     "https://elsewhere.example/admin/",
@@ -137,6 +143,45 @@ def test_read_pages_refuse_writes(name: str) -> None:
     client, _ = verified_admin()
 
     assert client.post(reverse(name)).status_code == 405
+
+
+def test_the_console_rail_draws_the_brand_mark_beside_its_name() -> None:
+    client, _ = verified_admin()
+
+    page = client.get(reverse("admin:index")).content.decode()
+
+    rail = page.split('<a class="brand"', 1)[1].split("</a>", 1)[0]
+    mark = ARTWORK["mark"]
+    elements = re.findall(r"<(\w+)([^>]*)>", rail)
+    assert [tag for tag, _ in elements] == ["svg", "path", "path", "span"]
+    assert elements[1:] == [
+        ("path", f' class="brand-mark-sun" d="{mark["sun"]}"/'),
+        ("path", f' class="brand-mark-bar" d="{mark["bar"]}"/'),
+        ("span", ""),
+    ]
+    root = elements[0][1]
+    assert re.fullmatch(r'(\s[\w-]+="[^"]*")*', root)
+    assert dict(re.findall(r'\s([\w-]+)="([^"]*)"', root)) == {
+        "class": "brand-mark",
+        "viewBox": mark["viewBox"],
+        "width": "25",
+        "height": "28",
+        "aria-hidden": "true",
+        "focusable": "false",
+    }
+    stylesheet = (ROOT / "src/pyracast/regions/static/pyracast/admin-workspace.css").read_text(
+        encoding="utf-8"
+    )
+    tokens = dict(re.findall(r"^\s*(--[\w-]+): (#\w+);$", stylesheet, re.MULTILINE))
+    fills = dict(
+        re.findall(r"^\.brand-mark-(\w+) \{\n    fill: var\((--[\w-]+)\);", stylesheet, re.M)
+    )
+    assert {part: tokens[token] for part, token in fills.items()} == {
+        "sun": ARTWORK["colours"]["sun"],
+        "bar": ARTWORK["colours"]["light"],
+    }
+    assert 'aria-hidden="true"' in rail
+    assert "Pyracast operations" in rail
 
 
 def test_a_successful_plant_setup_reports_success() -> None:

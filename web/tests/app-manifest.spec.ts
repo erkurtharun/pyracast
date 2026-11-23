@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { PNG } from "pngjs";
+import { brand, brandProperties } from "../src/styles/tokens";
 
 const web = path.resolve(__dirname, "..");
 const manifestAddress = new URL("http://app.test/app/manifest.webmanifest");
@@ -10,12 +11,12 @@ function publicFile(address: string) {
     return path.join(web, "public", new URL(address, manifestAddress).pathname);
 }
 
-function token(name: string) {
-    const tokens = readFileSync(
-        path.join(web, "src/styles/tokens.css"),
-        "utf8",
-    );
-    return tokens.match(new RegExp(`--${name}: (#[0-9a-f]{6});`))?.[1];
+function pageBackground() {
+    const globals = readFileSync(path.join(web, "src/app/globals.css"), "utf8");
+    const [, name] = /^body \{[^}]*^\s*background: var\((--[\w-]+)\);$/m.exec(
+        globals,
+    )!;
+    return brandProperties[name as keyof typeof brandProperties];
 }
 
 function image(address: string) {
@@ -74,8 +75,8 @@ test("the app manifest declares one fixed identity under /app/ and nothing else"
         start_url: "/app/",
         scope: "/app/",
         display: "standalone",
-        theme_color: token("forest"),
-        background_color: token("cream"),
+        theme_color: brand.forest,
+        background_color: pageBackground(),
         icons: ["any", "maskable"].flatMap((purpose) =>
             [192, 512].map((size) => ({
                 src: `icons/${purpose}-${size}.png`,

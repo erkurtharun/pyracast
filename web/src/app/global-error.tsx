@@ -1,4 +1,7 @@
 "use client";
+import type { CSSProperties } from "react";
+import { brandProperties } from "@/styles/tokens";
+import "@/styles/tokens.css";
 import "./globals.css";
 import { reloadPage } from "@/lib/on-demand";
 import { useScreenTitle } from "@/ui/page-title";
@@ -13,7 +16,7 @@ export default function GlobalError({
 }) {
     const title = useScreenTitle(en.AppError.title);
     return (
-        <html lang="en">
+        <html lang="en" style={brandProperties as CSSProperties}>
             <body>
                 <title>{title}</title>
                 <main className="auth-page">

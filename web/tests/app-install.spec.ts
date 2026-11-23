@@ -5,6 +5,7 @@ import { test, expect, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
 import { standInDisplayMode } from "./support/display-mode";
 import { accountWith, mockApi, sessionIdentity } from "./support/workspace";
+import { brand } from "../src/styles/tokens";
 
 const manifestAddress = "/app/manifest.webmanifest";
 const touchIconAddress = "/app/icons/apple-touch-icon.png";
@@ -97,6 +98,7 @@ async function expectServedHead(
     expect(
         served.favicon.head.map(({ href }) => resolvedPath(reference, href)),
     ).toEqual(["/icon.svg"]);
+    expect(manifest.theme_color).toBe(brand.forest);
     expect(served.themeColour).toEqual(
         layout === "app"
             ? onlyInHead({ name: "theme-color", content: manifest.theme_color })
