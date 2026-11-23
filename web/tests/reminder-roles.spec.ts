@@ -2134,6 +2134,44 @@ test("the mock combines the choices of several members of one address and keeps 
     ]);
 });
 
+for (const schedule of ["hidden", "visible", "unsaved"] as const)
+    test(`the mock's departure of a member from a ${schedule === "unsaved" ? "plant without a schedule changes only the person" : `${schedule} schedule removes the member's typed rows${schedule === "visible" ? ", hides every recipient" : ""} and advances the revision once`}`, async ({
+        page,
+    }) => {
+        const ALIAS = "alias@example.test";
+        const { depart, persons } = await reminderApi(page, {
+            recipients: [OUTSIDE, MEMBER, ALIAS],
+            members: TEAM,
+            hidden: schedule === "hidden",
+            unsaved: schedule === "unsaved",
+        });
+        await page.goto("/app/");
+        const call = caller(page);
+        persons[1]!.verified = [MEMBER, ALIAS];
+        const before = (await call("GET")).json;
+        depart(2);
+        const after = (await call("GET")).json;
+        if (schedule === "unsaved") {
+            expect(after).toEqual({
+                ...before,
+                workspace_member_count: 1,
+                addresses: {
+                    ...before.addresses,
+                    workspace_recipients: [ADMIN],
+                    members: [before.addresses.members[0]],
+                },
+            });
+            return;
+        }
+        expect(before.addresses.recipients).toEqual([OUTSIDE, MEMBER, ALIAS]);
+        expect([
+            after.addresses.recipients,
+            after.revision,
+            after.hide_recipients,
+            after.hidden_by_departure,
+        ]).toEqual([[OUTSIDE], 1, true, schedule === "visible"]);
+    });
+
 test("the mock refuses each malformed request with the status, code and member the server names", async ({
     page,
 }) => {

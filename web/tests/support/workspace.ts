@@ -1176,11 +1176,11 @@ type Held = {
     released: Promise<void>;
     capture: (request: Request) => void;
 };
-type Failure = {
-    method: Method;
-    when: "before" | "after";
-    answer: "lost" | 503;
-};
+type Status = { status: number; code?: Code };
+type Failure = { method: Method } & (
+    | { when: "before" | "after"; answer: "lost" | 503 }
+    | { when: "before"; answer: Status }
+);
 
 export async function reminderApi(page: Page, options: ReminderOptions = {}) {
     const account = await mockApi(page);
@@ -1231,13 +1231,36 @@ export async function reminderApi(page: Page, options: ReminderOptions = {}) {
         held?.capture(route.request());
         if (held) await held.released;
         if (failed?.answer === "lost") return route.abort("aborted");
-        if (failed)
+        if (failed?.answer === 503)
             return route.fulfill({
                 status: 503,
                 json: errorBody("server_error", "The service is unavailable."),
             });
+        if (failed) {
+            const { status, code } = failed.answer;
+            return code
+                ? refuse(route, { status, code })
+                : route.fulfill({ status, body: "" });
+        }
         await route.fulfill({ json });
     };
+    function failNext(
+        method: Method,
+        when?: "before" | "after",
+        answer?: "lost" | 503,
+    ): void;
+    function failNext(method: Method, when: "before", answer: Status): void;
+    function failNext(
+        method: Method,
+        when: "before" | "after" = "before",
+        answer: "lost" | 503 | Status = 503,
+    ) {
+        failing.push(
+            typeof answer === "object"
+                ? { method, when: "before", answer }
+                : { method, when, answer },
+        );
+    }
     await page.route("**/reminders/preview/", async (route) => {
         const failed = failure(route);
         if (failed) return respond(route, null, failed);
@@ -1288,22 +1311,30 @@ export async function reminderApi(page: Page, options: ReminderOptions = {}) {
                 committed: request.then(() => undefined),
             };
         },
-        failNext: (
-            method: Method,
-            when: Failure["when"] = "before",
-            answer: Failure["answer"] = 503,
-        ) => {
-            failing.push({ method, when, answer });
-        },
-        // The server hides every recipient again when a member leaves a schedule that shows addresses.
+        failNext,
         depart: (membership: number) => {
-            persons.find((person) => person.membership === membership)!.active =
-                false;
-            if (!store.hide)
+            const person = persons.find(
+                (found) => found.membership === membership,
+            )!;
+            person.active = false;
+            if (!store.saved) return;
+            const keys = new Set(
+                [person.primary, ...verifiedOf(person)].map(identity),
+            );
+            for (const row of store.rows)
+                if (row.ties.includes(membership))
+                    keys.add(identity(row.address));
+            const rows = store.rows.filter(
+                (row) =>
+                    !row.ties.includes(membership) &&
+                    !(!row.ties.length && keys.has(identity(row.address))),
+            );
+            if (!store.hide || rows.length !== store.rows.length)
                 store = {
                     ...store,
+                    rows,
                     hide: true,
-                    departed: true,
+                    departed: store.departed || !store.hide,
                     revision: store.revision + 1,
                 };
         },
