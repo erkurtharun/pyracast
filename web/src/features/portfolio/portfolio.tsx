@@ -9,6 +9,7 @@ import { PlantIcon } from "./plant-icon";
 import { PlantOnboarding } from "./plant-onboarding";
 import { matchesSearch, siteName } from "./portfolio-search";
 import { Field, Select } from "@/ui/form";
+import { usePageTitle } from "@/ui/page-title";
 import { Empty, Notice, RefreshFailed } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
 import { ReminderLine } from "@/features/plant/reminder-line";
@@ -23,6 +24,7 @@ export function Portfolio() {
     const router = useRouter();
     const refresh = useRefresh();
     const { tenant } = useWorkspace();
+    usePageTitle(`${t("plants")} · ${tenant.name}`);
     const canManage = tenant.role === "admin";
     const [creating, setCreating] = useState(false);
     const [search, setSearch] = useState("");

@@ -57,7 +57,6 @@ def plant_outlook(
     as_of: datetime | None = None,
     source: str = "forecast",
 ) -> dict[str, object]:
-    from pyracast.plants.incident_forecasts import incident_scenario
     from pyracast.plants.production_diagnostics import production_diagnostic
 
     with read_snapshot():
@@ -75,17 +74,40 @@ def plant_outlook(
         scenario_at = as_of or timezone.now()
         frozen = "outage_scenario" in result
         if not frozen:
-            evaluated = incident_scenario(result, target_date, resolution_minutes, scenario_at)
-            if evaluated.replacement_result is not None:
-                result["result"] = evaluated.replacement_result
-                result["calibration_id"] = None
-            result["outage_scenario"] = evaluated.scenario
+            _evaluate_outage_scenario(result, target_date, resolution_minutes, scenario_at)
         result["production_diagnostic"] = (
             production_diagnostic(result, target_date, scenario_at)
             if as_of is None and not frozen
             else None
         )
         return result
+
+
+def automatic_outlook(
+    plant: Plant, target_date: date, resolution_minutes: int, now: datetime
+) -> dict[str, object]:
+    result = _plant_outlook(
+        plant,
+        target_date=target_date,
+        resolution_minutes=resolution_minutes,
+        as_of=None,
+        source="auto",
+        now=now,
+    )
+    _evaluate_outage_scenario(result, target_date, resolution_minutes, now)
+    return result
+
+
+def _evaluate_outage_scenario(
+    result: dict[str, object], target_date: date, resolution_minutes: int, scenario_at: datetime
+) -> None:
+    from pyracast.plants.incident_forecasts import incident_scenario
+
+    evaluated = incident_scenario(result, target_date, resolution_minutes, scenario_at)
+    if evaluated.replacement_result is not None:
+        result["result"] = evaluated.replacement_result
+        result["calibration_id"] = None
+    result["outage_scenario"] = evaluated.scenario
 
 
 def _current_actuals(
@@ -219,11 +241,12 @@ def _plant_outlook(
     resolution_minutes: int,
     as_of: datetime | None,
     source: str,
+    now: datetime | None = None,
 ) -> dict[str, object]:
     if not is_source(source):
         raise ValidationError(gettext("Unsupported data source."))
     require_resolution(resolution_minutes)
-    now = timezone.now()
+    now = now or timezone.now()
     today = now.astimezone(ZoneInfo(plant.region.timezone)).date()
     policy = plant_policy(source, target_date, today, as_of=as_of is not None)
     if not plant_days_include(policy, target_date, today):

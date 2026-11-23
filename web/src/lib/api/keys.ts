@@ -13,15 +13,6 @@ export const keys = {
     },
     path: (owner: string, path: string, parameters: object = {}) =>
         [...keys.scope(owner, parameters), path, parameters] as const,
-    request: (
-        owner: string,
-        path: string,
-        options: Parameters = {},
-        locale = "",
-    ) =>
-        [
-            ...keys.path(owner, path, options.path),
-            options.query ?? {},
-            locale,
-        ] as const,
+    request: (owner: string, path: string, options: Parameters = {}) =>
+        [...keys.path(owner, path, options.path), options.query ?? {}] as const,
 };

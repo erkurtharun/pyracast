@@ -6,7 +6,7 @@ import { cadence, useApiList, useRefresh } from "@/lib/api/query";
 import { isPlantSection, plantAddress, routes } from "@/lib/routes";
 import { PlantOnboarding } from "@/features/portfolio/plant-onboarding";
 import { PlantWorkspace } from "./plant-workspace";
-import { Notice, RefreshFailed } from "@/ui/ui";
+import { Notice, ReadFailed, RefreshFailed } from "@/ui/ui";
 import { useLabel } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import { useWorkspace } from "@/features/workspace/workspace-shell";
@@ -65,7 +65,7 @@ export function PlantSite({
             {sites.loading ? (
                 <p role="status">{t("loadingPlant")}</p>
             ) : !sites.data ? (
-                <Notice error>{sites.error}</Notice>
+                <ReadFailed resource={sites} />
             ) : !site ? (
                 <Notice>{t("siteUnavailable")}</Notice>
             ) : site.edit_blocked_reason ? (

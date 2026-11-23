@@ -386,7 +386,6 @@
         "cancelFailed": "The invitation was not cancelled",
         "cancelled": "Invitation cancelled.",
         "acceptFailed": "The invitation was not accepted",
-        "signOutFailed": "You are still signed in",
         "sentOn": "Sent {date}",
         "expiresOn": "expires {date}",
         "expiredOn": "expired {date}",

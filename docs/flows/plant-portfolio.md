@@ -5,7 +5,7 @@ A workspace member (administrator or viewer) lands on the portfolio, which lists
 ## Entry points
 
 - Routes (`web/src/app/app/w/[tenantId]/`): the portfolio at `/app/w/{t}/`, an open plant at `/app/w/{t}/plants/{site}/{section}/` with `section` one of `forecast`, `production`, `calibration`, `outages`, `settings` and the date and view in the query (`routes` in `web/src/lib/routes.ts`; an id that is not a positive integer or an unknown section is a 404 page).
-- Screens: `web/src/features/portfolio/portfolio.tsx` `Portfolio` (cards, search in `portfolio-search.ts`, approval filter, attention count, the deletion notice `trash/recent-deletion.tsx` `DeletedNotice`, polls every 30 s), `web/src/features/plant/plant-site.tsx` `PlantSite` (resolves the site from the same list, polls every 120 s, then plant shell, wizard or notice), `web/src/features/plant/plant-workspace.tsx` `PlantWorkspace` (tab bar, review notice), `web/src/features/portfolio/plant-icon.tsx` `PlantIcon`.
+- Screens: `web/src/features/portfolio/portfolio.tsx` `Portfolio` (cards, search in `portfolio-search.ts`, approval filter, attention count, the deletion notice `web/src/features/trash/recent-deletion.tsx` `DeletedNotice`, polls every 30 s), `web/src/features/plant/plant-site.tsx` `PlantSite` (resolves the site from the same list, polls every 120 s, then plant shell, wizard or notice), `web/src/features/plant/plant-workspace.tsx` `PlantWorkspace` (tab bar, review notice), `web/src/features/portfolio/plant-icon.tsx` `PlantIcon`.
 - `GET /api/tenants/{t}/sites/` -> `pyracast.plants.site_api.SitesView.get` (paged, 50 per page, `SiteOutput`). `GET /api/tenants/{t}/regions/{r}/plants/` (`pyracast.plants.api.PlantsView.get`) is a member read with no web caller.
 - Actors: administrator and viewer. Creation is `site-onboarding`.
 
@@ -62,7 +62,7 @@ sequenceDiagram
 | `regions_auditevent` | R | Latest `region_approved`, `region_rejected` or `region_suspended` row per region (`with_review_outcome`): `reviewed_at`, `review_reason` |
 | `plants_plant` | R | One plant per region (`plant_region_uniq`) |
 | `plants_plantconfiguration`, `plants_plantsubmission` | R | Approved configuration and the submission; `PlantOutput.parameters` is the declaration (the submission while it awaits approval, else the configuration) |
-| `notifications_reminderschedule`, `notifications_reminderrecipient`, `notifications_reminderrecipienttie`, `notifications_notificationsettings`, `notifications_notificationdelivery`, `connections_provideraccount`, `account_emailaddress` | R | `reminder_summaries`: schedule state (explicit addresses with their member ties, the recipient limit) and latest delivery per listed region, null without a saved schedule |
+| `notifications_reminderschedule`, `notifications_reminderrecipient`, `notifications_reminderrecipienttie`, `notifications_notificationsettings`, `notifications_notificationdelivery`, `connections_provideraccount`, `accounts_membership`, `auth_user`, `account_emailaddress` | R | `reminder_summaries`: schedule state (explicit addresses with their member ties, the recipient limit) and latest delivery per listed region, null without a saved schedule; the workspace's active members and their verified addresses through `notifications/recipients.py` `workspace` |
 | `django_session`, `usersessions_usersession` | W | Session middleware: the activity marker and device record, at most once a minute |
 
 ## Authorization
@@ -83,7 +83,7 @@ sequenceDiagram
 | Id of the plant address not in the list (unknown, foreign, trashed) | Notice `siteUnavailable` and an "All plants" button |
 | Site without plant, viewer | Notice `plantUnavailable`; with `edit_blocked_reason`, that reason as for an administrator |
 | Region not approved | Tag and review notice in the shell (`ReviewNotice`); tabs stay usable. An approved plant whose connection is not current repeats the card's attention sentence there |
-| Code of an on-demand section cannot load | Plant route error (`plants/error.tsx`); its retry reloads the page, since a failed chunk stays failed for the document (`recovery`) |
+| Code of an on-demand section cannot load | Plant route error (`web/src/app/app/w/[tenantId]/plants/error.tsx`); its retry reloads the page, since a failed chunk stays failed for the document (`recovery`) |
 
 ## Rules and invariants
 

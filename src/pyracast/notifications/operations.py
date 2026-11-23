@@ -45,7 +45,6 @@ from pyracast.notifications.recipients import (
     workspace,
     workspaces,
 )
-from pyracast.notifications.recipients import effective_recipients as effective_recipients
 from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditAction, Region, RegionStatus, active_region
 

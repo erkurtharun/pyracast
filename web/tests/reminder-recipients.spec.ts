@@ -1,9 +1,11 @@
 import { expect, test } from "./support/test";
 import {
+    accountWith,
     mockApi,
     openReminders,
     paged,
     reminderApi,
+    sessionIdentity,
     tenantRow,
     user,
 } from "./support/workspace";
@@ -13,20 +15,15 @@ test("shared reminder recipients and email language survive administrator transf
     page,
 }, testInfo) => {
     let role = "admin";
-    await reminderApi(page, {
+    const account = await reminderApi(page, {
         enabled: true,
         viewer: () => role === "viewer",
     });
     await page.setViewportSize({ width: 320, height: 900 });
-    let currentUser = user;
     let saves = 0;
     await page.route("**/api/session/", (route) =>
         route.fulfill({
-            json: {
-                user: currentUser,
-                language: "en",
-                csrf_token: "signed-token",
-            },
+            json: { ...sessionIdentity(account.current), language: "en" },
         }),
     );
     await page.route("**/api/tenants/", (route) =>
@@ -54,7 +51,7 @@ test("shared reminder recipients and email language survive administrator transf
     await expect(
         page.getByLabel("Email language", { exact: true }),
     ).toHaveValue("tr");
-    currentUser = { ...user, id: 2, email: "next-admin@example.test" };
+    account.current = accountWith({ id: 2, email: "next-admin@example.test" });
     await openReminders(page);
     await expect(
         page.getByLabel("Email address 1", { exact: true }),
@@ -366,10 +363,10 @@ test("turning on a new oversized automatic group shows the limit and the server 
 test("Turkish automatic recipient labels preserve readable characters", async ({
     page,
 }) => {
-    await reminderApi(page);
+    const account = await reminderApi(page);
     await page.route("**/api/session/", (route) =>
         route.fulfill({
-            json: { user, language: "tr", csrf_token: "signed-token" },
+            json: { ...sessionIdentity(account.current), language: "tr" },
         }),
     );
     await page.goto("/app/");

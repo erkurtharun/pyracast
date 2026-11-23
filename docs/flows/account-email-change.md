@@ -86,6 +86,7 @@ sequenceDiagram
 - Lock order: session advisory lock (whole request), then the account's rows, then the session row, then `account_emailaddress` writes (`AccountAdapter.confirm_email` locks the user row). Concurrent confirmations of one user serialize; the constraint admits one owner across users.
 - A pending change rests on the account's credential state as read under lock when it started and ends on any change of it, rechecked at confirmation. The request locks the account's rows before it validates the new address, so a change started meanwhile waits and then ends the code.
 - `ACCOUNT_CHANGE_EMAIL=True`: confirmation replaces the old address; the notice and the `sessions_revoked` line leave with the commit, so a rolled-back confirmation sends none.
+- Verification runs by code only; system check `accounts.E007` refuses `ACCOUNT_EMAIL_VERIFICATION_BY_CODE_ENABLED` or `ACCOUNT_PASSWORD_RESET_BY_CODE_ENABLED` turned off (`password-reset`).
 - Code policy: 600 s lifetime, 3 attempts, up to three resends (each invalidates the older code), one code per target address per minute and six per hour across all users (`ACCOUNT_RATE_LIMITS["confirm_email"]`). A new POST replaces the pending process and its code. A pending address cannot sign in or recover.
 
 ## Tests

@@ -345,7 +345,7 @@ def _render(request: HttpRequest, site: PlatformAdminSite, page: PlantPage) -> T
         raise Http404 from missing
     review["plant_summary"] = replace(
         review["plant_summary"],
-        plant_name=next((plant.name for plant, _ in shown), page.region.name),
+        plant_name=next((plant.name for plant, _record in shown), page.region.name),
     )
     return TemplateResponse(
         request,

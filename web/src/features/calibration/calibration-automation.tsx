@@ -6,7 +6,7 @@ import { api } from "@/lib/api/client";
 import type { Loaded } from "@/lib/api/query";
 import { useFormat } from "@/lib/format/use-format";
 import { CheckboxField, useErrorMessage } from "@/ui/form";
-import { Notice, RefreshFailed } from "@/ui/ui";
+import { Notice, ReadFailed, RefreshFailed } from "@/ui/ui";
 import { useCodeLabel, useLabel } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import type { AutomationStatus } from "./model";
@@ -87,7 +87,7 @@ export function CalibrationAutomationPanel({
                 <p role="status">{t("loading_automatic_calibration")}</p>
             )}
             <RefreshFailed resource={resource} />
-            {resource.error && !data && <Notice error>{resource.error}</Notice>}
+            {resource.error && !data && <ReadFailed resource={resource} />}
             {toggle.status === "failed" && (
                 <Notice error>{toggle.error}</Notice>
             )}

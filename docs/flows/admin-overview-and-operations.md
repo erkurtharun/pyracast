@@ -4,7 +4,7 @@ A platform administrator (active superuser with live TOTP or recovery-code proof
 
 ## Entry points
 
-- `GET /admin/` -> `pyracast.platform_admin.site.PlatformAdminSite.landing` -> `index` -> `pyracast.platform_admin.read_models.overview_context`, template `admin/workspace/overview.html`.
+- `GET /admin/` -> `pyracast.platform_admin.site.PlatformAdminSite.landing` -> `index` -> `pyracast.platform_admin.read_models.overview_context`, template `src/pyracast/regions/templates/admin/workspace/overview.html`.
 - `GET /admin/plants/?q=&status=&page=&issue=&location_change=` -> `pyracast.platform_admin.pages.plants` -> `plant_list_context`, template `plants.html`.
 - `GET /admin/operations/?issue=&window=&collections_page=&deliveries_page=&metering_page=&calibrations_page=` -> `pages.operations` -> `operations_context` (which calls `work_pages`), template `operations.html` with `work_pager.html` per list.
 - Builders: `pyracast.orchestration.delivery_health` (`CHECKS`, `delivery_health`, `listed`, `read_broker`; also used by command `check_delivery_health`, whose dispatcher input is written by `record_dispatch_phase` in `orchestration/dispatcher.py`) and `pyracast.platform_admin.health` (`PRESENTATION`, `summarize_health`). Templates live in `pyracast/regions/templates/admin/workspace/` (`health.html` is included by overview and operations). No SPA screen or `/api/` endpoint is involved.

@@ -167,6 +167,7 @@ def test_git_failure_releases(
         "web/tests/x.spec.ts",
         "web/tests/support/test.ts",
         "web/integration/x.spec.ts",
+        "web/production-tests/x.spec.ts",
     ],
 )
 def test_each_unshipped_path_alone_skips_the_release(repository: Path, path: str) -> None:
@@ -228,6 +229,8 @@ def test_each_unshipped_path_alone_skips_the_release(repository: Path, path: str
         "web/integration.ts",
         "web/testing/coverage-reporter.ts",
         "web/playwright.config.ts",
+        "web/playwright.production.config.ts",
+        "web/production-tests2/a.ts",
     ],
 )
 def test_any_path_off_the_allowlist_releases(repository: Path, path: str) -> None:
@@ -511,6 +514,9 @@ def _named_entries(text: str) -> list[str]:
         "python3 scripts/x.py",
         "COPY AGENTS.md ./",
         "cat web/.prettierignore",
+        'cp -r web/production-tests "$stage/"',
+        "tar -C web -cf archive.tar production-tests",
+        "COPY production-tests/ ./specs/",
     ],
 )
 def test_the_release_input_guard_sees_a_named_allowlisted_path(line: str) -> None:
@@ -525,6 +531,8 @@ def test_the_release_input_guard_sees_a_named_allowlisted_path(line: str) -> Non
         "# https://cloud.google.com/iap/docs/using-tcp-forwarding",
         "    # The smoke tests run against the stack.",
         "RUN npm ci --ignore-scripts",
+        "    environment: production",
+        "ENV NODE_ENV=production HOSTNAME=0.0.0.0 PORT=3000",
     ],
 )
 def test_the_release_input_guard_ignores_names_and_comments(line: str) -> None:

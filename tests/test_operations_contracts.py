@@ -9,6 +9,8 @@ import logging.config
 import os
 import re
 import runpy
+import shutil
+import subprocess
 import urllib.request
 from collections import Counter
 from pathlib import Path
@@ -1376,6 +1378,109 @@ def test_smoke_refusals_without_a_broker_name_their_cause() -> None:
 
     assert "[[ $refused != 0 && $deploy_check == *background.E001* ]]" in smoke
     assert "[[ $refused != 0 && $missing_broker == *PYRACAST_RABBITMQ_URL* ]]" in smoke
+
+
+def worker_headers() -> list[tuple[str, str]]:
+    worker = re.search(
+        r'source: "/app/sw\.js",(.*?)\]', text(ROOT / "web" / "next.config.ts"), re.S
+    )
+    assert worker is not None
+    return re.findall(r'key: "([^"]+)",\s*value:\s*"([^"]+)"', worker[1])
+
+
+def smoke_statement(pattern: str) -> str:
+    statement = re.search(pattern, text(DEPLOY / "smoke.sh"), re.M | re.S)
+    assert statement is not None
+    return statement[0]
+
+
+SMOKE_WORKER_PIN = r"^app_file /app/sw\.js .*?[^\\]$"
+SMOKE_ICON_PINS = r"^for icon in .*?^done$"
+
+
+def test_smoke_pins_the_app_worker_manifest_and_icons_through_the_gateway() -> None:
+    smoke = text(DEPLOY / "smoke.sh")
+    pinned = smoke_statement(SMOKE_WORKER_PIN)
+    headers = worker_headers()
+    assert len(headers) == 3
+    for name, value in headers:
+        assert f"{name.lower()}: {value}" in pinned, name
+    manifest = json.loads(text(ROOT / "web" / "public" / "app" / "manifest.webmanifest"))
+    assert [manifest[member] for member in ("id", "start_url", "scope")] == ["/app/"] * 3
+    assert 'for member in ("id", "start_url", "scope")] == ["/app/"] * 3' in smoke
+    assert "app_file /app/manifest.webmanifest 'content-type: application/manifest+json'" in smoke
+    icons = sorted(path.stem for path in (ROOT / "web" / "public" / "app" / "icons").glob("*.png"))
+    looped = re.search(r"^for icon in (.+); do\n  app_file \"/app/icons/\$icon\.png\"", smoke, re.M)
+    assert looped is not None
+    assert sorted(looped[1].split()) == icons
+    for page in ("/", "/app/"):
+        assert f"app_file {page} 'cache-control: private, no-store'" in smoke
+
+
+def answered_pin(tmp_path: Path, pin: str, answer: list[str], curl_status: int) -> int:
+    lines = [*answer, ""]
+    (tmp_path / "answer").write_text("".join(f"{line}\r\n" for line in lines), newline="")
+    script = tmp_path / "pin.sh"
+    helper = shell_function(text(DEPLOY / "smoke.sh"), "app_file")
+    script.write_text(
+        "set -euo pipefail\n"
+        "temporary=$1 curl_status=$2\n"
+        'fake_curl() { cat "$temporary/answer"; return "$curl_status"; }\n'
+        "secure_curl=(fake_curl)\n"
+        f"{helper}\n}}\n{smoke_statement(pin)}\n",
+        newline="\n",
+    )
+    bash = shutil.which("bash")
+    assert bash is not None
+    return subprocess.run(  # noqa: S603 -- Resolved bash on a script built from smoke.sh.
+        [bash, str(script), str(tmp_path), str(curl_status)], capture_output=True, check=False
+    ).returncode
+
+
+@pytest.mark.skipif(os.name == "nt", reason="The smoke's bash runs only on the POSIX host")
+@pytest.mark.parametrize(
+    ("answer", "pin", "passes"),
+    [
+        ("served", "worker", True),
+        ("redirected", "worker", False),
+        ("another cache policy", "worker", False),
+        ("no script policy", "worker", False),
+        ("missing file", "worker", False),
+        ("widened scope", "worker", False),
+        ("served icon", "icons", True),
+        ("icon of another type", "icons", False),
+    ],
+)
+def test_the_smoke_pins_pass_the_served_files_and_stop_on_any_other_answer(
+    tmp_path: Path, answer: str, pin: str, passes: bool
+) -> None:
+    served = [f"{name}: {value}" for name, value in worker_headers()]
+    status, headers, curl_status = {
+        "served": ("HTTP/2 200", served, 0),
+        "redirected": ("HTTP/2 308", ["Location: /app/sw.js/", *served], 0),
+        "another cache policy": (
+            "HTTP/2 200",
+            [
+                "Cache-Control: max-age=3600" if line.startswith("Cache-") else line
+                for line in served
+            ],
+            0,
+        ),
+        "no script policy": (
+            "HTTP/2 200",
+            [line for line in served if not line.startswith("Content-Security-")],
+            0,
+        ),
+        "missing file": ("HTTP/2 404", served, 22),
+        "widened scope": ("HTTP/2 200", [*served, "Service-Worker-Allowed: /"], 0),
+        "served icon": ("HTTP/2 200", ["Content-Type: image/png"], 0),
+        "icon of another type": ("HTTP/2 200", ["Content-Type: text/html; charset=utf-8"], 0),
+    }[answer]
+
+    statement = {"worker": SMOKE_WORKER_PIN, "icons": SMOKE_ICON_PINS}[pin]
+    exit_status = answered_pin(tmp_path, statement, [status, *headers], curl_status)
+
+    assert (exit_status == 0) is passes, exit_status
 
 
 def test_smoke_proves_the_maintenance_notice_and_the_restricted_roles() -> None:

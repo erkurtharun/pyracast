@@ -4,7 +4,7 @@ An anonymous visitor creates a password account and, in the same request, a new 
 
 ## Entry points
 
-- Screen: `web/src/features/auth/auth.tsx` `Auth`, modes `register` then `verify`, opened by `RequireUser` for `/app/?signup=1` (links in `public-site/home-page.tsx`, which also pass `language` for `POST /api/session/language/`, and the allauth `unknown_account` mail). "Use a different address" ends the pending sign-up through `DELETE auth/session`.
+- Screen: `web/src/features/auth/auth.tsx` `Auth`, modes `register` then `verify`, opened by `RequireUser` for `/app/?signup=1` (links in `web/src/features/public-site/home-page.tsx`, which also pass `language` for `POST /api/session/language/`, and the allauth `unknown_account` mail). "Use a different address" ends the pending sign-up through `DELETE auth/session`.
 - `POST /api/auth/browser/v1/auth/signup` -> `pyracast.accounts.signup.CompanySignupView` (input `CompanySignupInput`), routed in `src/pyracast/accounts/auth_urls.py`, which lists every browser auth route; anonymous. `provider/signup` reuses `AccountSignupForm` and `register_account` (flow `social-sign-in`).
 - `POST .../auth/email/verify` -> `pyracast.accounts.headless.VerifyEmailView`; `POST .../auth/email/verify/resend` -> `ResendEmailVerificationCodeView` (both in `accounts/auth_urls.py`).
 - The mail is an outbound intent sent by the mailer actor `send_outbound_mail` (`account-mail-notifications`, `email-transport`).
@@ -56,7 +56,7 @@ sequenceDiagram
 ## Authorization
 
 - Anonymous by design; CSRF is enforced by `CsrfViewMiddleware` before the view; a signed-in session with valid input gets 409.
-- Rate limits in `ACCOUNT_RATE_LIMITS` (`pyracast/settings.py`): `signup` 5/h/ip, consumed before validation; `confirm_email` 1/1m/key and 6/h/key (the email) on every code or anti-enumeration mail. `AccountAdapter.get_client_ip` refuses requests without a determinable IP (403).
+- Rate limits in `ACCOUNT_RATE_LIMITS` (`src/pyracast/settings.py`): `signup` 5/h/ip, consumed before validation; `confirm_email` 1/1m/key and 6/h/key (the email) on every code or anti-enumeration mail. `AccountAdapter.get_client_ip` refuses requests without a determinable IP (403).
 - `SessionRequestSerialization` takes an advisory lock per session cookie. The database guards `membership_tenant_administrator_uniq` and allauth's `unique_verified_email`. Sign-in with an unverified address re-enters the code stage.
 
 ## Failure paths

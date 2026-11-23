@@ -16,7 +16,8 @@ import {
     useErrorMessage,
     formText,
 } from "@/ui/form";
-import { Notice, RefreshFailed } from "@/ui/ui";
+import { usePageTitle } from "@/ui/page-title";
+import { Notice, ReadFailed, RefreshFailed } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
 
 const SHORT_TIME: Intl.DateTimeFormatOptions = {
@@ -80,6 +81,7 @@ export function OperationalInbox({
     linked?: number;
 }) {
     const t = useTranslations("ChangeRequests");
+    usePageTitle(t("inbox"));
     const refresh = useRefresh();
     const [scope, setScope] = useState<Scope>("pending");
     const [update, setUpdate] = useState<{
@@ -243,7 +245,7 @@ function InboxPage({
         <>
             {items.loading && <p role="status">{t("loading")}</p>}
             <RefreshFailed resource={items} />
-            {items.error && !items.data && <Notice error>{items.error}</Notice>}
+            {items.error && !items.data && <ReadFailed resource={items} />}
             {items.data && !items.data.results.length && (
                 <section className="panel">
                     <p>{t("empty")}</p>

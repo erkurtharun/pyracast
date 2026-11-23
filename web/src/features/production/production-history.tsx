@@ -11,7 +11,7 @@ import { useFormat } from "@/lib/format/use-format";
 import { CsvDownload } from "@/ui/csv-download";
 import { useExportPlant } from "@/ui/export-plant";
 import { CheckboxField, ControlField, useErrorMessage } from "@/ui/form";
-import { Notice } from "@/ui/ui";
+import { Notice, ReadFailed } from "@/ui/ui";
 import { useCodeLabel } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import { ProductionDayNav } from "./history/day-nav";
@@ -366,7 +366,7 @@ export function ProductionHistory({
             {reading.loading ? (
                 <p role="status">{t("loading_production_history")}</p>
             ) : !history ? (
-                <Notice error>{reading.error}</Notice>
+                <ReadFailed resource={reading} />
             ) : (
                 <>
                     <div

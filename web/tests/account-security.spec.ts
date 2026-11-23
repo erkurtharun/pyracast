@@ -36,22 +36,11 @@ function emailChange(page: Page) {
 test("an expired account session returns to sign in instead of asking for reauthentication", async ({
     page,
 }) => {
-    await mockApi(page);
-    let expired = false;
-    await page.route("**/api/session/", (route) =>
-        route.fulfill({
-            json: {
-                user: expired
-                    ? null
-                    : { id: 1, username: "user", email: "user@example.test" },
-                csrf_token: "token",
-            },
-        }),
-    );
+    const account = await mockApi(page);
     await page.route(
         "**/api/auth/browser/v1/account/authenticators/totp",
         (route) => {
-            expired = true;
+            account.current = null;
             return route.fulfill({
                 status: 401,
                 json: { status: 401, meta: { is_authenticated: false } },

@@ -427,6 +427,40 @@ jobs:
     env: *web-environment
     steps: *web-steps
 
+  web_production:
+    name: Web production build (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.13.1
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npx --no-install playwright install --with-deps chromium
+      - run: npm run build
+      - name: Run the worker scenarios against the production web build
+        run: npm run test:production
+      - name: Upload Playwright failure traces
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-production-results-${{ github.run_attempt }}
+          path: |
+            web/production-results/**/trace.zip
+            web/production-results/**/error-context.md
+          if-no-files-found: ignore
+          retention-days: 3
+
   scientific:
     name: Scientific (${{ matrix.os }})
     strategy:
@@ -530,7 +564,7 @@ jobs:
 
   ci_result:
     name: CI result
-    needs: [deployment, verify_ubuntu, verify_windows_shards, verify_windows, web_ubuntu, web_windows, scientific, audit, sonar]
+    needs: [deployment, verify_ubuntu, verify_windows_shards, verify_windows, web_ubuntu, web_windows, web_production, scientific, audit, sonar]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -547,7 +581,7 @@ jobs:
   # tested base and tree with the squash merge on main. Without it the merge takes the full path.
   pr_tested:
     name: Record the tested tree
-    needs: [deployment, verify_ubuntu, verify_windows_shards, verify_windows, web_ubuntu, web_windows, scientific, audit, sonar, ci_result]
+    needs: [deployment, verify_ubuntu, verify_windows_shards, verify_windows, web_ubuntu, web_windows, web_production, scientific, audit, sonar, ci_result]
     if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.ci_result.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

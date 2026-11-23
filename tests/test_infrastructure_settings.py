@@ -127,6 +127,12 @@ def test_every_read_of_a_secret_reaches_the_data_access_audit_log() -> None:
     )
 
 
+def test_the_application_instance_may_be_stopped_to_change_its_machine_type() -> None:
+    instance = blocks("main.tf")['resource "google_compute_instance" "application"']
+
+    assert "machine_type = var.machine_type allow_stopping_for_update = true " in instance
+
+
 @pytest.mark.parametrize("name", ["github_repository_id", "github_owner_id"])
 def test_the_github_identities_that_bind_the_release_are_numeric(name: str) -> None:
     variable = blocks("variables.tf")[f'variable "{name}"']
