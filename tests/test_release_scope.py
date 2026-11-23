@@ -167,6 +167,7 @@ def test_git_failure_releases(
         "web/tests/x.spec.ts",
         "web/tests/support/test.ts",
         "web/integration/x.spec.ts",
+        "web/production/x.spec.ts",
     ],
 )
 def test_each_unshipped_path_alone_skips_the_release(repository: Path, path: str) -> None:
@@ -228,6 +229,8 @@ def test_each_unshipped_path_alone_skips_the_release(repository: Path, path: str
         "web/integration.ts",
         "web/testing/coverage-reporter.ts",
         "web/playwright.config.ts",
+        "web/playwright.production.config.ts",
+        "web/productionx/a.ts",
     ],
 )
 def test_any_path_off_the_allowlist_releases(repository: Path, path: str) -> None:
@@ -490,12 +493,19 @@ def _named_entries(text: str) -> list[str]:
     # Step names and comment lines are prose; any other mention of an entry's name counts.
     prose = re.compile(r"\s*(#|(- )?name:)")
     code = "\n".join(line for line in text.splitlines() if not prose.match(line))
-    named = []
-    for entry in release_scope.ALLOWLIST:
-        name = entry.removesuffix("/**").rsplit("/", 1)[-1]
-        if re.search(rf"(?<![\w.-]){re.escape(name)}(?![\w-])", code, flags=re.IGNORECASE):
-            named.append(entry)
-    return named
+    return [
+        entry
+        for entry in release_scope.ALLOWLIST
+        if re.search(_mention(entry), code, flags=re.IGNORECASE)
+    ]
+
+
+def _mention(entry: str) -> str:
+    if entry == "web/production/**":
+        # The bare word names the deployment environment throughout the release inputs.
+        return r"(?<![\w.-])(?:web/production(?![\w-])|production/)"
+    name = entry.removesuffix("/**").rsplit("/", 1)[-1]
+    return rf"(?<![\w.-]){re.escape(name)}(?![\w-])"
 
 
 @pytest.mark.parametrize(
@@ -511,6 +521,8 @@ def _named_entries(text: str) -> list[str]:
         "python3 scripts/x.py",
         "COPY AGENTS.md ./",
         "cat web/.prettierignore",
+        'cp -r web/production "$stage/"',
+        "COPY production/ ./production/",
     ],
 )
 def test_the_release_input_guard_sees_a_named_allowlisted_path(line: str) -> None:
@@ -525,6 +537,8 @@ def test_the_release_input_guard_sees_a_named_allowlisted_path(line: str) -> Non
         "# https://cloud.google.com/iap/docs/using-tcp-forwarding",
         "    # The smoke tests run against the stack.",
         "RUN npm ci --ignore-scripts",
+        "    environment: production",
+        "ENV NODE_ENV=production HOSTNAME=0.0.0.0 PORT=3000",
     ],
 )
 def test_the_release_input_guard_ignores_names_and_comments(line: str) -> None:

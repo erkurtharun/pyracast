@@ -15,6 +15,7 @@ ALLOWLIST = (
     "scripts/**",
     "web/tests/**",
     "web/integration/**",
+    "web/production/**",
     ".agents/**",
     "AGENTS.md",
     "CLAUDE.md",
