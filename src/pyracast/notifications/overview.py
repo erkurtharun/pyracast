@@ -203,7 +203,7 @@ def _addresses(
     schedule: ReminderSchedule, assessment: Assessment, members: Workspace
 ) -> ReminderAddresses:
     explicit = assessment.explicit
-    choices = stored_choices(schedule, explicit)
+    choices = stored_choices(schedule)
     typed = candidates([row.address for row in explicit], explicit, members, choices)
     holding = {recipient_key(member.address): member.membership for member in members.members}
     return ReminderAddresses(

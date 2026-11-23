@@ -344,7 +344,7 @@ def configure_reminders(
         members = workspace(tenant_id)
         _check_member_choices(member_roles or (), members)
         current = len(effective(stored.include_workspace_members, explicit, members))
-        planned = planned_recipients(tenant_id, explicit, submitted.recipients)
+        planned = planned_recipients(members, explicit, submitted.recipients)
         schedule.include_workspace_members = include_workspace_members
         unchanged_pause = not enabled and replace(submitted, enabled=stored.enabled) == stored
         addresses = effective(include_workspace_members, planned, members)

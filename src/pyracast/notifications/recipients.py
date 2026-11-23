@@ -1,8 +1,7 @@
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
-from allauth.account.models import EmailAddress
 from django.db.models import Case, F, Q, Value, When
 
 from pyracast.accounts.models import Membership, WorkspaceRole
@@ -40,67 +39,109 @@ class Explicit:
 
 
 @dataclass(frozen=True)
-class Member:
+class Person:
+    """One membership with its account: `verified` holds the keys of its verified addresses."""
+
     membership: int
-    address: str
     administrator: bool
+    active: bool
+    primary: str
+    verified: frozenset[str]
+
+
+@dataclass(frozen=True)
+class Member:
+    """A verified primary address of active members, in the spelling of the lowest membership,
+    with every membership whose address has its key, ascending."""
+
+    address: str
+    memberships: tuple[int, ...]
+    administrator: bool
+
+    @property
+    def membership(self) -> int:
+        return self.memberships[0]
 
 
 @dataclass(frozen=True)
 class Workspace:
-    """Active memberships, and one member per verified primary address."""
+    """Active memberships, the members of each address by key, and who holds each address:
+    the memberships, active or not, with the address as a verified or primary one."""
 
     active: frozenset[int]
-    members: tuple[Member, ...]
+    by_key: Mapping[str, Member]
+    holders: Mapping[str, frozenset[int]]
+
+    @property
+    def members(self) -> tuple[Member, ...]:
+        return tuple(self.by_key.values())
 
     @property
     def addresses(self) -> tuple[str, ...]:
-        return tuple(member.address for member in self.members)
+        return tuple(member.address for member in self.by_key.values())
+
+    def memberships(self, address: str) -> frozenset[int]:
+        found = self.by_key.get(recipient_key(address))
+        return frozenset(found.memberships) if found else frozenset()
 
 
-NO_MEMBERS = Workspace(frozenset(), ())
-MemberRow = tuple[int, int, str, str]
+NO_MEMBERS = Workspace(frozenset(), {}, {})
 
 
 def workspace(tenant_id: int, *, leaving: int | None = None) -> Workspace:
-    """Active memberships and the verified primary addresses of their members, read now."""
-    memberships = Membership.objects.filter(tenant_id=tenant_id, user__is_active=True)
-    if leaving is not None:
-        memberships = memberships.exclude(pk=leaving)
-    members = list(memberships.order_by("pk").values_list("pk", "user_id", "user__email", "role"))
-    return _workspace(members, _verified([tenant_id]))
+    return workspaces([tenant_id], leaving=leaving)[tenant_id]
 
 
-def workspaces(tenant_ids: Iterable[int]) -> dict[int, Workspace]:
-    """`workspace` of several tenants in two queries."""
+def workspaces(tenant_ids: Iterable[int], *, leaving: int | None = None) -> dict[int, Workspace]:
+    """Every membership of the workspaces with its account read in one statement. An address
+    confirmation locks the account and not the workspace, so statements read apart could mix
+    two states of one person; and callers hold the workspace, which may not wait for a person."""
     ids = set(tenant_ids)
-    found: dict[int, list[MemberRow]] = {pk: [] for pk in ids}
-    for tenant_id, pk, user_id, email, role in (
-        Membership.objects.filter(tenant_id__in=ids, user__is_active=True)
-        .order_by("pk")
-        .values_list("tenant_id", "pk", "user_id", "user__email", "role")
+    rows = Membership.objects.filter(tenant_id__in=ids)
+    if leaving is not None:
+        rows = rows.exclude(pk=leaving)
+    people: dict[int, dict[int, Person]] = {pk: {} for pk in ids}
+    for tenant_id, pk, role, active, primary, address, verified in rows.order_by(
+        "pk", "user__emailaddress__pk"
+    ).values_list(
+        "tenant_id",
+        "pk",
+        "role",
+        "user__is_active",
+        "user__email",
+        "user__emailaddress__email",
+        "user__emailaddress__verified",
     ):
-        found[tenant_id].append((pk, user_id, email, role))
-    verified = _verified(ids)
-    return {tenant_id: _workspace(members, verified) for tenant_id, members in found.items()}
+        known = people[tenant_id].get(pk) or Person(
+            pk, role == WorkspaceRole.ADMIN, active, primary, frozenset()
+        )
+        if verified:
+            known = replace(known, verified=known.verified | {recipient_key(address)})
+        people[tenant_id][pk] = known
+    return {tenant_id: _workspace(list(found.values())) for tenant_id, found in people.items()}
 
 
-def _verified(tenant_ids: Iterable[int]) -> set[tuple[int, str]]:
-    return {
-        (user_id, recipient_key(email))
-        for user_id, email in EmailAddress.objects.filter(
-            verified=True, user__membership__tenant_id__in=tenant_ids
-        ).values_list("user_id", "email")
-    }
-
-
-def _workspace(members: Sequence[MemberRow], verified: set[tuple[int, str]]) -> Workspace:
-    found: dict[str, Member] = {}
-    for pk, user_id, email, role in members:
-        key = recipient_key(email)
-        if (user_id, key) in verified:
-            found.setdefault(key, Member(pk, email.strip(), role == WorkspaceRole.ADMIN))
-    return Workspace(frozenset(pk for pk, _, _, _ in members), tuple(found.values()))
+def _workspace(people: Sequence[Person]) -> Workspace:
+    grouped: dict[str, list[Person]] = {}
+    holders: dict[str, set[int]] = defaultdict(set)
+    for person in people:
+        key = recipient_key(person.primary)
+        if person.active and key in person.verified:
+            grouped.setdefault(key, []).append(person)
+        for held in {key, *person.verified} - {""}:
+            holders[held].add(person.membership)
+    return Workspace(
+        frozenset(person.membership for person in people if person.active),
+        {
+            key: Member(
+                found[0].primary.strip(),
+                tuple(person.membership for person in found),
+                any(person.administrator for person in found),
+            )
+            for key, found in grouped.items()
+        },
+        {key: frozenset(found) for key, found in holders.items()},
+    )
 
 
 def grouped_recipients(
@@ -171,21 +212,15 @@ def effective_recipients(schedule: ReminderSchedule) -> list[str]:
 class Choices:
     typed: dict[str, RecipientRole]
     chosen: dict[int, RecipientRole]
-    holders: dict[str, set[int]]
 
 
-def stored_choices(schedule: ReminderSchedule, explicit: Sequence[Explicit]) -> Choices:
-    """The typed rows' choices by key, the members' choices by membership and, when a typed row
-    is tied, who holds each address now."""
+def stored_choices(schedule: ReminderSchedule) -> Choices:
+    """The typed rows' choices by key and the members' choices by membership."""
     typed = ReminderRecipient.objects.filter(schedule_id=schedule.pk).exclude(role="")
     chosen = ReminderMemberRole.objects.filter(schedule_id=schedule.pk)
-    holders = (
-        address_holders(schedule.region.tenant_id) if any(row.ties for row in explicit) else {}
-    )
     return Choices(
         {key: RecipientRole(role) for key, role in typed.values_list("key", "role")},
         {pk: RecipientRole(role) for pk, role in chosen.values_list("membership_id", "role")},
-        holders,
     )
 
 
@@ -195,11 +230,10 @@ def candidates(
     """A typed row is settled while untied or while an active member it is tied to holds its
     address; the choice of an unsettled row counts only when it hides."""
     rows = {recipient_key(row.address): row for row in explicit}
-    holding = {recipient_key(member.address): member for member in members.members}
     found = []
     for address in addresses:
         key = recipient_key(address)
-        row, member = rows.get(key), holding.get(key)
+        row, member = rows.get(key), members.by_key.get(key)
         found.append(
             Candidate(
                 address,
@@ -209,7 +243,7 @@ def candidates(
                 typed=choices.typed.get(key) if row else None,
                 settled=row is None
                 or not row.ties
-                or bool(row.ties & members.active & choices.holders.get(key, set())),
+                or bool(row.ties & members.active & members.holders.get(key, frozenset())),
             )
         )
     return found
@@ -227,7 +261,7 @@ def placements(
             addresses,
             resolved.explicit,
             resolved.members,
-            stored_choices(schedule, resolved.explicit),
+            stored_choices(schedule),
         )
     )
     return roles(
@@ -237,35 +271,17 @@ def placements(
     )
 
 
-def address_holders(tenant_id: int) -> dict[str, set[int]]:
-    """The memberships, active or not, whose member holds each address now."""
-    memberships = dict(Membership.objects.filter(tenant_id=tenant_id).values_list("user_id", "pk"))
-    addresses = list(
-        EmailAddress.objects.filter(user_id__in=memberships, verified=True).values_list(
-            "user_id", "email"
-        )
-    )
-    addresses.extend(
-        Membership.objects.filter(tenant_id=tenant_id).values_list("user_id", "user__email")
-    )
-    holders: dict[str, set[int]] = defaultdict(set)
-    for user_id, address in addresses:
-        if key := recipient_key(address):
-            holders[key].add(memberships[user_id])
-    return holders
-
-
 def planned_recipients(
-    tenant_id: int, stored: Sequence[Explicit], addresses: Sequence[str]
+    members: Workspace, stored: Sequence[Explicit], addresses: Sequence[str]
 ) -> list[Explicit]:
     """Each address keeps its ties and gains those of the members who hold it now, so an email
     change of its member never makes it an external address."""
     ties = {recipient_key(row.address): row.ties for row in stored}
-    holders = address_holders(tenant_id)
     return [
         Explicit(
             address,
-            ties.get(key := recipient_key(address), frozenset()) | holders.get(key, set()),
+            ties.get(key := recipient_key(address), frozenset())
+            | members.holders.get(key, frozenset()),
         )
         for address in addresses
     ]

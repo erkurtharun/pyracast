@@ -8,6 +8,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from pyracast.db import read_snapshot
 from pyracast.notifications.operations import configure_reminders, get_reminder_schedule
 from pyracast.notifications.overview import reminder_overview
 from pyracast.notifications.serializers import ReminderInput, ReminderOutput
@@ -17,10 +18,11 @@ class RemindersView(APIView):
     @extend_schema(responses=ReminderOutput)
     def get(self, request: Request, tenant_id: int, region_id: int) -> Response:
         now = timezone.now()
-        schedule, administrator = get_reminder_schedule(
-            cast(User, request.user), tenant_id, region_id, now
-        )
-        overview = reminder_overview(schedule, now, administrator=administrator)
+        with read_snapshot():
+            schedule, administrator = get_reminder_schedule(
+                cast(User, request.user), tenant_id, region_id, now
+            )
+            overview = reminder_overview(schedule, now, administrator=administrator)
         return Response(ReminderOutput(overview).data)
 
     @extend_schema(request=ReminderInput, responses=ReminderOutput)

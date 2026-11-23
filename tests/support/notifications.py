@@ -1,5 +1,6 @@
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from email import policy
 from email.message import EmailMessage as ParsedMessage
@@ -10,7 +11,8 @@ from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
 from django.core.mail import EmailMessage
-from django.test import override_settings
+from django.db import connection
+from django.test import Client, override_settings
 from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -38,6 +40,7 @@ from pyracast.notifications.recipients import recipient_key
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.notifications.serializers import ReminderOutput
 from tests.smtp_server import Script, loopback_smtp
+from tests.support.auth_lifecycle import PASSWORD, mailed_code, submit
 from tests.support.domain import NOW, System, make_system
 
 SLOT = NOW + timedelta(days=1) - timedelta(hours=6)
@@ -224,3 +227,53 @@ def parsed(raw: bytes) -> ParsedMessage:
     message = BytesParser(policy=policy.default).parsebytes(raw)
     assert isinstance(message, ParsedMessage)
     return message
+
+
+LOCAL_MAIL = {"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
+
+
+def pending_address_change(user: User, address: str) -> Callable[[], None]:
+    """Asks over HTTP to change `user`'s address to `address`; the returned call confirms it
+    through the verification endpoint."""
+    user.set_password(PASSWORD)
+    user.save(update_fields=["password"])
+    client = Client(enforce_csrf_checks=True)
+    with override_settings(MAILERS=LOCAL_MAIL):
+        login = {"email": user.email, "password": PASSWORD}
+        assert submit(client, "auth/login", login).status_code == 200
+        assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
+        assert submit(client, "account/email", {"email": address}).status_code == 200
+        key = mailed_code()
+
+    def confirm() -> None:
+        assert submit(client, "auth/email/verify", {"key": key}).status_code == 200
+
+    return confirm
+
+
+@dataclass
+class StatementHook:
+    """Runs `action` once, right after the first statement on this connection that names
+    `table` once `armed`, letting `skip` such statements pass first."""
+
+    table: str
+    action: Callable[[], object]
+    armed: bool = True
+    skip: int = 0
+    fired: bool = False
+
+
+@contextmanager
+def after_statement(hook: StatementHook) -> Iterator[StatementHook]:
+    def run(execute: Callable[..., Any], sql: str, *args: Any) -> Any:
+        result = execute(sql, *args)
+        if hook.armed and not hook.fired and f'"{hook.table}"' in sql:
+            if hook.skip:
+                hook.skip -= 1
+            else:
+                hook.fired = True
+                hook.action()
+        return result
+
+    with connection.execute_wrapper(run):
+        yield hook

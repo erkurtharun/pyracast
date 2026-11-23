@@ -1,5 +1,7 @@
 import json
 import time
+from datetime import timedelta
+from itertools import count
 from typing import Any
 
 import pytest
@@ -9,7 +11,8 @@ from django.test import Client
 from django.utils import timezone
 
 from pyracast import erasure
-from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
+from pyracast.accounts.invitations import accept_workspace_invitation, invitation_digest
+from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
 from pyracast.accounts.operations import reassign_workspace_admin, remove_workspace_member
 from pyracast.erasure import erase_account
 from pyracast.errors import ConflictError
@@ -26,11 +29,18 @@ from pyracast.notifications.models import (
 from pyracast.notifications.operations import MemberChoice, configure_reminders
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.models import AuditEvent
-from tests.support.concurrency import paused_in
+from tests.support.concurrency import committed_elsewhere, paused_in
 from tests.support.domain import NOW, System, make_system
 from tests.support.notification_groups import member
 from tests.support.notification_transmission import replying
-from tests.support.notifications import SLOT, chosen
+from tests.support.notifications import (
+    SLOT,
+    StatementHook,
+    after_statement,
+    chosen,
+    pending_address_change,
+    ties,
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -477,3 +487,111 @@ def test_a_save_racing_a_member_deletion_ends_without_the_members_choice(
     assert list(ReminderMemberRole.objects.values_list("membership__user__username", "role")) == [
         ("bob@example.com", "cc")
     ]
+
+
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+def test_an_address_confirmed_after_a_saves_read_of_people_leaves_the_save_one_picture() -> None:
+    system, _, bob = workspace()
+    confirm = pending_address_change(bob, "bob.new@example.com")
+    hook = StatementHook("account_emailaddress", lambda: committed_elsewhere(confirm))
+
+    with after_statement(hook):
+        schedule = configure_reminders(
+            system.member,
+            system.tenant.pk,
+            system.region.pk,
+            enabled=True,
+            recipients=["bob@example.com"],
+            include_workspace_members=True,
+            times=["10:00"],
+            language="en",
+            now=NOW,
+            hide_recipients=False,
+            member_roles=[MemberChoice(membership(bob), "bob@example.com", CC)],
+        )
+
+    assert hook.fired
+    assert User.objects.get(pk=bob.pk).email == "bob.new@example.com"
+    assert ties(schedule) == {"bob@example.com": [membership(bob)]}
+    assert stored_roles(system)[1] == {"bob.new@example.com": "cc"}
+    assert events(system) == [
+        {"schedule_revision": 1, "visible_recipients": 3, "visible_outside": 0}
+    ]
+
+
+def test_a_get_answers_the_state_its_membership_check_read() -> None:
+    system, alice, _ = workspace()
+    put(system)
+
+    def reassign_and_save() -> None:
+        committed_elsewhere(
+            lambda: reassign_workspace_admin(
+                system.admin, system.tenant.pk, alice.pk, expected_admin_id=system.member.pk
+            )
+        )
+        committed_elsewhere(
+            lambda: configure_reminders(
+                alice,
+                system.tenant.pk,
+                system.region.pk,
+                enabled=True,
+                recipients=["boss@example.com", "unknown@example.com"],
+                include_workspace_members=True,
+                times=["10:00"],
+                language="en",
+                now=NOW,
+            )
+        )
+
+    # The route's permission reads the membership first; the view checks it again.
+    hook = StatementHook("accounts_membership", reassign_and_save, skip=1)
+
+    with after_statement(hook):
+        body = client_for(system.member).get(url(system)).json()
+
+    assert hook.fired
+    assert "unknown@example.com" not in json.dumps(body)
+    assert body["addresses"]["recipients"] == ["boss@example.com", "outside@example.com"]
+    assert client_for(system.member).get(url(system)).json()["addresses"] is None
+
+
+def invited(system: System, number: int) -> tuple[User, str]:
+    guest = User.objects.create(username=f"guest{number}", email=f"guest{number}@example.com")
+    EmailAddress.objects.create(user=guest, email=guest.email, verified=True, primary=True)
+    token = f"guest-token-{number}"
+    WorkspaceInvitation.objects.create(
+        tenant=system.tenant,
+        email=guest.email,
+        token_hash=invitation_digest(token),
+        created_by=system.member,
+        expires_at=NOW + timedelta(days=7),
+    )
+    return guest, token
+
+
+def joining(guest: User, token: str) -> Any:
+    return lambda: committed_elsewhere(lambda: accept_workspace_invitation(guest, token))
+
+
+def test_a_member_who_joins_during_a_get_is_wholly_in_its_answer_or_wholly_absent() -> None:
+    system, alice, _ = workspace()
+    put(system, recipients=[alice.email, "outside@example.com"])
+    client = Client(raise_request_exception=False)
+    client.force_login(system.member)
+
+    for passed in count():
+        guest, token = invited(system, passed)
+        hook = StatementHook("accounts_membership", joining(guest, token), skip=passed)
+        with after_statement(hook):
+            response = client.get(url(system))
+        if not hook.fired:
+            break
+        assert response.status_code == 200, (passed, response.content)
+        body = response.json()
+        listed = body["addresses"]["workspace_recipients"]
+        assert (guest.email in listed) == (
+            guest.email in [row["address"] for row in body["addresses"]["members"]]
+        )
+        assert body["workspace_member_count"] == len(listed)
+
+    assert passed >= 2

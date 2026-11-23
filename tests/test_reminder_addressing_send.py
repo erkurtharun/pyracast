@@ -12,6 +12,7 @@ from django.test import override_settings
 
 from pyracast.accounts.models import Membership
 from pyracast.accounts.operations import reassign_workspace_admin
+from pyracast.mail import smtp
 from pyracast.mail.errors import NotSentError
 from pyracast.mail.gmail import SEND_SCOPE, TOKEN_URL
 from pyracast.notifications.jobs import process_notification
@@ -27,10 +28,20 @@ from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.recipients import placements, resolve
 from pyracast.notifications.scheduler import enqueue_due
 from tests.smtp_server import Script
+from tests.support.concurrency import committed_elsewhere
 from tests.support.domain import NOW, System, make_system
 from tests.support.notification_groups import group, member
 from tests.support.notification_transmission import OpeningBackend, replying
-from tests.support.notifications import SENDER, SLOT, chosen, parsed, smtp_wire
+from tests.support.notifications import (
+    SENDER,
+    SLOT,
+    StatementHook,
+    after_statement,
+    chosen,
+    parsed,
+    pending_address_change,
+    smtp_wire,
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -84,6 +95,22 @@ def visible_group() -> tuple[System, ReminderSchedule]:
 
 def user(address: str) -> User:
     return User.objects.get(username=address)
+
+
+def bound(schedule: ReminderSchedule, address: str, role: RecipientRole, *members: User) -> None:
+    ReminderRecipient.objects.filter(schedule=schedule, key=address).update(
+        role=role,
+        role_members=sorted(
+            Membership.objects.get(tenant_id=schedule.region.tenant_id, user=found).pk
+            for found in members
+        ),
+    )
+
+
+def moved(account: User, address: str) -> None:
+    account.email = address
+    account.save(update_fields=["email"])
+    EmailAddress.objects.filter(user=account).update(email=address)
 
 
 def delivered_roles(delivery_id: int) -> list[tuple[str, str]]:
@@ -378,3 +405,34 @@ def test_a_reassigned_administrator_and_a_joined_member_change_the_next_send() -
 
     assert headers(sent_on(1)) == (["alice@example.com"], [ADMIN, "carol@example.com"], [])
     assert ReminderSchedule.objects.get(pk=schedule.pk).revision == schedule.revision
+
+
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+def test_an_address_confirmed_after_the_markers_read_of_people_leaves_that_attempt_hidden(
+    smtp_wire: Script, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system, (alice,) = workspace_with_members("alice@example.com")
+    schedule = visible(group(system, ["alice@example.com"]))
+    bound(schedule, "alice@example.com", TO, alice)
+    chosen(schedule, alice, BCC)
+    moved(alice, "alice.b@example.com")
+    confirm = pending_address_change(alice, "alice@example.com")
+    hook = StatementHook("accounts_membership", lambda: committed_elsewhere(confirm), armed=False)
+    opening = smtp.EmailBackend.open
+
+    def arm(backend: smtp.EmailBackend) -> bool | None:
+        hook.armed = True
+        return opening(backend)
+
+    monkeypatch.setattr(smtp.EmailBackend, "open", arm)
+
+    with after_statement(hook):
+        delivery_id = send_on()
+
+    assert hook.fired
+    assert User.objects.get(pk=alice.pk).email == "alice@example.com"
+    (transaction,) = smtp_wire.transactions
+    assert "alice@example.com" in transaction.recipients
+    assert parsed(transaction.data)["To"] == ADMIN
+    assert b"alice@example.com" not in transaction.data
+    assert ("alice@example.com", BCC) in delivered_roles(delivery_id)
