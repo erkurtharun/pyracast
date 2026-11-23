@@ -1014,6 +1014,7 @@ erDiagram
         text key
         bigint schedule_id FK "references notifications_reminderschedule.id"
         varchar_3 role
+        bigint_array role_members
     }
     notifications_reminderrecipienttie {
         bigint id PK
@@ -1031,6 +1032,7 @@ erDiagram
         bigint region_id FK "references regions_region.id"
         integer revision
         boolean hide_recipients
+        boolean hidden_by_departure
     }
     notifications_notificationdelivery ||--o{ notifications_deliveryrecipient : "delivery_id"
     connections_sitebinding ||--o{ notifications_notificationdelivery : "binding_id"
@@ -1090,10 +1092,12 @@ erDiagram
 
 - `remindermemberrole_role_chk`: `CHECK ("role" IN ('to', 'cc', 'bcc'))`
 - `remindermemberrole_schedule_membership_uniq`: `UNIQUE ("schedule_id", "membership_id")`
+- `remindermemberrole_workspace_guard`: `TRIGGER BEFORE INSERT OR UPDATE FOR EACH ROW EXECUTE FUNCTION guard_remindermemberrole_workspace()`
 
 #### `notifications_reminderrecipient`
 
 - `reminderrecipient_role_chk`: `CHECK ("role" IN ('', 'to', 'cc', 'bcc'))`
+- `reminderrecipient_role_members_chk`: `CHECK ((cardinality("role_members") = 0 OR (array_ndims("role_members") = 1 AND (1 <= ALL("role_members")) IS TRUE AND "role" IN ('to', 'cc'))))`
 - `reminderrecipient_schedule_key_uniq`: `UNIQUE ("schedule_id", "key")`
 
 #### `notifications_reminderrecipienttie`
@@ -1103,6 +1107,7 @@ erDiagram
 
 #### `notifications_reminderschedule`
 
+- `reminderschedule_hidden_by_departure_chk`: `CHECK ((NOT "hidden_by_departure" OR "hide_recipients"))`
 - `reminderschedule_language_chk`: `CHECK ("language" IN ('en', 'tr'))`
 - `reminderschedule_region_uniq`: `UNIQUE ("region_id")`
 - `reminderschedule_times_chk`: `CHECK ((jsonb_typeof("times") = 'array' AND NOT (jsonb_path_exists("times", 'strict $[*] ? (@.type() != "string" || !(@ like_regex "^([01][0-9]|2[0-3]):[0-5][0-9]$"))'::jsonpath, '{}', true))))`

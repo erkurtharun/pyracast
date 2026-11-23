@@ -1,10 +1,19 @@
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from email import policy
+from email.message import EmailMessage as ParsedMessage
+from email.parser import BytesParser
 from io import BytesIO
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.core.mail import EmailMessage
+from django.db import connection
+from django.test import Client, override_settings
 from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -31,9 +40,12 @@ from pyracast.notifications.overview import reminder_overview
 from pyracast.notifications.recipients import recipient_key
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.notifications.serializers import ReminderOutput
+from tests.smtp_server import Script, loopback_smtp
+from tests.support.auth_lifecycle import PASSWORD, mailed_code, submit
 from tests.support.domain import NOW, System, make_system
 
 SLOT = NOW + timedelta(days=1) - timedelta(hours=6)
+SENDER = "Pyracast <reminders@example.com>"
 
 
 def schedule_addresses(schedule: ReminderSchedule) -> list[str]:
@@ -65,6 +77,12 @@ def store(
         )
         for membership_id in (tied or {}).get(row.key, []):
             ReminderRecipientTie.objects.create(recipient=row, membership_id=membership_id)
+
+
+def moved(account: User, address: str) -> None:
+    account.email = address
+    account.save(update_fields=["email"])
+    EmailAddress.objects.filter(user=account).update(email=address)
 
 
 def chosen(schedule: ReminderSchedule, user: User, role: RecipientRole) -> ReminderMemberRole:
@@ -192,3 +210,75 @@ def reminder_schedule_payload(
     schedule: ReminderSchedule, now: datetime, *, administrator: bool = True
 ) -> dict[str, Any]:
     return dict(ReminderOutput(reminder_overview(schedule, now, administrator=administrator)).data)
+
+
+@contextmanager
+def smtp_wire() -> Iterator[Script]:
+    script = Script()
+    with (
+        loopback_smtp(script) as port,
+        override_settings(
+            DEFAULT_FROM_EMAIL=SENDER,
+            MAILERS={
+                "default": {
+                    "BACKEND": "pyracast.mail.smtp.EmailBackend",
+                    "OPTIONS": {"host": "127.0.0.1", "port": port, "use_tls": False, "timeout": 5},
+                }
+            },
+        ),
+    ):
+        yield script
+
+
+def parsed(raw: bytes) -> ParsedMessage:
+    message = BytesParser(policy=policy.default).parsebytes(raw)
+    assert isinstance(message, ParsedMessage)
+    return message
+
+
+LOCAL_MAIL = {"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
+
+
+def pending_address_change(user: User, address: str) -> Callable[[], None]:
+    """Requests the change over HTTP; the returned call confirms it at the verification endpoint."""
+    user.set_password(PASSWORD)
+    user.save(update_fields=["password"])
+    client = Client(enforce_csrf_checks=True)
+    with override_settings(MAILERS=LOCAL_MAIL):
+        login = {"email": user.email, "password": PASSWORD}
+        assert submit(client, "auth/login", login).status_code == 200
+        assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
+        assert submit(client, "account/email", {"email": address}).status_code == 200
+        key = mailed_code()
+
+    def confirm() -> None:
+        assert submit(client, "auth/email/verify", {"key": key}).status_code == 200
+
+    return confirm
+
+
+@dataclass
+class StatementHook:
+    """Runs `action` once, after the first armed statement naming `table`, past `skip` of them."""
+
+    table: str
+    action: Callable[[], object]
+    armed: bool = True
+    skip: int = 0
+    fired: bool = False
+
+
+@contextmanager
+def after_statement(hook: StatementHook) -> Iterator[StatementHook]:
+    def run(execute: Callable[..., Any], sql: str, *args: Any) -> Any:
+        result = execute(sql, *args)
+        if hook.armed and not hook.fired and f'"{hook.table}"' in sql:
+            if hook.skip:
+                hook.skip -= 1
+            else:
+                hook.fired = True
+                hook.action()
+        return result
+
+    with connection.execute_wrapper(run):
+        yield hook

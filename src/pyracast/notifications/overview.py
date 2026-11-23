@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
 
-from pyracast.notifications.addressing import explicit_role
+from pyracast.notifications.addressing import explicit_role, sent_hidden
 from pyracast.notifications.eligibility import notifiable_regions
 from pyracast.notifications.models import (
     NotificationDelivery,
@@ -21,7 +21,8 @@ from pyracast.notifications.recipients import (
     delivery_roles,
     effective,
     explicit_recipients,
-    recipient_key,
+    mailbox_key,
+    placements,
     stored_choices,
     workspace,
 )
@@ -42,21 +43,22 @@ class MemberKind(StrEnum):
 
 @dataclass(frozen=True)
 class MemberAddress:
-    membership: int
+    memberships: list[int]
     address: str
     kind: MemberKind
     role: RecipientRole | None
+    placement: RecipientRole
 
 
 @dataclass(frozen=True)
 class AddedAddress:
-    """`role` is the explicit choice the rule applies to the address, `membership` the active
-    member whose verified primary address it is."""
+    """`role` is the explicit choice the rule gives the address, `null` while none applies."""
 
     address: str
     role: RecipientRole | None
+    placement: RecipientRole
     eligible: bool
-    membership: int | None
+    memberships: list[int]
 
 
 @dataclass(frozen=True)
@@ -98,6 +100,7 @@ class ReminderOverview:
     revision: int
     include_workspace_members: bool
     hide_recipients: bool
+    hidden_by_departure: bool | None
     language: str
     times: list[str]
     recipient_limit: int
@@ -203,18 +206,27 @@ def _addresses(
     schedule: ReminderSchedule, assessment: Assessment, members: Workspace
 ) -> ReminderAddresses:
     explicit = assessment.explicit
-    choices = stored_choices(schedule, explicit)
-    typed = candidates([row.address for row in explicit], explicit, members, choices)
-    holding = {recipient_key(member.address): member.membership for member in members.members}
+    choices = stored_choices(schedule)
+    typed = candidates([row.address for row in explicit], members, choices)
+    sent = assessment.recipients
+    placed = {
+        mailbox_key(address): role
+        for address, role in zip(sent, placements(schedule, members, sent, choices), strict=True)
+    }
+
+    def placement(address: str) -> RecipientRole:
+        return placed.get(mailbox_key(address), RecipientRole.BCC)
+
     return ReminderAddresses(
         [row.address for row in explicit],
         list(members.addresses),
         [
             MemberAddress(
-                member.membership,
+                list(member.memberships),
                 member.address,
                 MemberKind.ADMINISTRATOR if member.administrator else MemberKind.MEMBER,
-                choices.chosen.get(member.membership),
+                choices.of(member),
+                placement(member.address),
             )
             for member in members.members
         ],
@@ -222,8 +234,9 @@ def _addresses(
             AddedAddress(
                 row.address,
                 explicit_role(candidate),
+                placement(row.address),
                 not row.ties or bool(members.active & row.ties),
-                holding.get(recipient_key(row.address)),
+                sorted(members.memberships(row.address)),
             )
             for row, candidate in zip(explicit, typed, strict=True)
         ],
@@ -250,7 +263,8 @@ def reminder_overview(
         state=assessment.state,
         revision=schedule.revision,
         include_workspace_members=schedule.include_workspace_members,
-        hide_recipients=schedule.hide_recipients and schedule.pk is not None,
+        hide_recipients=sent_hidden(schedule.hide_recipients) and schedule.pk is not None,
+        hidden_by_departure=schedule.hidden_by_departure if administrator else None,
         language=schedule.language,
         times=list(schedule.times),
         recipient_limit=limit,

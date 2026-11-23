@@ -1,6 +1,7 @@
 import uuid
 
 from django.conf import settings
+from django.contrib.postgres.fields import ArrayField
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils.translation import gettext_lazy
@@ -51,6 +52,7 @@ class ReminderSchedule(models.Model):
     enabled = models.BooleanField(default=False)
     include_workspace_members = models.BooleanField(default=False)
     hide_recipients = models.BooleanField(default=True)
+    hidden_by_departure = models.BooleanField(default=False)
     times = models.JSONField(default=list)
     effective_from = models.DateTimeField()
     language = models.CharField(max_length=2, choices=Language, default=Language.EN)
@@ -61,10 +63,30 @@ class ReminderSchedule(models.Model):
             models.UniqueConstraint(fields=("region",), name="%(class)s_region_uniq"),
             choices_check("language", Language),
             json_shape_check("times", "array", TIME_ITEMS),
+            models.CheckConstraint(
+                condition=models.Q(hidden_by_departure=False) | models.Q(hide_recipients=True),
+                name="%(class)s_hidden_by_departure_chk",
+            ),
         )
 
     def __str__(self) -> str:
         return f"Reminders of region {self.region_id}"
+
+
+class Cardinality(models.Func):
+    function = "cardinality"
+    output_field = models.IntegerField()
+
+
+class Dimensions(models.Func):
+    function = "array_ndims"
+    output_field = models.IntegerField()
+
+
+class AllPositive(models.Func):
+    # A null element makes the comparison unknown, which IS TRUE refuses like an id below 1.
+    template = "(1 <= ALL(%(expressions)s)) IS TRUE"
+    output_field = models.BooleanField()
 
 
 class ReminderRecipient(models.Model):
@@ -75,12 +97,23 @@ class ReminderRecipient(models.Model):
     # `recipients.recipient_key(address)`: the identity used for uniqueness, removal and counts.
     key = models.TextField()
     role = models.CharField(max_length=3, choices=RecipientRole, blank=True, default="")
+    # Plain membership ids, like the ties: the address's members when its To or Cc was chosen.
+    role_members = ArrayField(models.BigIntegerField(), blank=True, default=list)
 
     class Meta:
         ordering = ("pk",)
         constraints = (
             models.UniqueConstraint(fields=("schedule", "key"), name="%(class)s_schedule_key_uniq"),
             choices_check("role", RecipientRole, blank=True),
+            models.CheckConstraint(
+                condition=models.Q(models.lookups.Exact(Cardinality("role_members"), 0))
+                | models.Q(
+                    models.lookups.Exact(Dimensions("role_members"), 1),
+                    AllPositive("role_members"),
+                    role__in=[RecipientRole.TO, RecipientRole.CC],
+                ),
+                name="%(class)s_role_members_chk",
+            ),
         )
 
     def __str__(self) -> str:

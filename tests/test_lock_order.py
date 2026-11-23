@@ -9,19 +9,27 @@ import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.db import connection
+from django.test import Client
 
 from pyracast.accounts.invitations import accept_workspace_invitation, invitation_digest
 from pyracast.accounts.models import Membership, WorkspaceInvitation
 from pyracast.accounts.operations import remove_workspace_member
 from pyracast.erasure import erase_account
 from pyracast.metering.operations import disconnect_epias
+from pyracast.notifications.jobs import process_notification
+from pyracast.notifications.models import RecipientRole, ReminderRecipient, ReminderSchedule
+from pyracast.notifications.operations import MemberChoice, configure_reminders
+from pyracast.notifications.scheduler import enqueue_due
 from pyracast.plants import training
 from pyracast.plants.automation import prepare_due_calibrations, set_calibration_automation
 from pyracast.plants.models import CalibrationRun, Plant
 from pyracast.plants.preparation import prepare_requested_calibrations
 from tests.support.calibration_automation import evaluated_run, import_fit_history
-from tests.support.domain import NOW, System
+from tests.support.domain import NOW, System, make_system
 from tests.support.metering import connect, connected
+from tests.support.notification_groups import group, member
+from tests.support.notification_transmission import replying
+from tests.support.notifications import SLOT, chosen
 from tests.support.plant_operations import request_run
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -198,3 +206,100 @@ def test_a_transaction_locks_a_person_before_any_workspace_row(
     assert PERSON in order.locked
     assert order.locked & WORKSPACE
     assert order.late == []
+
+
+def reminder_save(system: System) -> Callable[[], object]:
+    membership = Membership.objects.get(user=system.member).pk
+    return lambda: configure_reminders(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        enabled=True,
+        recipients=["ops@example.com"],
+        include_workspace_members=True,
+        times=["10:00"],
+        language="en",
+        now=NOW,
+        hide_recipients=False,
+        member_roles=[MemberChoice(frozenset({membership}), system.member.email, RecipientRole.CC)],
+    )
+
+
+def reminder_send(system: System) -> Callable[[], object]:
+    schedule = group(system, ["ops@example.com"])
+    ReminderSchedule.objects.filter(pk=schedule.pk).update(hide_recipients=False)
+    ReminderRecipient.objects.filter(schedule=schedule).update(role=RecipientRole.TO)
+    chosen(schedule, User.objects.get(username="alice@example.com"), RecipientRole.BCC)
+    (delivery_id,) = enqueue_due(SLOT)
+
+    def send() -> object:
+        with replying(lambda message: None) as sent:
+            assert process_notification(delivery_id, SLOT)
+        (message,) = sent
+        assert (message.to, message.bcc) == (
+            ["ops@example.com", "admin@example.com"],
+            ["alice@example.com"],
+        )
+        return message
+
+    return send
+
+
+def reminder_read(system: System) -> Callable[[], object]:
+    group(system, ["ops@example.com"])
+    client = Client()
+    client.force_login(system.member)
+    return lambda: client.get(
+        f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/"
+    )
+
+
+def reminder_preview(system: System) -> Callable[[], object]:
+    group(system, ["ops@example.com"])
+    alice = Membership.objects.get(user__username="alice@example.com").pk
+    client = Client()
+    client.force_login(system.member)
+    body = {
+        "enabled": True,
+        "include_workspace_members": True,
+        "language": "en",
+        "recipients": ["ops@example.com"],
+        "times": ["10:00"],
+        "expected_revision": 1,
+        "hide_recipients": False,
+        "address_roles": [{"address": "ops@example.com", "role": "to", "memberships": []}],
+        "member_roles": [{"memberships": [alice], "address": "alice@example.com", "role": "bcc"}],
+    }
+
+    def previewed() -> object:
+        response = client.post(
+            f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/preview/",
+            body,
+            content_type="application/json",
+        )
+        assert response.status_code == 200, response.content
+        return response
+
+    return previewed
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [reminder_save, reminder_send, reminder_read, reminder_preview],
+    ids=lambda op: op.__name__,
+)
+def test_reminders_lock_no_person_after_a_workspace_row(
+    operation: Callable[[System], Callable[[], object]],
+) -> None:
+    system = make_system(approved=True)
+    system.member.email = "admin@example.com"
+    system.member.save(update_fields=["email"])
+    EmailAddress.objects.create(user=system.member, email=system.member.email, verified=True)
+    member(system, "alice@example.com")
+    run = operation(system)
+
+    with lock_order() as order:
+        run()
+
+    assert order.late == []
+    assert ("accounts_tenant" in order.locked) == (operation is not reminder_read)

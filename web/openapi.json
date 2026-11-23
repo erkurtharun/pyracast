@@ -5048,6 +5048,137 @@
                         },
                         "description": ""
                     },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "description": "The request input was refused.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Sign-in is required.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Access was refused.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "The addressed item or page does not exist.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "415": {
+                        "description": "Send the request as JSON.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API failure.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/reminders/preview/": {
+            "post": {
+                "operationId": "tenants_regions_reminders_preview_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ReminderInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ReminderOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
                     "400": {
                         "description": "The request input was refused.",
                         "content": {
@@ -5662,15 +5793,26 @@
                             }
                         ]
                     },
+                    "placement": {
+                        "$ref": "#/components/schemas/RecipientRoleEnum"
+                    },
                     "eligible": {
                         "type": "boolean"
                     },
-                    "membership": {
-                        "type": "integer",
-                        "nullable": true
+                    "memberships": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
                     }
                 },
-                "required": ["address", "eligible", "membership", "role"]
+                "required": [
+                    "address",
+                    "eligible",
+                    "memberships",
+                    "placement",
+                    "role"
+                ]
             },
             "AddressRoleInput": {
                 "type": "object",
@@ -5681,10 +5823,26 @@
                         "maxLength": 254
                     },
                     "role": {
-                        "$ref": "#/components/schemas/RecipientRoleEnum"
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/RecipientRoleEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "memberships": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer",
+                            "minimum": 1
+                        },
+                        "maxItems": 32767
                     }
                 },
-                "required": ["address", "role"]
+                "required": ["address", "memberships", "role"]
             },
             "AddressRoleOutput": {
                 "type": "object",
@@ -8441,8 +8599,11 @@
             "MemberAddressOutput": {
                 "type": "object",
                 "properties": {
-                    "membership": {
-                        "type": "integer"
+                    "memberships": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
                     },
                     "address": {
                         "type": "string",
@@ -8461,16 +8622,29 @@
                                 "$ref": "#/components/schemas/NullEnum"
                             }
                         ]
+                    },
+                    "placement": {
+                        "$ref": "#/components/schemas/RecipientRoleEnum"
                     }
                 },
-                "required": ["address", "kind", "membership", "role"]
+                "required": [
+                    "address",
+                    "kind",
+                    "memberships",
+                    "placement",
+                    "role"
+                ]
             },
             "MemberRoleInput": {
                 "type": "object",
                 "properties": {
-                    "membership": {
-                        "type": "integer",
-                        "minimum": 1
+                    "memberships": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer",
+                            "minimum": 1
+                        },
+                        "maxItems": 32767
                     },
                     "address": {
                         "type": "string",
@@ -8489,7 +8663,7 @@
                         ]
                     }
                 },
-                "required": ["address", "membership", "role"]
+                "required": ["address", "memberships", "role"]
             },
             "MetricScopeEnum": {
                 "enum": ["daylight_intervals", "full_day"],
@@ -10806,13 +10980,15 @@
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/AddressRoleInput"
-                        }
+                        },
+                        "maxItems": 32767
                     },
                     "member_roles": {
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/MemberRoleInput"
-                        }
+                        },
+                        "maxItems": 32767
                     }
                 },
                 "required": [
@@ -10870,6 +11046,10 @@
                     "hide_recipients": {
                         "type": "boolean"
                     },
+                    "hidden_by_departure": {
+                        "type": "boolean",
+                        "nullable": true
+                    },
                     "language": {
                         "$ref": "#/components/schemas/LanguageEnum"
                     },
@@ -10915,6 +11095,7 @@
                     "daily_reminder_limit",
                     "deliveries",
                     "enabled",
+                    "hidden_by_departure",
                     "hide_recipients",
                     "include_workspace_members",
                     "language",

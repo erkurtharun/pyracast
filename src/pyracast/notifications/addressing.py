@@ -1,26 +1,39 @@
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from pyracast.notifications.models import RecipientRole
 
+VISIBLE_MODE_RELEASED = False
+
+
+def sent_hidden(hide_recipients: bool) -> bool:
+    """Whether a schedule stored with this mode is sent hidden, under the gate as it is now."""
+    return hide_recipients or not VISIBLE_MODE_RELEASED
+
+
+def members_choice(choices: Iterable[RecipientRole]) -> RecipientRole | None:
+    found = set(choices)
+    if RecipientRole.BCC in found or len(found) > 1:
+        return RecipientRole.BCC
+    return next(iter(found), None)
+
 
 @dataclass(frozen=True)
 class Candidate:
-    """One address of a reminder's list. `member` and `administrator` describe the active member
-    whose verified primary address it is; `chosen` is that member's stored choice and `typed`
-    the choice of the typed row that holds the address, which counts only while `settled`."""
+    """`member`: the address is the verified primary address of active members of the workspace."""
 
     address: str
     member: bool = False
     administrator: bool = False
     chosen: RecipientRole | None = None
     typed: RecipientRole | None = None
-    settled: bool = True
+    counts: bool = True
+    tied_hidden: bool = False
 
 
 def explicit_role(candidate: Candidate) -> RecipientRole | None:
-    typed = candidate.typed if candidate.settled else None
-    if RecipientRole.BCC in (candidate.chosen, candidate.typed):
+    typed = candidate.typed if candidate.counts else None
+    if candidate.tied_hidden or RecipientRole.BCC in (candidate.chosen, candidate.typed):
         return RecipientRole.BCC
     return candidate.chosen or typed
 

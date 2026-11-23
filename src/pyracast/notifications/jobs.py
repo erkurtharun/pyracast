@@ -31,12 +31,12 @@ from pyracast.notifications.models import (
     NotificationDeliveryError,
     NotificationDeliveryStatus,
     PreparedMessageKind,
-    RecipientRole,
 )
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.preparation import prepare_delivery
 from pyracast.notifications.recipients import (
     Resolved,
+    headers,
     narrow_recipients,
     placements,
     record_roles,
@@ -51,8 +51,7 @@ logger = logging.getLogger(__name__)
 
 
 def _authorize(delivery: NotificationDelivery, limit: int) -> tuple[Resolved | None, str]:
-    """The reads that permit the delivery with its addresses narrowed in the database, or the
-    reason to skip."""
+    """What permits the delivery, its addresses narrowed in the database, or the skip reason."""
     schedule = delivery.schedule
     clock = delivery.scheduled_for.astimezone(ZoneInfo(schedule.region.timezone)).strftime("%H:%M")
     if not schedule.enabled or clock not in schedule.times:
@@ -137,12 +136,9 @@ def _mark_transmit(
         delivery.transmit_started_at = now
         delivery.save(update_fields=("transmit_started_at",))
         addresses = resolved.addresses
-        placed = placements(delivery.schedule, resolved, addresses)
+        placed = placements(delivery.schedule, resolved.members, addresses)
         record_roles(delivery, addresses, placed)
-        message.to, message.cc, message.bcc = (
-            [address for address, given in zip(addresses, placed, strict=True) if given == role]
-            for role in (RecipientRole.TO, RecipientRole.CC, RecipientRole.BCC)
-        )
+        message.to, message.cc, message.bcc = headers(addresses, placed)
         return True
 
 

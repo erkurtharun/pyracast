@@ -118,20 +118,28 @@ def test_the_administrator_reads_the_addresses() -> None:
         "workspace_recipients": ["admin@example.com", "viewer@example.com"],
         "members": [
             {
-                "membership": memberships["admin@example.com"],
+                "memberships": [memberships["admin@example.com"]],
                 "address": "admin@example.com",
                 "kind": "administrator",
                 "role": None,
+                "placement": "bcc",
             },
             {
-                "membership": memberships["viewer@example.com"],
+                "memberships": [memberships["viewer@example.com"]],
                 "address": "viewer@example.com",
                 "kind": "member",
                 "role": None,
+                "placement": "bcc",
             },
         ],
         "added": [
-            {"address": "ops@example.com", "role": None, "eligible": True, "membership": None}
+            {
+                "address": "ops@example.com",
+                "role": None,
+                "placement": "bcc",
+                "eligible": True,
+                "memberships": [],
+            }
         ],
     }
     assert body["state"] == "sending"

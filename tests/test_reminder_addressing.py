@@ -1,6 +1,6 @@
 import pytest
 
-from pyracast.notifications.addressing import Candidate, explicit_role, roles
+from pyracast.notifications.addressing import Candidate, explicit_role, members_choice, roles
 from pyracast.notifications.models import RecipientRole
 
 TO, CC, BCC = RecipientRole.TO, RecipientRole.CC, RecipientRole.BCC
@@ -24,14 +24,15 @@ def placed(
         (Candidate("a@example.com", chosen=CC, typed=TO), CC),
         (Candidate("a@example.com", chosen=TO, typed=CC), TO),
         (Candidate("a@example.com", typed=CC), CC),
-        (Candidate("a@example.com", typed=TO, settled=False), None),
-        (Candidate("a@example.com", typed=BCC, settled=False), BCC),
-        (Candidate("a@example.com", chosen=CC, typed=TO, settled=False), CC),
-        (Candidate("a@example.com", chosen=TO, typed=BCC, settled=False), BCC),
+        (Candidate("a@example.com", typed=TO, counts=False), None),
+        (Candidate("a@example.com", typed=BCC, counts=False), BCC),
+        (Candidate("a@example.com", chosen=CC, typed=TO, counts=False), CC),
+        (Candidate("a@example.com", chosen=TO, typed=BCC, counts=False), BCC),
         (Candidate("a@example.com", member=True), None),
+        (Candidate("a@example.com", member=True, chosen=TO, typed=CC, tied_hidden=True), BCC),
     ],
 )
-def test_hidden_wins_then_the_member_choice_then_a_settled_typed_choice(
+def test_hidden_wins_then_the_member_choice_then_a_typed_choice_that_counts(
     candidate: Candidate, role: RecipientRole | None
 ) -> None:
     assert explicit_role(candidate) == role
@@ -84,9 +85,9 @@ def test_without_inclusion_a_member_address_follows_only_choices() -> None:
     ]
 
 
-def test_an_unsettled_typed_to_falls_back_to_the_default() -> None:
-    gave_up = Candidate("left@example.com", typed=TO, settled=False)
-    taken_over = Candidate("left@example.com", member=True, typed=TO, settled=False)
+def test_a_resting_typed_to_falls_back_to_the_default() -> None:
+    gave_up = Candidate("left@example.com", typed=TO, counts=False)
+    taken_over = Candidate("left@example.com", member=True, typed=TO, counts=False)
     assert placed(gave_up, ADMIN) == [BCC, TO]
     assert placed(taken_over, ADMIN) == [CC, TO]
 
@@ -98,10 +99,34 @@ def test_a_member_hidden_by_choice_stays_hidden_under_a_typed_to() -> None:
     ]
 
 
+def test_a_typed_to_of_a_hidden_member_shows_only_while_the_address_is_not_the_members() -> None:
+    unverified = Candidate("alice@example.com", typed=TO)
+    verified = Candidate("alice@example.com", member=True, chosen=BCC, typed=TO)
+    assert placed(unverified, ADMIN) == [TO, TO]
+    assert placed(verified, ADMIN) == [BCC, TO]
+
+
 def test_an_address_no_step_attributes_is_hidden() -> None:
     assert placed(OUTSIDE) == [BCC]
-    assert placed(Candidate("outside@example.com", typed=TO, settled=False)) == [BCC]
+    assert placed(Candidate("outside@example.com", typed=TO, counts=False)) == [BCC]
 
 
 def test_an_empty_list_places_nobody() -> None:
     assert placed() == []
+
+
+@pytest.mark.parametrize(
+    ("choices", "combined"),
+    [
+        ((), None),
+        ((CC,), CC),
+        ((TO, TO), TO),
+        ((TO, CC), BCC),
+        ((CC, BCC), BCC),
+        ((TO, BCC, TO), BCC),
+    ],
+)
+def test_the_members_of_an_address_choose_hidden_if_any_does_or_if_they_disagree(
+    choices: tuple[RecipientRole, ...], combined: RecipientRole | None
+) -> None:
+    assert members_choice(choices) == combined

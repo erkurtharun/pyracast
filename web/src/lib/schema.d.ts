@@ -676,6 +676,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tenants/{tenant_id}/regions/{region_id}/reminders/preview/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["tenants_regions_reminders_preview_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tenants/{tenant_id}/regions/{region_id}/restore/": {
         parameters: {
             query?: never;
@@ -775,13 +791,20 @@ export interface components {
                       | components["schemas"]["NullEnum"]
                   )
                 | null;
+            placement: components["schemas"]["RecipientRoleEnum"];
             eligible: boolean;
-            membership: number | null;
+            memberships: number[];
         };
         AddressRoleInput: {
             /** Format: email */
             address: string;
-            role: components["schemas"]["RecipientRoleEnum"];
+            role:
+                | (
+                      | components["schemas"]["RecipientRoleEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+            memberships: number[];
         };
         AddressRoleOutput: {
             /** Format: email */
@@ -2097,7 +2120,7 @@ export interface components {
          */
         MeasurementBasisEnum: "net_export" | "ac_generation";
         MemberAddressOutput: {
-            membership: number;
+            memberships: number[];
             /** Format: email */
             address: string;
             kind: components["schemas"]["ReminderMemberKindEnum"];
@@ -2107,9 +2130,10 @@ export interface components {
                       | components["schemas"]["NullEnum"]
                   )
                 | null;
+            placement: components["schemas"]["RecipientRoleEnum"];
         };
         MemberRoleInput: {
-            membership: number;
+            memberships: number[];
             /** Format: email */
             address: string;
             role:
@@ -3032,6 +3056,7 @@ export interface components {
             revision: number;
             include_workspace_members: boolean;
             hide_recipients: boolean;
+            hidden_by_departure: boolean | null;
             language: components["schemas"]["LanguageEnum"];
             times: string[];
             recipient_limit: number;
@@ -6885,6 +6910,102 @@ export interface operations {
             };
             /** @description The addressed item or page does not exist. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Send the request as JSON. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    tenants_regions_reminders_preview_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReminderInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReminderOutput"];
+                };
+            };
+            /** @description The request input was refused. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Sign-in is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Access was refused. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The addressed item or page does not exist. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

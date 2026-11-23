@@ -1,8 +1,13 @@
 from typing import ClassVar
 
+import django.contrib.postgres.fields
 import django.db.models.deletion
+import django.db.models.lookups
 from django.db import migrations, models
 from django.db.migrations.operations.base import Operation
+
+import pyracast.notifications.models
+from pyracast import schema_objects
 
 ROLES = [("to", "To"), ("cc", "Cc"), ("bcc", "Bcc")]
 
@@ -13,8 +18,7 @@ class Migration(migrations.Migration):
         ("notifications", "0010_delivery_preparation_metadata"),
     ]
 
-    # Existing schedules stay hidden, typed addresses carry no choice and every delivery row
-    # was sent in blind copy.
+    # Existing schedules stay hidden, typed rows carry no choice, delivery rows were blind copies.
     operations: ClassVar[list[Operation]] = [
         migrations.AddField(
             model_name="reminderschedule",
@@ -22,15 +26,55 @@ class Migration(migrations.Migration):
             field=models.BooleanField(default=True),
         ),
         migrations.AddField(
+            model_name="reminderschedule",
+            name="hidden_by_departure",
+            field=models.BooleanField(default=False),
+        ),
+        migrations.AddConstraint(
+            model_name="reminderschedule",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    ("hidden_by_departure", False), ("hide_recipients", True), _connector="OR"
+                ),
+                name="reminderschedule_hidden_by_departure_chk",
+            ),
+        ),
+        migrations.AddField(
             model_name="reminderrecipient",
             name="role",
             field=models.CharField(blank=True, choices=ROLES, default="", max_length=3),
+        ),
+        migrations.AddField(
+            model_name="reminderrecipient",
+            name="role_members",
+            field=django.contrib.postgres.fields.ArrayField(
+                base_field=models.BigIntegerField(), blank=True, default=list, size=None
+            ),
         ),
         migrations.AddConstraint(
             model_name="reminderrecipient",
             constraint=models.CheckConstraint(
                 condition=models.Q(role__in=["", "to", "cc", "bcc"]),
                 name="reminderrecipient_role_chk",
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="reminderrecipient",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    django.db.models.lookups.Exact(
+                        pyracast.notifications.models.Cardinality("role_members"), 0
+                    ),
+                    models.Q(
+                        django.db.models.lookups.Exact(
+                            pyracast.notifications.models.Dimensions("role_members"), 1
+                        ),
+                        pyracast.notifications.models.AllPositive("role_members"),
+                        ("role__in", ["to", "cc"]),
+                    ),
+                    _connector="OR",
+                ),
+                name="reminderrecipient_role_members_chk",
             ),
         ),
         migrations.AddField(
@@ -83,4 +127,5 @@ class Migration(migrations.Migration):
                 ],
             },
         ),
+        *schema_objects.operations("notifications", "0011_recipient_roles"),
     ]
