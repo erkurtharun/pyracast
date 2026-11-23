@@ -1,9 +1,12 @@
 import { expect, test } from "@playwright/test";
 import {
+    attemptPayload,
     INITIAL_OUTAGES,
     outageControls,
     reduceOutages,
     type Live,
+    type Outage,
+    type OutageChange,
     type OutageControls,
     type OutageEvent,
     type OutageRow,
@@ -102,8 +105,49 @@ const open =
             live: step.live,
         });
 
-const failed = (step: Step, current: OutageRow | null) =>
-    run(step, { type: "sendFailed", current, direct: step.live.direct });
+type Values = Extract<OutageChange, { action: "update" }>["values"];
+
+const valuesOf = (row: Outage): Values => ({
+    kind: row.kind,
+    title: row.title,
+    notes: row.notes,
+    starts_at: row.starts_at,
+    ends_at: row.ends_at,
+    available_dc_mw: row.available_dc_mw,
+    available_inverter_mw: row.available_inverter_mw,
+    available_export_mw: row.available_export_mw,
+});
+
+function sentChange({ screen }: Step): OutageChange {
+    const { workflow } = screen;
+    if (!workflow || workflow.kind === "create")
+        return { action: "create", values: valuesOf(outage(4)), reason: "" };
+    const target = workflow.outage;
+    if (workflow.kind === "update")
+        return {
+            action: "update",
+            outage: target,
+            values: valuesOf(target),
+            reason: "",
+        };
+    if (workflow.kind === "resolve")
+        return {
+            action: "resolve",
+            outage: target,
+            ends_at: "2026-11-10T10:00:00Z",
+            reason: "",
+        };
+    return { action: "cancel", outage: target, reason: "" };
+}
+
+const failed = (step: Step, current: OutageRow | null, answered = true) =>
+    run(step, {
+        type: "sendFailed",
+        change: sentChange(step),
+        current,
+        answered,
+        direct: step.live.direct,
+    });
 
 const events = {
     openCreate: open("create"),
@@ -118,9 +162,11 @@ const events = {
     sent: (step: Step) =>
         run(step, { type: "sent", proposed: !step.live.direct }),
     fail: (step: Step) => failed(step, null),
+    lost: (step: Step) => failed(step, null, false),
     // A conflict answer carries the outage as it now stands, with the member's own pending request when there is one.
     conflict: (step: Step) =>
         failed(step, outage(4, { revision: 3, title: "Changed" })),
+    conflictSame: (step: Step) => failed(step, outage(4, { revision: 3 })),
     conflictHeld: (step: Step) =>
         failed(step, outage(4, { revision: 3, pending_request_id: 9 })),
     conflictCancelled: (step: Step) =>
@@ -183,6 +229,7 @@ function phase({ screen, live }: Step) {
         live.direct ? "direct:" : "",
         status,
         workflow?.stale ? "+stale" : "",
+        workflow?.attempt?.unanswered ? "+lost" : "",
         screen.submitted ? "+sent" : "",
         shown.length ? `|${shown.join(",")}` : "",
     ].join("");
@@ -229,6 +276,12 @@ const states = {
     "direct:none|4held": { screen: INITIAL_OUTAGES, live: admin(listed(4)) },
     "direct:update4/idle": events.openUpdate(directStart),
     "direct:update4/sending": events.send(events.openUpdate(directStart)),
+    "direct:update4/sending+lost": events.send(
+        events.lost(events.send(events.openUpdate(directStart))),
+    ),
+    "direct:update4/saved+lost": events.conflictSame(
+        events.send(events.lost(events.send(events.openUpdate(directStart)))),
+    ),
     "none|4resolved": {
         screen: INITIAL_OUTAGES,
         live: member(
@@ -323,7 +376,9 @@ const expected: Record<StateName, Record<EventName, string>> = {
         ...unchanged("create/sending"),
         sent: "none+sent",
         fail: "create/idle",
+        lost: "create/idle+lost",
         conflict: "create/idle",
+        conflictSame: "create/idle",
         conflictHeld: "create/idle",
         conflictCancelled: "create/idle",
         promote: "direct:create/sending=",
@@ -366,7 +421,9 @@ const expected: Record<StateName, Record<EventName, string>> = {
         ...unchanged("update4/sending"),
         sent: "none+sent",
         fail: "update4/idle",
+        lost: "update4/idle+lost",
         conflict: "update4/idle+stale",
+        conflictSame: "update4/idle+stale",
         conflictHeld: "update4/held:own+stale",
         conflictCancelled: "update4/held:cancelled+stale",
         promote: "direct:update4/sending=",
@@ -419,7 +476,9 @@ const expected: Record<StateName, Record<EventName, string>> = {
         ...unchanged("resolve4/sending"),
         sent: "none+sent",
         fail: "resolve4/idle",
+        lost: "resolve4/idle+lost",
         conflict: "resolve4/idle+stale",
+        conflictSame: "resolve4/idle+stale",
         conflictHeld: "resolve4/held:own+stale",
         conflictCancelled: "resolve4/held:cancelled+stale",
         promote: "direct:resolve4/sending=",
@@ -467,7 +526,9 @@ const expected: Record<StateName, Record<EventName, string>> = {
         ...unchanged("cancel4/sending"),
         sent: "none+sent",
         fail: "cancel4/idle",
+        lost: "cancel4/idle+lost",
         conflict: "cancel4/idle+stale",
+        conflictSame: "cancel4/idle+stale",
         conflictHeld: "cancel4/held:own+stale",
         conflictCancelled: "cancel4/held:cancelled+stale",
         promote: "direct:cancel4/sending=",
@@ -530,17 +591,39 @@ const expected: Record<StateName, Record<EventName, string>> = {
         ...unchanged("direct:update4/sending", true),
         sent: "direct:none",
         fail: "direct:update4/idle",
+        lost: "direct:update4/idle+lost",
         conflict: "direct:update4/idle+stale",
+        conflictSame: "direct:update4/idle+stale",
         conflictHeld: "direct:update4/idle+stale",
         conflictCancelled: "direct:update4/held:cancelled+stale",
         demote: "update4/sending=",
+    },
+    "direct:update4/sending+lost": {
+        ...same("direct:update4/sending+lost"),
+        ...unchanged("direct:update4/sending+lost", true),
+        sent: "direct:none",
+        fail: "direct:update4/idle",
+        lost: "direct:update4/idle+lost",
+        conflict: "direct:update4/idle+stale",
+        conflictSame: "direct:update4/saved+lost",
+        conflictHeld: "direct:update4/saved+lost",
+        conflictCancelled: "direct:update4/held:cancelled+stale",
+        demote: "update4/sending+lost=",
+    },
+    "direct:update4/saved+lost": {
+        ...same("direct:update4/saved+lost"),
+        ...unchanged("direct:update4/saved+lost", true),
+        sent: "direct:none",
+        demote: "update4/saved+lost=",
     },
     "update4/sending+stale": {
         ...same("update4/sending+stale"),
         ...unchanged("update4/sending+stale"),
         sent: "none+sent",
         fail: "update4/idle+stale",
+        lost: "update4/idle+stale+lost",
         conflict: "update4/idle+stale",
+        conflictSame: "update4/idle+stale",
         conflictHeld: "update4/held:own+stale",
         conflictCancelled: "update4/held:cancelled+stale",
         promote: "direct:update4/sending+stale=",
@@ -634,13 +717,19 @@ test("no event other than its answer replaces, closes or changes a workflow that
     const answers = new Set([
         "sent",
         "fail",
+        "lost",
         "conflict",
+        "conflictSame",
         "conflictHeld",
         "conflictCancelled",
     ]);
     for (const [name, state] of Object.entries(states)) {
         const { workflow } = state.screen;
-        if (workflow?.phase.status !== "sending") continue;
+        if (
+            workflow?.phase.status !== "sending" &&
+            workflow?.phase.status !== "saved"
+        )
+            continue;
         for (const [event, run] of Object.entries(events))
             if (!answers.has(event))
                 expect(run(state).screen.workflow, `${name} × ${event}`).toBe(
@@ -723,6 +812,8 @@ test("every state of the outage screen enables only the controls whose event it 
         "direct:none|4held": quiet,
         "direct:update4/idle": open4,
         "direct:update4/sending": sending4,
+        "direct:update4/sending+lost": sending4,
+        "direct:update4/saved+lost": sending4,
         "none|4resolved": quiet,
         "resolve4/held:cancelled|4cancelled": heldBy("cancelled"),
         "resolve4/held:resolved|4resolved": heldBy("resolved"),
@@ -792,6 +883,189 @@ test("the idempotency key belongs to the open workflow's attempt", () => {
     const reopened = events.openUpdate(events.close(events.fail(changed)));
     expect(reopened.screen.workflow?.attempt).toBeNull();
     expect(key(events.send(reopened))).toBe("key-1");
+});
+
+test("a direct creation keeps its key while the values sent stay the same, also after an unconfirmed send, and an edit gets a new key", () => {
+    const creation = (title: string): OutageChange => ({
+        action: "create",
+        values: {
+            kind: "inverter",
+            title,
+            notes: "",
+            starts_at: "2026-11-09T08:00:00Z",
+            ends_at: null,
+            available_dc_mw: 0,
+            available_inverter_mw: 0,
+            available_export_mw: 0,
+        },
+        reason: "",
+    });
+    const send = (step: Step, change: OutageChange, key: string) =>
+        run(step, {
+            type: "send",
+            payload: attemptPayload(change, true),
+            key,
+        });
+    const key = (step: Step) => step.screen.workflow?.attempt?.key;
+    const first = send(
+        events.openCreate(directStart),
+        creation("Inverter offline"),
+        "key-1",
+    );
+    const again = send(
+        events.fail(first),
+        creation("Inverter offline"),
+        "key-2",
+    );
+    expect(key(again)).toBe("key-1");
+    const edited = send(
+        events.fail(again),
+        creation("Inverter tripped"),
+        "key-3",
+    );
+    expect(key(edited)).toBe("key-3");
+});
+
+test("a direct edit refused as stale ends as saved only when an unanswered try of the same change left exactly that write", () => {
+    const sent: Values = {
+        kind: "grid",
+        title: "Grid trip",
+        notes: "Feeder 2",
+        starts_at: "2026-11-09T08:00:00.000Z",
+        ends_at: null,
+        available_dc_mw: 2.5,
+        available_inverter_mw: null,
+        available_export_mw: 0,
+    };
+    const written = outage(4, {
+        ...sent,
+        revision: 3,
+        starts_at: "2026-11-09T11:00:00+03:00",
+    });
+    const edit = (values: Partial<Values> = {}): OutageChange => ({
+        action: "update",
+        outage: outage(4),
+        values: { ...sent, ...values },
+        reason: "",
+    });
+    const send = (step: Step, change: OutageChange) =>
+        run(step, {
+            type: "send",
+            payload: attemptPayload(change, step.live.direct),
+            key: "key",
+        });
+    const refuse = (
+        step: Step,
+        change: OutageChange,
+        current: OutageRow | null,
+        answered = true,
+    ) =>
+        run(step, {
+            type: "sendFailed",
+            change,
+            current,
+            answered,
+            direct: step.live.direct,
+        });
+    const lostOnce = (opened: Step, change = edit()) =>
+        send(refuse(send(opened, change), change, null, false), change);
+    const ending = (step: Step) => step.screen.workflow?.phase;
+    const opened = events.openUpdate(directStart);
+
+    const first = refuse(send(opened, edit()), edit(), written);
+    expect(first.screen.workflow).toMatchObject({
+        phase: { status: "idle" },
+        stale: { current: written },
+    });
+
+    const saved = refuse(lostOnce(opened), edit(), written);
+    expect(ending(saved)).toEqual({ status: "saved" });
+    expect(events.sent(saved).screen).toEqual({
+        workflow: null,
+        submitted: false,
+    });
+
+    const cancelled = refuse(lostOnce(opened), edit(), {
+        ...written,
+        status: "cancelled",
+    });
+    expect(cancelled.screen.workflow).toMatchObject({
+        phase: { status: "held", hold: "cancelled" },
+        stale: { current: { status: "cancelled" } },
+    });
+
+    const ended = edit({ ends_at: "2026-11-09T10:30:00.000Z" });
+    expect(
+        ending(
+            refuse(lostOnce(opened, ended), ended, {
+                ...written,
+                ends_at: "2026-11-09T13:30:00+03:00",
+                status: "resolved",
+            }),
+        ),
+    ).toEqual({ status: "saved" });
+
+    expect(
+        ending(refuse(lostOnce(opened), edit(), { ...written, revision: 4 })),
+    ).toEqual({ status: "idle" });
+
+    const refused = refuse(send(opened, edit()), edit(), null);
+    expect(ending(refuse(send(refused, edit()), edit(), written))).toEqual({
+        status: "idle",
+    });
+
+    const answeredAfterLoss = refuse(lostOnce(opened), edit(), null);
+    expect(
+        ending(refuse(send(answeredAfterLoss, edit()), edit(), written)),
+    ).toEqual({ status: "idle" });
+
+    const changed = edit({ title: "Grid tripped" });
+    const afterLoss = refuse(send(opened, edit()), edit(), null, false);
+    expect(
+        ending(
+            refuse(send(afterLoss, changed), changed, {
+                ...written,
+                title: "Grid tripped",
+            }),
+        ),
+    ).toEqual({ status: "idle" });
+
+    const others: Partial<OutageRow>[] = [
+        { kind: "other" },
+        { title: "Grid trips" },
+        { notes: "" },
+        { starts_at: "2026-11-09T08:00:01Z" },
+        { ends_at: "2026-11-09T10:30:00Z" },
+        { available_dc_mw: 2 },
+        { available_inverter_mw: 0 },
+        { available_export_mw: null },
+        { id: 5 },
+    ];
+    for (const other of others)
+        expect(
+            ending(refuse(lostOnce(opened), edit(), { ...written, ...other })),
+            JSON.stringify(other),
+        ).toEqual({ status: "idle" });
+
+    const member = events.openUpdate(start);
+    expect(ending(refuse(lostOnce(member), edit(), written))).toEqual({
+        status: "idle",
+    });
+
+    const cancellation: OutageChange = {
+        action: "cancel",
+        outage: outage(4),
+        reason: "",
+    };
+    expect(
+        ending(
+            refuse(
+                lostOnce(events.openCancel(directStart), cancellation),
+                cancellation,
+                written,
+            ),
+        ),
+    ).toEqual({ status: "idle" });
 });
 
 test("a conflict moves the workflow to the current version and keeps the version it was opened on", () => {
