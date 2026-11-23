@@ -307,7 +307,7 @@ def test_two_exceptions_for_one_finding_are_refused(pair: list[ScanException]) -
         load_exceptions(json.dumps(pair))
 
 
-def test_the_tracked_exceptions_are_exactly_the_two_reviewed_entries() -> None:
+def test_the_tracked_exceptions_are_exactly_the_reviewed_entries() -> None:
     tracked = load_exceptions(
         (ROOT / "deploy" / "image-scan-exceptions.json").read_text(encoding="utf-8")
     )
@@ -330,6 +330,25 @@ def test_the_tracked_exceptions_are_exactly_the_two_reviewed_entries() -> None:
             "none and never loads the system library, because the official Node.js binary "
             "carries its own OpenSSL and the Next.js server serves plain HTTP over TCP behind "
             "the gateway.",
+            "expires": "2026-12-21",
+        },
+        {
+            "service": "backend",
+            "vulnerability": "CVE-2026-107494",
+            "package": "libssl3t64",
+            "reason": "Not affected: the flaw is in OpenSSL's QUIC stack, and this image uses "
+            "none, because CPython's ssl module offers no QUIC and every process either serves "
+            "plain HTTP over TCP behind the gateway or opens outbound connections over TCP.",
+            "expires": "2026-12-21",
+        },
+        {
+            "service": "web",
+            "vulnerability": "CVE-2026-107494",
+            "package": "libssl3t64",
+            "reason": "Not affected: the flaw is in OpenSSL's QUIC stack, and this image uses "
+            "none and never loads the system library, because the official Node.js binary "
+            "carries its own OpenSSL and the Next.js server serves plain HTTP over TCP behind "
+            "the gateway and opens no QUIC connection.",
             "expires": "2026-12-21",
         },
     ]
