@@ -8,7 +8,9 @@ import {
     setCsrfToken,
     type Tag,
 } from "./api/lane";
-import { authRequest } from "./auth-api";
+import { ApiError } from "./api/errors";
+import { authRequest, type AuthResult } from "./auth-api";
+import { browserErrors } from "@/i18n/browser";
 
 export type Session = components["schemas"]["SessionOutput"];
 export type SessionUser = components["schemas"]["SessionUserOutput"];
@@ -321,6 +323,11 @@ function setSignOut(signOut: SignOutState) {
     notify();
 }
 
+// allauth answers a completed sign-out with its anonymous 401; any other answer ended nothing.
+function signedOutBy(answer: AuthResult) {
+    return answer.status === 401 && answer.meta?.is_authenticated === false;
+}
+
 // One sign-out request, for the session this tab adopted; when another tab changed the session
 // meanwhile, the server refuses it and the tab shows the session the browser now holds.
 export async function signOut({ keepInvitation = false } = {}) {
@@ -335,7 +342,9 @@ export async function signOut({ keepInvitation = false } = {}) {
     }
     signingOut = true;
     try {
-        await authRequest("auth/session", "DELETE");
+        const ended = await authRequest("auth/session", "DELETE");
+        if (!signedOutBy(ended))
+            throw new ApiError(browserErrors()("invalidResponse"));
         if (shown) {
             state = { ...state, replaced: true };
             notify();

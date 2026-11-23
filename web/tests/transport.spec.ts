@@ -422,6 +422,27 @@ test("a confirmed sign-out ends the document without reading the session", async
 const signedOutAnswer = () =>
     json({ status: 401, meta: { is_authenticated: false } }, 401);
 
+for (const [name, body] of [
+    ["a refusal without allauth's answer", { detail: "Unauthorized" }],
+    [
+        "a signed-in allauth answer",
+        { status: 401, meta: { is_authenticated: true } },
+    ],
+] as const) {
+    test(`a sign-out answered with ${name} keeps the document and fails`, async () => {
+        adoptSession(signedIn("token"));
+        answer(() => json(body, 401));
+        const error = await signOut().catch((failure) => failure);
+        expect(error).toBeInstanceOf(ApiError);
+        expect(sessionState()).toMatchObject({
+            replaced: false,
+            signOut: { status: "failed" },
+            session: { csrf_token: "token" },
+        });
+        expect(calls).toHaveLength(1);
+    });
+}
+
 test("a sign-out refused for a key another tab renewed signs out the renewed session", async () => {
     adoptSession(signedIn("token"));
     answer(changed, () => json(signedIn("rotated")), signedOutAnswer);
