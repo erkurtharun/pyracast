@@ -173,7 +173,7 @@ def native_production_days(
                 total_mwh=_total(rows, daylight.windows or ((start, end),)),
                 complete=_coverage(rows, start, end),
                 slots=tuple(
-                    NativeSlot(begin, finish, _slot_value(rows, begin, finish))
+                    NativeSlot(begin, finish, slot_value(rows, begin, finish))
                     for begin, finish in _slots(rows, start, end, 60, native_intervals=True)
                 ),
             )
