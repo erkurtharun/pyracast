@@ -36,6 +36,7 @@ from pyracast.notifications.operations import (
     MemberChoice,
     configure_reminders,
 )
+from pyracast.notifications.retention import trim_rendered_mail
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.models import AuditEvent
 from tests.support.concurrency import committed_elsewhere, paused_in
@@ -921,3 +922,30 @@ def test_the_published_role_lists_carry_their_bounds() -> None:
     ]
     assert (entry.get("maxItems"), entry["items"].get("minimum")) == (MAX_RECIPIENT_LIMIT, 1)
     assert schemas["MemberRoleInput"]["properties"]["membership"].get("minimum") == 1
+
+
+def test_a_delivery_row_erasure_keeps_for_another_verified_holder_keeps_its_visible_role() -> None:
+    system, _, _ = workspace()
+    lower, _ = member(system, FOLDED[0]), member(system, FOLDED[1])
+    put(system, recipients=["boss@example.com"], hide_recipients=False)
+    assert FOLDED[0] in sent_headers(0)[1]
+
+    assert erase_account(lower.pk, execute=True).changes
+
+    assert list(DeliveryRecipient.objects.filter(key=FOLDED[0]).values_list("role", flat=True)) == [
+        CC
+    ]
+
+
+def test_a_delivery_row_the_retention_sweep_passes_keeps_its_visible_role() -> None:
+    system, alice, bob = workspace()
+    visible_save(system, alice, bob)
+    sent_headers(0)
+    rows = list(DeliveryRecipient.objects.order_by("pk").values_list("address", "role"))
+
+    assert trim_rendered_mail(SLOT + timedelta(days=1), 10) == 1
+
+    assert ("boss@example.com", TO) in rows
+    assert list(DeliveryRecipient.objects.order_by("pk").values_list("address", "role")) == rows
+    ((status, roles),) = history_roles(system)
+    assert (status, [(entry["address"], entry["role"]) for entry in roles]) == ("sent", rows)
