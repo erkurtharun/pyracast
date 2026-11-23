@@ -171,8 +171,8 @@ export function OutageEditor({
                         throw new DisplayError(t("capacityRequired"));
                     const values = {
                         kind,
-                        title: formText(data, "title"),
-                        notes: formText(data, "notes"),
+                        title: formText(data, "title").trim(),
+                        notes: formText(data, "notes").trim(),
                         starts_at: starts,
                         ends_at: ends,
                         ...capacities,
