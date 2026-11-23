@@ -447,7 +447,7 @@ import json, sys
 errors = json.load(sys.stdin)["errors"]
 assert [error["code"] for error in errors] == ["email_password_mismatch"], errors
 ' < "$temporary/sign-in.json"
-[[ $("${secure_curl[@]}" https://localhost:18443/app/) == *'<title>Pyracast workspace'* ]]
+[[ $("${secure_curl[@]}" https://localhost:18443/app/) == *'<title>Pyracast</title>'* ]]
 "${compose[@]}" exec -T api python - <<'PY'
 import django
 django.setup()
