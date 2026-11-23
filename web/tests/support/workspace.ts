@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { expect, type Page, type Route } from "@playwright/test";
+import { expect, type Page, type Request, type Route } from "@playwright/test";
 import { errorBody } from "./errors";
 import type { ErrorCode } from "../../src/lib/api/errors";
 
@@ -435,6 +435,7 @@ export type ReminderOptions = {
     hidden?: boolean;
     hiddenByDeparture?: boolean;
     typed?: Record<string, Role | (TypedChoice & { ties?: number[] })>;
+    disclosure?: boolean;
 };
 // The backend does not publish this refusal code yet.
 const DISCLOSURE_CHANGED = "reminder_disclosure_changed";
@@ -464,10 +465,9 @@ const sameIds = (left: number[], right: number[]) =>
 const verifiedOf = (person: ReminderPerson) =>
     person.verified ?? [person.primary];
 
-const ATOM = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+$/;
+const LOCAL = /^[A-Za-z0-9_+-]+(?:\.[A-Za-z0-9_+-]+)*$/;
 const LABEL = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/;
 
-// The amended contract's plain form: ASCII, a dot-atom local part, a domain of host labels.
 export function plain(address: string) {
     const parts = address.split("@");
     if (
@@ -479,12 +479,46 @@ export function plain(address: string) {
     const [local, domain] = parts as [string, string];
     const labels = domain.split(".");
     return (
-        local.length >= 1 &&
         local.length <= 64 &&
-        local.split(".").every((atom) => ATOM.test(atom)) &&
+        LOCAL.test(local) &&
         labels.length >= 2 &&
         labels.every((label) => label.length <= 63 && LABEL.test(label)) &&
         !/^[0-9]+$/.test(labels.at(-1)!)
+    );
+}
+
+const DOT_ATOM =
+    /^[-!#$%&'*+/=?^_`{}|~0-9A-Za-z]+(?:\.[-!#$%&'*+/=?^_`{}|~0-9A-Za-z]+)*$/;
+const HOST =
+    /^(?:[a-z0-9\u00a1-\uffff](?:[a-z0-9\u00a1-\uffff-]{0,61}[a-z0-9\u00a1-\uffff])?\.)+(?:(?!-)[a-z\u00a1-\uffff-]{2,63}(?<!-)|xn--[a-z0-9]{1,59})$/i;
+
+function quoted(local: string) {
+    if (local.length < 2 || !local.startsWith('"') || !local.endsWith('"'))
+        return false;
+    const inner = local.slice(1, -1);
+    for (let index = 0; index < inner.length; index++) {
+        const code = inner.charCodeAt(index);
+        if (code === 92) {
+            const next = inner.charCodeAt(++index);
+            if (!(next >= 1 && next <= 127) || next === 10 || next === 13)
+                return false;
+        } else if (code < 1 || code > 127 || [9, 10, 13, 32, 34].includes(code))
+            return false;
+    }
+    return true;
+}
+
+// Django's email validator, which the list child and the nested address fields run before the plain check.
+function framework(address: string) {
+    const at = address.lastIndexOf("@");
+    if (at < 0) return false;
+    const local = address.slice(0, at);
+    const domain = address.slice(at + 1);
+    return (
+        (DOT_ATOM.test(local) || quoted(local)) &&
+        (domain === "localhost" ||
+            /^\[[A-Fa-f0-9:.]+\]$/.test(domain) ||
+            HOST.test(domain))
     );
 }
 
@@ -628,7 +662,6 @@ function placements(
     return placed.map((role) => role ?? fallback);
 }
 
-// An opaque digest of the mode and the exact To and Copy mailboxes the configuration shows.
 function disclosureOf(store: ReminderStore, found: People) {
     const sent = effective(store.include, store.rows, found);
     const placed = placements(sent, store, found);
@@ -832,7 +865,6 @@ const published = (
         readFileSync(path.resolve(__dirname, "../../openapi.json"), "utf8"),
     ) as { components: { schemas: Record<string, Schema> } }
 ).components.schemas;
-const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 // The published input does not carry the preview's digest yet.
 const REMINDER_INPUT: Schema = {
     ...published.ReminderInput,
@@ -890,7 +922,7 @@ function violations(
         return typeof value === "string" &&
             value.length <= (rule.maxLength ?? Infinity) &&
             (!rule.pattern || new RegExp(rule.pattern).test(value)) &&
-            (rule.format !== "email" || EMAIL.test(value))
+            (rule.format !== "email" || framework(value.trim()))
             ? []
             : here;
     if (rule.type === "integer")
@@ -919,19 +951,38 @@ function refused(
         administrator,
     }: { limit: number; dailyLimit: number; administrator: boolean },
 ): Refusal | null {
+    if (!administrator)
+        return { status: 403, code: "workspace_admin_required" };
     const shape = violations(body, REMINDER_INPUT);
     if (shape.includes(""))
         return { status: 400, code: "invalid_request", fields: shape };
     const submitted = body as ReminderPayload;
-    const named = shape.some((field) => field.startsWith("member_roles"))
-        ? []
-        : (submitted.member_roles ?? []);
+    const touched = (at: string) =>
+        shape.some((field) => field === at || field.startsWith(`${at}.`));
+    const unplain = (list: "address_roles" | "member_roles") =>
+        shape.includes(list)
+            ? []
+            : (submitted[list] ?? []).flatMap((entry, index) => {
+                  const at = `${list}.${index}`;
+                  return shape.includes(at) ||
+                      touched(`${at}.address`) ||
+                      plain(entry.address.trim())
+                      ? []
+                      : [`${at}.address`];
+              });
+    const entries = [...unplain("address_roles"), ...unplain("member_roles")];
+    const named =
+        touched("member_roles") ||
+        entries.some((field) => field.startsWith("member_roles"))
+            ? []
+            : (submitted.member_roles ?? []);
     const fields = [
         ...shape,
-        ...(shape.some((field) => field.startsWith("recipients")) ||
+        ...(touched("recipients") ||
         submitted.recipients.every((address) => plain(address.trim()))
             ? []
             : ["recipients"]),
+        ...entries,
         ...(repeated(
             named.flatMap((entry) => sorted(entry.memberships).map(String)),
         ) || repeated(named.map((entry) => identity(entry.address)))
@@ -951,7 +1002,6 @@ function refused(
         )
     )
         return invalid("address_roles");
-    if (!administrator) return { status: 403, code: "permission_denied" };
     if (submitted.expected_revision !== store.revision)
         return { status: 409, code: "reminder_schedule_changed" };
     if (repeated(recipients.map(identity)))
@@ -1034,7 +1084,7 @@ const messages: Partial<Record<Code, string>> = {
     duplicate_reminder_times: "Use each delivery time once.",
     reminder_time_required:
         "Add at least one delivery time to turn reminders on.",
-    permission_denied: "You do not have permission to perform this action.",
+    workspace_admin_required: "Workspace administrator required.",
 };
 
 function refusalBody(refusal: Refusal) {
@@ -1124,7 +1174,12 @@ type Method = "GET" | "PUT" | "POST";
 type Held = {
     method: Method;
     released: Promise<void>;
-    committed: () => void;
+    capture: (request: Request) => void;
+};
+type Failure = {
+    method: Method;
+    when: "before" | "after";
+    answer: "lost" | 503;
 };
 
 export async function reminderApi(page: Page, options: ReminderOptions = {}) {
@@ -1136,7 +1191,7 @@ export async function reminderApi(page: Page, options: ReminderOptions = {}) {
     const deliveries = options.deliveries ?? (options.unsaved ? [] : [{}]);
     const viewer = options.viewer ?? (() => false);
     const later: Held[] = [];
-    const failing: Method[] = [];
+    const failing: Failure[] = [];
     const answer = (value: ReminderStore, route: Route) =>
         reminderAnswer(value, persons, {
             limit,
@@ -1163,34 +1218,42 @@ export async function reminderApi(page: Page, options: ReminderOptions = {}) {
             ? store
             : { ...next, revision: store.revision + 1 };
     };
-    // Answers once the request is applied and its answer captured, so a held request sees no later change.
-    const respond = async (route: Route, json: unknown) => {
+    const failure = (route: Route) => {
         const method = route.request().method() as Method;
-        const failed = failing.indexOf(method);
+        const index = failing.findIndex((item) => item.method === method);
+        return index >= 0 ? failing.splice(index, 1)[0] : undefined;
+    };
+    // Answers once the request is applied and its answer captured, so a held request sees no later change.
+    const respond = async (route: Route, json: unknown, failed?: Failure) => {
+        const method = route.request().method() as Method;
         const gate = later.findIndex((item) => item.method === method);
         const held = gate >= 0 ? later.splice(gate, 1)[0] : undefined;
-        held?.committed();
+        held?.capture(route.request());
         if (held) await held.released;
-        if (failed >= 0) {
-            failing.splice(failed, 1);
+        if (failed?.answer === "lost") return route.abort("aborted");
+        if (failed)
             return route.fulfill({
                 status: 503,
                 json: errorBody("server_error", "The service is unavailable."),
             });
-        }
         await route.fulfill({ json });
     };
     await page.route("**/reminders/preview/", async (route) => {
+        const failed = failure(route);
+        if (failed) return respond(route, null, failed);
         const preview = await write(route);
         if (preview)
             await respond(route, {
                 ...answer(preview, route),
-                disclosure: disclosureOf(preview, read(persons)),
+                ...(options.disclosure !== false && {
+                    disclosure: disclosureOf(preview, read(persons)),
+                }),
             });
     });
     await page.route("**/reminders/", async (route) => {
-        const method = route.request().method();
-        if (method === "PUT") {
+        const failed = failure(route);
+        if (route.request().method() === "PUT") {
+            if (failed?.when === "before") return respond(route, null, failed);
             const next = await write(route);
             if (!next) return;
             const { disclosure } = route.request().postDataJSON() as {
@@ -1203,7 +1266,7 @@ export async function reminderApi(page: Page, options: ReminderOptions = {}) {
                 });
             store = next;
         }
-        await respond(route, answer(store, route));
+        await respond(route, answer(store, route), failed);
     });
     return {
         account,
@@ -1211,18 +1274,38 @@ export async function reminderApi(page: Page, options: ReminderOptions = {}) {
         deliveries,
         answerLater: (method: Method) => {
             let release!: () => void;
-            let committed!: () => void;
+            let capture!: (request: Request) => void;
             const released = new Promise<void>(
                 (resolve) => (release = resolve),
             );
-            const captured = new Promise<void>(
-                (resolve) => (committed = resolve),
+            const request = new Promise<Request>(
+                (resolve) => (capture = resolve),
             );
-            later.push({ method, released, committed });
-            return { release, committed: captured };
+            later.push({ method, released, capture });
+            return {
+                request,
+                release,
+                committed: request.then(() => undefined),
+            };
         },
-        failNext: (method: Method) => {
-            failing.push(method);
+        failNext: (
+            method: Method,
+            when: Failure["when"] = "before",
+            answer: Failure["answer"] = 503,
+        ) => {
+            failing.push({ method, when, answer });
+        },
+        // The server hides every recipient again when a member leaves a schedule that shows addresses.
+        depart: (membership: number) => {
+            persons.find((person) => person.membership === membership)!.active =
+                false;
+            if (!store.hide)
+                store = {
+                    ...store,
+                    hide: true,
+                    departed: true,
+                    revision: store.revision + 1,
+                };
         },
     };
 }

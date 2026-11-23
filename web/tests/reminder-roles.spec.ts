@@ -626,82 +626,118 @@ test("a read that removes the member whose role group holds focus moves focus to
     await expect(time(page, 1)).toHaveValue("09:00");
 });
 
-test("the mock decides plain addresses and their identity for the preview and the save, and bounds the times", async ({
+test("the mock answers each address field of the preview and the save with the status, code and field the server gives", async ({
     page,
 }) => {
+    const ACCEPTED = ["o.p_s+x-y@sub.example-1.com", "ops@xn--bcher-kva.de"];
     await reminderApi(page, {
         recipients: [OUTSIDE],
-        members: TEAM,
+        members: [
+            ADMIN,
+            { membership: 2, primary: ACCEPTED[0]! },
+            { membership: 3, primary: ACCEPTED[1]! },
+        ],
         hidden: true,
         dailyLimit: 2,
     });
     await page.goto("/app/");
     const call = caller(page);
-    const accepted = [
-        "ops@example.com",
-        "o.p-s+x@sub.example-1.com",
-        "ops@xn--bcher-kva.de",
-    ];
     const local65 = `${"o".repeat(65)}@example.com`;
     const long255 = `${"o".repeat(64)}@${"d".repeat(63)}.${"d".repeat(63)}.${"d".repeat(58)}.com`;
     expect(long255).toHaveLength(255);
-    const refused: [string, string][] = [
-        ['"ops"@example.com', "recipients"],
-        ["ops@bücher.de", "recipients"],
-        ["ops(c)@example.com", "recipients"],
-        ["ops@[127.0.0.1]", "recipients"],
-        [".ops@example.com", "recipients"],
-        ["o..ps@example.com", "recipients"],
-        ["ops@-example.com", "recipients"],
-        ["ops@example.123", "recipients"],
-        ["ops@example", "recipients.0"],
-        [local65, "recipients"],
-        [long255, "recipients.0"],
-        ["ops@a�b.de", "recipients"],
-        ["Ops <ops@example.com>", "recipients.0"],
+    const childRefused = [
+        ".ops@example.com",
+        "ops.@example.com",
+        "o..ps@example.com",
+        "ops@-example.com",
+        "ops@example.123",
+        long255,
     ];
-    for (const item of accepted)
+    const plainRefused = [
+        "o!ps@example.com",
+        '"ops"@example.com',
+        "ops@bücher.de",
+        local65,
+    ];
+    for (const item of ACCEPTED)
         expect([item, plain(item)]).toEqual([item, true]);
-    for (const [item] of refused)
+    for (const item of [...childRefused, ...plainRefused])
         expect([item, plain(item)]).toEqual([item, false]);
+    const hidden = { ...SAVED, hide_recipients: true };
+    const fields = {
+        recipients: (item: string) => ({ recipients: [item] }),
+        address_roles: (item: string, accepted: boolean) => ({
+            recipients: [accepted ? item : OUTSIDE],
+            address_roles: [
+                {
+                    address: item,
+                    role: "cc",
+                    memberships: accepted ? [ACCEPTED.indexOf(item) + 2] : [],
+                },
+            ],
+        }),
+        member_roles: (item: string, accepted: boolean) => ({
+            member_roles: [
+                {
+                    memberships: [accepted ? ACCEPTED.indexOf(item) + 2 : 2],
+                    address: item,
+                    role: "cc",
+                },
+            ],
+        }),
+    };
     for (const path of ["preview/", ""]) {
         const method = path ? "POST" : "PUT";
-        for (const recipients of accepted.map((item) => [item])) {
+        for (const [field, body] of Object.entries(fields)) {
+            for (const item of ACCEPTED) {
+                const revision = (await call("GET")).json.revision;
+                const answer = await call(
+                    method,
+                    {
+                        ...hidden,
+                        ...body(item, true),
+                        expected_revision: revision,
+                    },
+                    path,
+                );
+                expect([method, field, item, answer.status]).toEqual([
+                    method,
+                    field,
+                    item,
+                    200,
+                ]);
+            }
             const revision = (await call("GET")).json.revision;
-            const answer = await call(
-                method,
-                {
-                    ...SAVED,
-                    hide_recipients: true,
-                    recipients,
-                    expected_revision: revision,
-                },
-                path,
-            );
-            expect([recipients, answer.status]).toEqual([recipients, 200]);
+            for (const item of [...childRefused, ...plainRefused]) {
+                const answer = await call(
+                    method,
+                    {
+                        ...hidden,
+                        ...body(item, false),
+                        expected_revision: revision,
+                    },
+                    path,
+                );
+                const expected =
+                    field !== "recipients"
+                        ? `${field}.0.address`
+                        : childRefused.includes(item)
+                          ? "recipients.0"
+                          : "recipients";
+                expect([
+                    method,
+                    item,
+                    answer.status,
+                    answer.json.code,
+                    Object.keys(answer.json.fields ?? {}),
+                ]).toEqual([method, item, 400, "invalid_request", [expected]]);
+            }
         }
         const revision = (await call("GET")).json.revision;
-        for (const [recipient, field] of refused) {
-            const answer = await call(
-                method,
-                {
-                    ...SAVED,
-                    recipients: [recipient],
-                    expected_revision: revision,
-                },
-                path,
-            );
-            expect([recipient, answer.status, answer.json.code]).toEqual([
-                recipient,
-                400,
-                "invalid_request",
-            ]);
-            expect(Object.keys(answer.json.fields)).toEqual([field]);
-        }
         const twice = await call(
             method,
             {
-                ...SAVED,
+                ...hidden,
                 recipients: ["ops@example.com", "OPS@Example.COM"],
                 expected_revision: revision,
             },
@@ -715,7 +751,7 @@ test("the mock decides plain addresses and their identity for the preview and th
         const times = await call(
             method,
             {
-                ...SAVED,
+                ...hidden,
                 times: ["07:00", "08:00", "09:00"],
                 expected_revision: revision,
             },
@@ -727,6 +763,35 @@ test("the mock decides plain addresses and their identity for the preview and th
         ]);
         expect(Object.keys(times.json.fields)).toEqual(["times"]);
     }
+});
+
+test("the mock refuses a preview and a save by a member who is not the administrator before it reads the body", async ({
+    page,
+}) => {
+    await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: TEAM,
+        hidden: true,
+        viewer: (method) => method !== "GET",
+    });
+    await page.goto("/app/");
+    const call = caller(page);
+    const before = (await call("GET")).json;
+    for (const path of ["preview/", ""])
+        for (const body of [
+            { ...SAVED, hide_recipients: true },
+            { ...SAVED, recipients: [".ops@example.com"] },
+        ]) {
+            const answer = await call(path ? "POST" : "PUT", body, path);
+            expect([answer.status, answer.json]).toEqual([
+                403,
+                {
+                    code: "workspace_admin_required",
+                    message: "Workspace administrator required.",
+                },
+            ]);
+        }
+    expect((await call("GET")).json).toEqual(before);
 });
 
 test("the mock binds a visible save to the preview's digest, writes nothing for a preview or a refusal and ignores the digest of a hidden save", async ({
@@ -1393,7 +1458,7 @@ test("the mock refuses before it changes anything, keeps the revision of an unch
     });
     expect([viewer.status, viewer.json.code]).toEqual([
         403,
-        "permission_denied",
+        "workspace_admin_required",
     ]);
     viewing = false;
     expect((await call("GET")).json).toEqual(before);
