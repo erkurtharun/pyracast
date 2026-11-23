@@ -66,10 +66,10 @@ def test_a_workspace_member_is_mailed_at_the_stored_form_of_the_address() -> Non
     assert addresses["workspace_recipients"] == ["Mixed.Case@Example.com"]
 
 
-def test_an_address_written_with_eszett_leaves_with_the_member_holding_its_folded_form() -> None:
+def test_an_address_written_in_capitals_leaves_with_the_member_holding_it_in_lower_case() -> None:
     system, _ = configured()
     holder = member(system, "ops@strasse.de")
-    schedule = group(system, ["ops@straße.de", "kept@example.com"])
+    schedule = group(system, ["OPS@Strasse.de", "kept@example.com"])
 
     remove_workspace_member(system.member, system.tenant.pk, holder.pk)
 

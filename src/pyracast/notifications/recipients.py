@@ -1,16 +1,18 @@
+import hashlib
+import json
+import string
 from collections import defaultdict
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from email.headerregistry import AddressHeader
-from functools import cache
+from email import policy
+from email.parser import BytesParser
 
-from django.core.exceptions import ValidationError
-from django.core.mail.backends.smtp import EmailBackend as SMTPBackend
-from django.core.validators import validate_email
+from django.core.mail import EmailMessage
 from django.db.models import Case, F, Q, Value, When
-from django.utils.translation import gettext
 
+from pyracast.accounts.addresses import is_plain
 from pyracast.accounts.models import Membership, WorkspaceRole
+from pyracast.mail.policy import wire_policy
 from pyracast.notifications.addressing import Candidate, members_choice, roles
 from pyracast.notifications.models import (
     DeliveryRecipient,
@@ -30,73 +32,14 @@ OPEN_DELIVERIES = (
     NotificationDeliveryStatus.SENDING,
     NotificationDeliveryStatus.UNCERTAIN,
 )
-RECIPIENT_MAX_LENGTH = 254
+
+
+_ASCII_LOWER = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
 
 
 def recipient_key(address: str) -> str:
-    return address.strip().casefold()
-
-
-@cache
-def _smtp() -> SMTPBackend:
-    return SMTPBackend(alias="addressing", host="localhost")
-
-
-def prepared(address: str) -> str:
-    """The addr-spec the SMTP backend puts in `RCPT TO`, only where it is stable: it prepares to
-    itself, the header parser reads it as that one mailbox, and the folded address prepares to
-    the same key. `ValueError` otherwise."""
-    prepare = _smtp().prep_address
-    wire = prepare(address)
-    try:
-        stable = (
-            prepare(wire) == wire
-            and [found.addr_spec for found in AddressHeader.value_parser(wire).all_mailboxes]
-            == [wire]
-            and recipient_key(prepare(recipient_key(address))) == recipient_key(wire)
-        )
-    except ValueError:
-        stable = False
-    if not stable:
-        raise ValueError("The address has no stable wire form.")
-    return wire
-
-
-def addressable(address: str) -> str:
-    """The addr-spec both transports carry for the address, or `ValidationError`: the one test
-    of whether an address can be a recipient."""
-    text = address.strip()
-    if len(text) > RECIPIENT_MAX_LENGTH:
-        raise ValidationError(
-            gettext("Recipient addresses cannot exceed %(limit)s characters."),
-            params={"limit": RECIPIENT_MAX_LENGTH},
-        )
-    validate_email(text)
-    try:
-        wire = prepared(text)
-    except ValueError:
-        wire = ""
-    # Both wire policies and SMTP commands are ASCII only; RFC 5321 4.5.3.1.3 bounds the path.
-    if not wire or not wire.isascii() or len(wire) > RECIPIENT_MAX_LENGTH:
-        raise ValidationError(validate_email.message, code=validate_email.code)
-    return wire
-
-
-def _is_addressable(address: str) -> bool:
-    try:
-        addressable(address)
-    except ValidationError:
-        return False
-    return True
-
-
-def mailbox_key(address: str) -> str:
-    """What addressing compares: one key for every spelling a message carries as one address."""
-    try:
-        return recipient_key(addressable(address))
-    except ValidationError:
-        # `recipient_key` strips whitespace, so no addressable form's key starts with a line feed.
-        return "\n" + recipient_key(address)
+    """The identity of an address: its exact text with only `A`-`Z` lower-cased."""
+    return address.translate(_ASCII_LOWER)
 
 
 @dataclass(frozen=True)
@@ -127,13 +70,13 @@ class Member:
 
 @dataclass(frozen=True)
 class Workspace:
-    """`unaddressable`: a person of the read holds an address with no mailbox key, so no
-    placement from this read can tell whose mailbox it is."""
+    """`holds_non_plain`: a person of the read, active or not, holds a primary or verified
+    address that is not plain, so a list that reads these people is not sent."""
 
     active: frozenset[int]
     _members: Mapping[str, Member]
     _holders: Mapping[str, frozenset[int]]
-    unaddressable: bool = False
+    holds_non_plain: bool = False
 
     @property
     def members(self) -> tuple[Member, ...]:
@@ -144,7 +87,7 @@ class Workspace:
         return tuple(member.address for member in self._members.values())
 
     def member(self, address: str) -> Member | None:
-        return self._members.get(mailbox_key(address))
+        return self._members.get(recipient_key(address))
 
     def memberships(self, address: str) -> frozenset[int]:
         found = self.member(address)
@@ -156,7 +99,7 @@ class Workspace:
 
     def holders(self, address: str) -> frozenset[int]:
         """The memberships, active or not, holding the address verified or as primary."""
-        return self._holders.get(mailbox_key(address), frozenset())
+        return self._holders.get(recipient_key(address), frozenset())
 
 
 NO_MEMBERS = Workspace(frozenset(), {}, {})
@@ -197,17 +140,17 @@ def _workspace(people: Sequence[Person]) -> Workspace:
     grouped: dict[str, list[Person]] = {}
     holders: dict[str, set[int]] = defaultdict(set)
     for person in people:
-        key = mailbox_key(person.primary)
-        if person.active and key in {mailbox_key(address) for address in person.verified}:
+        key = recipient_key(person.primary)
+        if person.active and key in {recipient_key(address) for address in person.verified}:
             grouped.setdefault(key, []).append(person)
         for address in (person.primary, *person.verified):
             if address.strip():
-                holders[mailbox_key(address)].add(person.membership)
+                holders[recipient_key(address)].add(person.membership)
     return Workspace(
         frozenset(person.membership for person in people if person.active),
         {
             key: Member(
-                found[0].primary.strip(),
+                found[0].primary,
                 tuple(person.membership for person in found),
                 any(person.administrator for person in found),
             )
@@ -215,7 +158,7 @@ def _workspace(people: Sequence[Person]) -> Workspace:
         },
         {key: frozenset(found) for key, found in holders.items()},
         not all(
-            _is_addressable(address)
+            is_plain(address)
             for person in people
             for address in (person.primary, *person.verified)
             if address.strip()
@@ -256,10 +199,10 @@ def effective(
     addresses: dict[str, str] = {}
     for row in explicit:
         if not row.ties or members.active & row.ties:
-            addresses.setdefault(mailbox_key(row.address), row.address)
+            addresses.setdefault(recipient_key(row.address), row.address)
     if include_workspace_members:
         for address in members.addresses:
-            addresses.setdefault(mailbox_key(address), address)
+            addresses.setdefault(recipient_key(address), address)
     return list(addresses.values())
 
 
@@ -272,12 +215,20 @@ class Resolved:
     addresses: list[str]
 
 
+def reads_people(
+    include_workspace_members: bool, hide_recipients: bool, explicit: Sequence[Explicit]
+) -> bool:
+    """Whether the list depends on the workspace's people: for its members or for placement."""
+    return needs_members(include_workspace_members, explicit) or not hide_recipients
+
+
 def resolve(schedule: ReminderSchedule) -> Resolved:
+    """`members` is `NO_MEMBERS` for a list that does not read people."""
     explicit = explicit_recipients([schedule.pk]).get(schedule.pk or 0, [])
     include = schedule.include_workspace_members
     members = (
         workspace(schedule.region.tenant_id)
-        if needs_members(include, explicit) or not schedule.hide_recipients
+        if reads_people(include, schedule.hide_recipients, explicit)
         else NO_MEMBERS
     )
     return Resolved(explicit, members, effective(include, explicit, members))
@@ -306,7 +257,7 @@ class Choices:
     _hidden_ties: frozenset[int] = frozenset()
 
     def typed(self, address: str) -> TypedChoice | None:
-        return self._typed.get(mailbox_key(address))
+        return self._typed.get(recipient_key(address))
 
     def of(self, member: Member) -> RecipientRole | None:
         return members_choice(self._chosen[pk] for pk in member.memberships if pk in self._chosen)
@@ -320,21 +271,13 @@ TypedRow = tuple[str, TypedChoice, frozenset[int]]
 
 
 def choices(typed: Iterable[TypedRow], chosen: Mapping[int, RecipientRole]) -> Choices:
-    found: dict[str, set[TypedChoice]] = defaultdict(set)
-    tied: dict[str, set[int]] = defaultdict(set)
-    for address, choice, ties in typed:
-        found[key := mailbox_key(address)].add(choice)
-        tied[key] |= ties
-    # Rows stored before two spellings of one mailbox were refused: Hidden unless they agree.
-    combined = {key: next(iter(same)) if len(same) == 1 else HIDDEN for key, same in found.items()}
+    """A schedule holds one typed row per key."""
+    rows = list(typed)
     return Choices(
-        {key: choice for key, choice in combined.items() if choice.role},
+        {recipient_key(address): choice for address, choice, _ in rows if choice.role},
         chosen,
         frozenset(
-            pk
-            for key, choice in combined.items()
-            if choice.role == RecipientRole.BCC
-            for pk in tied[key]
+            pk for _, choice, ties in rows if choice.role == RecipientRole.BCC for pk in ties
         ),
     )
 
@@ -353,12 +296,13 @@ def typed_choices(schedule: ReminderSchedule) -> list[TypedRow]:
     return [(address, choice, frozenset(ties)) for address, choice, ties in found.values()]
 
 
-def stored_choices(schedule: ReminderSchedule) -> Choices:
+def member_choices(schedule: ReminderSchedule) -> dict[int, RecipientRole]:
     chosen = ReminderMemberRole.objects.filter(schedule_id=schedule.pk)
-    return choices(
-        typed_choices(schedule),
-        {pk: RecipientRole(role) for pk, role in chosen.values_list("membership_id", "role")},
-    )
+    return {pk: RecipientRole(role) for pk, role in chosen.values_list("membership_id", "role")}
+
+
+def stored_choices(schedule: ReminderSchedule) -> Choices:
+    return choices(typed_choices(schedule), member_choices(schedule))
 
 
 def candidates(addresses: Sequence[str], members: Workspace, choices: Choices) -> list[Candidate]:
@@ -386,8 +330,8 @@ def placements(
     read: Choices | None = None,
 ) -> list[RecipientRole]:
     """The header of each address of the list; a schedule sent hidden, or a read of people
-    holding an address without a mailbox key, reads no choice and hides every address."""
-    hidden = schedule.hide_recipients or members.unaddressable
+    holding an address that is not plain, reads no choice and hides every address."""
+    hidden = schedule.hide_recipients or members.holds_non_plain
     found = (
         [Candidate(address) for address in addresses]
         if hidden
@@ -400,17 +344,70 @@ def placements(
     )
 
 
-def headers(
-    addresses: Sequence[str], placed: Sequence[RecipientRole]
-) -> tuple[list[str], list[str], list[str]]:
-    """`To`, `Cc` and `Bcc` in wire form, each mailbox key once at its first placement."""
+Headers = tuple[list[str], list[str], list[str]]
+
+
+def headers(addresses: Sequence[str], placed: Sequence[RecipientRole]) -> Headers:
+    """`To`, `Cc` and `Bcc`, each key once in its address's text at its first placement."""
     found: dict[RecipientRole, list[str]] = {role: [] for role in RecipientRole}
     keys: set[str] = set()
     for address, role in zip(addresses, placed, strict=True):
-        if (key := mailbox_key(address)) not in keys:
+        if (key := recipient_key(address)) not in keys:
             keys.add(key)
-            found[role].append(addressable(address))
+            found[role].append(address)
     return found[RecipientRole.TO], found[RecipientRole.CC], found[RecipientRole.BCC]
+
+
+def disclosure_digest(
+    schedule: ReminderSchedule,
+    members: Workspace,
+    addresses: Sequence[str],
+    read: Choices | None = None,
+) -> str:
+    """A digest of the mode and the exact `To` and `Cc` lists the configuration places."""
+    to, cc, _ = headers(addresses, placements(schedule, members, addresses, read))
+    shown = {"hidden": schedule.hide_recipients, "to": to, "cc": cc}
+    canonical = json.dumps(shown, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("ascii")).hexdigest()
+
+
+def _lists(raw: bytes) -> tuple[list[str] | None, ...]:
+    """Each header's addr-specs, `[]` when absent, `None` when repeated, empty or defective."""
+    parsed = BytesParser(policy=policy.default).parsebytes(raw, headersonly=True)
+    found: list[list[str] | None] = []
+    for name in ("To", "Cc", "Bcc"):
+        values = parsed.get_all(name) or []
+        if not values:
+            found.append([])
+        elif len(values) > 1 or values[0].defects or not values[0].addresses:
+            found.append(None)
+        else:
+            found.append([address.addr_spec for address in values[0].addresses])
+    return tuple(found)
+
+
+def serialized_headers(message: EmailMessage) -> dict[str, tuple[list[str] | None, ...]]:
+    """`To`, `Cc` and `Bcc` read back from the bytes each transport writes: SMTP under either
+    body type, and Gmail, which also writes the hidden list into the message."""
+    seven_bit = message.message(policy=wire_policy(eight_bit=False))
+    eight_bit = message.message(policy=wire_policy(eight_bit=True))
+    found = {"smtp 7bit": _lists(seven_bit.as_bytes()), "smtp 8bit": _lists(eight_bit.as_bytes())}
+    if message.bcc:
+        eight_bit["Bcc"] = ", ".join(message.bcc)
+    found["gmail"] = _lists(eight_bit.as_bytes())
+    return found
+
+
+def carries_exactly(message: EmailMessage, placed: Headers) -> bool:
+    """Whether every address is plain and the envelope and every serialization carry exactly
+    the placed `To`, `Cc` and `Bcc`, in order."""
+    to, cc, bcc = placed
+    if not all(is_plain(address) for address in (*to, *cc, *bcc)):
+        return False
+    if list(message.recipients()) != [*to, *cc, *bcc]:
+        return False
+    expected = {"smtp 7bit": (to, cc, []), "smtp 8bit": (to, cc, []), "gmail": (to, cc, bcc)}
+    return serialized_headers(message) == expected
 
 
 def planned_recipients(
@@ -420,9 +417,9 @@ def planned_recipients(
     change of its member never makes it an external address."""
     ties: dict[str, frozenset[int]] = defaultdict(frozenset)
     for row in stored:
-        ties[mailbox_key(row.address)] |= row.ties
+        ties[recipient_key(row.address)] |= row.ties
     return [
-        Explicit(address, ties.get(mailbox_key(address), frozenset()) | members.holders(address))
+        Explicit(address, ties.get(recipient_key(address), frozenset()) | members.holders(address))
         for address in addresses
     ]
 
@@ -488,9 +485,9 @@ def freeze_recipients(delivery: NotificationDelivery, addresses: Sequence[str]) 
 
 def narrow_recipients(delivery: NotificationDelivery, current: Sequence[str]) -> list[str]:
     """Deletes the candidate rows that are revoked or no longer current; rows never return."""
-    keys = {mailbox_key(address) for address in current}
+    keys = {recipient_key(address) for address in current}
     rows = list(DeliveryRecipient.objects.filter(delivery=delivery).order_by("pk"))
-    kept = [row for row in rows if not row.revoked and mailbox_key(row.address) in keys]
+    kept = [row for row in rows if not row.revoked and row.key in keys]
     if excluded := [row.pk for row in rows if row not in kept]:
         DeliveryRecipient.objects.filter(pk__in=excluded).delete()
     return [row.address for row in kept]
@@ -570,47 +567,43 @@ def remove_member_recipients(tenant_id: int, membership_id: int, emails: set[str
     removed = rows.filter(
         Q(ties__membership_id=membership_id) | Q(ties__isnull=True, key__in=keys)
     ).values("pk")
-    deleted = list(
-        ReminderRecipient.objects.filter(pk__in=removed).values_list("schedule_id", "address")
+    changed = set(
+        ReminderRecipient.objects.filter(pk__in=removed).values_list("schedule_id", flat=True)
     )
     ReminderRecipient.objects.filter(pk__in=removed).delete()
-    changed = {schedule_id for schedule_id, _ in deleted}
     ReminderSchedule.objects.filter(pk__in=changed - hidden).update(revision=F("revision") + 1)
-    mailboxes = {mailbox_key(address) for address in emails if address.strip()}
-    mailboxes.update(mailbox_key(address) for _, address in deleted)
-    _revoke_unauthorized(tenant_id, membership_id, mailboxes)
+    _revoke_unauthorized(tenant_id, membership_id, keys)
 
 
-def _revoke_unauthorized(tenant_id: int, leaving: int, mailboxes: set[str]) -> None:
-    """Revokes the open deliveries' rows of these mailboxes that their schedule no longer
-    authorizes without the leaving membership; an address another active member holds stays."""
-    candidates = [
-        row
-        for row in DeliveryRecipient.objects.filter(
+def _revoke_unauthorized(tenant_id: int, leaving: int, keys: set[str]) -> None:
+    """Revokes the open deliveries' rows of these keys that their schedule no longer authorizes
+    without the leaving membership; an address another active member holds stays."""
+    if not keys:
+        return
+    candidates = list(
+        DeliveryRecipient.objects.filter(
             delivery__schedule__region__tenant_id=tenant_id,
             delivery__status__in=OPEN_DELIVERIES,
+            key__in=keys,
         ).values_list(
             "pk",
-            "address",
+            "key",
             "delivery__schedule_id",
             "delivery__schedule__include_workspace_members",
         )
-        if mailbox_key(row[1]) in mailboxes
-    ]
+    )
     if not candidates:
         return
     schedules = {schedule_id: include for _, _, schedule_id, include in candidates}
     explicit = explicit_recipients(schedules)
     members = workspace(tenant_id, leaving=leaving)
     authorized = {
-        (schedule_id, mailbox_key(address))
+        (schedule_id, recipient_key(address))
         for schedule_id, include in schedules.items()
         for address in effective(include, explicit.get(schedule_id, []), members)
     }
     DeliveryRecipient.objects.filter(
         pk__in=[
-            pk
-            for pk, address, schedule_id, _ in candidates
-            if (schedule_id, mailbox_key(address)) not in authorized
+            pk for pk, key, schedule_id, _ in candidates if (schedule_id, key) not in authorized
         ]
     ).update(revoked=True)

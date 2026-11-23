@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.core.mail import EmailMessage
-from django.db import connection
+from django.db import connection, transaction
 from django.test import Client, override_settings
 from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
@@ -204,6 +204,33 @@ def ready() -> NotificationDelivery:
     ids = enqueue_due(SLOT)
     assert len(ids) == 1
     return NotificationDelivery.objects.get(pk=ids[0])
+
+
+def confirmed_put(client: Client, url: str, body: dict[str, Any]) -> Any:
+    """The screen's save: the draft is previewed and saved with the preview's `disclosure`."""
+    if "disclosure" not in body:
+        preview = client.post(f"{url}preview/", body, content_type="application/json")
+        if preview.status_code == 200:
+            body = body | {"disclosure": preview.json()["disclosure"]}
+    return client.put(url, body, content_type="application/json")
+
+
+def disclosed(actor: User, tenant_id: int, region_id: int, **settings: Any) -> str:
+    """The `disclosure` the preview of these settings answers."""
+    with transaction.atomic():
+        schedule = configure_reminders(actor, tenant_id, region_id, preview=True, **settings)
+        digest = reminder_overview(schedule, settings["now"], administrator=True).disclosure
+        transaction.set_rollback(True)
+    assert digest is not None
+    return digest
+
+
+def confirmed_save(
+    actor: User, tenant_id: int, region_id: int, **settings: Any
+) -> ReminderSchedule:
+    """`configure_reminders` with the `disclosure` its preview answers."""
+    digest = disclosed(actor, tenant_id, region_id, **settings)
+    return configure_reminders(actor, tenant_id, region_id, disclosure=digest, **settings)
 
 
 def reminder_schedule_payload(

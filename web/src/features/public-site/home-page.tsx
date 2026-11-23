@@ -70,16 +70,12 @@ export function HomePage({ language }: { language: PublicLanguage }) {
                                         >
                                             <stop
                                                 offset="0%"
-                                                stopColor={
-                                                    illustrationColours.forecast
-                                                }
+                                                stopColor="currentColor"
                                                 stopOpacity="0.17"
                                             />
                                             <stop
                                                 offset="100%"
-                                                stopColor={
-                                                    illustrationColours.forecast
-                                                }
+                                                stopColor="currentColor"
                                                 stopOpacity="0"
                                             />
                                         </linearGradient>
@@ -103,7 +99,7 @@ export function HomePage({ language }: { language: PublicLanguage }) {
                                     <path
                                         d="M4 210C52 210 66 201 94 173S137 99 177 66S222 35 252 57S289 105 321 127S369 171 399 192S442 210 476 210"
                                         fill="none"
-                                        stroke={illustrationColours.forecast}
+                                        stroke="currentColor"
                                         strokeWidth="3"
                                         strokeLinecap="round"
                                     />

@@ -36,6 +36,7 @@ from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.preparation import prepare_delivery
 from pyracast.notifications.recipients import (
     Resolved,
+    carries_exactly,
     headers,
     narrow_recipients,
     placements,
@@ -50,6 +51,14 @@ WAITING = (NotificationDeliveryStatus.PENDING, NotificationDeliveryStatus.RETRY)
 logger = logging.getLogger(__name__)
 
 
+def list_refusal(resolved: Resolved, limit: int) -> str:
+    """Why the resolved list is not sent, or `""`; a read of people holding an address that is
+    not plain refuses it first."""
+    if resolved.members.holds_non_plain:
+        return NotificationDeliveryError.INVALID_RECIPIENT
+    return recipient_refusal(resolved.addresses, limit)
+
+
 def _authorize(delivery: NotificationDelivery, limit: int) -> tuple[Resolved | None, str]:
     """What permits the delivery, its addresses narrowed in the database, or the skip reason."""
     schedule = delivery.schedule
@@ -57,7 +66,7 @@ def _authorize(delivery: NotificationDelivery, limit: int) -> tuple[Resolved | N
     if not schedule.enabled or clock not in schedule.times:
         return None, NotificationDeliveryError.CANCELLED_BY_SETTINGS_CHANGE
     resolved = resolve(schedule)
-    if reason := recipient_refusal(resolved.addresses, limit):
+    if reason := list_refusal(resolved, limit):
         return None, reason
     addresses = narrow_recipients(delivery, resolved.addresses)
     if not addresses:
@@ -112,6 +121,13 @@ def _lock_workspace(delivery_id: int) -> None:
         Tenant.objects.select_for_update().filter(pk=tenant_id).first()
 
 
+def _skip(delivery: NotificationDelivery, reason: str) -> bool:
+    delivery.status, delivery.last_error = NotificationDeliveryStatus.SKIPPED, reason
+    release(delivery)
+    delivery.save()
+    return False
+
+
 def _mark_transmit(
     delivery_id: int, token: uuid.UUID, now: datetime, message: EmailMultiAlternatives
 ) -> bool:
@@ -128,17 +144,15 @@ def _mark_transmit(
             _recover_interrupted(delivery, now)
             return False
         if resolved is None or now - delivery.scheduled_for > MAX_LATENESS:
-            delivery.status = NotificationDeliveryStatus.SKIPPED
-            delivery.last_error = reason or NotificationDeliveryError.DELIVERY_DEADLINE_EXCEEDED
-            release(delivery)
-            delivery.save()
-            return False
-        delivery.transmit_started_at = now
-        delivery.save(update_fields=("transmit_started_at",))
+            return _skip(delivery, reason or NotificationDeliveryError.DELIVERY_DEADLINE_EXCEEDED)
         addresses = resolved.addresses
         placed = placements(delivery.schedule, resolved.members, addresses)
+        message.to, message.cc, message.bcc = sent = headers(addresses, placed)
+        if not carries_exactly(message, sent):
+            return _skip(delivery, NotificationDeliveryError.INVALID_RECIPIENT)
+        delivery.transmit_started_at = now
+        delivery.save(update_fields=("transmit_started_at",))
         record_roles(delivery, addresses, placed)
-        message.to, message.cc, message.bcc = headers(addresses, placed)
         return True
 
 

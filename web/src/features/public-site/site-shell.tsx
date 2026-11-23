@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { publicPath, type PublicPage } from "@/lib/public-metadata";
 import { homeCopy, type PublicLanguage } from "./home-copy";
 import { routes } from "@/lib/routes";
+import { Brand } from "@/ui/brand";
 import styles from "./public-site.module.css";
 
 export function SiteShell({
@@ -23,35 +24,8 @@ export function SiteShell({
             </a>
             <header className={styles.header}>
                 <div className={styles.headerInner}>
-                    <a
-                        className={styles.brand}
-                        href={home}
-                        aria-label="Pyracast"
-                    >
-                        <svg
-                            width="28"
-                            height="28"
-                            viewBox="0 0 28 28"
-                            fill="none"
-                            aria-hidden="true"
-                        >
-                            <circle
-                                cx="14"
-                                cy="14"
-                                r="5"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                            />
-                            <path
-                                d="M14 2v4m0 16v4M2 14h4m16 0h4M5.5 5.5l3 3m11 11 3 3m0-17-3 3m-11 11-3 3"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                            />
-                        </svg>
-                        <span>
-                            pyracast<span className={styles.brandDot}>.</span>
-                        </span>
+                    <a className={styles.brand} href={home}>
+                        <Brand surface="light" />
                     </a>
                     <nav
                         className={styles.desktopNav}
@@ -86,7 +60,7 @@ export function SiteShell({
                 <div className={styles.footerInner}>
                     <div>
                         <a className={styles.footerBrand} href={home}>
-                            pyracast<span className={styles.brandDot}>.</span>
+                            <Brand surface="light" />
                         </a>
                         <p>{copy.footer}</p>
                     </div>

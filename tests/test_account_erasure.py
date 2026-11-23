@@ -1081,9 +1081,8 @@ def test_a_row_committed_after_erasure_locked_its_table_is_not_deleted(
     assert ReminderSchedule.objects.get(pk=later_schedule.pk).revision == revision
 
 
-def test_erasure_compares_addresses_by_one_case_rule_beyond_ascii_letters() -> None:
-    # The sign-up form accepts both and stores them lower-cased by Python.
-    own, held = "İlker@Exämple.com", "Beyza@Exämple.com"
+def test_erasure_takes_addresses_differing_only_in_ascii_letter_case_as_one() -> None:
+    own, held = "Ilker@Example.com", "Beyza@Example.com"
     person = person_with(own.lower())
     holder = User.objects.create_user(username="holder", email="holder@example.com")
     EmailAddress.objects.create(user=holder, email=held.upper(), primary=False, verified=True)

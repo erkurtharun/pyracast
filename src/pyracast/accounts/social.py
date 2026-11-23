@@ -18,6 +18,7 @@ from django.db.models import QuerySet
 from django.http import HttpRequest
 from django.utils.crypto import salted_hmac
 
+from pyracast.accounts.addresses import is_plain
 from pyracast.accounts.audit import SecurityEvent, record_security_event, refusal_throttle
 from pyracast.accounts.authorization import requires_admin_mfa
 from pyracast.accounts.cache import AuthenticationCache
@@ -176,6 +177,11 @@ class SocialAccountAdapter(DefaultSocialAccountAdapter):
         # Runs before allauth looks the identity up and saves it, so no other profile field is
         # ever stored.
         user = cast(User, super().populate_user(request, sociallogin, data))
+        if not is_plain(user.email):
+            user.email = ""
+        sociallogin.email_addresses = [
+            address for address in sociallogin.email_addresses if is_plain(address.email)
+        ]
         provider = sociallogin.account.provider
         profile = sociallogin.account.extra_data
         for address in sociallogin.email_addresses:

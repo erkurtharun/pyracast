@@ -6,6 +6,7 @@
         "integration/**/*.spec.ts",
         "production-tests/**/*.spec.ts",
         "testing/coverage-reporter.ts",
+        "testing/server-coverage.ts",
         "testing/front.ts",
         "eslint/console-scripts.config.mjs"
     ],

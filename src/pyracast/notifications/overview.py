@@ -5,6 +5,7 @@ from enum import StrEnum
 
 from pyracast.notifications.addressing import explicit_role
 from pyracast.notifications.eligibility import notifiable_regions
+from pyracast.notifications.jobs import list_refusal
 from pyracast.notifications.models import (
     NotificationDelivery,
     NotificationDeliveryError,
@@ -14,19 +15,22 @@ from pyracast.notifications.models import (
 )
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.recipients import (
+    NO_MEMBERS,
     Explicit,
+    Resolved,
     Workspace,
     candidates,
     delivery_addresses,
     delivery_roles,
+    disclosure_digest,
     effective,
     explicit_recipients,
-    mailbox_key,
     placements,
+    reads_people,
+    recipient_key,
     stored_choices,
     workspace,
 )
-from pyracast.notifications.scheduler import recipient_refusal
 from pyracast.regions.models import Region, RegionStatus
 
 STATE_OF_PAUSE: dict[str, ReminderState] = {
@@ -110,6 +114,7 @@ class ReminderOverview:
     daily_reminder_limit: int | None
     addresses: ReminderAddresses | None
     deliveries: list[ReminderDelivery]
+    disclosure: str | None = None
 
 
 @dataclass(frozen=True)
@@ -157,11 +162,15 @@ def assess(
     assessed = []
     for schedule in schedules:
         rows = explicit.get(schedule.pk, [])
-        recipients = effective(schedule.include_workspace_members, rows, members)
+        include = schedule.include_workspace_members
+        recipients = effective(include, rows, members)
+        read = reads_people(include, schedule.hide_recipients, rows)
         state = reminder_state(
             schedule,
             notifiable=schedule.region_id in notifiable,
-            refusal=recipient_refusal(recipients, limit),
+            refusal=list_refusal(
+                Resolved(rows, members if read else NO_MEMBERS, recipients), limit
+            ),
         )
         assessed.append(Assessment(schedule, rows, recipients, state))
     return assessed
@@ -204,20 +213,21 @@ def _delivery(
 
 def _addresses(
     schedule: ReminderSchedule, assessment: Assessment, members: Workspace
-) -> ReminderAddresses:
+) -> tuple[ReminderAddresses, str]:
+    """The administrator's addresses and the `disclosure` digest of the placements they show."""
     explicit = assessment.explicit
     choices = stored_choices(schedule)
     typed = candidates([row.address for row in explicit], members, choices)
     sent = assessment.recipients
     placed = {
-        mailbox_key(address): role
+        recipient_key(address): role
         for address, role in zip(sent, placements(schedule, members, sent, choices), strict=True)
     }
 
     def placement(address: str) -> RecipientRole:
-        return placed.get(mailbox_key(address), RecipientRole.BCC)
+        return placed.get(recipient_key(address), RecipientRole.BCC)
 
-    return ReminderAddresses(
+    shown = ReminderAddresses(
         [row.address for row in explicit],
         list(members.addresses),
         [
@@ -241,6 +251,7 @@ def _addresses(
             for row, candidate in zip(explicit, typed, strict=True)
         ],
     )
+    return shown, disclosure_digest(schedule, members, sent, choices)
 
 
 def reminder_overview(
@@ -251,6 +262,9 @@ def reminder_overview(
     members = workspace(schedule.region.tenant_id)
     (assessment,) = assess([schedule], members, limit)
     binding = schedule.region.approved_binding
+    addresses, disclosure = (
+        _addresses(schedule, assessment, members) if administrator else (None, None)
+    )
     deliveries = (
         NotificationDelivery.objects.filter(schedule__region_id=schedule.region_id)
         .defer("prepared_message")
@@ -272,10 +286,11 @@ def reminder_overview(
         workspace_member_count=len(members.addresses),
         recipient_limit_exceeded=len(assessment.recipients) > limit,
         daily_reminder_limit=binding.provider_account.daily_quota if binding else None,
-        addresses=_addresses(schedule, assessment, members) if administrator else None,
+        addresses=addresses,
         deliveries=[
             _delivery(delivery, now, administrator=administrator) for delivery in deliveries
         ],
+        disclosure=disclosure,
     )
 
 

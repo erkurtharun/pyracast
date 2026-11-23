@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from datetime import timedelta
 from io import StringIO
 from typing import Any
@@ -47,6 +48,8 @@ from tests.support.notifications import (
     StatementHook,
     after_statement,
     chosen,
+    confirmed_put,
+    disclosed,
     moved,
     pending_address_change,
     ties,
@@ -106,9 +109,7 @@ def put_body(system: System, changes: dict[str, Any]) -> dict[str, Any]:
 
 
 def put(system: System, **changes: Any) -> Any:
-    return client_for(system.member).put(
-        url(system), put_body(system, changes), content_type="application/json"
-    )
+    return confirmed_put(client_for(system.member), url(system), put_body(system, changes))
 
 
 def stored_roles(system: System) -> tuple[dict[str, str], dict[str, str]]:
@@ -136,19 +137,19 @@ def to_for(address: str, *members: User) -> list[dict[str, Any]]:
     return [{"address": address, "role": "to", "memberships": [membership(m) for m in members]}]
 
 
+def visible_changes(alice: User, bob: User) -> dict[str, Any]:
+    return {
+        "hide_recipients": False,
+        "address_roles": [{"address": "boss@example.com", "role": "to", "memberships": []}],
+        "member_roles": [
+            {"memberships": [membership(alice)], "address": alice.email, "role": "bcc"},
+            {"memberships": [membership(bob)], "address": bob.email, "role": "cc"},
+        ],
+    }
+
+
 def visible_save(system: System, alice: User, bob: User, **changes: Any) -> Any:
-    return put(
-        system,
-        **{
-            "hide_recipients": False,
-            "address_roles": [{"address": "boss@example.com", "role": "to", "memberships": []}],
-            "member_roles": [
-                {"memberships": [membership(alice)], "address": alice.email, "role": "bcc"},
-                {"memberships": [membership(bob)], "address": bob.email, "role": "cc"},
-            ],
-        }
-        | changes,
-    )
+    return put(system, **visible_changes(alice, bob) | changes)
 
 
 def test_a_plant_without_a_schedule_answers_the_visible_default() -> None:
@@ -461,9 +462,14 @@ def test_a_reassignment_waits_for_a_save_and_its_answer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, alice, bob = workspace()
+    body = put_body(system, visible_changes(alice, bob))
+    previewed = client_for(system.member).post(
+        f"{url(system)}preview/", body, content_type="application/json"
+    )
+    body["disclosure"] = previewed.json()["disclosure"]
 
     def save() -> tuple[int, list[str]]:
-        response = visible_save(system, alice, bob)
+        response = client_for(system.member).put(url(system), body, content_type="application/json")
         return response.status_code, [
             row["kind"] for row in response.json()["addresses"]["members"]
         ]
@@ -481,24 +487,29 @@ def test_a_reassignment_waits_for_a_save_and_its_answer(
     assert Membership.objects.get(user=alice).role == WorkspaceRole.ADMIN
 
 
-def save_naming(system: System, user: User) -> str:
-    try:
-        configure_reminders(
-            system.member,
-            system.tenant.pk,
-            system.region.pk,
-            enabled=True,
-            recipients=[],
-            include_workspace_members=True,
-            times=["10:00"],
-            language="en",
-            now=NOW,
-            hide_recipients=False,
-            member_roles=[MemberChoice(frozenset({membership(user)}), user.email, BCC)],
-        )
-    except ConflictError as error:
-        return error.code
-    return "saved"
+def save_naming(system: System, user: User) -> Callable[[], str]:
+    settings: dict[str, Any] = {
+        "enabled": True,
+        "recipients": [],
+        "include_workspace_members": True,
+        "times": ["10:00"],
+        "language": "en",
+        "now": NOW,
+        "hide_recipients": False,
+        "member_roles": [MemberChoice(frozenset({membership(user)}), user.email, BCC)],
+    }
+    digest = disclosed(system.member, system.tenant.pk, system.region.pk, **settings)
+
+    def run() -> str:
+        try:
+            configure_reminders(
+                system.member, system.tenant.pk, system.region.pk, disclosure=digest, **settings
+            )
+        except ConflictError as error:
+            return error.code
+        return "saved"
+
+    return run
 
 
 def remove(system: System, user: User) -> str:
@@ -541,8 +552,7 @@ def test_a_save_racing_a_member_deletion_ends_without_the_members_choice(
         CC,
     )
 
-    def saving() -> str:
-        return save_naming(system, alice)
+    saving = save_naming(system, alice)
 
     def deleting() -> str:
         return str(deletion(system, alice))
@@ -568,21 +578,22 @@ def test_an_address_confirmed_after_a_saves_read_of_people_leaves_the_save_one_p
     system, _, bob = workspace()
     confirm = pending_address_change(bob, "bob.new@example.com")
     hook = StatementHook("account_emailaddress", lambda: committed_elsewhere(confirm))
+    settings: dict[str, Any] = {
+        "enabled": True,
+        "recipients": ["bob@example.com"],
+        "include_workspace_members": True,
+        "times": ["10:00"],
+        "language": "en",
+        "now": NOW,
+        "hide_recipients": False,
+        "address_roles": [AddressChoice("bob@example.com", TO, frozenset({membership(bob)}))],
+        "member_roles": [MemberChoice(frozenset({membership(bob)}), "bob@example.com", CC)],
+    }
+    digest = disclosed(system.member, system.tenant.pk, system.region.pk, **settings)
 
     with after_statement(hook):
         schedule = configure_reminders(
-            system.member,
-            system.tenant.pk,
-            system.region.pk,
-            enabled=True,
-            recipients=["bob@example.com"],
-            include_workspace_members=True,
-            times=["10:00"],
-            language="en",
-            now=NOW,
-            hide_recipients=False,
-            address_roles=[AddressChoice("bob@example.com", TO, frozenset({membership(bob)}))],
-            member_roles=[MemberChoice(frozenset({membership(bob)}), "bob@example.com", CC)],
+            system.member, system.tenant.pk, system.region.pk, disclosure=digest, **settings
         )
 
     assert hook.fired
@@ -679,7 +690,7 @@ def test_a_member_who_joins_during_a_get_is_wholly_in_its_answer_or_wholly_absen
     assert 2 <= passed <= MEMBERSHIP_STATEMENTS
 
 
-FOLDED = ("ops@strasse.de", "ops@straße.de")
+FOLDED = ("Ops@Strasse.de", "ops@strasse.de")
 
 
 def folded_members() -> tuple[System, User, User]:
@@ -1001,7 +1012,7 @@ def test_a_delivery_row_erasure_keeps_for_another_verified_holder_keeps_its_visi
 
     assert erase_account(lower.pk, execute=True).changes
 
-    assert list(DeliveryRecipient.objects.filter(key=FOLDED[0]).values_list("role", flat=True)) == [
+    assert list(DeliveryRecipient.objects.filter(key=FOLDED[1]).values_list("role", flat=True)) == [
         CC
     ]
 
@@ -1086,13 +1097,13 @@ def test_a_typed_entry_naming_the_earlier_members_of_its_address_refuses_the_sav
     assert honoured.status_code == 200, honoured.content
 
 
-UNICODE_MAILBOX, ACE_MAILBOX = "ops@b\u00fccher.de", "ops@xn--bcher-kva.de"
+UPPER_MAILBOX, LOWER_MAILBOX = "OPS@XN--BCHER-KVA.DE", "ops@xn--bcher-kva.de"
 
 
 def test_two_spellings_of_one_mailbox_are_refused_as_duplicate_recipients() -> None:
     system, _, _ = workspace()
 
-    response = put(system, recipients=[UNICODE_MAILBOX, ACE_MAILBOX])
+    response = put(system, recipients=[UPPER_MAILBOX, LOWER_MAILBOX])
 
     assert response.status_code == 400
     assert (response.json()["code"], list(response.json()["fields"])) == (
@@ -1107,10 +1118,10 @@ def test_two_typed_role_entries_for_spellings_of_one_mailbox_are_refused() -> No
 
     response = put(
         system,
-        recipients=[UNICODE_MAILBOX, ACE_MAILBOX],
+        recipients=[UPPER_MAILBOX, LOWER_MAILBOX],
         address_roles=[
-            {"address": UNICODE_MAILBOX, "role": "to", "memberships": []},
-            {"address": ACE_MAILBOX, "role": "cc", "memberships": []},
+            {"address": UPPER_MAILBOX, "role": "to", "memberships": []},
+            {"address": LOWER_MAILBOX, "role": "cc", "memberships": []},
         ],
     )
 
@@ -1153,7 +1164,7 @@ def test_a_member_entry_naming_the_earlier_members_of_an_address_refuses_the_sav
         assert stale.json()["code"] == "reminder_schedule_changed"
         assert (revision(system), stored_roles(system), len(events(system))) == before
 
-    assert FOLDED[0] in sent_headers(0)[2]
+    assert FOLDED[1] in sent_headers(0)[2]
 
     both = sorted([membership(ops), membership(bob)])
     honoured = put(
@@ -1164,12 +1175,12 @@ def test_a_member_entry_naming_the_earlier_members_of_an_address_refuses_the_sav
     )
     assert honoured.status_code == 200, honoured.content
     assert stored_roles(system)[1] == {}
-    assert FOLDED[0] in sent_headers(1)[1]
+    assert FOLDED[1] in sent_headers(1)[1]
 
 
 def test_member_entries_that_share_a_membership_or_a_mailbox_are_refused() -> None:
     system, alice, bob = workspace()
-    unicode_holder, ace_holder = member(system, UNICODE_MAILBOX), member(system, "x@example.com")
+    upper_holder, lower_holder = member(system, UPPER_MAILBOX), member(system, "x@example.com")
 
     for entries in (
         [
@@ -1181,8 +1192,8 @@ def test_member_entries_that_share_a_membership_or_a_mailbox_are_refused() -> No
             },
         ],
         [
-            {"memberships": [membership(unicode_holder)], "address": UNICODE_MAILBOX, "role": "cc"},
-            {"memberships": [membership(ace_holder)], "address": ACE_MAILBOX, "role": "to"},
+            {"memberships": [membership(upper_holder)], "address": UPPER_MAILBOX, "role": "cc"},
+            {"memberships": [membership(lower_holder)], "address": LOWER_MAILBOX, "role": "to"},
         ],
     ):
         response = put(system, member_roles=entries)
@@ -1250,13 +1261,13 @@ def test_a_respelled_typed_address_keeps_its_choice() -> None:
     put(
         system,
         **body,
-        recipients=[UNICODE_MAILBOX],
-        address_roles=[{"address": UNICODE_MAILBOX, "role": "cc", "memberships": []}],
+        recipients=[UPPER_MAILBOX],
+        address_roles=[{"address": UPPER_MAILBOX, "role": "cc", "memberships": []}],
     )
 
-    assert put(system, **body, recipients=[ACE_MAILBOX]).status_code == 200
+    assert put(system, **body, recipients=[LOWER_MAILBOX]).status_code == 200
 
-    assert typed_rows(system) == {ACE_MAILBOX: ("cc", [])}
+    assert typed_rows(system) == {LOWER_MAILBOX: ("cc", [])}
 
 
 def placed(rows: list[dict[str, Any]]) -> list[tuple[str, Any, str]]:

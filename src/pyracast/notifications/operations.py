@@ -10,6 +10,7 @@ from django.db import connection, transaction
 from django.utils import translation
 from django.utils.translation import gettext
 
+from pyracast.accounts.addresses import plain_address
 from pyracast.accounts.authorization import require_platform_admin, tenant_membership
 from pyracast.accounts.models import Language, WorkspaceRole
 from pyracast.connections.models import MAX_DAILY_QUOTA
@@ -30,15 +31,16 @@ from pyracast.notifications.recipients import (
     Resolved,
     TypedChoice,
     Workspace,
-    addressable,
     choices,
+    disclosure_digest,
     effective,
     explicit_recipients,
     grouped_recipients,
-    mailbox_key,
-    needs_members,
+    member_choices,
     placements,
     planned_recipients,
+    reads_people,
+    recipient_key,
     store_member_choices,
     store_recipients,
     typed_choices,
@@ -48,12 +50,18 @@ from pyracast.notifications.recipients import (
 from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditAction, Region, RegionStatus, active_region
 
+RECIPIENT_MAX_LENGTH = 254
 # The largest per-plant recipient limit the console accepts (a smallint column).
 MAX_RECIPIENT_LIMIT = 32767
 
 
 def validate_recipient(address: str) -> None:
-    addressable(address)
+    if len(address) > RECIPIENT_MAX_LENGTH:
+        raise ValidationError(
+            gettext("Recipient addresses cannot exceed %(limit)s characters."),
+            params={"limit": RECIPIENT_MAX_LENGTH},
+        )
+    plain_address(address)
 
 
 def _all_valid(addresses: list[str]) -> bool:
@@ -66,11 +74,11 @@ def _all_valid(addresses: list[str]) -> bool:
 
 
 def invalid_recipient_region_ids() -> set[int]:
-    """Regions whose enabled reminders would go to an invalid address, in at most three
-    statements."""
-    schedules: dict[int, tuple[int, bool, int]] = {}
+    """Regions whose enabled reminders would go to an invalid address, or read people holding
+    one, in at most three statements."""
+    schedules: dict[int, tuple[int, bool, bool, int]] = {}
     rows: list[tuple[int, int, str, int | None]] = []
-    for pk, region_id, include, tenant_id, row, address, membership_id in (
+    for pk, region_id, include, hide, tenant_id, row, address, membership_id in (
         ReminderSchedule.objects.filter(
             active_region("region__"),
             enabled=True,
@@ -82,30 +90,29 @@ def invalid_recipient_region_ids() -> set[int]:
             "pk",
             "region_id",
             "include_workspace_members",
+            "hide_recipients",
             "region__tenant_id",
             "recipient_rows__pk",
             "recipient_rows__address",
             "recipient_rows__ties__membership_id",
         )
     ):
-        schedules[pk] = (region_id, include, tenant_id)
+        schedules[pk] = (region_id, include, hide, tenant_id)
         if row is not None:
             rows.append((pk, row, address, membership_id))
     explicit = grouped_recipients(rows)
-    members = workspaces(
-        {
-            tenant_id
-            for pk, (_, include, tenant_id) in schedules.items()
-            if needs_members(include, explicit.get(pk, []))
-        }
-    )
-    return {
-        region_id
-        for pk, (region_id, include, tenant_id) in schedules.items()
-        if not _all_valid(
-            effective(include, explicit.get(pk, []), members.get(tenant_id, NO_MEMBERS))
-        )
+    read = {
+        pk: reads_people(include, hide, explicit.get(pk, []))
+        for pk, (_, include, hide, _) in schedules.items()
     }
+    members = workspaces({tenant_id for pk, (*_, tenant_id) in schedules.items() if read[pk]})
+    found = set()
+    for pk, (region_id, include, _, tenant_id) in schedules.items():
+        people = members[tenant_id] if read[pk] else NO_MEMBERS
+        addresses = effective(include, explicit.get(pk, []), people)
+        if people.holds_non_plain or not _all_valid(addresses):
+            found.add(region_id)
+    return found
 
 
 SHARED_LIMIT = (
@@ -213,7 +220,9 @@ def _check_recipients(submitted: ReminderSettings) -> None:
             validate_recipient(address)
         except ValidationError as error:
             raise ValidationError({"recipients": error}) from None
-    if len({mailbox_key(address) for address in submitted.recipients}) != len(submitted.recipients):
+    if len({recipient_key(address) for address in submitted.recipients}) != len(
+        submitted.recipients
+    ):
         raise DomainError(ErrorCode.DUPLICATE_RECIPIENTS, field="recipients")
     if submitted.enabled and not (submitted.recipients or submitted.include_workspace_members):
         raise DomainError(ErrorCode.RECIPIENT_REQUIRED, field="recipients")
@@ -283,13 +292,36 @@ def _typed_choice(entry: AddressChoice) -> TypedChoice:
 def _typed_choices(
     planned: Sequence[Explicit], stored: Choices, changes: Sequence[AddressChoice]
 ) -> list[TypedChoice]:
-    named = {mailbox_key(entry.address): entry for entry in changes}
+    named = {recipient_key(entry.address): entry for entry in changes}
     return [
         _typed_choice(entry)
-        if (entry := named.get(mailbox_key(row.address)))
+        if (entry := named.get(recipient_key(row.address)))
         else stored.typed(row.address) or NO_CHOICE
         for row in planned
     ]
+
+
+def _check_disclosure(
+    schedule: ReminderSchedule,
+    members: Workspace,
+    planned: Sequence[Explicit],
+    addresses: Sequence[str],
+    roles: Sequence[TypedChoice],
+    decided: dict[int, RecipientRole | None],
+    submitted: str | None,
+) -> None:
+    """The administrator's preview digest binds the visible result about to be saved."""
+    chosen = member_choices(schedule)
+    for pk, role in decided.items():
+        if role is None:
+            chosen.pop(pk, None)
+        else:
+            chosen[pk] = role
+    read = choices(
+        [(row.address, role, row.ties) for row, role in zip(planned, roles, strict=True)], chosen
+    )
+    if submitted != disclosure_digest(schedule, members, addresses, read):
+        raise ConflictError(ErrorCode.REMINDER_DISCLOSURE_CHANGED)
 
 
 def _audit_details(schedule: ReminderSchedule, resolved: Resolved) -> dict[str, int]:
@@ -324,9 +356,12 @@ def configure_reminders(
     hide_recipients: bool = True,
     address_roles: Sequence[AddressChoice] | None = None,
     member_roles: Sequence[MemberChoice] | None = None,
+    disclosure: str | None = None,
+    preview: bool = False,
 ) -> ReminderSchedule:
     """`expected_revision` is the revision the administrator's form was read at; a schedule
-    changed since then is refused instead of overwritten."""
+    changed since then is refused instead of overwritten. A visible result is saved only with
+    the `disclosure` of its preview; a preview binds nothing."""
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
     if language not in Language.values:
@@ -371,14 +406,16 @@ def configure_reminders(
         stored_typed = typed_choices(schedule)
         stored_roles = [choice for _, choice, _ in stored_typed]
         roles = _typed_choices(planned, choices(stored_typed, {}), address_roles or ())
+        mode = schedule.hide_recipients != hide_recipients or schedule.hidden_by_departure
+        schedule.hide_recipients = hide_recipients
+        if not preview and not hide_recipients:
+            _check_disclosure(schedule, members, planned, addresses, roles, decided, disclosure)
         rows = store_recipients(schedule, explicit, planned, roles=roles, stored_roles=stored_roles)
         chosen = store_member_choices(schedule, decided)
-        mode = schedule.hide_recipients != hide_recipients or schedule.hidden_by_departure
-        schedule.enabled, schedule.times, schedule.language, schedule.hide_recipients = (
+        schedule.enabled, schedule.times, schedule.language = (
             enabled,
             list(submitted.times),
             language,
-            hide_recipients,
         )
         schedule.hidden_by_departure = False
         configured = created or submitted != stored or mode or roles != stored_roles or chosen

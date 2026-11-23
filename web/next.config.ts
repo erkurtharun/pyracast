@@ -2,10 +2,14 @@ import type { NextConfig } from "next";
 import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 import createNextIntlPlugin from "next-intl/plugin";
 
+const coverageBuild = process.env.PLAYWRIGHT_COVERAGE === "1";
+
 const config = (phase: string): NextConfig => ({
     output: "standalone",
     distDir: process.env.NEXT_DIST_DIR ?? ".next",
-    productionBrowserSourceMaps: process.env.PLAYWRIGHT_COVERAGE === "1",
+    productionBrowserSourceMaps: coverageBuild,
+    // The minifier shapes one source differently per chunk, so the measured branches would follow unrelated changes.
+    ...(coverageBuild && { experimental: { turbopackMinify: false } }),
     poweredByHeader: false,
     trailingSlash: true,
     skipTrailingSlashRedirect: true,

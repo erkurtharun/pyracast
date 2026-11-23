@@ -1633,6 +1633,7 @@ export interface components {
          *     * `duplicate_recipients` - Duplicate Recipients
          *     * `recipient_limit_exceeded` - Recipient Limit Exceeded
          *     * `reminder_schedule_changed` - Reminder Schedule Changed
+         *     * `reminder_disclosure_changed` - Reminder Disclosure Changed
          *     * `plant_not_approved` - Plant Not Approved
          *     * `provider_account_unavailable` - Provider Account Unavailable
          *     * `configuration_changed` - Configuration Changed
@@ -1719,6 +1720,7 @@ export interface components {
             | "duplicate_recipients"
             | "recipient_limit_exceeded"
             | "reminder_schedule_changed"
+            | "reminder_disclosure_changed"
             | "plant_not_approved"
             | "provider_account_unavailable"
             | "configuration_changed"
@@ -3126,6 +3128,7 @@ export interface components {
             hide_recipients?: boolean;
             address_roles?: components["schemas"]["AddressRoleInput"][];
             member_roles?: components["schemas"]["MemberRoleInput"][];
+            disclosure?: string;
         };
         /**
          * @description * `administrator` - administrator
@@ -3157,6 +3160,24 @@ export interface components {
             daily_reminder_limit: number | null;
             addresses: components["schemas"]["ReminderAddressesOutput"] | null;
             deliveries: components["schemas"]["ReminderDeliveryOutput"][];
+        };
+        ReminderPreviewOutput: {
+            enabled: boolean;
+            state: components["schemas"]["ReminderStateEnum"];
+            revision: number;
+            include_workspace_members: boolean;
+            hide_recipients: boolean;
+            hidden_by_departure: boolean | null;
+            language: components["schemas"]["LanguageEnum"];
+            times: string[];
+            recipient_limit: number;
+            recipient_count: number;
+            workspace_member_count: number;
+            recipient_limit_exceeded: boolean;
+            daily_reminder_limit: number | null;
+            addresses: components["schemas"]["ReminderAddressesOutput"] | null;
+            deliveries: components["schemas"]["ReminderDeliveryOutput"][];
+            disclosure: string;
         };
         /**
          * @description * `sending` - Sending
@@ -7134,7 +7155,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ReminderOutput"];
+                    "application/json": components["schemas"]["ReminderPreviewOutput"];
                 };
             };
             /** @description The request input was refused. */

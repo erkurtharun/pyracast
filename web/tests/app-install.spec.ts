@@ -1,90 +1,288 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import type { Locator } from "@playwright/test";
 import { test, expect, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
 import { standInDisplayMode } from "./support/display-mode";
 import { accountWith, mockApi, sessionIdentity } from "./support/workspace";
+import { brand } from "../src/styles/tokens";
 
-const manifest = JSON.parse(
-    readFileSync(
-        path.resolve(__dirname, "../public/app/manifest.webmanifest"),
-        "utf8",
-    ),
-) as { name: string; theme_color: string };
+const manifestAddress = "/app/manifest.webmanifest";
+const touchIconAddress = "/app/icons/apple-touch-icon.png";
+const manifestText = readFileSync(
+    path.resolve(__dirname, "../public/app/manifest.webmanifest"),
+    "utf8",
+);
+const manifest = JSON.parse(manifestText) as {
+    name: string;
+    theme_color: string;
+};
 
-function installLinks(page: Page) {
-    const head = page.locator("head");
-    return {
-        manifest: head.locator('link[rel="manifest"]'),
-        touchIcon: head.locator('link[rel="apple-touch-icon"]'),
-        themeColour: head.locator('meta[name="theme-color"]'),
-        applicationName: head.locator('meta[name="application-name"]'),
-        homeScreenTitle: head.locator(
-            'meta[name="apple-mobile-web-app-title"]',
-        ),
-        launchCapability: head.locator(
-            'meta[name="mobile-web-app-capable"], meta[name="apple-mobile-web-app-capable"]',
-        ),
-    };
+// HTML reads rel as a set of ASCII case-insensitive tokens and compares meta names ASCII case-insensitively.
+const headTags = {
+    manifest: 'link[rel~="manifest" i]',
+    touchIcon: 'link[rel~="apple-touch-icon" i]',
+    applicationName: 'meta[name="application-name" i]',
+    homeScreenTitle: 'meta[name="apple-mobile-web-app-title" i]',
+    favicon: 'link[rel~="icon" i]',
+    themeColour: 'meta[name="theme-color" i]',
+    launchCapability:
+        'meta[name="mobile-web-app-capable" i], meta[name="apple-mobile-web-app-capable" i]',
+};
+type HeadTag = keyof typeof headTags;
+type ServedTag = { head: Record<string, string>[]; elsewhere: number };
+
+// DOMParser runs no script, so this is the tree the browser's parser builds from the served bytes.
+function readServedHead(page: Page, html: string) {
+    return page.evaluate(
+        ({ html, selectors }) => {
+            const parsed = new DOMParser().parseFromString(html, "text/html");
+            return Object.fromEntries(
+                Object.entries(selectors).map(([tag, selector]) => {
+                    const found = [...parsed.querySelectorAll(selector)];
+                    const head = found.filter(
+                        (element) => element.parentElement === parsed.head,
+                    );
+                    return [
+                        tag,
+                        {
+                            head: head.map((element) =>
+                                Object.fromEntries(
+                                    [...element.attributes].map(
+                                        ({ name, value }) => [name, value],
+                                    ),
+                                ),
+                            ),
+                            elsewhere: found.length - head.length,
+                        },
+                    ];
+                }),
+            );
+        },
+        { html, selectors: headTags },
+    ) as Promise<Record<HeadTag, ServedTag>>;
 }
 
-test("workspace pages link the manifest, the touch icon, the theme colour and the app's name", async ({
-    page,
-}) => {
-    await mockApi(page);
-    await page.goto("/app/");
-    await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
-    const links = installLinks(page);
-    await expect(links.manifest).toHaveCount(1);
-    await expect(links.manifest).toHaveAttribute(
-        "href",
-        "/app/manifest.webmanifest",
+const installHead = {
+    manifest: { rel: "manifest", href: manifestAddress },
+    touchIcon: { rel: "apple-touch-icon", href: touchIconAddress },
+    applicationName: { name: "application-name", content: manifest.name },
+    homeScreenTitle: {
+        name: "apple-mobile-web-app-title",
+        content: manifest.name,
+    },
+};
+const absent: ServedTag = { head: [], elsewhere: 0 };
+
+function onlyInHead(attributes: Record<string, string>): ServedTag {
+    return { head: [attributes], elsewhere: 0 };
+}
+
+function resolvedPath(reference: string, href: string | null | undefined) {
+    return new URL(href ?? "", reference).pathname;
+}
+
+type Layout = "root" | "app";
+
+async function expectServedHead(
+    page: Page,
+    html: string,
+    layout: Layout,
+    reference: string,
+) {
+    const served = await readServedHead(page, html);
+    for (const [tag, attributes] of Object.entries(installHead))
+        expect(served[tag as HeadTag], tag).toEqual(onlyInHead(attributes));
+    expect(served.launchCapability).toEqual(absent);
+    expect(served.favicon.elsewhere).toBe(0);
+    expect(
+        served.favicon.head.map(({ href }) => resolvedPath(reference, href)),
+    ).toEqual(["/icon.svg"]);
+    expect(manifest.theme_color).toBe(brand.forest);
+    expect(served.themeColour).toEqual(
+        layout === "app"
+            ? onlyInHead({ name: "theme-color", content: manifest.theme_color })
+            : absent,
     );
-    await expect(links.manifest).not.toHaveAttribute("crossorigin");
-    await expect(links.touchIcon).toHaveAttribute(
-        "href",
-        "/app/icons/apple-touch-icon.png",
-    );
-    await expect(links.themeColour).toHaveAttribute(
-        "content",
-        manifest.theme_color,
-    );
-    for (const name of [links.applicationName, links.homeScreenTitle]) {
+}
+
+async function expectLiveHead(page: Page, layout: Layout, reference: string) {
+    const head = page.locator("head");
+    const tag = (name: HeadTag) => head.locator(headTags[name]);
+    await expect(tag("manifest")).toHaveCount(1);
+    await expect(tag("manifest")).toHaveAttribute("href", manifestAddress);
+    await expect(tag("manifest")).not.toHaveAttribute("crossorigin");
+    await expect(tag("touchIcon")).toHaveCount(1);
+    await expect(tag("touchIcon")).toHaveAttribute("href", touchIconAddress);
+    for (const name of [tag("applicationName"), tag("homeScreenTitle")]) {
         await expect(name).toHaveCount(1);
         await expect(name).toHaveAttribute("content", manifest.name);
     }
-    await expect(links.launchCapability).toHaveCount(0);
-    await expect(page.locator('head link[rel="icon"]')).toHaveAttribute(
-        "href",
-        /^\/icon\.svg/,
-    );
-    const browser = await page.context().newCDPSession(page);
-    const found = await browser.send("Page.getAppManifest", {});
-    expect(new URL(found.url).pathname).toBe("/app/manifest.webmanifest");
-    expect(found.errors).toEqual([]);
-});
+    await expect(tag("launchCapability")).toHaveCount(0);
+    await expect(tag("favicon")).toHaveCount(1);
+    expect(
+        resolvedPath(reference, await tag("favicon").getAttribute("href")),
+    ).toBe("/icon.svg");
+    if (layout === "app")
+        await expect(tag("themeColour")).toHaveAttribute(
+            "content",
+            manifest.theme_color,
+        );
+    else await expect(tag("themeColour")).toHaveCount(0);
+}
 
-for (const address of [
+type Address = {
+    name: string;
+    address: string;
+    layout: Layout;
+    session?: "anonymous" | "member";
+    shown: (page: Page) => Locator;
+};
+
+const publicAddresses: Address[] = [
     "/",
     "/tr/",
     "/privacy/",
     "/tr/privacy/",
     "/terms/",
     "/tr/terms/",
-]) {
-    test(`public ${address} links no manifest, touch icon, theme colour or app name`, async ({
-        page,
-    }) => {
-        await page.goto(address);
-        const links = installLinks(page);
-        await expect(page.locator("h1")).toBeVisible();
-        await expect(links.manifest).toHaveCount(0);
-        await expect(links.touchIcon).toHaveCount(0);
-        await expect(links.themeColour).toHaveCount(0);
-        await expect(links.applicationName).toHaveCount(0);
-        await expect(links.homeScreenTitle).toHaveCount(0);
+].map((address) => ({
+    name: `public ${address}`,
+    address,
+    layout: "root",
+    shown: (page) => page.locator("h1"),
+}));
+
+const workspacePage: Address = {
+    name: "a workspace page",
+    address: "/app/w/1/",
+    layout: "app",
+    session: "member",
+    shown: (page) => page.getByRole("heading", { name: "Plants", exact: true }),
+};
+
+const pageNotFound = (page: Page) =>
+    page.getByRole("heading", { name: "Page not found", exact: true });
+
+// notFound() in a route renders app/app/not-found.tsx inside the /app/ layout; an address no route matches renders the root not-found file in the root layout alone.
+const addresses: Address[] = [
+    ...publicAddresses,
+    {
+        name: "an unknown public address",
+        address: "/no-such-page/",
+        layout: "root",
+        session: "anonymous",
+        shown: pageNotFound,
+    },
+    {
+        name: "the sign-in screen",
+        address: "/app/",
+        layout: "app",
+        session: "anonymous",
+        shown: (page) =>
+            page.locator("form").getByRole("button", { name: "Sign in" }),
+    },
+    workspacePage,
+    {
+        name: "a missing workspace page",
+        address: "/app/w/1/plants/11/unknown/",
+        layout: "app",
+        session: "member",
+        shown: pageNotFound,
+    },
+    {
+        name: "an unknown address under /app/",
+        address: "/app/no-such-page/",
+        layout: "root",
+        session: "member",
+        shown: pageNotFound,
+    },
+];
+
+async function visit(
+    page: Page,
+    baseURL: string | undefined,
+    { address, session, shown }: Address,
+) {
+    if (session) await mockApi(page, { anonymous: session === "anonymous" });
+    const response = (await page.goto(address))!;
+    expect(response.request().redirectedFrom()).toBeNull();
+    const reference = new URL(address, baseURL).href;
+    expect(response.url()).toBe(reference);
+    const served = await response.text();
+    await expect(shown(page)).toBeVisible();
+    return { reference, served };
+}
+
+async function expectReceivedManifest(page: Page, reference: string) {
+    const browser = await page.context().newCDPSession(page);
+    const found = await browser.send("Page.getAppManifest", {});
+    expect(found.url).toBe(new URL(manifestAddress, reference).href);
+    expect(found.errors).toEqual([]);
+    expect(found.data).toBe(manifestText);
+    const app = new URL("/app/", reference).href;
+    expect({
+        id: found.manifest.id,
+        startUrl: found.manifest.startUrl,
+        scope: found.manifest.scope,
+        display: found.manifest.display,
+    }).toEqual({
+        id: app,
+        startUrl: app,
+        scope: app,
+        // Chromium reports a processed display mode by its enum name: "standalone" as "kStandalone".
+        display: "kStandalone",
     });
 }
+
+for (const address of addresses)
+    test(`${address.name} serves the manifest link, the touch icon and the app's name as children of head ${
+        address.layout === "app" ? "with" : "without"
+    } the theme colour, and the browser receives the checked-in manifest and processes it with the app's identity, start, scope and display, with the page at the requested address before and after the live checks`, async ({
+        page,
+        baseURL,
+    }) => {
+        const { reference, served } = await visit(page, baseURL, address);
+        await expectServedHead(page, served, address.layout, reference);
+        expect(page.url()).toBe(reference);
+        await expectLiveHead(page, address.layout, reference);
+        await expectReceivedManifest(page, reference);
+        expect(page.url()).toBe(reference);
+    });
+
+test("a served head tag is selected by its relation or name as HTML reads them and counts only as a child of head, not in body or in script text", async ({
+    page,
+}) => {
+    const link = `<link rel="manifest" href="${manifestAddress}">`;
+    const read = async (html: string) =>
+        (await readServedHead(page, html)).manifest;
+    expect(
+        await read(
+            `<!doctype html><html><head>${link}</head><body></body></html>`,
+        ),
+    ).toEqual(onlyInHead(installHead.manifest));
+    expect(
+        await read(
+            `<!doctype html><html><head></head><body><div hidden>${link}</div></body></html>`,
+        ),
+    ).toEqual({ head: [], elsewhere: 1 });
+    expect(
+        await read(
+            `<!doctype html><html><head><script>self.payload = '${link}';</script></head><body></body></html>`,
+        ),
+    ).toEqual(absent);
+    expect(
+        await read(
+            `<!doctype html><html><head><link rel=" manifest " href="/other.webmanifest">${link}</head><body></body></html>`,
+        ),
+    ).toEqual({
+        head: [
+            { rel: " manifest ", href: "/other.webmanifest" },
+            installHead.manifest,
+        ],
+        elsewhere: 0,
+    });
+});
 
 type Engine = "webkit" | "gecko";
 
