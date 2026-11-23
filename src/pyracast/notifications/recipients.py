@@ -383,10 +383,10 @@ def store_recipients(
     *,
     roles: Sequence[TypedChoice],
     stored_roles: Sequence[TypedChoice],
-) -> None:
-    """`roles` holds the choice of each planned row and `stored_roles` that of each stored one."""
+) -> bool:
+    """Rewrites the rows when they, their ties or their aligned choices differ; whether it did."""
     if list(stored) == list(planned) and list(roles) == list(stored_roles):
-        return
+        return False
     ReminderRecipient.objects.filter(schedule=schedule).delete()
     rows = ReminderRecipient.objects.bulk_create(
         ReminderRecipient(
@@ -403,6 +403,7 @@ def store_recipients(
         for stored_row, row in zip(rows, planned, strict=True)
         for membership_id in sorted(row.ties)
     )
+    return True
 
 
 def store_member_choices(

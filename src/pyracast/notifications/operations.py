@@ -387,7 +387,7 @@ def configure_reminders(
         stored_typed = typed_choices(schedule)
         stored_roles = [choice for _, choice, _ in stored_typed]
         roles = _typed_choices(planned, choices(stored_typed, {}), address_roles or ())
-        store_recipients(schedule, explicit, planned, roles=roles, stored_roles=stored_roles)
+        rows = store_recipients(schedule, explicit, planned, roles=roles, stored_roles=stored_roles)
         chosen = store_member_choices(schedule, decided)
         mode = schedule.hide_recipients != hide_recipients or schedule.hidden_by_departure
         schedule.enabled, schedule.times, schedule.language, schedule.hide_recipients = (
@@ -397,7 +397,7 @@ def configure_reminders(
             hide_recipients,
         )
         schedule.hidden_by_departure = False
-        if created or submitted != stored or mode or roles != stored_roles or chosen:
+        if created or submitted != stored or mode or rows or chosen:
             schedule.configured_by = actor
             schedule.effective_from = now
             schedule.revision += 1

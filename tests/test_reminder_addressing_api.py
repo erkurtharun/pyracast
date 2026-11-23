@@ -789,12 +789,14 @@ def test_a_typed_to_whose_address_another_member_took_is_hidden_until_chosen_for
     assert sent_headers(0) == ([address], [], [])
     moved(alice, "alice.new@example.com")
     moved(bob, address)
-    unchanged = (revision(system), len(events(system)))
+    taken = (revision(system), len(events(system)))
 
     assert sent_headers(1) == ([], [], [address])
 
     assert put(system, **body).status_code == 200
-    assert (revision(system), len(events(system))) == unchanged
+    assert ties(ReminderSchedule.objects.get()) == {address: [membership(alice), membership(bob)]}
+    unchanged = (revision(system), len(events(system)))
+    assert unchanged == (taken[0] + 1, taken[1] + 1)
     assert sent_headers(2) == ([], [], [address])
 
     repeated = put(system, **body, address_roles=to_for(address, alice))
@@ -1414,4 +1416,23 @@ def test_an_address_change_inside_the_marker_leaves_a_tied_hidden_member_hidden(
         [ADMIN],
         False,
         True,
+    )
+
+
+def test_a_save_that_only_ties_a_typed_row_to_its_new_holder_is_a_change() -> None:
+    system, _, _ = workspace()
+    body = {"recipients": ["boss@example.com", "outside@example.com"], "hide_recipients": False}
+    assert put(system, **body).status_code == 200
+    carol = member(system, "carol@example.com", active=False)
+    moved(carol, "outside@example.com")
+    before = (revision(system), len(events(system)))
+
+    response = put(system, **body)
+
+    assert response.status_code == 200, response.content
+    eligible = {row["address"]: row["eligible"] for row in response.json()["addresses"]["added"]}
+    assert (revision(system), len(events(system)), eligible["outside@example.com"]) == (
+        before[0] + 1,
+        before[1] + 1,
+        False,
     )
