@@ -10,6 +10,7 @@ import {
     liveRegion,
     markDocument,
     outstandingAnswers,
+    outstandingSessionReads,
     resentNotice,
     sessionAnswer,
 } from "./support/session";
@@ -61,6 +62,25 @@ async function openSettingsForm(page: Page) {
 }
 
 const abort = (route: Route) => route.abort();
+const otherApi = (url: URL) =>
+    url.pathname.startsWith("/api/") && url.pathname !== "/api/session/";
+
+// A paused jump fires the tick once; runFor fires it repeatedly and can start a second idle read.
+async function coverIdleWindow(page: Page) {
+    const reads = await outstandingSessionReads(page);
+    await page.route(otherApi, abort);
+    await page.route("**/api/session/", abort);
+    const now = await page.evaluate(() => Date.now());
+    const settled = reads(0);
+    await page.clock.pauseAt(now + idleLimit + tick);
+    await settled;
+    await expect(cover(page)).toBeVisible();
+    return reads;
+}
+
+function restoreSessionRead(page: Page) {
+    return page.unroute("**/api/session/", abort);
+}
 
 test("a window without an answer for the idle limit covers its screens and keeps what was typed", async ({
     page,
@@ -68,11 +88,9 @@ test("a window without an answer for the idle limit covers its screens and keeps
     await signedInOnClock(page);
     await openSettingsForm(page);
     await markDocument(page);
-    await page.route("**/api/**", abort);
-    await page.clock.runFor(idleLimit + tick);
-    await expect(cover(page)).toBeVisible();
+    await coverIdleWindow(page);
     await expect(page.getByLabel(capacity)).toBeHidden();
-    await page.unroute("**/api/**", abort);
+    await restoreSessionRead(page);
     await page.getByRole("button", { name: "Try again" }).click();
     await expect(cover(page)).toHaveCount(0);
     await expect(page.getByLabel(capacity)).toHaveValue("6.25");
@@ -84,12 +102,10 @@ test("a cover lifts at the next answer of the session read", async ({
 }) => {
     const server = await signedInOnClock(page);
     await openSettingsForm(page);
-    await page.route("**/api/**", abort);
-    await page.clock.runFor(idleLimit + tick);
-    await expect(cover(page)).toBeVisible();
-    await page.unroute("**/api/**", abort);
+    await coverIdleWindow(page);
+    await restoreSessionRead(page);
     const reads = server.reads;
-    await page.clock.runFor(tick);
+    await page.clock.fastForward(tick);
     await expect(cover(page)).toHaveCount(0);
     expect(server.reads).toBeGreaterThan(reads);
     await expect(page.getByLabel(capacity)).toHaveValue("6.25");
@@ -137,11 +153,9 @@ test("a covered window whose session read finds no user becomes a fresh document
     const server = await signedInOnClock(page);
     await openSettingsForm(page);
     await markDocument(page);
-    await page.route("**/api/**", abort);
-    await page.clock.runFor(idleLimit + tick);
-    await expect(cover(page)).toBeVisible();
+    await coverIdleWindow(page);
     server.account.current = null;
-    await page.unroute("**/api/**", abort);
+    await restoreSessionRead(page);
     await page.getByRole("button", { name: "Try again" }).click();
     await expect(page.getByText(expiredNotice)).toBeVisible();
     expect(await isMarked(page)).toBe(false);
@@ -168,10 +182,8 @@ test("a cover lifts at the answer of Retry after the clock was moved back", asyn
 }) => {
     await signedInOnClock(page);
     await openSettingsForm(page);
-    await page.route("**/api/**", abort);
-    await page.clock.runFor(idleLimit + tick);
-    await expect(cover(page)).toBeVisible();
-    await page.unroute("**/api/**", abort);
+    await coverIdleWindow(page);
+    await restoreSessionRead(page);
     await page.clock.setSystemTime(new Date(start.getTime() - 60 * 60_000));
     await page.getByRole("button", { name: "Try again" }).click();
     await expect(cover(page)).toHaveCount(0);
@@ -197,19 +209,17 @@ test("a failed Retry after the clock was moved back keeps the cover until an ans
 }) => {
     await signedInOnClock(page);
     await openSettingsForm(page);
-    await page.route("**/api/**", abort);
-    await page.clock.runFor(idleLimit + tick);
-    await expect(cover(page)).toBeVisible();
+    const reads = await coverIdleWindow(page);
     await page.clock.setSystemTime(new Date(start.getTime() - 60 * 60_000));
-    const failed = sessionReadFailed(page);
+    const retried = reads(0);
     await page.getByRole("button", { name: "Try again" }).click();
-    await failed;
-    const idleRead = sessionReadFailed(page);
-    await page.clock.runFor(tick);
+    await retried;
+    const idleRead = reads(0);
+    await page.clock.fastForward(tick);
     await idleRead;
     await expect(cover(page)).toBeVisible();
     await expect(page.getByLabel(capacity)).toBeHidden();
-    await page.unroute("**/api/**", abort);
+    await restoreSessionRead(page);
     await page.getByRole("button", { name: "Try again" }).click();
     await expect(cover(page)).toHaveCount(0);
     await expect(page.getByLabel(capacity)).toHaveValue("6.25");
