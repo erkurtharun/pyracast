@@ -3,6 +3,7 @@ import json
 from collections.abc import Iterator
 from datetime import timedelta
 from email.headerregistry import AddressHeader
+from email.message import EmailMessage as WireMessage
 from typing import Any
 
 import httpx
@@ -18,6 +19,7 @@ from django.utils import timezone
 from pyracast.accounts.models import Membership
 from pyracast.mail import smtp
 from pyracast.mail.gmail import SEND_SCOPE, TOKEN_URL
+from pyracast.mail.policy import wire_policy
 from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.models import (
     DeliveryRecipient,
@@ -29,8 +31,12 @@ from pyracast.notifications.models import (
     ReminderRecipient,
     ReminderSchedule,
 )
-from pyracast.notifications.operations import configure_reminders, invalid_recipient_region_ids
-from pyracast.notifications.recipients import mailbox_key, prepared, recipient_key
+from pyracast.notifications.operations import (
+    configure_reminders,
+    invalid_recipient_region_ids,
+    validate_recipient,
+)
+from pyracast.notifications.recipients import addressable, mailbox_key, prepared, recipient_key
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.models import AuditEvent
 from tests.support.domain import NOW, System, make_system
@@ -40,6 +46,7 @@ from tests.support.notifications import (
     SLOT,
     freeze,
     mailboxes,
+    moved,
     parsed,
     pending_address_change,
     smtp_wire,
@@ -60,7 +67,20 @@ UNSTABLE = [
     "ops@stra\u1e9ee.de",
     "ops@\u1c90\u1c91.ge",
 ]
-WITHOUT_WIRE_FORM = [REFUSED, *UNSTABLE]
+NOT_ASCII = [f"t{letter}st@example.com" for letter in ("\u212a", "\u017f", "\u0130", "\u0131")]
+KELVIN = NOT_ASCII[0]
+UNADDRESSABLE = [REFUSED, *UNSTABLE, *NOT_ASCII]
+DISPLAY_NAME = "Ops <ops@example.com>"
+STRASSE_ACE, STRASSE_CAPITAL = "ops@xn--strae-301b.de", "ops@stra\u1e9ee.de"
+
+
+def long_unicode_address() -> str:
+    """At most 254 characters, but more than 254 octets once its domain is in ACE form."""
+    domain = ".".join(["\u00e4" * 57] * 4) + ".de"
+    return "o" * (253 - len(domain)) + "@" + domain
+
+
+LONG = long_unicode_address()
 
 ONE_KEY = [
     (SOFT_HYPHEN, "ops@softmail.de"),
@@ -128,6 +148,49 @@ def test_an_ordinary_spelling_is_one_mailbox_in_a_stable_wire_form(address: str)
     assert prepared(wire) == wire
     assert [found.addr_spec for found in AddressHeader.value_parser(wire).all_mailboxes] == [wire]
     assert mailbox_key(recipient_key(address)) == mailbox_key(address)
+    assert addressable(address) == wire
+    assert mailbox_key(address) == recipient_key(wire)
+    validate_recipient(address)
+
+
+@pytest.mark.parametrize("address", [*UNADDRESSABLE, LONG, DISPLAY_NAME])
+def test_an_address_neither_transport_can_carry_is_refused_and_has_no_mailbox_key(
+    address: str,
+) -> None:
+    assert len(address) <= 254
+    with pytest.raises(ValidationError) as refused:
+        addressable(address)
+    assert refused.value.code == validate_email.code
+    with pytest.raises(ValidationError):
+        validate_recipient(address)
+    assert mailbox_key(address) not in {
+        recipient_key(address),
+        *(mailbox_key(other) for other in ORDINARY),
+    }
+
+
+def test_an_address_refused_only_for_its_wire_bytes_has_a_stable_preparation() -> None:
+    for address in NOT_ASCII:
+        validate_email(address)
+        assert prepared(address) == address
+    assert len(LONG) == 254
+    assert len(prepared(LONG)) > 254
+    assert prepared(LONG).isascii()
+
+
+@pytest.mark.parametrize("address", ORDINARY)
+@pytest.mark.parametrize("eight_bit", [True, False])
+def test_an_addressable_form_serializes_in_every_header_under_both_wire_policies(
+    address: str, eight_bit: bool
+) -> None:
+    wire = addressable(address)
+    message = WireMessage(policy=wire_policy(eight_bit=eight_bit))
+    for name in ("To", "Cc", "Bcc"):
+        message[name] = wire
+
+    serialized = parsed(message.as_bytes())
+
+    assert [mailboxes(serialized, name) for name in ("To", "Cc", "Bcc")] == [[wire]] * 3
 
 
 pytestdb = pytest.mark.django_db(transaction=True)
@@ -212,8 +275,8 @@ def test_two_distinct_ace_domains_are_two_recipients() -> None:
 
 
 @pytestdb
-@pytest.mark.parametrize("address", WITHOUT_WIRE_FORM)
-def test_an_address_without_a_stable_wire_form_is_refused_by_the_preview_and_the_save(
+@pytest.mark.parametrize("address", [*UNADDRESSABLE, LONG])
+def test_an_address_neither_transport_can_carry_is_refused_by_the_preview_and_the_save(
     address: str,
 ) -> None:
     system = workspace()
@@ -436,8 +499,8 @@ def skipped_as_invalid(delivery_id: int) -> bool:
 
 
 @pytestdb
-@pytest.mark.parametrize("address", WITHOUT_WIRE_FORM)
-def test_a_member_address_without_a_stable_wire_form_skips_the_delivery_before_any_transport(
+@pytest.mark.parametrize("address", UNADDRESSABLE)
+def test_a_member_address_neither_transport_can_carry_skips_the_delivery_before_any_transport(
     gmail_requests: list[bytes], address: str
 ) -> None:
     system = workspace()
@@ -453,6 +516,143 @@ def test_a_member_address_without_a_stable_wire_form_skips_the_delivery_before_a
     assert skipped_as_invalid(over_gmail)
     assert not DeliveryRecipient.objects.exists()
     assert invalid_recipient_region_ids() == {system.region.pk}
+
+
+@pytestdb
+@pytest.mark.parametrize("address", NOT_ASCII)
+def test_a_member_address_smtp_cannot_carry_skips_a_delivery_sending_it_only_in_bcc(
+    address: str,
+) -> None:
+    system = workspace()
+    member(system, address)
+    assert request(system, hide_recipients=True).status_code == 200
+
+    with smtp_wire() as script:
+        delivery_id = send_on()
+
+    assert script.transactions == []
+    assert skipped_as_invalid(delivery_id)
+    assert not DeliveryRecipient.objects.exists()
+    assert invalid_recipient_region_ids() == {system.region.pk}
+
+
+@pytestdb
+def test_a_member_address_the_validator_refuses_is_not_absorbed_by_a_typed_spelling(
+    gmail_requests: list[bytes],
+) -> None:
+    system = workspace()
+    member(system, DISPLAY_NAME)
+    assert request(system, recipients=["ops@example.com"]).status_code == 200
+
+    with smtp_wire() as script:
+        over_smtp = send_on()
+    over_gmail = send_on(1)
+
+    assert (script.transactions, gmail_requests) == ([], [])
+    assert skipped_as_invalid(over_smtp)
+    assert skipped_as_invalid(over_gmail)
+    assert not DeliveryRecipient.objects.exists()
+    assert invalid_recipient_region_ids() == {system.region.pk}
+
+
+def answer(system: System) -> Any:
+    client = Client()
+    client.force_login(system.member)
+    response = client.get(url(system))
+    assert response.status_code == 200, response.content
+    return response.json()
+
+
+def sent_headers(day: int) -> tuple[list[str], list[str], list[str]]:
+    with smtp_wire() as script:
+        send_on(day)
+    (transaction,) = script.transactions
+    message = parsed(transaction.data)
+    return mailboxes(message, "To"), mailboxes(message, "Cc"), transaction.recipients
+
+
+def stored_mode(system: System) -> tuple[int, bool, bool]:
+    schedule = ReminderSchedule.objects.get(region=system.region)
+    return schedule.revision, schedule.hide_recipients, schedule.hidden_by_departure
+
+
+@pytestdb
+def test_a_hidden_member_respelling_their_address_without_a_mailbox_key_hides_every_placement() -> (
+    None
+):
+    system = workspace()
+    holder = member(system, "holder@example.com")
+    saved = request(
+        system,
+        include_workspace_members=False,
+        recipients=[STRASSE_ACE],
+        address_roles=[{"address": STRASSE_ACE, "role": "to", "memberships": []}],
+        member_roles=[
+            {"memberships": [membership(holder)], "address": "holder@example.com", "role": "bcc"}
+        ],
+    )
+    assert saved.status_code == 200, saved.content
+    moved(holder, STRASSE_ACE)
+    assert sent_headers(0) == ([], [], [STRASSE_ACE])
+    before = stored_mode(system)
+
+    moved(holder, STRASSE_CAPITAL)
+
+    assert sent_headers(1) == ([], [], [STRASSE_ACE])
+    added = answer(system)["addresses"]["added"]
+    assert [(row["address"], row["role"], row["placement"]) for row in added] == [
+        (STRASSE_ACE, "to", "bcc")
+    ]
+    assert answer(system)["hide_recipients"] is False
+    assert stored_mode(system) == before
+    assert before[1:] == (False, False)
+    moved(holder, STRASSE_ACE)
+    assert sent_headers(2) == ([], [], [STRASSE_ACE])
+    added = answer(system)["addresses"]["added"]
+    assert [(row["address"], row["role"], row["placement"]) for row in added] == [
+        (STRASSE_ACE, "bcc", "bcc")
+    ]
+    assert stored_mode(system) == before
+
+
+@pytestdb
+def test_a_member_address_neither_transport_can_carry_hides_a_typed_to_of_another_address() -> None:
+    system = workspace()
+    member(system, KELVIN)
+    saved = request(
+        system,
+        include_workspace_members=False,
+        recipients=["outside@example.com"],
+        address_roles=[{"address": "outside@example.com", "role": "to", "memberships": []}],
+    )
+    assert saved.status_code == 200, saved.content
+
+    assert sent_headers(0) == ([], [], ["outside@example.com"])
+    event = AuditEvent.objects.get(action="reminder_schedule_updated")
+    assert event.details["visible_recipients"] == 0
+    added = answer(system)["addresses"]["added"]
+    assert [(row["role"], row["placement"]) for row in added] == [("to", "bcc")]
+
+
+@pytestdb
+def test_a_member_address_the_validator_refuses_hides_a_typed_to_of_its_mailbox() -> None:
+    system = workspace()
+    member(system, DISPLAY_NAME)
+    preview = request(
+        system, "preview/", include_workspace_members=False, recipients=["ops@example.com"]
+    )
+    (shown,) = preview.json()["addresses"]["added"]
+    saved = request(
+        system,
+        include_workspace_members=False,
+        recipients=["ops@example.com"],
+        address_roles=[
+            {"address": "ops@example.com", "role": "to", "memberships": shown["memberships"]}
+        ],
+    )
+    assert saved.status_code == 200, saved.content
+
+    assert sent_headers(0) == ([], [], ["ops@example.com"])
 
 
 def hidden_member_beside_the_administrator() -> tuple[System, ReminderSchedule]:

@@ -15,7 +15,6 @@ from pyracast.notifications.models import (
 )
 from pyracast.notifications.operations import (
     MAX_RECIPIENT_LIMIT,
-    RECIPIENT_MAX_LENGTH,
     AddressChoice,
     MemberChoice,
 )
@@ -30,7 +29,7 @@ from pyracast.notifications.overview import (
     ReminderOverview,
     ReminderSummary,
 )
-from pyracast.notifications.recipients import mailbox_key
+from pyracast.notifications.recipients import RECIPIENT_MAX_LENGTH, mailbox_key
 
 
 class AddressRoleInput(InputSerializer):
