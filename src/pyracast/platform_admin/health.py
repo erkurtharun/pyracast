@@ -240,7 +240,8 @@ def presented(key: str, count: int) -> HealthCheck:
 
 def summarize_health(report: HealthReport) -> HealthSummary:
     checks = [presented(key, report.counts[key]) for key in PRESENTATION if report.counts[key] > 0]
-    if unhealthy_phases := [state for state in report.phases if not state.healthy]:
+    unhealthy_phases = [state for state in report.phases if not state.healthy]
+    if unhealthy_phases:
         checks.insert(
             0,
             HealthCheck(

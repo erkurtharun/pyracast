@@ -265,11 +265,12 @@ resource "google_compute_disk_resource_policy_attachment" "data_snapshots" {
 }
 
 resource "google_compute_instance" "application" {
-  name                = var.name
-  zone                = var.zone
-  machine_type        = var.machine_type
-  deletion_protection = var.deletion_protection
-  labels              = local.labels
+  name                      = var.name
+  zone                      = var.zone
+  machine_type              = var.machine_type
+  allow_stopping_for_update = true
+  deletion_protection       = var.deletion_protection
+  labels                    = local.labels
 
   boot_disk {
     initialize_params {

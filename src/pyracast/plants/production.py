@@ -51,7 +51,7 @@ def _value(row: Measurement) -> dict[str, Any]:
     }
 
 
-def _slot_value(rows: list[Measurement], start: datetime, end: datetime) -> dict[str, Any] | None:
+def slot_value(rows: list[Measurement], start: datetime, end: datetime) -> dict[str, Any] | None:
     contained = [row for row in rows if row.starts_at >= start and row.ends_at <= end]
     if len(contained) == 1 and contained[0].starts_at == start and contained[0].ends_at == end:
         return _value(contained[0])
@@ -278,7 +278,7 @@ def production_history(
                         if row.starts_at < end and row.ends_at > cursor
                     ],
                     "revision_id": head.pk if head else None,
-                    "effective": _slot_value(effective, cursor, end),
+                    "effective": slot_value(effective, cursor, end),
                     "provider_originals": [_provider(row) for row in originals],
                     "can_edit": edit_reason is None,
                     "can_propose": may_propose and technical_reason is None,

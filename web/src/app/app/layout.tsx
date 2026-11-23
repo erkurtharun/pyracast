@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { NextIntlClientProvider } from "next-intl";
 import { connection } from "next/server";
-import { Suspense } from "react";
+import { Suspense, type ReactNode } from "react";
 import { AppRoot } from "@/features/session/app-root";
 import { WorkerRegistration } from "@/lib/worker-registration";
 import { appWindowColour } from "@/styles/tokens";
@@ -21,7 +21,7 @@ export const viewport: Viewport = { themeColor: appWindowColour };
 
 export default async function AppLayout({
     children,
-}: Readonly<{ children: React.ReactNode }>) {
+}: Readonly<{ children: ReactNode }>) {
     await connection();
     return (
         <NextIntlClientProvider messages={null}>

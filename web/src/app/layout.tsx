@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { getLocale } from "next-intl/server";
+import type { ReactNode } from "react";
 import "@/styles/tokens.css";
 import "./globals.css";
 export const metadata: Metadata = {
@@ -9,7 +10,7 @@ export const metadata: Metadata = {
 };
 export default async function Layout({
     children,
-}: Readonly<{ children: React.ReactNode }>) {
+}: Readonly<{ children: ReactNode }>) {
     const locale = await getLocale();
     return (
         <html lang={locale}>

@@ -6,7 +6,8 @@
         "integration/**/*.spec.ts",
         "production-tests/**/*.spec.ts",
         "testing/coverage-reporter.ts",
-        "testing/front.ts"
+        "testing/front.ts",
+        "eslint/console-scripts.config.mjs"
     ],
     "project": [
         "src/**/*.{ts,tsx}",

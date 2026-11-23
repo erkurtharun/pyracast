@@ -11,7 +11,6 @@ these pages hold what it cannot show at a glance.
 | System-wide design decisions and their rationale | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Irradiance, energy and calibration calculations | [IRRADIANCE.md](IRRADIANCE.md) |
 | Production topology, release and recovery | [DEPLOYMENT.md](DEPLOYMENT.md) |
-| State of the current improvement program | [agents/PROGRESS.md](agents/PROGRESS.md) |
 
 ## Keeping it true
 

@@ -22,7 +22,7 @@ from pyracast.incidents.models import PlantIncident
 from pyracast.incidents.operations import prepare_incident, prepare_incident_finish
 from pyracast.plants.measurements import select_measurements, select_provider_measurements
 from pyracast.plants.models import Plant
-from pyracast.plants.production import _slot_value
+from pyracast.plants.production import slot_value
 from pyracast.plants.production_changes import (
     PreparedChange,
     ProductionChange,
@@ -199,8 +199,8 @@ def production_context(request: ChangeRequest) -> list[dict[str, Any]]:
             "expected_revision_id": row.expected_head_id,
             "baseline_energy_mwh": row.baseline_energy_mwh,
             "baseline_source_kind": row.baseline_source_kind,
-            "current": _slot_value(effective, row.starts_at, row.ends_at),
-            "automatic": _slot_value(providers, row.starts_at, row.ends_at),
+            "current": slot_value(effective, row.starts_at, row.ends_at),
+            "automatic": slot_value(providers, row.starts_at, row.ends_at),
             "provider_intervals": [
                 {
                     "starts_at": value.starts_at,
