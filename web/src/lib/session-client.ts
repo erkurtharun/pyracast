@@ -23,7 +23,13 @@ type SessionState = {
     replaced: boolean;
     signOut: SignOutState;
 };
-type Confirmation = { answeredAt: number; failedAt?: number };
+// answeredAt is wall-clock time; listAnswer is the stamp of the last workspace-list answer seen,
+// so a remounted shell replaying it is no answer.
+type Confirmation = {
+    answeredAt: number;
+    listAnswer?: number;
+    covered: boolean;
+};
 
 // PYRACAST_SESSION_IDLE_SECONDS in settings.py: the server ends a session left this long.
 const serverIdleLimitMs = 30 * 60_000;
@@ -47,7 +53,7 @@ let state: SessionState = {
     replaced: false,
     signOut: { status: "idle" },
 };
-let confirmation: Confirmation = { answeredAt: 0 };
+let confirmation: Confirmation = { answeredAt: 0, covered: false };
 let documentOwner: string | null | undefined;
 // What a session read's answer may have missed: this tab's session changes, another tab's
 // observation and every read started or session adopted here.
@@ -67,8 +73,7 @@ export function sessionState() {
 }
 
 function unconfirmed() {
-    const { answeredAt, failedAt } = confirmation;
-    return failedAt !== undefined && failedAt - answeredAt >= serverIdleLimitMs;
+    return confirmation.covered;
 }
 
 function subscribeSession(listener: () => void) {
@@ -105,26 +110,28 @@ export function useSessionClock() {
 }
 
 export function confirmAnswer(at: number) {
-    if (at <= confirmation.answeredAt) return;
-    confirmation = { ...confirmation, answeredAt: at };
-    notify();
-}
-
-function failConfirmation() {
-    confirmation = { ...confirmation, failedAt: Date.now() };
+    if (at === confirmation.listAnswer) return;
+    confirmation = { answeredAt: at, listAnswer: at, covered: false };
     notify();
 }
 
 // The wall clock counts the time a suspended device slept. An answer stamped later than now counts
 // as old, so a clock set back cannot postpone the check.
-export function confirmIdleSession() {
+function stale() {
     const now = Date.now();
     const { answeredAt } = confirmation;
-    if (
-        state.session?.user &&
-        (now < answeredAt || now - answeredAt >= serverIdleLimitMs)
-    )
-        loadSession().catch(() => {});
+    return now < answeredAt || now - answeredAt >= serverIdleLimitMs;
+}
+
+// Once set, the cover stays whatever the clock does until an answer arrives.
+function failConfirmation() {
+    if (confirmation.covered || !stale()) return;
+    confirmation = { ...confirmation, covered: true };
+    notify();
+}
+
+export function confirmIdleSession() {
+    if (state.session?.user && stale()) loadSession().catch(() => {});
 }
 
 // The tab's pending invitation lives in a feature module, which this store cannot import.
@@ -227,7 +234,11 @@ export function adoptSession(session: Session) {
             session,
             replaced: state.replaced || owner !== documentOwner,
         };
-    confirmation = { answeredAt: Date.now() };
+    confirmation = {
+        ...confirmation,
+        answeredAt: Date.now(),
+        covered: false,
+    };
     setCsrfToken(session.csrf_token);
     observe(session.session_tag ?? "");
     generation += 1;

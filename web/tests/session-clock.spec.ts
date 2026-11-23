@@ -172,6 +172,82 @@ test("a cover lifts at the answer of Retry after the clock was moved back", asyn
     await expect(page.getByLabel(capacity)).toHaveValue("6.25");
 });
 
+function showWindow(page: Page) {
+    return page.evaluate(() =>
+        document.dispatchEvent(new Event("visibilitychange")),
+    );
+}
+
+function sessionReadFailed(page: Page) {
+    return page.waitForEvent("requestfailed", (request) =>
+        request.url().endsWith("/api/session/"),
+    );
+}
+
+test("a failed Retry after the clock was moved back keeps the cover until an answer", async ({
+    page,
+}) => {
+    await signedInOnClock(page);
+    await openSettingsForm(page);
+    await page.route("**/api/**", abort);
+    await page.clock.runFor(idleLimit + tick);
+    await expect(cover(page)).toBeVisible();
+    await page.clock.setSystemTime(new Date(start.getTime() - 60 * 60_000));
+    const failed = sessionReadFailed(page);
+    await page.getByRole("button", { name: "Try again" }).click();
+    await failed;
+    await page.clock.runFor(tick);
+    await expect(cover(page)).toBeVisible();
+    await expect(page.getByLabel(capacity)).toBeHidden();
+    await page.unroute("**/api/**", abort);
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect(cover(page)).toHaveCount(0);
+    await expect(page.getByLabel(capacity)).toHaveValue("6.25");
+});
+
+test("a workspace-list answer after the clock was moved back lifts the cover", async ({
+    page,
+}) => {
+    await signedInOnClock(page);
+    await openSettingsForm(page);
+    await page.route("**/api/**", abort);
+    await page.clock.runFor(idleLimit + tick);
+    await expect(cover(page)).toBeVisible();
+    let answerReads!: () => void;
+    const readsAnswered = new Promise<void>(
+        (resolve) => (answerReads = resolve),
+    );
+    await page.route("**/api/session/", async (route) => {
+        await readsAnswered;
+        await route.fallback();
+    });
+    await page.unroute("**/api/**", abort);
+    await page.clock.setSystemTime(new Date(start.getTime() - 60 * 60_000));
+    const listed = page.waitForResponse("**/api/tenants/");
+    await showWindow(page);
+    expect((await listed).ok()).toBe(true);
+    await page.clock.runFor(tick);
+    await expect(cover(page)).toHaveCount(0);
+    await expect(page.getByLabel(capacity)).toHaveValue("6.25");
+    const read = page.waitForResponse("**/api/session/");
+    answerReads();
+    await read;
+});
+
+test("a clock moved back before a session read fails still covers the screens", async ({
+    page,
+}) => {
+    await signedInOnClock(page);
+    await openSettingsForm(page);
+    await page.clock.setSystemTime(new Date(start.getTime() - 60 * 60_000));
+    await page.route("**/api/**", abort);
+    const failed = sessionReadFailed(page);
+    await page.clock.runFor(tick);
+    await failed;
+    await expect(cover(page)).toBeVisible();
+    await expect(page.getByLabel(capacity)).toBeHidden();
+});
+
 test("a clock moved back does not postpone the idle session read", async ({
     page,
 }) => {
