@@ -22,7 +22,11 @@ const FRESH_VISITS: [string, string[]][] = [
 ];
 
 type Marked = Window & { marker?: string; violations?: string[] };
-type Probed = Window & { attempts?: string[]; effects?: Promise<void> };
+type Probed = Window & {
+    attempts?: string[];
+    registered?: Promise<void>;
+    hydrated?: Promise<void>;
+};
 
 async function controlled(page: Page, address = "/app/") {
     await page.goto(address);
@@ -72,27 +76,53 @@ test("a fresh visit makes no registration attempt outside the app layout", async
         const probed = window as Probed;
         const attempts: string[] = [];
         probed.attempts = attempts;
+        let attempted: () => void = () => undefined;
+        probed.registered = new Promise((resolve) => (attempted = resolve));
         const container = navigator.serviceWorker;
         const register = container.register.bind(container);
         container.register = (url, options) => {
             attempts.push(String(url));
+            attempted();
             return register(url, options);
         };
-        probed.effects = new Promise((resolve) => {
+        type Fiber = {
+            stateNode: unknown;
+            child: Fiber | null;
+            sibling: Fiber | null;
+        };
+        const holds = (fiber: Fiber | null, node: Element): boolean => {
+            for (let next = fiber; next; next = next.sibling)
+                if (next.stateNode === node || holds(next.child, node))
+                    return true;
+            return false;
+        };
+        probed.hydrated = new Promise((resolve) => {
             // React calls this hook, production builds included, once the effects of a commit ran.
             Object.defineProperty(window, "__REACT_DEVTOOLS_GLOBAL_HOOK__", {
                 value: {
                     supportsFiber: true,
                     inject: () => 1,
                     onCommitFiberRoot: () => undefined,
-                    onPostCommitFiberRoot: () => resolve(),
+                    onPostCommitFiberRoot: (
+                        _: number,
+                        root: { current: Fiber },
+                    ) => {
+                        const main = document.querySelector("main");
+                        if (main && holds(root.current, main)) resolve();
+                    },
                 },
             });
         });
     });
     for (const [address, attempted] of FRESH_VISITS) {
         await page.goto(address);
-        await page.evaluate(() => (window as Probed).effects);
+        await page.evaluate(
+            (registers) =>
+                registers
+                    ? (window as Probed).registered
+                    : (window as Probed).hydrated,
+            attempted.length > 0,
+        );
         expect(
             await page.evaluate(() => (window as Probed).attempts),
             address,
