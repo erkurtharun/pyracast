@@ -397,9 +397,11 @@ def configure_reminders(
             hide_recipients,
         )
         schedule.hidden_by_departure = False
-        if created or submitted != stored or mode or rows or chosen:
+        configured = created or submitted != stored or mode or roles != stored_roles or chosen
+        if configured:
             schedule.configured_by = actor
             schedule.effective_from = now
+        if configured or rows:
             schedule.revision += 1
             schedule.save()
             record_audit(
