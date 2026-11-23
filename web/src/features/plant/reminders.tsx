@@ -2,20 +2,35 @@
 import { useTranslations } from "next-intl";
 import { ScrollRegion } from "@/ui/scroll-region";
 import dynamic from "next/dynamic";
-import { useEffect, useEffectEvent, useId, useRef } from "react";
+import {
+    useEffect,
+    useEffectEvent,
+    useId,
+    useRef,
+    useState,
+    type RefObject,
+} from "react";
+import { flushSync } from "react-dom";
 import type { Region, RegionScope } from "@/lib/api";
 import { MISSING } from "@/lib/format/number";
 import { useFormat } from "@/lib/format/use-format";
-import { useApiQuery } from "@/lib/api/query";
+import { useApiQuery, useRefresh } from "@/lib/api/query";
 import { ActionForm } from "@/ui/form";
 import { Resource } from "@/ui/resource";
 import { Empty } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import { sectionUnavailable } from "@/lib/on-demand";
-import type { Answer } from "./reminder-draft";
+import {
+    EMPTY,
+    type Answer,
+    type Desk,
+    type Outcome,
+    type Panel,
+} from "./reminder-draft";
 import { ReminderFields, rowsOf, type Change } from "./reminder-fields";
 import { ReminderOutcome } from "./reminder-line";
+import styles from "./reminders.module.css";
 type Delivery = Answer["deliveries"][number];
 const PATH = "/api/tenants/{tenant_id}/regions/{region_id}/reminders/";
 const ReminderEditor = dynamic(
@@ -30,6 +45,8 @@ function EditorLoading() {
     const t = useTranslations("Reminders");
     return <p className="fine">{t("loadingEmailReminders")}</p>;
 }
+
+const START: Panel = { draft: EMPTY, outcome: "none", dropped: [] };
 
 const READ_ONLY: Change = {
     enabled: () => undefined,
@@ -217,78 +234,188 @@ function DeliveryHistory({
     );
 }
 
+function OutcomeLine({
+    outcome,
+    line,
+}: {
+    outcome: Outcome;
+    line: RefObject<HTMLParagraphElement | null>;
+}) {
+    const t = useTranslations("Reminders");
+    const common = useTranslations("Common");
+    if (outcome === "none") return null;
+    return (
+        <p
+            className={`${styles.outcome} ${styles.focusable}`}
+            tabIndex={-1}
+            ref={line}
+        >
+            {outcome === "saved"
+                ? common("saved")
+                : t(
+                      outcome === "conflict"
+                          ? "conflict"
+                          : outcome === "unknown"
+                            ? "saveUnconfirmed"
+                            : "accessLost",
+                  )}
+        </p>
+    );
+}
+
 function ReminderSettings({ scope, region }: ReminderProps) {
     const t = useTranslations("Reminders");
+    const headingId = useId();
     const resource = useApiQuery(PATH, { path: scope });
+    const refresh = useRefresh();
+    const canManage = useCanManageWorkspace();
+    const [panel, setPanel] = useState(START);
+    const heading = useRef<HTMLHeadingElement>(null);
+    const line = useRef<HTMLParagraphElement>(null);
+    const focused = useRef<EventTarget | null>(null);
+    const answer = resource.data;
+    const access =
+        !canManage || resource.denied
+            ? false
+            : answer && answer.addresses !== null;
+    const was = useRef<boolean | undefined>(undefined);
+    const lose = useEffectEvent(() => {
+        setPanel((now) => ({ ...now, draft: EMPTY, dropped: [] }));
+        resource.discard();
+    });
+    useEffect(() => {
+        if (access === undefined) return;
+        if (was.current && !access) lose();
+        was.current = access;
+    }, [access]);
+    useEffect(() => {
+        if (
+            focused.current instanceof Node &&
+            !focused.current.isConnected &&
+            document.activeElement === document.body
+        )
+            heading.current?.focus();
+    });
+    const desk: Desk = {
+        panel,
+        change: setPanel,
+        finish: (outcome, close) => {
+            focused.current = null;
+            flushSync(() => {
+                close();
+                setPanel((now) => ({
+                    draft:
+                        outcome === "saved" || outcome === "lost"
+                            ? EMPTY
+                            : now.draft,
+                    outcome,
+                    dropped: [],
+                }));
+            });
+            line.current?.focus();
+            if (outcome === "lost") was.current = false;
+            resource.discard();
+            if (outcome === "lost") void refresh.tenants();
+            if (outcome === "saved")
+                void refresh.workspace(scope.tenant_id, {
+                    path: PATH,
+                    options: { path: scope },
+                });
+        },
+    };
     return (
-        <Resource resource={resource} loading={t("loadingEmailReminders")}>
-            {(answer) => (
-                <ReminderPanel
-                    answer={answer}
-                    reload={resource.reload}
-                    scope={scope}
-                    region={region}
+        <>
+            <section
+                className="panel"
+                aria-labelledby={headingId}
+                onFocus={(event) => {
+                    focused.current = event.target;
+                }}
+            >
+                <div className="section-heading">
+                    <div>
+                        <h2
+                            id={headingId}
+                            className={styles.focusable}
+                            tabIndex={-1}
+                            ref={heading}
+                        >
+                            {t("emailReminders")}
+                        </h2>
+                    </div>
+                    {answer && (
+                        <StatusTag group="ReminderState" value={answer.state} />
+                    )}
+                </div>
+                <div aria-live="polite">
+                    <OutcomeLine outcome={panel.outcome} line={line} />
+                    {panel.dropped.map(({ address, role }, index) => (
+                        <p key={index} className="fine">
+                            {t("choiceRemoved", {
+                                address,
+                                role: role
+                                    ? t(`roles.${role}`)
+                                    : t("defaultRole"),
+                            })}
+                        </p>
+                    ))}
+                </div>
+                <Resource
+                    resource={resource}
+                    loading={t("loadingEmailReminders")}
+                >
+                    {(answer) => (
+                        <ReminderPanel
+                            answer={answer}
+                            desk={desk}
+                            scope={scope}
+                            region={region}
+                        />
+                    )}
+                </Resource>
+            </section>
+            {answer && (
+                <DeliveryHistory
+                    deliveries={answer.deliveries}
+                    timezone={region.timezone}
+                    addresses={canManage && answer.addresses !== null}
                 />
             )}
-        </Resource>
+        </>
     );
 }
 
 function ReminderPanel({
     answer,
-    reload,
+    desk,
     scope,
     region,
-}: ReminderProps & { answer: Answer; reload: () => Promise<Answer> }) {
+}: ReminderProps & { answer: Answer; desk: Desk }) {
     const t = useTranslations("Reminders");
-    const headingId = useId();
     const addresses = useCanManageWorkspace() ? answer.addresses : null;
-    const managing = addresses !== null;
-    const lose = useEffectEvent(() => {
-        // RefreshFailed reports a failure.
-        reload().catch(() => undefined);
-    });
-    const was = useRef(managing);
-    useEffect(() => {
-        if (was.current && !managing) lose();
-        was.current = managing;
-    }, [managing]);
     return (
         <>
-            <section className="panel" aria-labelledby={headingId}>
-                <div className="section-heading">
-                    <div>
-                        <h2 id={headingId}>{t("emailReminders")}</h2>
-                    </div>
-                    <StatusTag group="ReminderState" value={answer.state} />
-                </div>
-                <p className="fine" role="status">
-                    {answer.deliveries[0] ? (
-                        <ReminderOutcome
-                            outcome={answer.deliveries[0]}
-                            timezone={region.timezone}
-                        />
-                    ) : (
-                        t("noEmailYet")
-                    )}
-                </p>
-                {addresses ? (
-                    <ReminderEditor
-                        answer={answer}
-                        addresses={addresses}
-                        reload={reload}
-                        scope={scope}
-                        region={region}
+            <p className="fine" role="status">
+                {answer.deliveries[0] ? (
+                    <ReminderOutcome
+                        outcome={answer.deliveries[0]}
+                        timezone={region.timezone}
                     />
                 ) : (
-                    <ReminderView answer={answer} region={region} />
+                    t("noEmailYet")
                 )}
-            </section>
-            <DeliveryHistory
-                deliveries={answer.deliveries}
-                timezone={region.timezone}
-                addresses={managing}
-            />
+            </p>
+            {addresses ? (
+                <ReminderEditor
+                    answer={answer}
+                    addresses={addresses}
+                    desk={desk}
+                    scope={scope}
+                    region={region}
+                />
+            ) : (
+                <ReminderView answer={answer} region={region} />
+            )}
         </>
     );
 }

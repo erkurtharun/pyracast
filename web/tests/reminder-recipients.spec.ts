@@ -1,3 +1,4 @@
+import type { Request } from "@playwright/test";
 import { expect, test, type Page } from "./support/test";
 import {
     accountWith,
@@ -588,7 +589,7 @@ test("duplicate recipient addresses are refused by the server and kept on screen
 });
 
 const CONFLICT =
-    "Nothing was saved: the reminder settings or the people in this workspace changed. Check them and save again.";
+    "Nothing of this save was stored: the reminder settings or the people in this workspace changed. Check them and save again.";
 
 async function changeElsewhere(page: Page, recipients: string[]) {
     await expect(
@@ -616,6 +617,9 @@ async function changeElsewhere(page: Page, recipients: string[]) {
     expect(answer).toBe(200);
 }
 
+const isRead = (request: Request) =>
+    request.method() === "GET" && request.url().endsWith("/reminders/");
+
 test("a save refused after another change keeps the draft, reads again and the next save is accepted", async ({
     page,
 }) => {
@@ -624,16 +628,11 @@ test("a save refused after another change keeps the draft, reads again and the n
     await changeElsewhere(page, ["current@example.test"]);
     const address = page.getByLabel("Email address 1", { exact: true });
     await address.fill("mine@example.test");
-    const read = page.waitForResponse(
-        (response) =>
-            response.request().method() === "GET" &&
-            response.url().endsWith("/reminders/"),
-    );
+    const read = page.waitForRequest(isRead);
     await page.getByRole("button", { name: "Save reminders" }).click();
-    const alert = page.locator("form .notice[role=alert]");
-    await expect(alert).toContainText(CONFLICT);
-    await expect(alert).toBeFocused();
-    await read;
+    const conflict = page.getByText(CONFLICT, { exact: true });
+    await expect(conflict).toBeFocused();
+    await (await read).response();
     await expect(address).toHaveValue("mine@example.test");
     const outgoing = page.waitForRequest(
         (request) =>
@@ -644,14 +643,14 @@ test("a save refused after another change keeps the draft, reads again and the n
         recipients: ["mine@example.test"],
         expected_revision: 1,
     });
-    await expect(alert).toHaveCount(0);
+    await expect(conflict).toHaveCount(0);
     await expect(
         page.getByText("Saved successfully.", { exact: true }),
-    ).toBeVisible();
+    ).toBeFocused();
     await expect(address).toHaveValue("mine@example.test");
 });
 
-test("a read that fails after a refused save says so beside Retry and reports no page error", async ({
+test("a read that fails after a refused save leaves the reader's one Try again and reports no page error", async ({
     page,
 }) => {
     const errors: Error[] = [];
@@ -660,66 +659,52 @@ test("a read that fails after a refused save says so beside Retry and reports no
     await openReminders(page);
     await changeElsewhere(page, ["current@example.test"]);
     failNext("GET");
-    const failed = page.waitForResponse(
-        (response) =>
-            response.request().method() === "GET" &&
-            response.url().endsWith("/reminders/") &&
-            response.status() === 503,
-    );
+    const read = page.waitForRequest(isRead);
     await page.getByRole("button", { name: "Save reminders" }).click();
-    await failed;
-    await expect(page.locator("form .notice[role=alert]")).toContainText(
-        CONFLICT,
+    expect((await (await read).response())!.status()).toBe(503);
+    await expect(page.getByText(CONFLICT, { exact: true })).toBeVisible();
+    const panel = page.getByRole("region", { name: "Email reminders" });
+    await expect(panel.getByRole("alert")).toHaveText(
+        "The service is unavailable.Try again",
     );
-    await expect(
-        page.getByText("The present recipients could not be loaded.", {
-            exact: true,
-        }),
-    ).toBeVisible();
-    const retry = page
-        .getByRole("heading", { name: "Who sees what" })
-        .locator("xpath=..")
-        .getByRole("button", { name: "Try again", exact: true });
+    const retry = panel.getByRole("button", { name: "Try again", exact: true });
+    await expect(retry).toHaveCount(1);
     await retry.click();
     await expect(page.locator("p.recipient-count")).toHaveText("1 / 5");
     await expect(retry).toHaveCount(0);
     expect(errors).toEqual([]);
 });
 
-test("saved reminder fields stay unavailable until the refreshed settings arrive", async ({
+test("after a save the reader's loading line stands in for the fields until the read that follows arrives", async ({
     page,
 }) => {
-    await reminderApi(page);
-    const refresh = Promise.withResolvers<void>();
-    const reloading = Promise.withResolvers<void>();
-    let saving = false;
-    await page.route("**/reminders/", async (route) => {
-        if (route.request().method() === "PUT") saving = true;
-        else if (saving) {
-            reloading.resolve();
-            await refresh.promise;
-        }
-        await route.fallback();
-    });
+    const { answerLater } = await reminderApi(page);
     await openReminders(page);
     const address = page.getByLabel("Email address 1", { exact: true });
     await address.fill("custom@example.test");
-    await page.getByRole("button", { name: "Save reminders" }).click();
+    const following = answerLater("GET");
     try {
-        // The reload starts only after the save was answered, so the form is checked in that window.
-        await reloading.promise;
-        await expect(address).toHaveValue("custom@example.test");
-        await expect(address).toBeDisabled();
+        await page.getByRole("button", { name: "Save reminders" }).click();
+        const held = await following.request;
         await expect(
-            page.getByText("Saved. Loading the saved recipients…", {
-                exact: true,
-            }),
+            page.getByText("Saved successfully.", { exact: true }),
         ).toBeFocused();
+        await expect(
+            page
+                .getByRole("region", { name: "Email reminders" })
+                .getByRole("status"),
+        ).toHaveText("Loading email reminders…");
+        await expect(address).toHaveCount(0);
         await expect(
             page.getByRole("button", { name: /Save reminders|Saving…/ }),
         ).toHaveCount(0);
+        const answered = page.waitForResponse(
+            (response) => response.request() === held,
+        );
+        following.release();
+        await answered;
     } finally {
-        refresh.resolve();
+        following.release();
     }
     await expect(address).toBeEnabled();
     await expect(address).toHaveValue("custom@example.test");

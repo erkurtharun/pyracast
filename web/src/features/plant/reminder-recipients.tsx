@@ -7,32 +7,37 @@ import {
     useLayoutEffect,
     useRef,
     useState,
-    type Dispatch,
-    type RefObject,
-    type SetStateAction,
 } from "react";
 import { flushSync } from "react-dom";
 import type { Region, RegionScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
-import { ApiError } from "@/lib/api/errors";
-import { useRefresh } from "@/lib/api/query";
+import { ApiError, answerLost } from "@/lib/api/errors";
 import { ActionForm, CheckboxField, useErrorMessage } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import {
-    DISCLOSURE_CHANGED,
-    EMPTY,
     bodyOf,
     formOf,
     identity,
+    keyOf,
+    memberTarget,
+    stale,
+    typedRows,
+    typedTarget,
+    type Form,
+} from "./reminder-body";
+import {
+    DISCLOSURE_CHANGED,
     type Addresses,
     type Answer,
     type Body,
     type Choice,
     type Confirmed,
+    type Desk,
     type Draft,
-    type Form,
+    type Outcome,
     type Previewed,
     type Role,
+    type Target,
 } from "./reminder-draft";
 import { ReminderFields, type Row } from "./reminder-fields";
 import styles from "./reminder-recipients.module.css";
@@ -46,22 +51,25 @@ type Review =
     | { status: "closed" | "previewing" | "saving" }
     | { status: "open" | "confirming"; body: Body; answer: Previewed }
     | { status: "failed"; body: Body; answer: Previewed; message: string };
-type After = {
-    cause: "saved" | "changed";
-    status: "loading" | "failed";
-    focus: boolean;
-} | null;
-type Outcome = "saved" | "cancelled";
-type Decision = {
-    resolve: (outcome: Outcome) => void;
-    reject: (error: unknown) => void;
-};
 const CLOSED: Review = { status: "closed" };
+type Ending = Exclude<Outcome, "none">;
 
-const conflicted = (error: unknown) =>
-    error instanceof ApiError &&
-    (error.code === "reminder_schedule_changed" ||
-        (error.body as { code?: unknown } | null)?.code === DISCLOSURE_CHANGED);
+function endingOf(error: unknown, write: boolean): Ending | null {
+    if (!(error instanceof ApiError)) return write ? "unknown" : null;
+    if (error.status === 403) return "lost";
+    if (
+        error.status === 409 &&
+        (error.code === "reminder_schedule_changed" ||
+            (error.body as { code?: unknown } | null)?.code ===
+                DISCLOSURE_CHANGED)
+    )
+        return "conflict";
+    const unanswered =
+        answerLost(error) ||
+        error.status >= 500 ||
+        (error.status >= 200 && error.status < 300);
+    return write && unanswered ? "unknown" : null;
+}
 
 const OPTIONS = [null, "to", "cc", "bcc"] as const satisfies readonly Choice[];
 
@@ -133,103 +141,55 @@ function Groups({ answer }: { answer: Answer }) {
 function SavedView({
     answer,
     addresses,
-    after,
-    retry,
-    heading,
-    line,
-    status,
 }: {
     answer: Answer;
     addresses: Addresses;
-    after: After;
-    retry: () => void;
-    heading: RefObject<HTMLHeadingElement | null>;
-    line: RefObject<HTMLParagraphElement | null>;
-    status: RefObject<HTMLDivElement | null>;
 }) {
     const t = useTranslations("Reminders");
-    const common = useTranslations("Common");
     const count = answer.recipient_count;
     const visible = !answer.hide_recipients && count > 0;
     const shown = groupsOf(answer);
     return (
         <div className={styles.summary}>
-            <h3 tabIndex={-1} ref={heading}>
-                {t("whoSeesWhat")}
-            </h3>
-            <div aria-live="polite" ref={status}>
-                {after && (
-                    <div className={styles.line}>
-                        <p tabIndex={-1} ref={line}>
-                            {t(
-                                after.cause === "saved"
-                                    ? after.status === "loading"
-                                        ? "savedLoading"
-                                        : "savedFailed"
-                                    : after.status === "loading"
-                                      ? "readingAgain"
-                                      : "readFailed",
-                            )}
-                        </p>
-                        {after.status === "failed" && (
-                            <button
-                                type="button"
-                                className="button secondary"
-                                onClick={retry}
-                            >
-                                {common("retry")}
-                            </button>
-                        )}
-                    </div>
-                )}
-            </div>
-            {!after && (
+            <h3>{t("whoSeesWhat")}</h3>
+            <p className="recipient-count fine">
+                {t("quotaCount", { count, limit: answer.recipient_limit })}
+            </p>
+            {count > answer.recipient_limit && (
+                <Notice>
+                    {t("recipientLimitExceeded", {
+                        limit: answer.recipient_limit,
+                    })}
+                </Notice>
+            )}
+            {answer.hide_recipients && (
+                <p>
+                    {t(
+                        answer.hidden_by_departure
+                            ? "hiddenByDeparture"
+                            : "hiddenToday",
+                    )}
+                </p>
+            )}
+            {visible && (
                 <>
-                    <p className="recipient-count fine">
-                        {t("quotaCount", {
-                            count,
-                            limit: answer.recipient_limit,
-                        })}
-                    </p>
-                    {count > answer.recipient_limit && (
-                        <Notice>
-                            {t("recipientLimitExceeded", {
-                                limit: answer.recipient_limit,
-                            })}
-                        </Notice>
-                    )}
-                    {answer.hide_recipients && (
-                        <p>
-                            {t(
-                                answer.hidden_by_departure
-                                    ? "hiddenByDeparture"
-                                    : "hiddenToday",
-                            )}
+                    <Groups answer={answer} />
+                    <p>{t("summarySentence")}</p>
+                    {!shown.to.length && !shown.cc.length && (
+                        <p className={styles.warning}>
+                            {t("allHiddenWarning")}
                         </p>
                     )}
-                    {visible && (
-                        <>
-                            <Groups answer={answer} />
-                            <p>{t("summarySentence")}</p>
-                            {!shown.to.length && !shown.cc.length && (
-                                <p className={styles.warning}>
-                                    {t("allHiddenWarning")}
-                                </p>
-                            )}
-                        </>
-                    )}
-                    {!count && <p>{t("nobodyReceives")}</p>}
-                    {addresses.added
-                        .filter((item) => !item.eligible)
-                        .map((item, index) => (
-                            <p key={index} className="fine">
-                                {t("addsNoRecipient", {
-                                    address: item.address,
-                                })}
-                            </p>
-                        ))}
                 </>
             )}
+            {!count && <p>{t("nobodyReceives")}</p>}
+            {addresses.added
+                .filter((item) => !item.eligible)
+                .map((item, index) => (
+                    <p key={index} className="fine">
+                        {t("addsNoRecipient", { address: item.address })}
+                    </p>
+                ))}
         </div>
     );
 }
@@ -250,6 +210,7 @@ function ReviewDialog({
     const heading = useRef<HTMLHeadingElement>(null);
     const alert = useRef<HTMLDivElement>(null);
     const confirming = review.status === "confirming";
+    const { to, cc } = groupsOf(review.answer);
     useLayoutEffect(() => {
         dialog.current?.showModal();
         heading.current?.focus();
@@ -279,6 +240,7 @@ function ReviewDialog({
             </h2>
             <p id={`${id}-sentence`}>{t("reviewSentence")}</p>
             <Groups answer={review.answer} />
+            {!to.length && !cc.length && <p>{t("noAddressShown")}</p>}
             {review.status === "failed" && (
                 <div
                     className="notice error"
@@ -345,19 +307,13 @@ function RoleControl({
     );
 }
 
-const withChoice = (
-    choices: Record<string, Choice>,
-    key: string,
-    stored: Choice,
-    choice: Choice,
-) =>
-    choice === stored
-        ? Object.fromEntries(
-              Object.entries(choices).filter(([other]) => other !== key),
-          )
-        : { ...choices, [key]: choice };
-
-type Control = { key: string; stored: Choice };
+const decided = (draft: Draft, target: Target, role: Choice): Draft => ({
+    ...draft,
+    decisions: new Map(draft.decisions).set(keyOf(target), {
+        ...target,
+        role,
+    }),
+});
 
 function RecipientSection({
     addresses,
@@ -368,7 +324,7 @@ function RecipientSection({
     addresses: Addresses;
     form: Form;
     draft: Draft;
-    update: Dispatch<SetStateAction<Draft>>;
+    update: (change: (draft: Draft) => Draft) => void;
 }) {
     const t = useTranslations("Reminders");
     const visible = !form.hide;
@@ -379,72 +335,24 @@ function RecipientSection({
     const members = new Map(
         addresses.members.map((member) => [identity(member.address), member]),
     );
-    const listed = new Set(
-        form.rows
-            .map((row) => identity(row.text))
-            .filter((key) => added.has(key)),
-    );
-    const choiceOf = (key: string, stored: Choice) =>
-        key in draft.choices ? (draft.choices[key] ?? null) : stored;
-    const choose = (key: string, stored: Choice) => (choice: Choice) =>
-        update((now) => ({
-            ...now,
-            choices: withChoice(now.choices, key, stored, choice),
-        }));
+    const typed = typedRows(addresses, form);
+    const choiceOf = (target: Target, stored: Choice) => {
+        const decision = draft.decisions.get(keyOf(target));
+        return decision ? decision.role : stored;
+    };
+    const choose = (target: Target) => (role: Choice) =>
+        update((now) => decided(now, target, role));
     const setRows = (change: (rows: Row[]) => Row[]) =>
         update((now) => ({ ...now, rows: change(now.rows ?? form.rows) }));
 
-    const orphans = Object.keys(draft.choices).filter(
-        (key) => !listed.has(key) && !members.has(key),
-    );
-    const discard = useEffectEvent((removed: string[]) =>
-        update((now) => ({
-            ...now,
-            choices: Object.fromEntries(
-                Object.entries(now.choices).filter(
-                    ([key]) => !removed.includes(key),
-                ),
-            ),
-            removed,
-        })),
-    );
-    const orphaned = orphans.join("\n");
-    useEffect(() => {
-        if (orphaned) discard(orphaned.split("\n"));
-    }, [orphaned]);
-
-    const membersHeading = useRef<HTMLHeadingElement>(null);
-    const focused = useRef<string | null>(null);
-    useLayoutEffect(() => {
-        const key = focused.current;
-        if (
-            key === null ||
-            addresses.members.some(
-                (member) => member.memberships.join() === key,
-            )
-        )
-            return;
-        focused.current = null;
-        if (document.activeElement === document.body)
-            membersHeading.current?.focus();
-    });
-
     const shownMembers = visible && form.include;
-    const controls: Control[] = [
+    const controls: Target[] = [
         ...(shownMembers ? addresses.members : [])
-            .filter((member) => !listed.has(identity(member.address)))
-            .map((member) => ({
-                key: identity(member.address),
-                stored: member.role,
-            })),
+            .filter((member) => !typed.has(identity(member.address)))
+            .map(memberTarget),
         ...(visible ? addresses.added : [])
-            .filter(
-                (item) => item.eligible && listed.has(identity(item.address)),
-            )
-            .map((item) => ({
-                key: identity(item.address),
-                stored: item.role,
-            })),
+            .filter((item) => typed.has(identity(item.address)))
+            .map(typedTarget),
     ];
     return (
         <fieldset className="reminder-recipients">
@@ -474,11 +382,7 @@ function RecipientSection({
             {shownMembers ? (
                 <>
                     <p className="fine">{t("newMembersDefault")}</p>
-                    <h3
-                        className={styles.listHeading}
-                        tabIndex={-1}
-                        ref={membersHeading}
-                    >
+                    <h3 className={styles.listHeading}>
                         {t("workspaceMembers", {
                             count: addresses.members.length,
                         })}
@@ -486,23 +390,16 @@ function RecipientSection({
                     {addresses.members.length ? (
                         <ul className={styles.members}>
                             {addresses.members.map((member) => {
-                                const key = identity(member.address);
                                 const id = member.memberships.join();
                                 return (
-                                    <li
-                                        key={id}
-                                        className={styles.member}
-                                        onFocus={() => {
-                                            focused.current = id;
-                                        }}
-                                    >
+                                    <li key={id} className={styles.member}>
                                         <span className={styles.identity}>
                                             <span>{member.address}</span>
                                             <span className="field-hint">
                                                 {t(`kinds.${member.kind}`)}
                                             </span>
                                         </span>
-                                        {listed.has(key) ? (
+                                        {typed.has(identity(member.address)) ? (
                                             <span className={styles.state}>
                                                 {t("setUnderOtherAddresses")}
                                             </span>
@@ -511,12 +408,11 @@ function RecipientSection({
                                                 name={`${prefix}-m-${id}`}
                                                 address={member.address}
                                                 checked={choiceOf(
-                                                    key,
+                                                    memberTarget(member),
                                                     member.role,
                                                 )}
                                                 choose={choose(
-                                                    key,
-                                                    member.role,
+                                                    memberTarget(member),
                                                 )}
                                             />
                                         )}
@@ -614,8 +510,11 @@ function RecipientSection({
                                 <RoleControl
                                     name={`${prefix}-t-${row.id}`}
                                     address={item.address}
-                                    checked={choiceOf(key, item.role)}
-                                    choose={choose(key, item.role)}
+                                    checked={choiceOf(
+                                        typedTarget(item),
+                                        item.role,
+                                    )}
+                                    choose={choose(typedTarget(item))}
                                 />
                                 {member && (
                                     <span className="field-hint">
@@ -649,26 +548,17 @@ function RecipientSection({
                     type="button"
                     className="button secondary"
                     onClick={() =>
-                        update((now) => ({
-                            ...now,
-                            choices: controls.reduce(
-                                (choices, { key, stored }) =>
-                                    withChoice(choices, key, stored, null),
-                                now.choices,
+                        update((now) =>
+                            controls.reduce(
+                                (draft, target) => decided(draft, target, null),
+                                now,
                             ),
-                        }))
+                        )
                     }
                 >
                     {t("useDefaults")}
                 </button>
             )}
-            <div aria-live="polite">
-                {draft.removed?.map((address, index) => (
-                    <p key={index} className="fine">
-                        {t("choiceRemoved", { address })}
-                    </p>
-                ))}
-            </div>
         </fieldset>
     );
 }
@@ -676,95 +566,75 @@ function RecipientSection({
 export function ReminderEditor({
     answer,
     addresses,
-    reload,
+    desk,
     scope,
     region,
 }: {
     answer: Answer;
     addresses: Addresses;
-    reload: () => Promise<Answer>;
+    desk: Desk;
     scope: RegionScope;
     region: Region;
 }) {
     const t = useTranslations("Reminders");
-    const refresh = useRefresh();
     const errorMessage = useErrorMessage();
-    const [draft, setDraft] = useState(EMPTY);
     const [review, setReview] = useState(CLOSED);
-    const [after, setAfter] = useState<After>(null);
-    const [cancelled, setCancelled] = useState(false);
-    const decision = useRef<Decision | null>(null);
-    const reads = useRef(0);
     const wrapper = useRef<HTMLDivElement>(null);
-    const heading = useRef<HTMLHeadingElement>(null);
-    const line = useRef<HTMLParagraphElement>(null);
-    const status = useRef<HTMLDivElement>(null);
+    const { draft } = desk.panel;
     const form = formOf(answer, draft);
+    const update = (change: (draft: Draft) => Draft) =>
+        desk.change((now) => ({ ...now, draft: change(now.draft) }));
 
-    const readAgain = (next: NonNullable<After>) => {
-        const read = ++reads.current;
-        flushSync(() => setAfter(next));
-        if (next.focus) line.current?.focus();
-        reload().then(
-            () => {
-                if (read !== reads.current) return;
-                const move = !!status.current?.contains(document.activeElement);
-                flushSync(() => {
-                    if (next.cause === "saved") setDraft(EMPTY);
-                    setAfter(null);
-                });
-                if (move) heading.current?.focus();
-            },
-            () => {
-                if (read === reads.current)
-                    setAfter({ ...next, status: "failed" });
-            },
-        );
-    };
+    const dropped = stale(addresses, draft.decisions).join("\n");
+    const drop = useEffectEvent((keys: string[]) =>
+        desk.change((now) => {
+            const removed = keys.flatMap((key) => {
+                const decision = now.draft.decisions.get(key);
+                return decision ? [decision] : [];
+            });
+            if (!removed.length) return now;
+            const decisions = new Map(now.draft.decisions);
+            for (const key of keys) decisions.delete(key);
+            return {
+                ...now,
+                draft: { ...now.draft, decisions },
+                dropped: removed.map(({ address, role }) => ({
+                    address,
+                    role,
+                })),
+            };
+        }),
+    );
+    useEffect(() => {
+        if (dropped) drop(dropped.split("\n"));
+    }, [dropped]);
+
+    const end = (ending: Ending) =>
+        desk.finish(ending, () => setReview(CLOSED));
 
     const submit = async () => {
-        const { body, saved } = bodyOf(answer, addresses, draft);
-        setCancelled(false);
-        setReview({ status: body.hide_recipients ? "saving" : "previewing" });
-        let outcome: Outcome = "saved";
+        const body = bodyOf(answer, addresses, draft);
+        desk.change((now) => ({ ...now, outcome: "none", dropped: [] }));
+        const hidden = body.hide_recipients === true;
+        setReview({ status: hidden ? "saving" : "previewing" });
+        let previewed: Previewed | undefined;
         try {
-            if (body.hide_recipients)
-                await api.put(PATH, { path: scope, body });
-            else {
-                const previewed = (await api.post(PREVIEW, {
+            if (hidden) await api.put(PATH, { path: scope, body });
+            else
+                previewed = (await api.post(PREVIEW, {
                     path: scope,
                     body,
                 })) as Previewed;
-                outcome = await new Promise<Outcome>((resolve, reject) => {
-                    decision.current = { resolve, reject };
-                    setReview({ status: "open", body, answer: previewed });
-                });
-            }
         } catch (error) {
-            setReview(CLOSED);
-            if (!conflicted(error)) throw error;
-            readAgain({ cause: "changed", status: "loading", focus: false });
-            throw new ApiError(t("conflict"));
-        } finally {
-            decision.current = null;
-        }
-        if (outcome === "cancelled") {
-            flushSync(() => {
+            const ending = endingOf(error, hidden);
+            if (!ending) {
                 setReview(CLOSED);
-                setCancelled(true);
-            });
-            wrapper.current
-                ?.querySelector<HTMLElement>("[type=submit]")
-                ?.focus();
-            return;
+                throw error;
+            }
+            return end(ending);
         }
-        setReview(CLOSED);
-        setDraft(saved);
-        readAgain({ cause: "saved", status: "loading", focus: true });
-        void refresh.workspace(scope.tenant_id, {
-            path: PATH,
-            options: { path: scope },
-        });
+        if (!previewed) return end("saved");
+        setReview({ status: "open", body, answer: previewed });
     };
 
     const confirm = async () => {
@@ -778,39 +648,31 @@ export function ReminderEditor({
         try {
             await api.put(PATH, { path: scope, body: confirmed });
         } catch (error) {
-            if (conflicted(error)) decision.current?.reject(error);
-            else
-                setReview({
-                    status: "failed",
-                    body,
-                    answer: previewed,
-                    message: errorMessage(error),
-                });
-            return;
+            const ending = endingOf(error, true);
+            if (ending) return end(ending);
+            return setReview({
+                status: "failed",
+                body,
+                answer: previewed,
+                message: errorMessage(error),
+            });
         }
-        decision.current?.resolve("saved");
+        end("saved");
+    };
+
+    const cancel = () => {
+        flushSync(() => setReview(CLOSED));
+        wrapper.current?.querySelector<HTMLElement>("[type=submit]")?.focus();
     };
 
     return (
         <>
-            <SavedView
-                answer={answer}
-                addresses={addresses}
-                after={after}
-                retry={() =>
-                    after &&
-                    readAgain({ ...after, status: "loading", focus: true })
-                }
-                heading={heading}
-                line={line}
-                status={status}
-            />
+            <SavedView answer={answer} addresses={addresses} />
             <div ref={wrapper}>
                 <ActionForm
                     submit={t("saveReminders")}
-                    permitted={after?.cause !== "saved"}
                     pending={review.status !== "closed"}
-                    success={cancelled ? null : undefined}
+                    success={null}
                     onSubmit={submit}
                 >
                     <ReminderFields
@@ -819,21 +681,21 @@ export function ReminderEditor({
                         fields={form}
                         change={{
                             enabled: (enabled) =>
-                                setDraft((now) => ({ ...now, enabled })),
+                                update((now) => ({ ...now, enabled })),
                             times: (apply) =>
-                                setDraft((now) => ({
+                                update((now) => ({
                                     ...now,
                                     times: apply(now.times ?? form.times),
                                 })),
                             language: (language) =>
-                                setDraft((now) => ({ ...now, language })),
+                                update((now) => ({ ...now, language })),
                         }}
                     >
                         <RecipientSection
                             addresses={addresses}
                             form={form}
                             draft={draft}
-                            update={setDraft}
+                            update={update}
                         />
                     </ReminderFields>
                 </ActionForm>
@@ -842,7 +704,7 @@ export function ReminderEditor({
                 <ReviewDialog
                     review={review}
                     confirm={() => void confirm()}
-                    cancel={() => decision.current?.resolve("cancelled")}
+                    cancel={cancel}
                 />
             )}
         </>

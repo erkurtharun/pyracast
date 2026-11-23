@@ -1,4 +1,4 @@
-import type { Locator } from "@playwright/test";
+import type { Locator, Request } from "@playwright/test";
 import { expect, test, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
 import {
@@ -20,9 +20,14 @@ const TITLE = "Show these addresses to every recipient?";
 const SENTENCE =
     "Every recipient of these reminders will see the To and Copy addresses below.";
 const CONFLICT =
-    "Nothing was saved: the reminder settings or the people in this workspace changed. Check them and save again.";
-const SAVED_LOADING = "Saved. Loading the saved recipients…";
-const SAVED_FAILED = "Saved, but the saved recipients could not be loaded.";
+    "Nothing of this save was stored: the reminder settings or the people in this workspace changed. Check them and save again.";
+const UNKNOWN =
+    "The save could not be confirmed. “Who sees what” shows what is stored once it has loaded; your edits are still in the form.";
+const LOST = "Nothing was saved: you can no longer change these reminders.";
+const SAVED_LINE = "Saved successfully.";
+const LOADING = "Loading email reminders…";
+const UNAVAILABLE = "The service is unavailable.";
+const NO_ADDRESS_SHOWN = "No address will appear in To or Copy.";
 const HIDDEN_TODAY =
     "Every recipient is hidden today. You can address the administrator directly and keep members in copy.";
 const HIDDEN_HELPER =
@@ -30,7 +35,9 @@ const HIDDEN_HELPER =
 const ONCE_SAVED = "You can choose a role once this address is saved.";
 const DEPARTURE =
     "Every recipient was hidden again because a member left or an account was deleted. The remaining choices are kept.";
-const OUTSIDE_MARK = "Outside the workspace";
+const OUTSIDE_MARK = "Not an active member's verified primary address";
+const DROPPED = (role: string, address: string) =>
+    `Your choice “${role}” for ${address} was removed: the saved recipients or the people in this workspace changed.`;
 const COUNT_ONLY = (count: number) =>
     `${count} recipient${count === 1 ? "" : "s"} of at most 5. In this app only the workspace administrator sees the addresses.`;
 
@@ -43,6 +50,14 @@ const radio = (page: Page, address: string, label: string) =>
     group(page, address).getByRole("radio", { name: label, exact: true });
 const line = (page: Page | Locator, text: string) =>
     page.getByText(text, { exact: true });
+const panel = (page: Page) =>
+    page.getByRole("region", { name: "Email reminders", exact: true });
+const panelHeading = (page: Page) =>
+    page.getByRole("heading", {
+        name: "Email reminders",
+        exact: true,
+        level: 2,
+    });
 const heading = (page: Page) =>
     page.getByRole("heading", { name: "Who sees what", exact: true });
 const savedView = (page: Page) => heading(page).locator("xpath=..");
@@ -63,10 +78,15 @@ const confirmButton = (page: Page) =>
 const cancelButton = (page: Page) =>
     dialog(page).getByRole("button", { name: "Back to editing", exact: true });
 const retryButton = (page: Page) =>
-    savedView(page).getByRole("button", { name: "Try again", exact: true });
+    panel(page).getByRole("button", { name: "Try again", exact: true });
 const typedFields = (page: Page) => page.locator('input[name="recipients"]');
 const hideBox = (page: Page) =>
     page.getByLabel("Hide recipients from each other", { exact: true });
+const useDefaults = (page: Page) =>
+    page.getByRole("button", {
+        name: "Use the defaults for everyone",
+        exact: true,
+    });
 
 const isWrite = (method: string, url: string) =>
     method === "PUT" && url.endsWith("/reminders/");
@@ -74,6 +94,8 @@ const isPreview = (method: string, url: string) =>
     method === "POST" && url.endsWith("/reminders/preview/");
 const isRead = (method: string, url: string) =>
     method === "GET" && url.endsWith("/reminders/");
+const isTenants = (method: string, url: string) =>
+    method === "GET" && url.endsWith("/api/tenants/");
 
 function sent(page: Page, matches: (method: string, url: string) => boolean) {
     const bodies: Record<string, unknown>[] = [];
@@ -84,47 +106,52 @@ function sent(page: Page, matches: (method: string, url: string) => boolean) {
     return bodies;
 }
 
-const response = (
+function order(page: Page) {
+    const requests: Request[] = [];
+    page.on("request", (request) => requests.push(request));
+    return (
+        before: Request,
+        matches: (method: string, url: string) => boolean,
+    ) =>
+        requests
+            .slice(requests.indexOf(before) + 1)
+            .filter((request) => matches(request.method(), request.url()));
+}
+
+const nextRequest = (
     page: Page,
     matches: (method: string, url: string) => boolean,
-    status?: number,
-) =>
-    page.waitForResponse(
-        (answer) =>
-            matches(answer.request().method(), answer.url()) &&
-            (status === undefined || answer.status() === status),
-    );
+) => page.waitForRequest((request) => matches(request.method(), request.url()));
+
+const answerTo = (page: Page, request: Request) =>
+    page.waitForResponse((response) => response.request() === request);
 
 async function review(page: Page) {
-    const request = page.waitForRequest((request) =>
-        isPreview(request.method(), request.url()),
-    );
-    const answered = response(page, isPreview, 200);
+    const request = nextRequest(page, isPreview);
     await saveButton(page).click();
-    const previewed = (await request).postDataJSON();
-    const answer = await (await answered).json();
+    const previewed = await request;
+    const answer = await (await previewed.response())!.json();
     await expect(dialog(page)).toBeVisible();
-    return { previewed, answer };
+    return { previewed: previewed.postDataJSON(), answer };
 }
 
 async function saveVisible(page: Page) {
     const { previewed, answer } = await review(page);
-    const request = page.waitForRequest((request) =>
-        isWrite(request.method(), request.url()),
-    );
+    const request = nextRequest(page, isWrite);
     await confirmButton(page).click();
     const body = (await request).postDataJSON();
+    await expect(line(page, SAVED_LINE)).toBeFocused();
     await expect(saveButton(page)).toBeEnabled();
     return { previewed, answer, body };
 }
 
 async function refetch(page: Page) {
-    const read = response(page, isRead);
+    const read = nextRequest(page, isRead);
     await page.clock.fastForward("00:10");
     await page.evaluate(() =>
         window.dispatchEvent(new Event("visibilitychange")),
     );
-    return read;
+    return (await read).response();
 }
 
 async function watchFor(page: Page, needles: string[]) {
@@ -200,14 +227,26 @@ function caller(page: Page) {
 
 async function saveElsewhere(page: Page, body: object) {
     const call = caller(page);
-    const preview = await call("POST", body, "preview/");
+    const revision = (await call("GET")).json.revision;
+    const current = { ...body, expected_revision: revision };
+    const preview = await call("POST", current, "preview/");
     expect(preview.status).toBe(200);
     const stored = await call("PUT", {
-        ...body,
+        ...current,
         disclosure: preview.json.disclosure,
     });
     expect(stored.status).toBe(200);
     return stored.json;
+}
+
+async function asRole(page: Page, role: () => "admin" | "viewer") {
+    await page.route("**/api/tenants/", (route) =>
+        route.fulfill({
+            json: paged([
+                tenantRow({ id: 1, name: "Sunfield Energy", role: role() }),
+            ]),
+        }),
+    );
 }
 
 const fits = (page: Page) =>
@@ -249,11 +288,7 @@ test("address data stays hidden after administration moves, through two language
         viewer: (method) => answersViewer && method === "GET",
         deliveries: [SENT_TO_TEAM],
     });
-    await page.route("**/api/tenants/", (route) =>
-        route.fulfill({
-            json: paged([tenantRow({ id: 1, name: "Sunfield Energy", role })]),
-        }),
-    );
+    await asRole(page, () => role);
     await speaking(page);
     await openReminders(page);
     await expect(typedFields(page)).toHaveValue(OUTSIDE);
@@ -276,8 +311,8 @@ test("address data stays hidden after administration moves, through two language
         await english.committed;
         expect(await seen()).toEqual([]);
         await expect(saveButton(page)).toHaveCount(0);
-        const late = response(page, isRead);
-        const fresh = response(page, isRead);
+        const late = answerTo(page, await turkish.request);
+        const fresh = answerTo(page, await english.request);
         turkish.release();
         english.release();
         await late;
@@ -291,11 +326,9 @@ test("address data stays hidden after administration moves, through two language
     }
     role = "admin";
     answersViewer = false;
-    const tenants = page.waitForResponse((answer) =>
-        answer.url().endsWith("/api/tenants/"),
-    );
+    const tenants = nextRequest(page, isTenants);
     await refetch(page);
-    await tenants;
+    await (await tenants).response();
     await expect(typedFields(page)).toHaveValue(OUTSIDE);
     await expect(saveButton(page)).toBeEnabled();
 });
@@ -312,25 +345,19 @@ test("losing administration while the review is open closes it, sends nothing an
         hidden: false,
         viewer: (method) => role === "viewer" && method === "GET",
     });
-    await page.route("**/api/tenants/", (route) =>
-        route.fulfill({
-            json: paged([tenantRow({ id: 1, name: "Sunfield Energy", role })]),
-        }),
-    );
+    await asRole(page, () => role);
     const writes = sent(page, isWrite);
     await openReminders(page);
     await radio(page, OUTSIDE, "Copy").check();
     await time(page, 1).fill("09:00");
     await review(page);
     role = "viewer";
-    const tenants = page.waitForResponse((answer) =>
-        answer.url().endsWith("/api/tenants/"),
-    );
+    const tenants = nextRequest(page, isTenants);
     await page.clock.fastForward("00:10");
     await page.evaluate(() =>
         window.dispatchEvent(new Event("visibilitychange")),
     );
-    await tenants;
+    await (await tenants).response();
     await expect(dialog(page)).toHaveCount(0);
     await expect(typedFields(page)).toHaveCount(0);
     await expect(line(page, COUNT_ONLY(3))).toBeVisible();
@@ -340,6 +367,348 @@ test("losing administration while the review is open closes it, sends nothing an
     await expect(radio(page, OUTSIDE, "Default")).toBeChecked();
     await expect(time(page, 1)).toHaveValue("08:00");
     expect(writes).toEqual([]);
+});
+
+test("a save the server refuses because administration moved, after the review, shows nothing of the addresses again and says that nothing was saved", async ({
+    page,
+}) => {
+    let transferred = false;
+    await page.clock.install();
+    const { answerLater } = await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: TEAM,
+        includeMembers: true,
+        hidden: false,
+        viewer: () => transferred,
+        deliveries: [SENT_TO_TEAM],
+    });
+    await asRole(page, () => (transferred ? "viewer" : "admin"));
+    const after = order(page);
+    await openReminders(page);
+    await page.getByText("Recent deliveries", { exact: true }).click();
+    await expect(page.getByText(`${MEMBER} Copy`)).toBeVisible();
+    await time(page, 1).fill("09:00");
+    await review(page);
+    transferred = true;
+    const following = answerLater("GET");
+    try {
+        const put = nextRequest(page, isWrite);
+        const tenantsRead = nextRequest(page, isTenants);
+        await confirmButton(page).click();
+        const write = await put;
+        const refusal = (await write.response())!;
+        expect([refusal.status(), (await refusal.json()).code]).toEqual([
+            403,
+            "workspace_admin_required",
+        ]);
+        await expect(line(page, LOST)).toBeFocused();
+        const seen = await watchFor(page, [MEMBER, OUTSIDE]);
+        expect(await seen()).toEqual([]);
+        await expect(dialog(page)).toHaveCount(0);
+        await expect(page.getByRole("radio")).toHaveCount(0);
+        await expect(saveButton(page)).toHaveCount(0);
+        await expect(typedFields(page)).toHaveCount(0);
+        const held = await following.request;
+        const answered = answerTo(page, held);
+        following.release();
+        await answered;
+        await expect(line(page, COUNT_ONLY(3))).toBeVisible();
+        const tenants = await tenantsRead;
+        expect(after(write, isTenants)).toContain(tenants);
+        await tenants.response();
+        expect(after(write, isRead)[0]).toBe(held);
+        await expect(saveButton(page)).toHaveCount(0);
+        expect(await seen()).toEqual([]);
+    } finally {
+        following.release();
+    }
+    transferred = false;
+    await refetch(page);
+    await expect(time(page, 1)).toHaveValue("08:00");
+});
+
+for (const visible of [true, false])
+    test(`a ${visible ? "review" : "hidden save"} the server refuses because administration moved before Save ends the editing the same way`, async ({
+        page,
+    }) => {
+        let transferred = false;
+        const { answerLater } = await reminderApi(page, {
+            recipients: [OUTSIDE],
+            members: TEAM,
+            includeMembers: true,
+            hidden: !visible,
+            viewer: () => transferred,
+            deliveries: [SENT_TO_TEAM],
+        });
+        await asRole(page, () => (transferred ? "viewer" : "admin"));
+        const after = order(page);
+        await openReminders(page);
+        await time(page, 1).fill("09:00");
+        transferred = true;
+        const following = answerLater("GET");
+        try {
+            const refused = nextRequest(page, visible ? isPreview : isWrite);
+            const tenantsRead = nextRequest(page, isTenants);
+            await saveButton(page).click();
+            const request = await refused;
+            const refusal = (await request.response())!;
+            expect([refusal.status(), (await refusal.json()).code]).toEqual([
+                403,
+                "workspace_admin_required",
+            ]);
+            await expect(line(page, LOST)).toBeFocused();
+            const seen = await watchFor(page, [MEMBER, OUTSIDE]);
+            expect(await seen()).toEqual([]);
+            await expect(dialog(page)).toHaveCount(0);
+            await expect(saveButton(page)).toHaveCount(0);
+            const held = await following.request;
+            const answered = answerTo(page, held);
+            following.release();
+            await answered;
+            await expect(line(page, COUNT_ONLY(3))).toBeVisible();
+            expect(after(request, isRead)[0]).toBe(held);
+            const tenants = await tenantsRead;
+            expect(after(request, isTenants)).toContain(tenants);
+            await tenants.response();
+            expect(await seen()).toEqual([]);
+            expect(after(request, isWrite)).toEqual([]);
+        } finally {
+            following.release();
+        }
+    });
+
+test("an administrator answer read before administration moved never returns after the read that follows the loss fails", async ({
+    page,
+}) => {
+    let role: "admin" | "viewer" = "admin";
+    await page.clock.install();
+    const { answerLater, failNext } = await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: TEAM,
+        includeMembers: true,
+        hidden: false,
+    });
+    await asRole(page, () => role);
+    await openReminders(page);
+    await expect(typedFields(page)).toHaveValue(OUTSIDE);
+    role = "viewer";
+    failNext("GET");
+    failNext("GET");
+    await page.clock.fastForward("00:10");
+    await page.evaluate(() =>
+        window.dispatchEvent(new Event("visibilitychange")),
+    );
+    await expect(panel(page).getByRole("alert")).toHaveText(
+        `${UNAVAILABLE}Try again`,
+    );
+    await expect(retryButton(page)).toHaveCount(1);
+    await expect(typedFields(page)).toHaveCount(0);
+    await saveElsewhere(page, { ...SAVED, recipients: [THIRD] });
+    role = "admin";
+    const seen = await watchFor(page, [OUTSIDE]);
+    const following = answerLater("GET");
+    try {
+        const tenants = nextRequest(page, isTenants);
+        await page.clock.fastForward("00:10");
+        await page.evaluate(() =>
+            window.dispatchEvent(new Event("visibilitychange")),
+        );
+        await (await tenants).response();
+        const held = await following.request;
+        await expect(typedFields(page)).toHaveCount(0);
+        expect(await seen()).toEqual([]);
+        const answered = answerTo(page, held);
+        following.release();
+        await answered;
+        await expect(typedFields(page)).toHaveValue(THIRD);
+        expect(await seen()).toEqual([]);
+    } finally {
+        following.release();
+    }
+});
+
+test("returning to the reminders while the read after a save is held shows the loading line and then the saved configuration", async ({
+    page,
+}) => {
+    const { answerLater } = await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: TEAM,
+        includeMembers: true,
+        hidden: true,
+    });
+    await openReminders(page);
+    await expect(line(page, HIDDEN_TODAY)).toBeVisible();
+    await hideBox(page).uncheck();
+    await review(page);
+    const following = answerLater("GET");
+    try {
+        await confirmButton(page).click();
+        await following.committed;
+        await page
+            .getByRole("button", { name: "Location", exact: true })
+            .click();
+        await page
+            .getByRole("button", { name: "Email reminders", exact: true })
+            .click();
+        await expect(panel(page).getByRole("status")).toHaveText(LOADING);
+        await expect(saveButton(page)).toHaveCount(0);
+        await expect(typedFields(page)).toHaveCount(0);
+        await expect(hideBox(page)).toHaveCount(0);
+        await expect(line(page, HIDDEN_TODAY)).toHaveCount(0);
+        const answered = answerTo(page, await following.request);
+        following.release();
+        await answered;
+    } finally {
+        following.release();
+    }
+    await expect(hideBox(page)).not.toBeChecked();
+    await expect(listed(savedView(page))).toHaveText([
+        "To",
+        ADMIN,
+        "Copy (Cc)",
+        MEMBER,
+    ]);
+    await expect(line(page, HIDDEN_TODAY)).toHaveCount(0);
+});
+
+test("leaving the reminders while a hidden save is held and returning after its answer shows no answer from before the save", async ({
+    page,
+}) => {
+    const SUMMARY =
+        "Everyone who receives the email, hidden addresses included, sees the To and Copy addresses.";
+    const { answerLater } = await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: TEAM,
+        includeMembers: true,
+        hidden: false,
+    });
+    await openReminders(page);
+    await expect(line(page, SUMMARY)).toBeVisible();
+    await hideBox(page).check();
+    const write = answerLater("PUT");
+    try {
+        await saveButton(page).click();
+        await write.committed;
+        await page
+            .getByRole("button", { name: "Location", exact: true })
+            .click();
+        await expect(hideBox(page)).toHaveCount(0);
+        const seen = await watchFor(page, [SUMMARY]);
+        const held = await write.request;
+        const answered = answerTo(page, held);
+        const tenants = nextRequest(page, isTenants);
+        write.release();
+        await answered;
+        await (await tenants).response();
+        await page
+            .getByRole("button", { name: "Email reminders", exact: true })
+            .click();
+        await expect(line(page, HIDDEN_TODAY)).toBeVisible();
+        await expect(hideBox(page)).toBeChecked();
+        expect(await seen()).toEqual([]);
+    } finally {
+        write.release();
+    }
+});
+
+test("a save whose following read fails leaves one Try again, the reader's, and it opens the saved read for editing", async ({
+    page,
+}) => {
+    const { failNext } = await reminderApi(page);
+    await openReminders(page);
+    await page.getByRole("button", { name: "Add time", exact: true }).click();
+    await time(page, 2).fill("07:00");
+    failNext("GET");
+    const put = nextRequest(page, isWrite);
+    const read = nextRequest(page, isRead);
+    await saveButton(page).click();
+    await (await put).response();
+    await expect(line(page, SAVED_LINE)).toBeFocused();
+    expect((await (await read).response())!.status()).toBe(503);
+    await expect(panel(page).getByRole("alert")).toHaveText(
+        `${UNAVAILABLE}Try again`,
+    );
+    await expect(retryButton(page)).toHaveCount(1);
+    await expect(saveButton(page)).toHaveCount(0);
+    await expect(time(page, 1)).toHaveCount(0);
+    const again = nextRequest(page, isRead);
+    await retryButton(page).click();
+    await (await again).response();
+    await expect(time(page, 1)).toHaveValue("07:00");
+    await expect(time(page, 2)).toHaveValue("08:00");
+    await expect(saveButton(page)).toBeEnabled();
+    await expect(panel(page).getByRole("alert")).toHaveCount(0);
+    await expect(retryButton(page)).toHaveCount(0);
+});
+
+test("a language switch while the read after a save is held and fails leaves no failure once the replacement read succeeds", async ({
+    page,
+}) => {
+    const { answerLater, failNext } = await reminderApi(page);
+    await speaking(page);
+    await openReminders(page);
+    await time(page, 1).fill("07:00");
+    const following = answerLater("GET");
+    failNext("GET");
+    try {
+        await saveButton(page).click();
+        const held = await following.request;
+        const replacement = nextRequest(page, isRead);
+        await speak(page, "tr");
+        await (await replacement).response();
+        await expect(
+            page.getByLabel("Gönderim saati 1", { exact: true }),
+        ).toHaveValue("07:00");
+        const answered = answerTo(page, held);
+        following.release();
+        expect((await answered).status()).toBe(503);
+        const later = nextRequest(page, isRead);
+        await speak(page, "en");
+        await (await later).response();
+        await expect(time(page, 1)).toHaveValue("07:00");
+        await expect(panel(page).getByRole("alert")).toHaveCount(0);
+        await expect(retryButton(page)).toHaveCount(0);
+    } finally {
+        following.release();
+    }
+});
+
+test("after a conflict Save returns only with the read that follows, and the next review carries its revision", async ({
+    page,
+}) => {
+    const { answerLater } = await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: TEAM,
+        includeMembers: true,
+        hidden: false,
+    });
+    await openReminders(page);
+    await time(page, 1).fill("09:00");
+    await review(page);
+    await saveElsewhere(page, { ...SAVED, times: ["10:00"] });
+    const following = answerLater("GET");
+    try {
+        const put = nextRequest(page, isWrite);
+        await confirmButton(page).click();
+        const refusal = (await (await put).response())!;
+        expect([refusal.status(), (await refusal.json()).code]).toEqual([
+            409,
+            "reminder_schedule_changed",
+        ]);
+        await following.committed;
+        await expect(line(page, CONFLICT)).toBeFocused();
+        await expect(saveButton(page)).toHaveCount(0);
+        await expect(typedFields(page)).toHaveCount(0);
+        const answered = answerTo(page, await following.request);
+        following.release();
+        await answered;
+    } finally {
+        following.release();
+    }
+    await expect(saveButton(page)).toBeEnabled();
+    await expect(time(page, 1)).toHaveValue("09:00");
+    const { previewed } = await review(page);
+    expect(previewed).toMatchObject({ expected_revision: 1, times: ["09:00"] });
 });
 
 for (const touched of [false, true]) {
@@ -404,9 +773,8 @@ test("a newer read stays in the saved view through a language switch whose read 
     const held = answerLater("GET");
     failNext("GET");
     try {
-        const failed = response(page, isRead, 503);
         await page.getByLabel("Language", { exact: true }).selectOption("tr");
-        await held.committed;
+        const request = await held.request;
         const turkish = page
             .getByRole("heading", { name: "Kim neyi görür", exact: true })
             .locator("xpath=..");
@@ -415,10 +783,11 @@ test("a newer read stays in the saved view through a language switch whose read 
             ADMIN,
             "Bilgi (Cc)",
             MEMBER,
-            `${OUTSIDE}Çalışma alanı dışında`,
+            `${OUTSIDE}Aktif bir üyenin doğrulanmış birincil adresi değil`,
         ]);
+        const failed = answerTo(page, request);
         held.release();
-        await failed;
+        expect((await failed).status()).toBe(503);
         await expect(
             page.getByRole("alert").filter({ hasText: /./ }),
         ).not.toHaveCount(0);
@@ -427,7 +796,7 @@ test("a newer read stays in the saved view through a language switch whose read 
             ADMIN,
             "Bilgi (Cc)",
             MEMBER,
-            `${OUTSIDE}Çalışma alanı dışında`,
+            `${OUTSIDE}Aktif bir üyenin doğrulanmış birincil adresi değil`,
         ]);
         await expect(
             page.getByLabel("Gönderim saati 1", { exact: true }),
@@ -459,9 +828,7 @@ test("the review freezes the draft, a changed draft is reviewed again and the sa
     await cancelButton(page).click();
     await expect(dialog(page)).toHaveCount(0);
     await expect(saveButton(page)).toBeFocused();
-    await expect(
-        page.getByText("Saved successfully.", { exact: true }),
-    ).toHaveCount(0);
+    await expect(line(page, SAVED_LINE)).toHaveCount(0);
     await enabled.check();
     const { previewed, answer, body } = await saveVisible(page);
     expect(previews).toHaveLength(2);
@@ -494,17 +861,21 @@ test("a digest that differs at the save closes the review, keeps the draft and t
         MEMBER,
     ]);
     persons[2]!.verified = [OUTSIDE];
-    const refused = response(page, isWrite, 409);
-    const read = response(page, isRead, 200);
+    const put = nextRequest(page, isWrite);
+    const reading = nextRequest(page, isRead);
+    const after = order(page);
     await confirmButton(page).click();
-    expect((await (await refused).json()).code).toBe(
+    const write = await put;
+    const refused = (await write.response())!;
+    expect([refused.status(), (await refused.json()).code]).toEqual([
+        409,
         "reminder_disclosure_changed",
-    );
+    ]);
     await expect(dialog(page)).toHaveCount(0);
-    const alert = page.locator(".notice[role=alert]");
-    await expect(alert).toContainText(CONFLICT);
-    await expect(alert).toBeFocused();
-    await read;
+    await expect(line(page, CONFLICT)).toBeFocused();
+    const read = await reading;
+    expect(after(write, isRead)[0]).toBe(read);
+    await read.response();
     await expect(time(page, 1)).toHaveValue("09:00");
     await expect(listed(savedView(page))).toHaveText([
         "To",
@@ -514,6 +885,7 @@ test("a digest that differs at the save closes the review, keeps the draft and t
         OUTSIDE,
     ]);
     await review(page);
+    await expect(line(page, CONFLICT)).toHaveCount(0);
     await expect(listed(dialog(page))).toHaveText([
         "To",
         ADMIN,
@@ -521,90 +893,188 @@ test("a digest that differs at the save closes the review, keeps the draft and t
         MEMBER,
         OUTSIDE,
     ]);
-    const write = response(page, isWrite, 200);
     await confirmButton(page).click();
-    await write;
+    await expect(line(page, SAVED_LINE)).toBeFocused();
     await expect(saveButton(page)).toBeEnabled();
     await expect(time(page, 1)).toHaveValue("09:00");
 });
 
-test("a save whose following read fails keeps the fields read-only with Retry, and Retry opens the read for editing", async ({
+test("a review whose answer carries no digest is refused at the save and ends on the conflict line with the draft kept", async ({
     page,
 }) => {
-    const { failNext } = await reminderApi(page);
+    await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: TEAM,
+        includeMembers: true,
+        hidden: false,
+        disclosure: false,
+    });
     await openReminders(page);
-    await page.getByRole("button", { name: "Add time", exact: true }).click();
-    await time(page, 2).fill("07:00");
-    failNext("GET");
-    const failed = response(page, isRead, 503);
-    await saveButton(page).click();
-    await failed;
-    await expect(line(page, SAVED_FAILED)).toBeVisible();
-    await expect(line(page, SAVED_FAILED)).toBeFocused();
-    await expect(retryButton(page)).toBeVisible();
-    await expect(saveButton(page)).toHaveCount(0);
-    await expect(time(page, 1)).toHaveValue("08:00");
-    await expect(time(page, 2)).toHaveValue("07:00");
-    for (const field of [time(page, 1), address(page, 1)])
-        await expect(field).toBeDisabled();
-    await expect(
-        page.getByRole("button", { name: "Add time", exact: true }),
-    ).toBeHidden();
-    const read = response(page, isRead, 200);
-    await retryButton(page).click();
-    await read;
-    await expect(time(page, 1)).toHaveValue("07:00");
-    await expect(time(page, 2)).toHaveValue("08:00");
-    await expect(time(page, 1)).toBeEnabled();
-    await expect(saveButton(page)).toBeEnabled();
-    await expect(heading(page)).toBeFocused();
-    await expect(line(page, SAVED_FAILED)).toHaveCount(0);
+    await time(page, 1).fill("09:00");
+    const { answer } = await review(page);
+    expect(answer).not.toHaveProperty("disclosure");
+    const put = nextRequest(page, isWrite);
+    const reading = nextRequest(page, isRead);
+    const after = order(page);
+    await confirmButton(page).click();
+    const write = await put;
+    expect(write.postDataJSON()).not.toHaveProperty("disclosure");
+    const refused = (await write.response())!;
+    expect([refused.status(), (await refused.json()).code]).toEqual([
+        409,
+        "reminder_disclosure_changed",
+    ]);
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(line(page, CONFLICT)).toBeFocused();
+    const read = await reading;
+    expect(after(write, isRead)[0]).toBe(read);
+    await read.response();
+    await expect(time(page, 1)).toHaveValue("09:00");
+    const { previewed } = await review(page);
+    expect(previewed).toMatchObject({ times: ["09:00"] });
 });
 
-test("a held unchanged save ends on the read Retry loads, with no line about a change elsewhere", async ({
+for (const after of [true, false])
+    test(`a save whose answer is ${after ? "lost after the write" : "a server failure before the write"} says the outcome is unknown, keeps the draft and reviews the next save on what is stored`, async ({
+        page,
+    }) => {
+        const { answerLater, failNext } = await reminderApi(page, {
+            recipients: [OUTSIDE],
+            members: TEAM,
+            includeMembers: true,
+            hidden: false,
+        });
+        await openReminders(page);
+        await radio(page, MEMBER, "To").check();
+        await review(page);
+        const write = answerLater("PUT");
+        if (after) failNext("PUT", "after", "lost");
+        else failNext("PUT");
+        try {
+            await confirmButton(page).click();
+            const request = await write.request;
+            const reading = nextRequest(page, isRead);
+            if (after) {
+                const lost = page.waitForEvent(
+                    "requestfailed",
+                    (failed) => failed === request,
+                );
+                write.release();
+                await lost;
+            } else {
+                const answered = answerTo(page, request);
+                write.release();
+                expect((await answered).status()).toBe(503);
+            }
+            await expect(dialog(page)).toHaveCount(0);
+            await expect(line(page, UNKNOWN)).toBeFocused();
+            await expect(confirmButton(page)).toHaveCount(0);
+            await (await reading).response();
+        } finally {
+            write.release();
+        }
+        await expect(listed(savedView(page))).toHaveText(
+            after ? ["To", ADMIN, MEMBER] : ["To", ADMIN, "Copy (Cc)", MEMBER],
+        );
+        await expect(radio(page, MEMBER, "To")).toBeChecked();
+        await expect(line(page, UNKNOWN)).toBeVisible();
+        const { previewed } = await review(page);
+        expect(previewed).toMatchObject({
+            expected_revision: after ? 1 : 0,
+            member_roles: [{ memberships: [2], address: MEMBER, role: "to" }],
+        });
+        await confirmButton(page).click();
+        await expect(line(page, SAVED_LINE)).toBeFocused();
+    });
+
+test("a hidden result is saved with one PUT, without a preview or a review, and the reader's loading line stands in until the read that follows", async ({
     page,
 }) => {
-    await page.clock.install();
-    const { persons, answerLater, failNext } = await reminderApi(page, {
+    const { answerLater } = await reminderApi(page, {
         recipients: [OUTSIDE],
-        members: [
-            ADMIN,
-            MEMBER,
-            { membership: 3, primary: OUTSIDE, verified: [] },
-        ],
+        members: TEAM,
+        includeMembers: true,
+        hidden: false,
+    });
+    const previews = sent(page, isPreview);
+    const writes = sent(page, isWrite);
+    await openReminders(page);
+    await hideBox(page).check();
+    await expect(line(page, HIDDEN_HELPER)).toBeVisible();
+    await expect(page.getByRole("radio")).toHaveCount(0);
+    const following = answerLater("GET");
+    let body: Record<string, unknown>;
+    try {
+        const request = nextRequest(page, isWrite);
+        await saveButton(page).click();
+        body = (await request).postDataJSON();
+        await following.committed;
+        await expect(line(page, SAVED_LINE)).toBeFocused();
+        await expect(panel(page).getByRole("status")).toHaveText(LOADING);
+        await expect(saveButton(page)).toHaveCount(0);
+        await expect(heading(page)).toHaveCount(0);
+        const answered = answerTo(page, await following.request);
+        following.release();
+        await answered;
+    } finally {
+        following.release();
+    }
+    await expect(saveButton(page)).toBeEnabled();
+    await expect(line(page, SAVED_LINE)).toBeFocused();
+    expect(body).toMatchObject({ hide_recipients: true });
+    expect(body).not.toHaveProperty("disclosure");
+    expect(previews).toEqual([]);
+    expect(writes).toHaveLength(1);
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(line(page, HIDDEN_TODAY)).toBeVisible();
+});
+
+test("a confirmed visible save moves focus to the outcome line after the dialog has closed", async ({
+    page,
+}) => {
+    await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: TEAM,
         includeMembers: true,
         hidden: false,
     });
     await openReminders(page);
     await review(page);
-    const write = answerLater("PUT");
-    try {
-        await confirmButton(page).click();
-        await write.committed;
-        persons[2]!.verified = [OUTSIDE];
-        await refetch(page);
-        await expect(listed(savedView(page))).toContainText([OUTSIDE]);
-        failNext("GET");
-        const failed = response(page, isRead, 503);
-        write.release();
-        await failed;
-        await expect(line(page, SAVED_FAILED)).toBeVisible();
-    } finally {
-        write.release();
-    }
-    await expect(page.getByText(/changed elsewhere/)).toHaveCount(0);
-    await retryButton(page).click();
-    await expect(listed(savedView(page))).toHaveText([
-        "To",
-        ADMIN,
-        "Copy (Cc)",
-        MEMBER,
-        OUTSIDE,
-    ]);
-    await expect(page.getByText(/changed elsewhere/)).toHaveCount(0);
+    await confirmButton(page).click();
+    await expect(line(page, SAVED_LINE)).toBeFocused();
+    await expect(dialog(page)).toHaveCount(0);
+    expect(
+        await page.evaluate(() => ({
+            inDialog: !!document.activeElement?.closest("dialog"),
+            open: document.querySelectorAll("dialog[open]").length,
+        })),
+    ).toEqual({ inDialog: false, open: 0 });
 });
 
-test("a read that removes the member whose role group holds focus moves focus to the members heading and keeps an edited time", async ({
+test("a new typed address offers its role only once it is saved", async ({
+    page,
+}) => {
+    await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: [ADMIN],
+        hidden: false,
+    });
+    await openReminders(page);
+    await page
+        .getByRole("button", { name: "Add address", exact: true })
+        .click();
+    await address(page, 2).fill("new@example.test");
+    await expect(group(page, "new@example.test")).toHaveCount(0);
+    await expect(line(page, ONCE_SAVED)).toBeVisible();
+    await expect(address(page, 2)).toHaveAccessibleDescription(ONCE_SAVED);
+    const { body } = await saveVisible(page);
+    expect(body.recipients).toEqual([OUTSIDE, "new@example.test"]);
+    expect(body).not.toHaveProperty("address_roles");
+    await expect(radio(page, "new@example.test", "Default")).toBeChecked();
+    await expect(line(page, ONCE_SAVED)).toHaveCount(0);
+});
+
+test("a choice for a member who leaves is removed with a line naming the choice and the address, and the rest of the draft stays", async ({
     page,
 }) => {
     await page.clock.install();
@@ -615,15 +1085,397 @@ test("a read that removes the member whose role group holds focus moves focus to
         hidden: false,
     });
     await openReminders(page);
+    await radio(page, MEMBER, "Hidden").check();
+    await radio(page, THIRD, "To").check();
     await time(page, 1).fill("09:00");
-    await radio(page, MEMBER, "Default").focus();
     persons[1]!.active = false;
     await refetch(page);
-    await expect(group(page, MEMBER)).toHaveCount(0);
-    await expect(
-        page.getByRole("heading", { name: "Workspace members (2)" }),
-    ).toBeFocused();
+    await expect(line(page, DROPPED("Hidden", MEMBER))).toBeVisible();
+    await expect(radio(page, THIRD, "To")).toBeChecked();
     await expect(time(page, 1)).toHaveValue("09:00");
+    const { body } = await saveVisible(page);
+    expect(body.member_roles).toEqual([
+        { memberships: [3], address: THIRD, role: "to" },
+    ]);
+    expect(body.times).toEqual(["09:00"]);
+    await expect(line(page, DROPPED("Hidden", MEMBER))).toHaveCount(0);
+});
+
+test("a choice on a typed address whose row went elsewhere is dropped and named, never moved to the member who now holds the address", async ({
+    page,
+}) => {
+    await page.clock.install();
+    const { persons } = await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: [
+            ADMIN,
+            MEMBER,
+            { membership: 3, primary: OUTSIDE, verified: [] },
+        ],
+        includeMembers: true,
+        hidden: false,
+    });
+    await openReminders(page);
+    await radio(page, OUTSIDE, "Copy").check();
+    await saveElsewhere(page, { ...SAVED, recipients: [] });
+    persons[2]!.verified = [OUTSIDE];
+    await refetch(page);
+    await expect(line(page, DROPPED("Copy", OUTSIDE))).toBeVisible();
+    await expect(typedFields(page)).toHaveValue("");
+    await expect(group(page, OUTSIDE)).toHaveCount(1);
+    await expect(radio(page, OUTSIDE, "Default")).toBeChecked();
+    await expect(radio(page, OUTSIDE, "Copy")).not.toBeChecked();
+    const { body } = await saveVisible(page);
+    expect(body).not.toHaveProperty("address_roles");
+    expect(body).not.toHaveProperty("member_roles");
+});
+
+for (const how of ["Use the defaults for everyone", "Copy, then Default"])
+    test(`a Default chosen on a typed row whose stored To rests is sent as a clear in both lists (${how})`, async ({
+        page,
+    }) => {
+        await reminderApi(page, {
+            recipients: [MEMBER],
+            members: [ADMIN, { membership: 2, primary: MEMBER }],
+            typed: { [MEMBER]: { role: "to", members: [] } },
+            includeMembers: true,
+            hidden: false,
+        });
+        await openReminders(page);
+        await expect(radio(page, MEMBER, "Default")).toBeChecked();
+        await expect(
+            page.getByRole("listitem").filter({ hasText: MEMBER }),
+        ).toContainText("Set under Other addresses");
+        if (how === "Copy, then Default") {
+            await radio(page, MEMBER, "Copy").check();
+            await radio(page, MEMBER, "Default").check();
+        } else await useDefaults(page).click();
+        const { body } = await saveVisible(page);
+        expect(body.address_roles).toEqual([
+            { address: MEMBER, role: null, memberships: [2] },
+        ]);
+        expect(body.member_roles).toEqual(
+            how === "Copy, then Default"
+                ? [{ memberships: [2], address: MEMBER, role: null }]
+                : [
+                      { memberships: [1], address: ADMIN, role: null },
+                      { memberships: [2], address: MEMBER, role: null },
+                  ],
+        );
+    });
+
+test("an active member keeps their own role control beside a typed row of their address that adds no recipient", async ({
+    page,
+}) => {
+    const SHARED = "shared@example.test";
+    await page.clock.install();
+    const { persons } = await reminderApi(page, {
+        recipients: [SHARED],
+        members: [
+            ADMIN,
+            { membership: 2, primary: SHARED, active: false },
+            { membership: 3, primary: "later@example.test" },
+        ],
+        includeMembers: true,
+        hidden: false,
+    });
+    await openReminders(page);
+    persons[2]!.primary = SHARED;
+    persons[2]!.verified = [SHARED];
+    await refetch(page);
+    const memberRow = page.getByRole("listitem").filter({ hasText: SHARED });
+    await expect(memberRow.getByRole("radio")).toHaveCount(4);
+    await expect(memberRow).not.toContainText("Set under Other addresses");
+    await expect(line(page, `${SHARED} adds no recipient.`)).toBeVisible();
+    await expect(group(page, SHARED)).toHaveCount(1);
+    await radio(page, SHARED, "Copy").check();
+    const { body } = await saveVisible(page);
+    expect(body.member_roles).toEqual([
+        { memberships: [3], address: SHARED, role: "cc" },
+    ]);
+    expect(body).not.toHaveProperty("address_roles");
+});
+
+for (const cause of ["a departure hides everyone", "the address becomes typed"])
+    test(`when ${cause}, focus on a removed member control moves to the panel heading`, async ({
+        page,
+    }) => {
+        await page.clock.install();
+        const { depart } = await reminderApi(page, {
+            recipients: [],
+            members: [ADMIN, MEMBER, THIRD],
+            includeMembers: true,
+            hidden: false,
+        });
+        await openReminders(page);
+        await time(page, 1).fill("09:00");
+        await radio(page, MEMBER, "Default").focus();
+        if (cause === "a departure hides everyone") depart(3);
+        else await saveElsewhere(page, { ...SAVED, recipients: [MEMBER] });
+        await refetch(page);
+        if (cause === "a departure hides everyone") {
+            await expect(line(page, DEPARTURE)).toBeVisible();
+            await expect(group(page, MEMBER)).toHaveCount(0);
+        } else
+            await expect(
+                page.getByRole("listitem").filter({ hasText: MEMBER }),
+            ).toContainText("Set under Other addresses");
+        await expect(panelHeading(page)).toBeFocused();
+        await expect(time(page, 1)).toHaveValue("09:00");
+    });
+
+test("a save answered after a count-only read shows no address again and keeps nothing of the draft", async ({
+    page,
+}) => {
+    let revoked = false;
+    await page.clock.install();
+    const { answerLater } = await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: TEAM,
+        includeMembers: true,
+        hidden: false,
+        viewer: (method) => revoked && method === "GET",
+        deliveries: [SENT_TO_TEAM],
+    });
+    await asRole(page, () => "admin");
+    await openReminders(page);
+    await page.getByText("Recent deliveries", { exact: true }).click();
+    await expect(page.getByText(`${MEMBER} Copy`)).toBeVisible();
+    await time(page, 1).fill("09:00");
+    await review(page);
+    const write = answerLater("PUT");
+    try {
+        await confirmButton(page).click();
+        await write.committed;
+        revoked = true;
+        const first = nextRequest(page, isRead);
+        await page.clock.fastForward("00:10");
+        await page.evaluate(() =>
+            window.dispatchEvent(new Event("visibilitychange")),
+        );
+        const countOnly = await first;
+        const loss = page.waitForRequest(
+            (request) =>
+                isRead(request.method(), request.url()) &&
+                request !== countOnly,
+        );
+        expect((await countOnly.response())!.status()).toBe(200);
+        await (await loss).response();
+        await expect(line(page, COUNT_ONLY(3))).toBeVisible();
+        await expect(typedFields(page)).toHaveCount(0);
+        await expect(dialog(page)).toHaveCount(0);
+        const seen = await watchFor(page, [MEMBER, OUTSIDE]);
+        const held = await write.request;
+        const answered = answerTo(page, held);
+        const following = nextRequest(page, isRead);
+        write.release();
+        await answered;
+        await (await following).response();
+        await expect(line(page, SAVED_LINE)).toBeFocused();
+        await expect(line(page, COUNT_ONLY(3))).toBeVisible();
+        await expect(typedFields(page)).toHaveCount(0);
+        await expect(saveButton(page)).toHaveCount(0);
+        expect(await seen()).toEqual([]);
+    } finally {
+        write.release();
+    }
+});
+
+test("the review takes focus, confines the keyboard to its own controls, returns focus to Save on Escape and fits a narrow screen", async ({
+    page,
+}) => {
+    const LONG =
+        "a.very.long.recipient.address.outside.the.workspace@subdomain.example.test";
+    await reminderApi(page, {
+        recipients: [LONG],
+        members: TEAM,
+        includeMembers: true,
+        hidden: false,
+        typed: { [LONG]: "cc" },
+    });
+    await page.setViewportSize({ width: 320, height: 900 });
+    await openReminders(page);
+    await review(page);
+    await expect(
+        dialog(page).getByRole("heading", { name: TITLE }),
+    ).toBeFocused();
+    await expect(dialog(page)).toHaveAccessibleDescription(SENTENCE);
+    await expect(listed(dialog(page))).toContainText([
+        `${LONG}${OUTSIDE_MARK}`,
+    ]);
+    expect(await fits(page)).toBe(true);
+    const box = await dialog(page).boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(320);
+    const visited: string[] = [];
+    for (let step = 0; step < 6; step++) {
+        await page.keyboard.press("Tab");
+        visited.push(
+            await dialog(page).evaluate((element) => {
+                const active = document.activeElement;
+                if (!active || active === document.body) return "browser";
+                return element.contains(active)
+                    ? (active.textContent ?? "")
+                    : `outside: ${active.outerHTML.slice(0, 60)}`;
+            }),
+        );
+    }
+    expect(visited).toEqual([
+        "Save and show addresses",
+        "Back to editing",
+        "browser",
+        "Save and show addresses",
+        "Back to editing",
+        "browser",
+    ]);
+    await page.setViewportSize({ width: 390, height: 900 });
+    expect(await accessibilityViolations(page)).toEqual([]);
+    await page.keyboard.press("Escape");
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(saveButton(page)).toBeFocused();
+});
+
+test("a visible review in which every recipient is hidden says that no address will appear in To or Copy", async ({
+    page,
+}) => {
+    await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: TEAM,
+        includeMembers: true,
+        hidden: false,
+    });
+    await openReminders(page);
+    for (const item of [ADMIN, MEMBER, OUTSIDE])
+        await radio(page, item, "Hidden").check();
+    await review(page);
+    await expect(listed(dialog(page))).toHaveCount(0);
+    await expect(line(dialog(page), NO_ADDRESS_SHOWN)).toBeVisible();
+    await expect(
+        line(dialog(page), "Hidden (Bcc): 3 recipients"),
+    ).toBeVisible();
+    await cancelButton(page).click();
+    await radio(page, ADMIN, "To").check();
+    await review(page);
+    await expect(line(dialog(page), NO_ADDRESS_SHOWN)).toHaveCount(0);
+});
+
+test("the review, the outside mark, a dropped choice, a review without To or Copy and the conflict read in Turkish", async ({
+    page,
+}) => {
+    await page.clock.install();
+    const { account, persons } = await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: [ADMIN, MEMBER, THIRD],
+        includeMembers: true,
+        hidden: false,
+        typed: { [OUTSIDE]: "cc" },
+    });
+    await page.route("**/api/session/", (route) =>
+        route.fulfill({
+            json: { ...sessionIdentity(account.current), language: "tr" },
+        }),
+    );
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Işınım", exact: true }).click();
+    await page.getByRole("button", { name: "Ayarlar", exact: true }).click();
+    await page
+        .getByRole("button", { name: "E-posta hatırlatıcıları", exact: true })
+        .click();
+    const turkishRadio = (item: string, label: string) =>
+        page
+            .getByRole("group", {
+                name: `${item} e-postayı nasıl alır`,
+                exact: true,
+            })
+            .getByRole("radio", { name: label, exact: true });
+    const saved = page
+        .getByRole("heading", { name: "Kim neyi görür", exact: true })
+        .locator("xpath=..");
+    await expect(listed(saved)).toHaveText([
+        "Kime",
+        ADMIN,
+        "Bilgi (Cc)",
+        MEMBER,
+        THIRD,
+        `${OUTSIDE}Aktif bir üyenin doğrulanmış birincil adresi değil`,
+    ]);
+    await turkishRadio(THIRD, "Gizli").check();
+    persons[2]!.active = false;
+    await refetch(page);
+    await expect(
+        line(
+            page,
+            `${THIRD} için “Gizli” seçiminiz kaldırıldı: kayıtlı alıcılar veya bu çalışma alanındaki kişiler değişti.`,
+        ),
+    ).toBeVisible();
+    for (const item of [ADMIN, MEMBER, OUTSIDE])
+        await turkishRadio(item, "Gizli").check();
+    const save = page.getByRole("button", {
+        name: "Hatırlatıcıları kaydet",
+        exact: true,
+    });
+    const turkishDialog = page.getByRole("dialog", {
+        name: "Bu adresler her alıcıya gösterilsin mi?",
+        exact: true,
+    });
+    await save.click();
+    await expect(turkishDialog).toHaveAccessibleDescription(
+        "Bu hatırlatıcıların her alıcısı aşağıdaki Kime ve Bilgi adreslerini görecek.",
+    );
+    await expect(
+        line(
+            turkishDialog,
+            "Kime veya Bilgi satırında hiçbir adres görünmeyecek.",
+        ),
+    ).toBeVisible();
+    await expect(line(turkishDialog, "Gizli (Bcc): 3 alıcı")).toBeVisible();
+    await turkishDialog
+        .getByRole("button", { name: "Düzenlemeye dön", exact: true })
+        .click();
+    await turkishRadio(ADMIN, "Varsayılan").check();
+    await save.click();
+    await expect(listed(turkishDialog)).toHaveText(["Kime", ADMIN]);
+    await saveElsewhere(page, { ...SAVED, times: ["10:00"] });
+    await turkishDialog
+        .getByRole("button", { name: "Kaydet ve adresleri göster" })
+        .click();
+    await expect(
+        line(
+            page,
+            "Bu kaydetmeden hiçbir şey saklanmadı: hatırlatıcı ayarları veya bu çalışma alanındaki kişiler değişti. Kontrol edip yeniden kaydedin.",
+        ),
+    ).toBeFocused();
+    await expect(save).toBeEnabled();
+});
+
+test("Use the defaults for everyone sends Default for every control shown, including a choice equal to the stored role", async ({
+    page,
+}) => {
+    await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: [ADMIN, { membership: 2, primary: MEMBER, choice: "bcc" }],
+        includeMembers: true,
+        hidden: false,
+    });
+    await openReminders(page);
+    await radio(page, ADMIN, "Copy").check();
+    await radio(page, ADMIN, "Default").check();
+    await radio(page, OUTSIDE, "To").check();
+    await useDefaults(page).click();
+    await expect(useDefaults(page)).toBeFocused();
+    for (const item of [ADMIN, MEMBER, OUTSIDE])
+        await expect(radio(page, item, "Default")).toBeChecked();
+    const { body } = await saveVisible(page);
+    expect(body.address_roles).toEqual([
+        { address: OUTSIDE, role: null, memberships: [] },
+    ]);
+    expect(body.member_roles).toEqual([
+        { memberships: [1], address: ADMIN, role: null },
+        { memberships: [2], address: MEMBER, role: null },
+    ]);
 });
 
 test("the mock answers each address field of the preview and the save with the status, code and field the server gives", async ({
@@ -794,289 +1646,6 @@ test("the mock refuses a preview and a save by a member who is not the administr
     expect((await call("GET")).json).toEqual(before);
 });
 
-test("the mock binds a visible save to the preview's digest, writes nothing for a preview or a refusal and ignores the digest of a hidden save", async ({
-    page,
-}) => {
-    await reminderApi(page, {
-        recipients: [OUTSIDE],
-        members: TEAM,
-        includeMembers: true,
-        hidden: true,
-    });
-    await page.goto("/app/");
-    const call = caller(page);
-    const before = (await call("GET")).json;
-    const visible = { ...SAVED, hide_recipients: false };
-    const preview = await call("POST", visible, "preview/");
-    expect(preview.status).toBe(200);
-    expect(typeof preview.json.disclosure).toBe("string");
-    expect((await call("GET")).json).toEqual(before);
-    for (const body of [visible, { ...visible, disclosure: "other" }]) {
-        const answer = await call("PUT", body);
-        expect([answer.status, answer.json.code]).toEqual([
-            409,
-            "reminder_disclosure_changed",
-        ]);
-        expect((await call("GET")).json).toEqual(before);
-    }
-    const hidden = await call("PUT", {
-        ...SAVED,
-        hide_recipients: true,
-        times: ["09:00"],
-        disclosure: "other",
-    });
-    expect(hidden.status).toBe(200);
-    expect(hidden.json.revision).toBe(1);
-    const shown = await call("PUT", {
-        ...visible,
-        expected_revision: 1,
-        disclosure: (
-            await call("POST", { ...visible, expected_revision: 1 }, "preview/")
-        ).json.disclosure,
-    });
-    expect(shown.status).toBe(200);
-    expect(shown.json.hide_recipients).toBe(false);
-});
-
-test("a hidden result is saved with one PUT, without a preview or a review", async ({
-    page,
-}) => {
-    const { answerLater } = await reminderApi(page, {
-        recipients: [OUTSIDE],
-        members: TEAM,
-        includeMembers: true,
-        hidden: false,
-    });
-    const previews = sent(page, isPreview);
-    const writes = sent(page, isWrite);
-    await openReminders(page);
-    await hideBox(page).check();
-    await expect(line(page, HIDDEN_HELPER)).toBeVisible();
-    await expect(page.getByRole("radio")).toHaveCount(0);
-    const read = answerLater("GET");
-    let body: Record<string, unknown>;
-    try {
-        const request = page.waitForRequest((request) =>
-            isWrite(request.method(), request.url()),
-        );
-        await saveButton(page).click();
-        body = (await request).postDataJSON();
-        await read.committed;
-        await expect(line(page, SAVED_LOADING)).toBeFocused();
-        await expect(saveButton(page)).toHaveCount(0);
-        await expect(listed(savedView(page))).toHaveCount(0);
-        const answered = response(page, isRead, 200);
-        read.release();
-        await answered;
-    } finally {
-        read.release();
-    }
-    await expect(saveButton(page)).toBeEnabled();
-    await expect(heading(page)).toBeFocused();
-    expect(body).toMatchObject({ hide_recipients: true });
-    expect(body).not.toHaveProperty("disclosure");
-    expect(previews).toEqual([]);
-    expect(writes).toHaveLength(1);
-    await expect(dialog(page)).toHaveCount(0);
-    await expect(line(page, HIDDEN_TODAY)).toBeVisible();
-});
-
-test("a new typed address offers its role only once it is saved", async ({
-    page,
-}) => {
-    await reminderApi(page, {
-        recipients: [OUTSIDE],
-        members: [ADMIN],
-        hidden: false,
-    });
-    await openReminders(page);
-    await page
-        .getByRole("button", { name: "Add address", exact: true })
-        .click();
-    await address(page, 2).fill("new@example.test");
-    await expect(group(page, "new@example.test")).toHaveCount(0);
-    await expect(line(page, ONCE_SAVED)).toBeVisible();
-    await expect(address(page, 2)).toHaveAccessibleDescription(ONCE_SAVED);
-    const { body } = await saveVisible(page);
-    expect(body.recipients).toEqual([OUTSIDE, "new@example.test"]);
-    expect(body).not.toHaveProperty("address_roles");
-    await expect(radio(page, "new@example.test", "Default")).toBeChecked();
-    await expect(line(page, ONCE_SAVED)).toHaveCount(0);
-});
-
-test("a choice for a member who leaves is removed with a line naming the address and the rest of the draft stays", async ({
-    page,
-}) => {
-    await page.clock.install();
-    const { persons } = await reminderApi(page, {
-        recipients: [],
-        members: [ADMIN, MEMBER, THIRD],
-        includeMembers: true,
-        hidden: false,
-    });
-    await openReminders(page);
-    await radio(page, MEMBER, "Hidden").check();
-    await radio(page, THIRD, "To").check();
-    await time(page, 1).fill("09:00");
-    persons[1]!.active = false;
-    await refetch(page);
-    await expect(
-        line(
-            page,
-            `Your choice for ${MEMBER} was removed: it is no longer on the list.`,
-        ),
-    ).toBeVisible();
-    await expect(radio(page, THIRD, "To")).toBeChecked();
-    await expect(time(page, 1)).toHaveValue("09:00");
-    const { body } = await saveVisible(page);
-    expect(body.member_roles).toEqual([
-        { memberships: [3], address: THIRD, role: "to" },
-    ]);
-    expect(body.times).toEqual(["09:00"]);
-});
-
-test("the review dialog takes focus, keeps Tab off the page behind it, returns to Save on Escape and passes axe at 390px without sideways scroll at 320px", async ({
-    page,
-}) => {
-    const LONG =
-        "a.very.long.recipient.address.outside.the.workspace@subdomain.example.test";
-    await reminderApi(page, {
-        recipients: [LONG],
-        members: TEAM,
-        includeMembers: true,
-        hidden: false,
-        typed: { [LONG]: "cc" },
-    });
-    await page.setViewportSize({ width: 320, height: 900 });
-    await openReminders(page);
-    await review(page);
-    await expect(
-        dialog(page).getByRole("heading", { name: TITLE }),
-    ).toBeFocused();
-    await expect(dialog(page)).toHaveAccessibleDescription(SENTENCE);
-    await expect(listed(dialog(page))).toContainText([
-        `${LONG}${OUTSIDE_MARK}`,
-    ]);
-    expect(await fits(page)).toBe(true);
-    const box = await dialog(page).boundingBox();
-    expect(box!.x).toBeGreaterThanOrEqual(0);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(320);
-    const visited: string[] = [];
-    for (let step = 0; step < 6; step++) {
-        await page.keyboard.press("Tab");
-        visited.push(
-            await dialog(page).evaluate((element) => {
-                const active = document.activeElement;
-                if (!active || active === document.body) return "browser";
-                return element.contains(active)
-                    ? (active.textContent ?? "")
-                    : `outside: ${active.outerHTML.slice(0, 60)}`;
-            }),
-        );
-    }
-    expect(visited).toEqual([
-        "Save and show addresses",
-        "Back to editing",
-        "browser",
-        "Save and show addresses",
-        "Back to editing",
-        "browser",
-    ]);
-    await page.setViewportSize({ width: 390, height: 900 });
-    expect(await accessibilityViolations(page)).toEqual([]);
-    await page.keyboard.press("Escape");
-    await expect(dialog(page)).toHaveCount(0);
-    await expect(saveButton(page)).toBeFocused();
-});
-
-test("the review, the conflict and the lines after a save read in Turkish", async ({
-    page,
-}) => {
-    const { account, answerLater, failNext } = await reminderApi(page, {
-        recipients: [OUTSIDE],
-        members: TEAM,
-        includeMembers: true,
-        hidden: false,
-    });
-    await page.route("**/api/session/", (route) =>
-        route.fulfill({
-            json: { ...sessionIdentity(account.current), language: "tr" },
-        }),
-    );
-    await page.goto("/app/");
-    await page
-        .getByRole("button", { name: /East array|Antalya solar park/ })
-        .click();
-    await page.getByRole("button", { name: "Işınım", exact: true }).click();
-    await page.getByRole("button", { name: "Ayarlar", exact: true }).click();
-    await page
-        .getByRole("button", { name: "E-posta hatırlatıcıları", exact: true })
-        .click();
-    const save = page.getByRole("button", {
-        name: "Hatırlatıcıları kaydet",
-        exact: true,
-    });
-    const turkishDialog = page.getByRole("dialog", {
-        name: "Bu adresler her alıcıya gösterilsin mi?",
-        exact: true,
-    });
-    await save.click();
-    await expect(turkishDialog).toHaveAccessibleDescription(
-        "Bu hatırlatıcıların her alıcısı aşağıdaki Kime ve Bilgi adreslerini görecek.",
-    );
-    await expect(listed(turkishDialog)).toHaveText([
-        "Kime",
-        ADMIN,
-        "Bilgi (Cc)",
-        MEMBER,
-    ]);
-    await expect(line(turkishDialog, "Gizli (Bcc): 1 alıcı")).toBeVisible();
-    await expect(
-        turkishDialog.getByRole("button", { name: "Düzenlemeye dön" }),
-    ).toBeVisible();
-    await saveElsewhere(page, { ...SAVED, times: ["10:00"] });
-    await turkishDialog
-        .getByRole("button", { name: "Kaydet ve adresleri göster" })
-        .click();
-    const alert = page.locator(".notice[role=alert]");
-    await expect(alert).toContainText(
-        "Hiçbir şey kaydedilmedi: hatırlatıcı ayarları veya bu çalışma alanındaki kişiler değişti. Kontrol edip yeniden kaydedin.",
-    );
-    await expect(alert).toBeFocused();
-    await expect(save).toBeEnabled();
-    await page
-        .getByLabel("Alıcıları birbirinden gizle", { exact: true })
-        .check();
-    const held = answerLater("GET");
-    try {
-        await save.click();
-        await held.committed;
-        await expect(
-            line(page, "Kaydedildi. Kaydedilen alıcılar yükleniyor…"),
-        ).toBeFocused();
-        failNext("GET");
-        held.release();
-    } finally {
-        held.release();
-    }
-    await expect(
-        line(page, "Kaydedildi. Kaydedilen alıcılar yükleniyor…"),
-    ).toHaveCount(0);
-    await expect(save).toBeEnabled();
-    await page.getByLabel("Gönderim saati 1", { exact: true }).fill("11:00");
-    failNext("GET");
-    await save.click();
-    await expect(
-        line(page, "Kaydedildi, ancak kaydedilen alıcılar yüklenemedi."),
-    ).toBeFocused();
-    await expect(
-        page
-            .getByRole("heading", { name: "Kim neyi görür", exact: true })
-            .locator("xpath=..")
-            .getByRole("button", { name: "Tekrar dene" }),
-    ).toBeVisible();
-});
-
 test("a plant without a schedule opens unticked with Default for every row and the language of the request", async ({
     page,
 }) => {
@@ -1143,34 +1712,6 @@ test("a member whose address is typed is chosen once on the typed row and its ch
         address_roles: [{ address: MEMBER, role: null, memberships: [2] }],
         member_roles: [{ memberships: [2], address: MEMBER, role: null }],
     });
-});
-
-test("a choice back to the stored role and Use the defaults for everyone send only what differs", async ({
-    page,
-}) => {
-    await reminderApi(page, {
-        recipients: [OUTSIDE],
-        members: [ADMIN, { membership: 2, primary: MEMBER, choice: "bcc" }],
-        includeMembers: true,
-        hidden: false,
-    });
-    await openReminders(page);
-    await radio(page, ADMIN, "Copy").check();
-    await radio(page, ADMIN, "Default").check();
-    await radio(page, OUTSIDE, "To").check();
-    const useDefaults = page.getByRole("button", {
-        name: "Use the defaults for everyone",
-        exact: true,
-    });
-    await useDefaults.click();
-    await expect(useDefaults).toBeFocused();
-    for (const item of [ADMIN, MEMBER, OUTSIDE])
-        await expect(radio(page, item, "Default")).toBeChecked();
-    const { body } = await saveVisible(page);
-    expect(body).not.toHaveProperty("address_roles");
-    expect(body.member_roles).toEqual([
-        { memberships: [2], address: MEMBER, role: null },
-    ]);
 });
 
 test("a saved Copy with nobody in To shows the warning in the saved view and the review", async ({
@@ -1385,6 +1926,50 @@ test("the section has no horizontal scroll at 320px and no accessibility violati
     expect(segment!.height).toBeGreaterThanOrEqual(44);
     await page.setViewportSize({ width: 390, height: 900 });
     expect(await accessibilityViolations(page)).toEqual([]);
+});
+
+test("the mock binds a visible save to the preview's digest, writes nothing for a preview or a refusal and ignores the digest of a hidden save", async ({
+    page,
+}) => {
+    await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: TEAM,
+        includeMembers: true,
+        hidden: true,
+    });
+    await page.goto("/app/");
+    const call = caller(page);
+    const before = (await call("GET")).json;
+    const visible = { ...SAVED, hide_recipients: false };
+    const preview = await call("POST", visible, "preview/");
+    expect(preview.status).toBe(200);
+    expect(typeof preview.json.disclosure).toBe("string");
+    expect((await call("GET")).json).toEqual(before);
+    for (const body of [visible, { ...visible, disclosure: "other" }]) {
+        const answer = await call("PUT", body);
+        expect([answer.status, answer.json.code]).toEqual([
+            409,
+            "reminder_disclosure_changed",
+        ]);
+        expect((await call("GET")).json).toEqual(before);
+    }
+    const hidden = await call("PUT", {
+        ...SAVED,
+        hide_recipients: true,
+        times: ["09:00"],
+        disclosure: "other",
+    });
+    expect(hidden.status).toBe(200);
+    expect(hidden.json.revision).toBe(1);
+    const shown = await call("PUT", {
+        ...visible,
+        expected_revision: 1,
+        disclosure: (
+            await call("POST", { ...visible, expected_revision: 1 }, "preview/")
+        ).json.disclosure,
+    });
+    expect(shown.status).toBe(200);
+    expect(shown.json.hide_recipients).toBe(false);
 });
 
 test("the mock refuses before it changes anything, keeps the revision of an unchanged save and keeps recorded history", async ({
