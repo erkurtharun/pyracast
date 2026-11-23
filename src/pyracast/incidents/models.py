@@ -22,6 +22,9 @@ class IncidentStatus(models.TextChoices):
     CANCELLED = "cancelled", "Cancelled"
 
 
+CREATE_KEY_FIELDS = ("plant", "created_by", "idempotency_key")
+
+
 class PlantIncident(models.Model):
     plant = models.ForeignKey("plants.Plant", on_delete=models.PROTECT)
     declared_configuration = models.ForeignKey(
@@ -45,9 +48,13 @@ class PlantIncident(models.Model):
     updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
     )
+    idempotency_key = models.UUIDField(null=True)
 
     class Meta:
         constraints = (
+            models.UniqueConstraint(
+                fields=CREATE_KEY_FIELDS, name="%(class)s_idempotency_key_uniq"
+            ),
             ExclusionConstraint(
                 name="%(class)s_plant_interval_excl",
                 expressions=(
