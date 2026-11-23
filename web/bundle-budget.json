@@ -3,16 +3,16 @@
     "firstLoad": {
         "/app": 651972,
         "/app/w/[tenantId]": 678652,
-        "/app/w/[tenantId]/plants/[siteId]/[section]": 765731
+        "/app/w/[tenantId]/plants/[siteId]/[section]": 766009
     },
     "onDemand": {
         "Calibrations": 15147,
         "Outages": 19206,
         "ProductionSection": 30543,
         "ForecastPerformance": 7130,
-        "ReminderEditor": 12412,
-        "english": 73287,
-        "turkish": 79483
+        "ReminderEditor": 12762,
+        "english": 73437,
+        "turkish": 79649
     },
     "otherOnDemand": 17698
 }
