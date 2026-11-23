@@ -69,8 +69,7 @@ test("a window without an answer for the idle limit covers its screens and keeps
     await openSettingsForm(page);
     await markDocument(page);
     await page.route("**/api/**", abort);
-    await page.clock.runFor(idleLimit);
-    await page.clock.runFor(tick);
+    await page.clock.runFor(idleLimit + tick);
     await expect(cover(page)).toBeVisible();
     await expect(page.getByLabel(capacity)).toBeHidden();
     await page.unroute("**/api/**", abort);
@@ -205,7 +204,9 @@ test("a failed Retry after the clock was moved back keeps the cover until an ans
     const failed = sessionReadFailed(page);
     await page.getByRole("button", { name: "Try again" }).click();
     await failed;
+    const idleRead = sessionReadFailed(page);
     await page.clock.runFor(tick);
+    await idleRead;
     await expect(cover(page)).toBeVisible();
     await expect(page.getByLabel(capacity)).toBeHidden();
     await page.unroute("**/api/**", abort);
