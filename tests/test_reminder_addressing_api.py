@@ -1,7 +1,6 @@
 import json
 from datetime import timedelta
 from io import StringIO
-from itertools import count
 from typing import Any
 
 import pytest
@@ -621,13 +620,16 @@ def joining(guest: User, token: str) -> Any:
     return lambda: committed_elsewhere(lambda: accept_workspace_invitation(guest, token))
 
 
+MEMBERSHIP_STATEMENTS = 8
+
+
 def test_a_member_who_joins_during_a_get_is_wholly_in_its_answer_or_wholly_absent() -> None:
     system, alice, _ = workspace()
     put(system, recipients=[alice.email, "outside@example.com"])
     client = Client(raise_request_exception=False)
     client.force_login(system.member)
 
-    for passed in count():
+    for passed in range(MEMBERSHIP_STATEMENTS + 1):
         guest, token = invited(system, passed)
         hook = StatementHook("accounts_membership", joining(guest, token), skip=passed)
         with after_statement(hook):
@@ -642,7 +644,8 @@ def test_a_member_who_joins_during_a_get_is_wholly_in_its_answer_or_wholly_absen
         )
         assert body["workspace_member_count"] == len(listed)
 
-    assert passed >= 2
+    assert not hook.fired
+    assert 2 <= passed <= MEMBERSHIP_STATEMENTS
 
 
 FOLDED = ("ops@strasse.de", "ops@straße.de")

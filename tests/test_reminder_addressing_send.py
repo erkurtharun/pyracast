@@ -487,8 +487,9 @@ def test_an_address_confirmed_after_the_markers_read_of_people_leaves_that_attem
 def test_a_hidden_choice_of_the_higher_member_of_a_folded_address_keeps_it_off_the_wire(
     smtp_wire: Script,
 ) -> None:
-    system, (_, higher) = workspace_with_members("ops@strasse.de", "ops@straße.de")
-    schedule = visible(group(system, ["ops@straße.de"]), {"ops@strasse.de": TO})
+    system, (lower, higher) = workspace_with_members("ops@strasse.de", "ops@straße.de")
+    schedule = visible(group(system, ["ops@straße.de"]))
+    bound(schedule, "ops@strasse.de", TO, lower, higher)
     chosen(schedule, higher, BCC)
 
     delivery_id = send_on()

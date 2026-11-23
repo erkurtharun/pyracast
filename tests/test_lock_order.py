@@ -17,7 +17,7 @@ from pyracast.accounts.operations import remove_workspace_member
 from pyracast.erasure import erase_account
 from pyracast.metering.operations import disconnect_epias
 from pyracast.notifications.jobs import process_notification
-from pyracast.notifications.models import RecipientRole
+from pyracast.notifications.models import RecipientRole, ReminderRecipient, ReminderSchedule
 from pyracast.notifications.operations import MemberChoice, configure_reminders
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.plants import training
@@ -29,7 +29,7 @@ from tests.support.domain import NOW, System, make_system
 from tests.support.metering import connect, connected
 from tests.support.notification_groups import group, member
 from tests.support.notification_transmission import replying
-from tests.support.notifications import SLOT
+from tests.support.notifications import SLOT, chosen
 from tests.support.plant_operations import request_run
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -226,12 +226,21 @@ def reminder_save(system: System) -> Callable[[], object]:
 
 
 def reminder_send(system: System) -> Callable[[], object]:
-    group(system, ["ops@example.com"])
+    schedule = group(system, ["ops@example.com"])
+    ReminderSchedule.objects.filter(pk=schedule.pk).update(hide_recipients=False)
+    ReminderRecipient.objects.filter(schedule=schedule).update(role=RecipientRole.TO)
+    chosen(schedule, User.objects.get(username="alice@example.com"), RecipientRole.BCC)
     (delivery_id,) = enqueue_due(SLOT)
 
     def send() -> object:
-        with replying(lambda message: None):
-            return process_notification(delivery_id, SLOT)
+        with replying(lambda message: None) as sent:
+            assert process_notification(delivery_id, SLOT)
+        (message,) = sent
+        assert (message.to, message.bcc) == (
+            ["ops@example.com", "admin@example.com"],
+            ["alice@example.com"],
+        )
+        return message
 
     return send
 
