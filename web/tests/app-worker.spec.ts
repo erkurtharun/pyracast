@@ -46,7 +46,7 @@ test("the app worker listens only for install and activate", () => {
     ]);
 });
 
-test("the app worker takes over at once on install", async () => {
+test("the app worker asks to skip waiting on install and does nothing else", async () => {
     const worker = loadWorker();
     await worker.dispatch("install");
     expect(worker.calls).toEqual(["skipWaiting"]);

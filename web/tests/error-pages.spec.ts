@@ -230,3 +230,68 @@ test("a missing workspace page leads back to the app without choosing a language
     expect(new URL(page.url()).searchParams.has("language")).toBe(false);
     expect(languages).toEqual([]);
 });
+
+function notFoundLinks(page: Parameters<typeof mockApi>[0]) {
+    return {
+        english: page.locator('main header[lang="en"] a'),
+        turkish: page.locator('main section[lang="tr"] a'),
+    };
+}
+
+test("the not-found links follow the address inside the not-found document", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const response = await page.goto("/app/typo/");
+    expect(response?.status()).toBe(404);
+    const html = await response!.text();
+    expect(html).toContain('<a href="/app/">Go to the app</a>');
+    expect(html).toContain('<a href="/app/">Uygulamaya git</a>');
+    await expect(
+        page.getByRole("heading", { name: "Page not found", exact: true }),
+    ).toBeVisible();
+    const links = notFoundLinks(page);
+    await expect(links.english).toHaveText("Go to the app");
+    await expect(links.english).toHaveAttribute("href", "/app/");
+    await expect(links.turkish).toHaveText("Uygulamaya git");
+    await expect(links.turkish).toHaveAttribute("href", "/app/");
+    await page.evaluate(() => {
+        Object.assign(window, { notFoundDocument: true });
+        window.history.replaceState(null, "", "/typo/");
+    });
+    await expect(links.english).toHaveText("Go to the homepage");
+    await expect(links.english).toHaveAttribute("href", "/");
+    await expect(links.turkish).toHaveText("Ana sayfaya git");
+    await expect(links.turkish).toHaveAttribute("href", "/tr/");
+    await page.evaluate(() =>
+        window.history.replaceState(null, "", "/app/typo/"),
+    );
+    await expect(links.english).toHaveText("Go to the app");
+    await expect(links.english).toHaveAttribute("href", "/app/");
+    await expect(links.turkish).toHaveText("Uygulamaya git");
+    await expect(links.turkish).toHaveAttribute("href", "/app/");
+    await expect(
+        page.getByRole("heading", { name: "Page not found", exact: true }),
+    ).toBeVisible();
+    expect(await page.evaluate(() => "notFoundDocument" in window)).toBe(true);
+});
+
+test("an unmatched app address leads back to the app without choosing a language", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const languages: string[] = [];
+    await page.route("**/api/session/language/", (route) => {
+        languages.push(route.request().method());
+        return route.fallback();
+    });
+    await page.goto("/app/typo/");
+    await page
+        .getByRole("link", { name: "Go to the app", exact: true })
+        .click();
+    await expect(page).toHaveURL("/app/");
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
+    expect(languages).toEqual([]);
+});

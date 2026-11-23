@@ -115,6 +115,8 @@ test("pages and unknown files under /app/ keep the page headers", async ({
         ["/app/manifest.webmanifest/child/", 404],
         ["/app/icons/any-192.png/child/", 404],
         ["/app/sw.js/child/", 404],
+        ["/app/icons/missing.png/", 404],
+        ["/app/w/1.2/", 200],
     ] as const) {
         const response = await request.get(address, { maxRedirects: 0 });
         expect(response.status(), address).toBe(status);
