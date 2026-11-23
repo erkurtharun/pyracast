@@ -1,0 +1,36 @@
+{
+    "id": "/app/",
+    "name": "Pyracast",
+    "short_name": "Pyracast",
+    "start_url": "/app/",
+    "scope": "/app/",
+    "display": "standalone",
+    "theme_color": "#143c32",
+    "background_color": "#f6f7f3",
+    "icons": [
+        {
+            "src": "icons/any-192.png",
+            "sizes": "192x192",
+            "purpose": "any",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/any-512.png",
+            "sizes": "512x512",
+            "purpose": "any",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/maskable-192.png",
+            "sizes": "192x192",
+            "purpose": "maskable",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/maskable-512.png",
+            "sizes": "512x512",
+            "purpose": "maskable",
+            "type": "image/png"
+        }
+    ]
+}

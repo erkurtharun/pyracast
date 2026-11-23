@@ -212,6 +212,12 @@
         "attentionReason": "Needs attention: {reason}",
         "awaitingSetup": "Waiting for an administrator to finish setup"
     },
+    "InstallApp": {
+        "install": "Install app",
+        "browserMenu": "Open the browser menu and choose the command with Install in its name, such as Install this site as an app or Install and create shortcut. In some browsers it is inside a submenu.",
+        "homeScreen": "Tap Share, then Add to Home Screen. If Share is not shown, it is in the page menu.",
+        "dock": "In Safari, choose File > Add to Dock."
+    },
     "Common": {
         "unexpected": "Something went wrong.",
         "saveFailed": "We couldn’t save your changes",
