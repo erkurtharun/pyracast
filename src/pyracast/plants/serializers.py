@@ -667,6 +667,9 @@ class PlantForecastOutput(ForecastEnvelope):
     production_diagnostic = ProductionDiagnosticField(allow_null=True, default=None)
 
 
+ROWS_PER_DAY_LIMIT = 52
+
+
 class ForecastDayRowOutput(serializers.Serializer[Any]):
     """Energy in MWh on the measurement basis of the plant."""
 
@@ -704,7 +707,9 @@ class ForecastDayOutput(ForecastEnvelope):
             **super().get_fields(),
             "partial": serializers.BooleanField(),
             "affected": AffectedDayOutput(allow_null=True),
-            "rows": ForecastDayRowOutput(many=True),
+            "rows": serializers.ListField(
+                child=ForecastDayRowOutput(), max_length=ROWS_PER_DAY_LIMIT
+            ),
         }
 
 
@@ -727,7 +732,7 @@ class SavedProductionDayOutput(serializers.Serializer[Any]):
     timezone = serializers.CharField()
     total_mwh = serializers.FloatField(allow_null=True)
     complete = serializers.BooleanField()
-    rows = ProductionDayRowOutput(many=True)
+    rows = serializers.ListField(child=ProductionDayRowOutput(), max_length=ROWS_PER_DAY_LIMIT)
 
 
 class PlantDaysOutput(serializers.Serializer[Any]):

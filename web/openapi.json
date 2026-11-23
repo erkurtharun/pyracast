@@ -7416,7 +7416,8 @@
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/ForecastDayRowOutput"
-                        }
+                        },
+                        "maxItems": 52
                     }
                 },
                 "required": [
@@ -11187,7 +11188,8 @@
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/ProductionDayRowOutput"
-                        }
+                        },
+                        "maxItems": 52
                     }
                 },
                 "required": [

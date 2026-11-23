@@ -188,7 +188,13 @@ def forecast_window(system: System) -> None:
 
 
 def metered(
-    system: System, plant: Plant, day: date, *, minutes: int = 60, hours: int | None = None
+    system: System,
+    plant: Plant,
+    day: date,
+    *,
+    minutes: int = 60,
+    hours: int | None = None,
+    mwh: float | None = None,
 ) -> None:
     start, end = local_day_bounds(day, system.binding.timezone)
     stop = end if hours is None else start + timedelta(hours=hours)
@@ -201,7 +207,7 @@ def metered(
                 configuration=plant.current_configuration,
                 starts_at=start,
                 ends_at=start + step,
-                energy_mwh=minutes / 6,
+                energy_mwh=minutes / 6 if mwh is None else mwh,
                 source="meter",
                 recorded_by=system.member,
             )
@@ -490,7 +496,12 @@ def failing_on(monkeypatch: pytest.MonkeyPatch, day: date, error: Exception) -> 
         ("start", MISSING, "KeyError"),
         ("start", "11.11.2026 03:00", "ValueError"),
     ],
-    ids=["collected-at-text", "collected-at-number", "interval-without-start", "interval-start-text"],
+    ids=[
+        "collected-at-text",
+        "collected-at-number",
+        "interval-without-start",
+        "interval-start-text",
+    ],
 )
 def test_an_archived_field_the_days_read_cannot_project_refuses_only_its_day(
     monkeypatch: pytest.MonkeyPatch,
@@ -594,6 +605,58 @@ def reduced_production(read: dict[str, Any]) -> list[dict[str, Any]]:
     return days
 
 
+def production_with_instants(day: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **day,
+        "rows": [
+            {**row, "start": _instant(row["start"]), "end": _instant(row["end"])}
+            for row in day["rows"]
+        ],
+    }
+
+
+def native_production_day(
+    client: Client, system: System, plant: Plant, day: date
+) -> dict[str, Any]:
+    read = client.get(
+        plant_path(system, plant, "production"),
+        {"start_date": day.isoformat(), "end_date": day.isoformat(), "native_intervals": "true"},
+    )
+    assert read.status_code == 200, read.content
+    [reduced] = reduced_production(read.json())
+    return reduced
+
+
+def each_production_day_is_its_native_read(
+    client: Client, system: System, plant: Plant, body: dict[str, Any]
+) -> None:
+    for day in body["production"]:
+        assert production_with_instants(day) == native_production_day(
+            client, system, plant, date.fromisoformat(day["date"])
+        )
+
+
+def test_a_26_hour_day_answers_all_52_half_hourly_rows_of_its_native_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    zone, day = "Antarctica/Troll", date(2026, 10, 25)
+    Region.objects.filter(pk=system.region.pk).update(timezone=zone)
+    SiteBinding.objects.filter(pk=system.binding.pk).update(timezone=zone)
+    system.binding.timezone = zone
+    start, end = local_day_bounds(day, zone)
+    assert end - start == timedelta(hours=26)
+    monkeypatch.setattr(timezone, "now", lambda: end + timedelta(hours=12))
+    metered(system, plant, day, minutes=30)
+    production = by_date(days_of(system, plant)["production"])[day]
+    assert len(production["rows"]) == 52
+    assert {row["mwh"] for row in production["rows"]} == {5}
+    assert production["complete"] is True
+    assert production_with_instants(production) == native_production_day(
+        client_for(system.member), system, plant, day
+    )
+
+
 def test_production_days_are_the_reduced_native_production_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -614,16 +677,9 @@ def test_production_days_are_the_reduced_native_production_read(
         },
     )
     assert read.status_code == 200
-    assert [
-        {
-            **day,
-            "rows": [
-                {**row, "start": _instant(row["start"]), "end": _instant(row["end"])}
-                for row in day["rows"]
-            ],
-        }
-        for day in body["production"]
-    ] == reduced_production(read.json())
+    assert [production_with_instants(day) for day in body["production"]] == reduced_production(
+        read.json()
+    )
     days = by_date(body["production"])
     assert days[complete]["complete"] is True
     assert days[complete]["total_mwh"] == pytest.approx(240)
@@ -666,7 +722,7 @@ def test_members_get_one_answer_without_configuration_calibration_or_snapshot_id
     assert keys(body) == ANSWER | FORECAST_DAY | FORECAST_ROW | PRODUCTION_DAY | PRODUCTION_ROW | {
         "status"
     }
-    assert all(len(day["rows"]) <= 50 for day in body["forecast"] + body["production"])
+    assert all(len(day["rows"]) <= 52 for day in body["forecast"] + body["production"])
 
 
 def test_only_a_member_reads_the_days_of_a_plant_of_an_active_location_in_the_address(
