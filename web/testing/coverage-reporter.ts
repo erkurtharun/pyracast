@@ -97,7 +97,7 @@ export default class CoverageReporter implements Reporter {
             );
         const sources = authoredSources();
         const baseline = await baselineRecords(sources);
-        const { coverage, shapes } = combineCoverage({
+        const { coverage, statistics } = combineCoverage({
             sources,
             browser,
             server,
@@ -128,9 +128,7 @@ export default class CoverageReporter implements Reporter {
         console.log(
             `Measured frontend coverage: ${JSON.stringify(coverageFigures(lcov))}`,
         );
-        console.log(
-            `Coverage items the compilations shape differently: ${JSON.stringify(shapes)}`,
-        );
+        console.log(`Coverage union statistics: ${JSON.stringify(statistics)}`);
         const floor = JSON.parse(
             await readFile("coverage-floor.json", "utf8"),
         ) as Floor;

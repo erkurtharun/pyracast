@@ -328,28 +328,19 @@ const ranSwitch = (...arms: [number, number][]) =>
 const union = (
     sides: Partial<Omit<Parameters<typeof combineCoverage>[0], "sources">>,
 ) => {
-    const { coverage, shapes } = combineCoverage({
+    const { coverage, statistics } = combineCoverage({
         sources: [name],
         browser: {},
         server: {},
         baseline: {},
         ...sides,
     });
-    return { coverage: coverage[name]!, shapes };
+    return { coverage: coverage[name]!, statistics };
 };
 const united = (sides: Parameters<typeof union>[0]) => union(sides).coverage;
-const shapes = ({
-    functions = 0,
-    groups = 0,
-    arms = 0,
-    executedLeftOut = 0,
-    partialArms = 0,
-    otherTypePairs = 0,
-}) => ({
-    contested: { functions, groups, arms },
-    executedLeftOut,
-    partialArms,
-    otherTypePairs,
+const statistics = ({ functions = 0, groups = 0, lackedArms = 0 }) => ({
+    unitedOnEqualRanges: { functions, groups },
+    armsSomeRecordLacks: lackedArms,
 });
 const bothOrders = (one: FileCoverage, other: FileCoverage) => [
     { "a.js": one, "b.js": other },
@@ -484,7 +475,7 @@ test("arms that some records of a group lack are counted as partial arms", () =>
             8: 1,
             9: 1,
         });
-        expect(measured.shapes).toEqual(shapes({ partialArms: 2 }));
+        expect(measured.statistics).toEqual(statistics({ lackedArms: 2 }));
     }
 });
 
@@ -526,7 +517,7 @@ test("a function whose start differs between compilations while its body's end a
         ]);
 });
 
-test("two functions sharing an end stay two and pair outer with outer and inner with inner", () => {
+test("functions sharing an end in one record unite only on equal ranges, so no count moves between an outer and an inner function", () => {
     const inner: [string, Range, Range, number] = [
         "inner",
         span(3, 23, 3, 23),
@@ -537,36 +528,39 @@ test("two functions sharing an end stay two and pair outer with outer and inner 
         ["outer", span(3, 17, 3, 17), span(3, 17, 3, 40), 1],
         ["inner", span(3, 23, 3, 23), span(3, 23, 3, 40), 0],
     ]);
-    for (const other of [
-        compiled([inner, ["outer", span(3, 17, 3, 17), span(3, 17, 3, 40), 3]]),
-        compiled([inner, ["outer", span(3, 16, 3, 16), span(3, 16, 3, 40), 3]]),
-    ])
-        for (const scripts of bothOrders(listedOuterFirst, other))
-            expect(counted(united({ browser: { [name]: scripts } }))).toEqual([
-                ["outer", 4],
-                ["inner", 2],
-            ]);
-});
-
-test("a record with fewer functions of one end than another adds nothing to them", () => {
-    const both = (inner: number) =>
-        compiled([
-            ["outer", span(3, 17, 3, 17), span(3, 17, 3, 40), 0],
-            ["inner", span(3, 23, 3, 23), span(3, 23, 3, 40), inner],
+    const placed = (coverage: FileCoverage) =>
+        Object.entries(coverage.fnMap).map(([key, fn]) => [
+            fn.name,
+            fn.decl!.start.column,
+            coverage.f[key],
         ]);
-    const single = compiled([
-        ["inner", span(3, 23, 3, 23), span(3, 23, 3, 40), 5],
-    ]);
-    for (const inner of [0, 1])
-        for (const scripts of bothOrders(both(inner), single)) {
+    for (const [other, expected] of [
+        [
+            compiled([
+                inner,
+                ["outer", span(3, 16, 3, 16), span(3, 16, 3, 40), 3],
+            ]),
+            [
+                ["outer", 16, 3],
+                ["outer", 17, 1],
+                ["inner", 23, 2],
+            ],
+        ],
+        [
+            compiled([
+                inner,
+                ["outer", span(3, 17, 3, 17), span(3, 17, 3, 40), 3],
+            ]),
+            [
+                ["outer", 17, 4],
+                ["inner", 23, 2],
+            ],
+        ],
+    ] as const)
+        for (const scripts of bothOrders(listedOuterFirst, other)) {
             const measured = union({ browser: { [name]: scripts } });
-            expect(counted(measured.coverage)).toEqual([
-                ["outer", 0],
-                ["inner", inner],
-            ]);
-            expect(measured.shapes).toEqual(
-                shapes({ functions: 1, executedLeftOut: 1 }),
-            );
+            expect(placed(measured.coverage)).toEqual(expected);
+            expect(measured.statistics).toEqual(statistics({ functions: 1 }));
         }
 });
 
@@ -576,7 +570,7 @@ const described = (coverage: FileCoverage) =>
         count: coverage.f[key],
     }));
 
-test("a module function some compilations carry keeps its own name, place and count beside the last function sharing its end", () => {
+test("a module function some compilations carry keeps its own name, place and count beside the function sharing its end", () => {
     const callback = (count: number) =>
         ["noop", span(1, 19, 1, 19), span(1, 19, 1, 21), count] as [
             string,
@@ -588,12 +582,9 @@ test("a module function some compilations carry keeps its own name, place and co
         ["module", span(1, 13, 1, 13), span(1, 13, 1, 21), 5],
         callback(0),
     ]);
-    for (const [count, executedLeftOut] of [
-        [0, 0],
-        [3, 1],
-    ])
+    for (const count of [0, 3])
         for (const scripts of bothOrders(
-            compiled([callback(count!)]),
+            compiled([callback(count)]),
             wrapped,
         )) {
             const measured = union({ browser: { [name]: scripts } });
@@ -608,12 +599,10 @@ test("a module function some compilations carry keeps its own name, place and co
                     name: "noop",
                     decl: span(1, 19, 1, 19),
                     loc: span(1, 19, 1, 21),
-                    count: 0,
+                    count,
                 },
             ]);
-            expect(measured.shapes).toEqual(
-                shapes({ functions: 1, executedLeftOut }),
-            );
+            expect(measured.statistics).toEqual(statistics({ functions: 1 }));
         }
 });
 
@@ -627,7 +616,7 @@ const armsByEnd = (coverage: FileCoverage) =>
         ),
     );
 
-test("a branch group whose start differs between compilations while type and end agree is one group with its arms united by end", () => {
+test("a branch group whose start column differs between compilations while type, start line and end agree is one group with its arms united by end", () => {
     const one = compiled(
         [],
         [
@@ -660,37 +649,59 @@ test("a branch group whose start differs between compilations while type and end
         expect(armsByEnd(measured.coverage)).toEqual([
             { "8:20": 3, "9:20": 0, "9:30": 1 },
         ]);
-        expect(measured.shapes).toEqual(shapes({ partialArms: 1 }));
+        expect(measured.statistics).toEqual(statistics({ lackedArms: 1 }));
     }
 });
 
-test("two branch groups of one type sharing an end stay two and pair from the outside in", () => {
-    const outer = (start: number, counts: [number, number]) =>
-        [
-            "ConditionalExpression",
-            span(5, start, 5, 20),
-            [
-                [span(5, 4, 5, 5), counts[0]],
-                [span(5, 8, 5, 20), counts[1]],
-            ],
-        ] as [string, Range, [Range, number][]];
-    const inner = (counts: [number, number]) =>
-        [
-            "ConditionalExpression",
-            span(5, 8, 5, 20),
-            [
-                [span(5, 12, 5, 13), counts[0]],
-                [span(5, 16, 5, 20), counts[1]],
-            ],
-        ] as [string, Range, [Range, number][]];
+test("the else arm the converter writes without a location is one arm of its group across records", () => {
+    const withoutElse = (counts: number[]): FileCoverage => ({
+        ...compiled([]),
+        branchMap: {
+            0: {
+                type: "IfStatement",
+                loc: span(46, 8, 56, 9),
+                locations: [span(46, 35, 56, 9), { start: {}, end: {} }],
+            },
+        },
+        b: { 0: counts },
+    });
     for (const scripts of bothOrders(
-        compiled([], [outer(0, [1, 2]), inner([1, 1])]),
-        compiled([], [inner([0, 3]), outer(1, [2, 0])]),
+        withoutElse([1, 0]),
+        withoutElse([0, 2]),
     )) {
+        const measured = union({
+            browser: { [name]: scripts },
+            baseline: { [name]: { c: withoutElse([5, 5]) } },
+        });
+        expect(measured.coverage.b).toEqual({ 0: [1, 2] });
+        expect(measured.statistics).toEqual(statistics({}));
+    }
+});
+
+test("branch groups of one type and end that start on different lines in two records stay two groups", () => {
+    const group = (line: number, counts: [number, number]) =>
+        compiled(
+            [],
+            [
+                [
+                    "IfStatement",
+                    span(line, 4, 9, 1),
+                    [
+                        [span(line, 20, line, 30), counts[0]],
+                        [span(line + 1, 4, 9, 1), counts[1]],
+                    ],
+                ],
+            ],
+        );
+    for (const scripts of bothOrders(group(3, [1, 0]), group(5, [0, 1]))) {
         const measured = union({ browser: { [name]: scripts } });
-        expect(measured.coverage.b).toEqual({ 0: [3, 2], 1: [1, 4] });
-        expect(measured.coverage.branchMap[1]!.loc!.start.column).toBe(8);
-        expect(measured.shapes).toEqual(shapes({}));
+        expect(
+            Object.values(measured.coverage.branchMap).map(
+                ({ loc }) => loc!.start.line,
+            ),
+        ).toEqual([3, 5]);
+        expect(measured.coverage.b).toEqual({ 0: [1, 0], 1: [0, 1] });
+        expect(measured.statistics).toEqual(statistics({}));
     }
 });
 
@@ -710,7 +721,7 @@ async function branchLines(coverage: FileCoverage): Promise<string[]> {
     return lines;
 }
 
-test("sibling conditions one compilation nests into fewer groups of one end count only the fuller record, each at its own line", async () => {
+test("sibling conditions of one end that one compilation lacks stay one group per start line counted by the records that have them", async () => {
     const conditional = (line: number, counts: [number, number]) =>
         [
             "ConditionalExpression",
@@ -741,23 +752,56 @@ test("sibling conditions one compilation nests into fewer groups of one end coun
         const measured = union({ browser: { [name]: scripts } });
         expect(await branchLines(measured.coverage)).toEqual([
             "BRDA:712,0,0,0",
-            "BRDA:712,0,1,1",
+            "BRDA:712,0,1,2",
             "BRDA:714,1,0,0",
             "BRDA:714,1,1,1",
-            "BRDA:715,2,0,1",
+            "BRDA:715,2,0,2",
             "BRDA:715,2,1,0",
             "BRDA:717,3,0,0",
             "BRDA:717,3,1,0",
             "BRF:8",
             "BRH:3",
         ]);
-        expect(measured.shapes).toEqual(
-            shapes({ groups: 1, executedLeftOut: 2 }),
-        );
+        expect(measured.statistics).toEqual(statistics({}));
     }
 });
 
-test("arms of one group sharing an end count only the record that carries the most of them", () => {
+test("a taken arm of sibling conditions sharing an end is reported only on the line of the group that took it", async () => {
+    const conditional = (line: number, counts: [number, number]) =>
+        [
+            "ConditionalExpression",
+            span(line, 11, 6, 0),
+            [
+                [span(line, 40, line, 63), counts[0]],
+                [span(line + 1, 0, 6, 0), counts[1]],
+            ],
+        ] as [string, Range, [Range, number][]];
+    const client = compiled(
+        [],
+        [conditional(2, [1, 0]), conditional(3, [0, 0])],
+    );
+    const node = compiled([], [conditional(2, [0, 1]), conditional(4, [1, 0])]);
+    const edge = compiled([], [conditional(2, [0, 0])]);
+    for (const scripts of bothOrders(client, node)) {
+        const measured = union({
+            browser: { [name]: scripts },
+            baseline: { [name]: { edge } },
+        });
+        expect(await branchLines(measured.coverage)).toEqual([
+            "BRDA:2,0,0,1",
+            "BRDA:2,0,1,1",
+            "BRDA:3,1,0,0",
+            "BRDA:3,1,1,0",
+            "BRDA:4,2,0,1",
+            "BRDA:4,2,1,0",
+            "BRF:6",
+            "BRH:3",
+        ]);
+        expect(measured.statistics).toEqual(statistics({}));
+    }
+});
+
+test("arms of one group sharing an end unite only on equal locations", () => {
     const logical = (arms: [number, number][]) =>
         compiled(
             [],
@@ -784,19 +828,17 @@ test("arms of one group sharing an end count only the record that carries the mo
         ]),
     )) {
         const measured = union({ browser: { [name]: scripts } });
-        expect(measured.coverage.b).toEqual({ 0: [1, 0, 0] });
+        expect(measured.coverage.b).toEqual({ 0: [2, 0, 4] });
         expect(
             measured.coverage.branchMap[0]!.locations!.map(
                 (location) => location.start!.column,
             ),
         ).toEqual([5, 10, 15]);
-        expect(measured.shapes).toEqual(
-            shapes({ arms: 1, executedLeftOut: 2 }),
-        );
+        expect(measured.statistics).toEqual(statistics({ lackedArms: 1 }));
     }
 });
 
-test("groups of another type sharing an end in another record stay two groups and are counted as such a pair", () => {
+test("groups of another type with one start line and end in another record stay two groups", () => {
     const group = (type: string) =>
         compiled(
             [],
@@ -817,7 +859,7 @@ test("groups of another type sharing an end in another record stay two groups an
     )) {
         const measured = union({ browser: { [name]: scripts } });
         expect(measured.coverage.b).toEqual({ 0: [1, 0], 1: [1, 0] });
-        expect(measured.shapes).toEqual(shapes({ otherTypePairs: 1 }));
+        expect(measured.statistics).toEqual(statistics({}));
     }
 });
 
@@ -1076,33 +1118,22 @@ test("the browser capture returns each script's text the browser answers after t
     const functions = wholeScript("late();\n");
     const parsed: ((event: { scriptId: string; url: string }) => void)[] = [];
     const sent: string[] = [];
-    let release = () => {};
-    const taken = new Promise<void>((resolve) => (release = resolve));
+    const profile = Promise.withResolvers<{ result: object[] }>();
+    const source = Promise.withResolvers<void>();
     const session = {
         on: (_: string, listener: (typeof parsed)[number]) =>
             void parsed.push(listener),
         detach: () => Promise.resolve(void sent.push("detach")),
-        send: async (method: string, params?: { scriptId: string }) => {
+        send: (method: string, params?: { scriptId: string }) => {
             sent.push(`${method} ${params?.scriptId ?? ""}`.trim());
-            if (method === "Debugger.getScriptSource") {
-                await taken;
+            if (method === "Profiler.takePreciseCoverage")
+                return profile.promise;
+            if (method !== "Debugger.getScriptSource")
+                return Promise.resolve({});
+            return source.promise.then(() => {
                 if (params!.scriptId === "2") throw new Error("No script");
                 return { scriptSource: "late();\n" };
-            }
-            if (method !== "Profiler.takePreciseCoverage") return {};
-            const answer = Promise.resolve({
-                result: ["1", "2", "3", "4"].map((scriptId) => ({
-                    scriptId,
-                    url: {
-                        1: built,
-                        2: refused,
-                        3: "https://example.com/a.js",
-                    }[scriptId],
-                    functions,
-                })),
             });
-            void answer.then(release);
-            return answer;
         },
     };
     const stop = await startBrowserCoverage(session as unknown as CDPSession);
@@ -1113,7 +1144,22 @@ test("the browser capture returns each script's text the browser answers after t
     ])
         for (const listener of parsed)
             listener({ scriptId: scriptId!, url: url! });
-    expect(await stop()).toEqual([
+    const stopped = stop();
+    profile.resolve({
+        result: ["1", "2", "3", "4"].map((scriptId) => ({
+            scriptId,
+            url: {
+                1: built,
+                2: refused,
+                3: "https://example.com/a.js",
+            }[scriptId],
+            functions,
+        })),
+    });
+    await profile.promise;
+    expect(sent).not.toContain("Profiler.stopPreciseCoverage");
+    source.resolve();
+    expect(await stopped).toEqual([
         { url: built, source: "late();\n", functions },
         { url: refused, source: undefined, functions },
     ]);
