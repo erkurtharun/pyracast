@@ -114,6 +114,7 @@ class LockOrder:
 class _Transaction:
     outer: object = None
     workspace: bool = False
+    open_person_cursor: bool = False
     held_persons: frozenset[object] = frozenset()
     savepoints: list[tuple[str, frozenset[object]]] = field(default_factory=list)
 
@@ -164,11 +165,15 @@ def lock_order() -> Iterator[LockOrder]:
         if rows > 0:
             order.locked |= acquired & WORKSPACE
         already_held = proven is not None and proven <= state.held_persons
-        if PERSON in acquired and state.workspace and outer is not None and not already_held:
+        workspace = bool(acquired & WORKSPACE)
+        late_person = PERSON in acquired and state.workspace and not already_held
+        late_workspace = workspace and state.open_person_cursor
+        if outer is not None and (late_person or late_workspace):
             order.late.append(sql)
         if proven is not None:
             state.held_persons |= proven
-        state.workspace = state.workspace or bool(acquired & WORKSPACE)
+        state.workspace = state.workspace or workspace
+        state.open_person_cursor = state.open_person_cursor or (rows < 0 and PERSON in acquired)
         state.follow_savepoint(sql)
         return result
 
@@ -341,6 +346,18 @@ def lock_and_reuse_a_savepoint_name(alice: User) -> None:
     raw("ROLLBACK TO SAVEPOINT s")
 
 
+def fetch_alice_lock_workspace_fetch_bob(alice: User, bob: User, tenant: Tenant) -> None:
+    persons = (
+        User.objects.filter(pk__in=(alice.pk, bob.pk))
+        .order_by("pk")
+        .select_for_update()
+        .iterator(chunk_size=1)
+    )
+    next(persons)
+    list(Tenant.objects.select_for_update().filter(pk=tenant.pk))
+    next(persons)
+
+
 def unless_named(alice: User) -> Case:
     return Case(
         When(Q(first_name="") & Q(pk=alice.pk) & Q(last_name=""), then=Value(False)),
@@ -393,6 +410,9 @@ STEPS: dict[str, Callable[[User, User, Tenant], object]] = {
     ),
     "lock bob through an iterator": lambda alice, bob, tenant: list(
         User.objects.filter(pk=bob.pk).select_for_update().iterator()
+    ),
+    "fetch alice, lock workspace and fetch bob through one iterator": (
+        fetch_alice_lock_workspace_fetch_bob
     ),
     "lock bob in a lateral derived table": lambda alice, bob, tenant: raw(
         "SELECT p.id FROM LATERAL (SELECT id FROM auth_user WHERE id = %s) AS p FOR UPDATE",
@@ -585,6 +605,15 @@ def test_a_person_row_is_held_only_after_a_whole_id_filter_matched_it(
 )
 def test_an_unproven_person_lock_or_write_after_a_workspace_lock_is_late(step: str) -> None:
     assert late_statements("lock alice by key", "lock workspace", step) == 1
+
+
+def test_a_workspace_lock_while_a_person_locking_cursor_is_open_is_late() -> None:
+    assert (
+        late_statements(
+            "lock alice by key", "fetch alice, lock workspace and fetch bob through one iterator"
+        )
+        == 1
+    )
 
 
 @pytest.mark.parametrize("step", ["read alice", "read alice in raw lower case"])
