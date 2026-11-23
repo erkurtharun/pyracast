@@ -1,13 +1,16 @@
 import logging
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from threading import Event
+from time import perf_counter
 from typing import Any, cast
 
 import pytest
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.db import connection
+from django.http import HttpResponseBase
 from django.test import Client, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
@@ -17,9 +20,9 @@ from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
 from pyracast.errors import DomainError, ErrorCode
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants.models import Plant, PlantConfiguration, ProductionObservation
 from pyracast.plants import api as plants_api
 from pyracast.plants import plant_days as plant_days_module
+from pyracast.plants.models import Plant, PlantConfiguration, ProductionObservation
 from pyracast.plants.operations import create_plant
 from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import Region
@@ -674,9 +677,7 @@ def test_an_exhausted_forecast_budget_leaves_the_days_read_answering(
         assert client.get(plant_path(system, plant)).status_code == 200
 
 
-def held_read(
-    monkeypatch: pytest.MonkeyPatch, outcome: Exception | None
-) -> tuple[Event, Event]:
+def held_read(monkeypatch: pytest.MonkeyPatch, outcome: Exception | None) -> tuple[Event, Event]:
     entered, release = Event(), Event()
     read = plants_api.plant_days
 
@@ -702,7 +703,9 @@ def status_of(user: User, path: str) -> int:
 
 
 @pytest.mark.parametrize(
-    ("outcome", "first_status"), [(None, 200), (RuntimeError("defect"), 500)], ids=["ended", "failed"]
+    ("outcome", "first_status"),
+    [(None, 200), (RuntimeError("defect"), 500)],
+    ids=["ended", "failed"],
 )
 def test_one_days_read_at_a_time_and_the_next_after_it_ended_or_failed(
     monkeypatch: pytest.MonkeyPatch,
@@ -738,3 +741,88 @@ def test_the_days_scope_admits_120_reads_an_hour() -> None:
     rates = cast(dict[str, str], settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"])
     assert rates["days"] == "120/hour"
     assert rates["forecast"] == "60/min"
+
+
+def older_sources(system: System, plant: Plant, copies: range) -> None:
+    """Older acquisitions behind every forecast day of the window and newer calibration
+    activations whose outage history changed; none of them is selected by a read."""
+    configuration = plant.current_configuration
+    assert configuration is not None
+    for copy in copies:
+        for offset in range(-7, 0):
+            day = TODAY + timedelta(days=offset)
+            _, end = local_day_bounds(day, system.binding.timezone)
+            estimated_actuals(system, day, 0.3 + copy / 100, end + timedelta(minutes=59 - copy))
+        for offset in range(15):
+            publish_snapshot(
+                snapshot_for(
+                    system,
+                    TODAY + timedelta(days=offset),
+                    power_kw=0.4 + copy / 100,
+                    collected_at=NOW - timedelta(hours=1, minutes=copy),
+                )
+            )
+        activated_calibration(
+            system,
+            configuration,
+            0.7,
+            date(2026, 10, 25),
+            NOW - timedelta(days=2, minutes=copy),
+            incident_revision_ids=[999_999],
+        )
+
+
+def queries_of(client: Client, system: System, plant: Plant) -> int:
+    with CaptureQueriesContext(connection) as queries:
+        response = client.get(plant_path(system, plant))
+    assert response.status_code == 200
+    return len(queries)
+
+
+def test_the_queries_do_not_grow_with_production_days_resolution_or_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    usable_calibration(system, plant)
+    forecast_window(system)
+    older_sources(system, plant, range(1))
+    client = client_for(system.member)
+    client.get(plant_path(system, plant))
+    counts: dict[str, int] = {}
+    for days, minutes in ((1, 60), (30, 60), (30, 30)):
+        ProductionObservation.objects.all().delete()
+        for offset in range(1, days + 1):
+            metered(system, plant, TODAY - timedelta(days=offset), minutes=minutes)
+        counts[f"{days} days at {minutes} min"] = queries_of(client, system, plant)
+    older_sources(system, plant, range(1, 10))
+    counts["ten times the history"] = queries_of(client, system, plant)
+    assert len(set(counts.values())) == 1, counts
+
+
+def best_of_five_alternately(*reads: Callable[[], HttpResponseBase]) -> list[float]:
+    durations: list[list[float]] = [[] for _ in reads]
+    for _ in range(5):
+        for read, measured in zip(reads, durations, strict=True):
+            start = perf_counter()
+            response = read()
+            measured.append(perf_counter() - start)
+            assert response.status_code == 200
+    return [min(measured) for measured in durations]
+
+
+def test_the_days_read_takes_at_most_25_single_day_forecast_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    usable_calibration(system, plant)
+    forecast_window(system)
+    older_sources(system, plant, range(1))
+    for offset in range(1, 31):
+        metered(system, plant, TODAY - timedelta(days=offset))
+    client = client_for(system.member)
+    parameters = {"date": TODAY.isoformat(), "data_source": "auto", "resolution_minutes": "60"}
+    days, single = best_of_five_alternately(
+        lambda: client.get(plant_path(system, plant)),
+        lambda: client.get(plant_path(system, plant, "forecast"), parameters),
+    )
+    assert days <= 25 * single, (days, single)
