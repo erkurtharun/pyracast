@@ -1,3 +1,4 @@
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 
@@ -18,15 +19,23 @@ from pyracast.local_time import CLOCK_PATTERN
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.models import (
     NotificationSettings,
+    RecipientRole,
     ReminderSchedule,
 )
 from pyracast.notifications.recipients import (
     NO_MEMBERS,
+    Explicit,
+    Resolved,
+    Workspace,
     effective,
     explicit_recipients,
     grouped_recipients,
     needs_members,
+    placements,
     planned_recipients,
+    recipient_key,
+    recipient_roles,
+    store_member_choices,
     store_recipients,
     workspace,
     workspaces,
@@ -159,6 +168,15 @@ def set_recipient_limit(actor: User, value: int, *, expected: int) -> RecipientL
 
 
 @dataclass(frozen=True)
+class MemberChoice:
+    """`address` is the member's address the form showed; `None` deletes the choice."""
+
+    membership: int
+    address: str
+    role: RecipientRole | None
+
+
+@dataclass(frozen=True)
 class ReminderSettings:
     enabled: bool
     recipients: tuple[str, ...]
@@ -228,6 +246,45 @@ def _check_recipient_limit(count: int, current: int, limit: int, unchanged_pause
         )
 
 
+def _check_member_choices(choices: Sequence[MemberChoice], members: Workspace) -> None:
+    present = {member.membership: recipient_key(member.address) for member in members.members}
+    if any(present.get(choice.membership) != recipient_key(choice.address) for choice in choices):
+        raise ConflictError(ErrorCode.REMINDER_SCHEDULE_CHANGED)
+
+
+def _typed_roles(
+    planned: Sequence[Explicit],
+    stored: Mapping[str, str],
+    address_roles: Mapping[str, RecipientRole] | None,
+) -> dict[str, str]:
+    """A typed address without an entry has no choice; without `address_roles` an address that
+    stays keeps its stored choice."""
+    chosen = (
+        {recipient_key(address): role for address, role in address_roles.items()}
+        if address_roles is not None
+        else stored
+    )
+    return {key: chosen.get(key, "") for key in (recipient_key(row.address) for row in planned)}
+
+
+def _audit_details(schedule: ReminderSchedule, resolved: Resolved) -> dict[str, int]:
+    member_keys = {recipient_key(address) for address in resolved.members.addresses}
+    visible = [
+        address
+        for address, role in zip(
+            resolved.addresses,
+            placements(schedule, resolved, resolved.addresses),
+            strict=True,
+        )
+        if role != RecipientRole.BCC
+    ]
+    return {
+        "schedule_revision": schedule.revision,
+        "visible_recipients": len(visible),
+        "visible_outside": sum(recipient_key(address) not in member_keys for address in visible),
+    }
+
+
 def configure_reminders(
     actor: User,
     tenant_id: int,
@@ -240,9 +297,13 @@ def configure_reminders(
     include_workspace_members: bool = False,
     now: datetime,
     expected_revision: int | None = None,
+    hide_recipients: bool = True,
+    address_roles: Mapping[str, RecipientRole] | None = None,
+    member_roles: Sequence[MemberChoice] | None = None,
 ) -> ReminderSchedule:
     """`expected_revision` is the revision the administrator's form was read at; a schedule
-    changed since then is refused instead of overwritten."""
+    changed since then is refused instead of overwritten, and so is a member choice whose
+    member no longer has the address the form showed."""
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
     if language not in Language.values:
@@ -276,23 +337,27 @@ def configure_reminders(
         if enabled and (created or not stored.enabled):
             _check_enabling(region)
         members = workspace(tenant_id)
+        _check_member_choices(member_roles or (), members)
         current = len(effective(stored.include_workspace_members, explicit, members))
         planned = planned_recipients(tenant_id, explicit, submitted.recipients)
         schedule.include_workspace_members = include_workspace_members
         unchanged_pause = not enabled and replace(submitted, enabled=stored.enabled) == stored
-        _check_recipient_limit(
-            len(effective(include_workspace_members, planned, members)),
-            current,
-            limit,
-            unchanged_pause,
+        addresses = effective(include_workspace_members, planned, members)
+        _check_recipient_limit(len(addresses), current, limit, unchanged_pause)
+        stored_roles = recipient_roles(schedule)
+        roles = _typed_roles(planned, stored_roles, address_roles)
+        store_recipients(schedule, explicit, planned, roles=roles, stored_roles=stored_roles)
+        chosen = store_member_choices(
+            schedule, {choice.membership: choice.role for choice in member_roles or ()}
         )
-        store_recipients(schedule, explicit, planned)
-        schedule.enabled, schedule.times, schedule.language = (
+        mode = schedule.hide_recipients != hide_recipients
+        schedule.enabled, schedule.times, schedule.language, schedule.hide_recipients = (
             enabled,
             list(submitted.times),
             language,
+            hide_recipients,
         )
-        if created or submitted != stored:
+        if created or submitted != stored or mode or roles != stored_roles or chosen:
             schedule.configured_by = actor
             schedule.effective_from = now
             schedule.revision += 1
@@ -302,6 +367,6 @@ def configure_reminders(
                 actor=actor,
                 region=region,
                 revision=region.revision,
-                details={"schedule_revision": schedule.revision},
+                details=_audit_details(schedule, Resolved(planned, members, addresses)),
             )
         return schedule

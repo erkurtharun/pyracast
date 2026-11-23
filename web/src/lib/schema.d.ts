@@ -766,6 +766,28 @@ export interface components {
             /** Format: date-time */
             readonly created_at: string;
         };
+        AddedAddressOutput: {
+            /** Format: email */
+            address: string;
+            role:
+                | (
+                      | components["schemas"]["RecipientRoleEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+            eligible: boolean;
+            membership: number | null;
+        };
+        AddressRoleInput: {
+            /** Format: email */
+            address: string;
+            role: components["schemas"]["RecipientRoleEnum"];
+        };
+        AddressRoleOutput: {
+            /** Format: email */
+            address: string;
+            role: components["schemas"]["RecipientRoleEnum"];
+        };
         ApprovalInput: {
             review_fingerprint: string;
         };
@@ -2056,6 +2078,29 @@ export interface components {
          * @enum {string}
          */
         MeasurementBasisEnum: "net_export" | "ac_generation";
+        MemberAddressOutput: {
+            membership: number;
+            /** Format: email */
+            address: string;
+            kind: components["schemas"]["ReminderMemberKindEnum"];
+            role:
+                | (
+                      | components["schemas"]["RecipientRoleEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+        };
+        MemberRoleInput: {
+            membership: number;
+            /** Format: email */
+            address: string;
+            role:
+                | (
+                      | components["schemas"]["RecipientRoleEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+        };
         /**
          * @description * `daylight_intervals` - daylight_intervals
          *     * `full_day` - full_day
@@ -2866,6 +2911,13 @@ export interface components {
             source_kind: string;
         };
         /**
+         * @description * `to` - To
+         *     * `cc` - Cc
+         *     * `bcc` - Bcc
+         * @enum {string}
+         */
+        RecipientRoleEnum: "to" | "cc" | "bcc";
+        /**
          * @description * `active_calibration` - active_calibration
          *     * `uncalibrated_reference` - uncalibrated_reference
          * @enum {string}
@@ -2900,6 +2952,8 @@ export interface components {
         ReminderAddressesOutput: {
             recipients: string[];
             workspace_recipients: string[];
+            members: components["schemas"]["MemberAddressOutput"][];
+            added: components["schemas"]["AddedAddressOutput"][];
         };
         ReminderDeliveryOutput: {
             id: number;
@@ -2926,6 +2980,8 @@ export interface components {
             sent_at: string | null;
             recipient_count: number;
             recipients: string[] | null;
+            recipient_roles:
+                components["schemas"]["AddressRoleOutput"][] | null;
         };
         ReminderInput: {
             enabled: boolean;
@@ -2934,7 +2990,16 @@ export interface components {
             recipients: string[];
             times: string[];
             expected_revision: number;
+            hide_recipients?: boolean;
+            address_roles?: components["schemas"]["AddressRoleInput"][];
+            member_roles?: components["schemas"]["MemberRoleInput"][];
         };
+        /**
+         * @description * `administrator` - administrator
+         *     * `member` - member
+         * @enum {string}
+         */
+        ReminderMemberKindEnum: "administrator" | "member";
         ReminderOutcomeOutput: {
             /** Format: date-time */
             scheduled_for: string;
@@ -2948,6 +3013,7 @@ export interface components {
             state: components["schemas"]["ReminderStateEnum"];
             revision: number;
             include_workspace_members: boolean;
+            hide_recipients: boolean;
             language: components["schemas"]["LanguageEnum"];
             times: string[];
             recipient_limit: number;

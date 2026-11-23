@@ -1,6 +1,7 @@
 from typing import cast
 
 from django.contrib.auth.models import User
+from django.db import transaction
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from rest_framework.request import Request
@@ -27,7 +28,9 @@ class RemindersView(APIView):
         data = ReminderInput(data=request.data)
         data.is_valid(raise_exception=True)
         now = timezone.now()
-        schedule = configure_reminders(
-            cast(User, request.user), tenant_id, region_id, now=now, **data.validated_data
-        )
-        return Response(ReminderOutput(reminder_overview(schedule, now, administrator=True)).data)
+        with transaction.atomic():
+            schedule = configure_reminders(
+                cast(User, request.user), tenant_id, region_id, now=now, **data.validated_data
+            )
+            overview = reminder_overview(schedule, now, administrator=True)
+        return Response(ReminderOutput(overview).data)

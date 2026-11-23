@@ -93,7 +93,8 @@ def test_transfer_preserves_one_shared_schedule_and_its_deliveries(
         **administrator_view,
         "addresses": None,
         "deliveries": [
-            {**delivery, "recipients": None} for delivery in administrator_view["deliveries"]
+            {**delivery, "recipients": None, "recipient_roles": None}
+            for delivery in administrator_view["deliveries"]
         ],
     }
 

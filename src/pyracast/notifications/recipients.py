@@ -1,5 +1,5 @@
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from allauth.account.models import EmailAddress
@@ -270,14 +270,34 @@ def planned_recipients(
     ]
 
 
+def recipient_roles(schedule: ReminderSchedule) -> dict[str, str]:
+    """The choice of each typed row by key, `""` for none."""
+    return dict(
+        ReminderRecipient.objects.filter(schedule=schedule)
+        .order_by("pk")
+        .values_list("key", "role")
+    )
+
+
 def store_recipients(
-    schedule: ReminderSchedule, stored: Sequence[Explicit], planned: Sequence[Explicit]
+    schedule: ReminderSchedule,
+    stored: Sequence[Explicit],
+    planned: Sequence[Explicit],
+    *,
+    roles: Mapping[str, str],
+    stored_roles: Mapping[str, str],
 ) -> None:
-    if list(stored) == list(planned):
+    """`roles` holds the choice of each planned row by key; it is carried into the rebuilt rows."""
+    if list(stored) == list(planned) and roles == stored_roles:
         return
     ReminderRecipient.objects.filter(schedule=schedule).delete()
     rows = ReminderRecipient.objects.bulk_create(
-        ReminderRecipient(schedule=schedule, address=row.address, key=recipient_key(row.address))
+        ReminderRecipient(
+            schedule=schedule,
+            address=row.address,
+            key=(key := recipient_key(row.address)),
+            role=roles.get(key, ""),
+        )
         for row in planned
     )
     ReminderRecipientTie.objects.bulk_create(
@@ -285,6 +305,29 @@ def store_recipients(
         for stored_row, row in zip(rows, planned, strict=True)
         for membership_id in sorted(row.ties)
     )
+
+
+def store_member_choices(
+    schedule: ReminderSchedule, choices: Mapping[int, RecipientRole | None]
+) -> bool:
+    """Stores or, for `None`, deletes the choice of each named membership; whether any
+    changed."""
+    rows = ReminderMemberRole.objects.filter(schedule=schedule)
+    stored = dict(rows.filter(membership_id__in=choices).values_list("membership_id", "role"))
+    deleted = [pk for pk, role in choices.items() if role is None and pk in stored]
+    changed = {pk: role for pk, role in choices.items() if role and stored.get(pk) != role}
+    if deleted:
+        rows.filter(membership_id__in=deleted).delete()
+    ReminderMemberRole.objects.bulk_create(
+        (
+            ReminderMemberRole(schedule=schedule, membership_id=pk, role=role)
+            for pk, role in changed.items()
+        ),
+        update_conflicts=True,
+        unique_fields=("schedule", "membership"),
+        update_fields=("role",),
+    )
+    return bool(deleted or changed)
 
 
 def freeze_recipients(delivery: NotificationDelivery, addresses: Sequence[str]) -> None:

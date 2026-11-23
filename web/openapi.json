@@ -5634,6 +5634,61 @@
                     "id"
                 ]
             },
+            "AddedAddressOutput": {
+                "type": "object",
+                "properties": {
+                    "address": {
+                        "type": "string",
+                        "format": "email"
+                    },
+                    "role": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/RecipientRoleEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "eligible": {
+                        "type": "boolean"
+                    },
+                    "membership": {
+                        "type": "integer",
+                        "nullable": true
+                    }
+                },
+                "required": ["address", "eligible", "membership", "role"]
+            },
+            "AddressRoleInput": {
+                "type": "object",
+                "properties": {
+                    "address": {
+                        "type": "string",
+                        "format": "email",
+                        "maxLength": 254
+                    },
+                    "role": {
+                        "$ref": "#/components/schemas/RecipientRoleEnum"
+                    }
+                },
+                "required": ["address", "role"]
+            },
+            "AddressRoleOutput": {
+                "type": "object",
+                "properties": {
+                    "address": {
+                        "type": "string",
+                        "format": "email"
+                    },
+                    "role": {
+                        "$ref": "#/components/schemas/RecipientRoleEnum"
+                    }
+                },
+                "required": ["address", "role"]
+            },
             "ApprovalInput": {
                 "type": "object",
                 "properties": {
@@ -8324,6 +8379,59 @@
                 "type": "string",
                 "description": "* `net_export` - Net export\n* `ac_generation` - AC generation"
             },
+            "MemberAddressOutput": {
+                "type": "object",
+                "properties": {
+                    "membership": {
+                        "type": "integer"
+                    },
+                    "address": {
+                        "type": "string",
+                        "format": "email"
+                    },
+                    "kind": {
+                        "$ref": "#/components/schemas/ReminderMemberKindEnum"
+                    },
+                    "role": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/RecipientRoleEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    }
+                },
+                "required": ["address", "kind", "membership", "role"]
+            },
+            "MemberRoleInput": {
+                "type": "object",
+                "properties": {
+                    "membership": {
+                        "type": "integer",
+                        "minimum": 1
+                    },
+                    "address": {
+                        "type": "string",
+                        "format": "email",
+                        "maxLength": 254
+                    },
+                    "role": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/RecipientRoleEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    }
+                },
+                "required": ["address", "membership", "role"]
+            },
             "MetricScopeEnum": {
                 "enum": ["daylight_intervals", "full_day"],
                 "type": "string",
@@ -10378,6 +10486,11 @@
                     "starts_at"
                 ]
             },
+            "RecipientRoleEnum": {
+                "enum": ["to", "cc", "bcc"],
+                "type": "string",
+                "description": "* `to` - To\n* `cc` - Cc\n* `bcc` - Bcc"
+            },
             "ReferenceKindEnum": {
                 "enum": ["active_calibration", "uncalibrated_reference"],
                 "type": "string",
@@ -10476,9 +10589,26 @@
                             "type": "string",
                             "format": "email"
                         }
+                    },
+                    "members": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/MemberAddressOutput"
+                        }
+                    },
+                    "added": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AddedAddressOutput"
+                        }
                     }
                 },
-                "required": ["recipients", "workspace_recipients"]
+                "required": [
+                    "added",
+                    "members",
+                    "recipients",
+                    "workspace_recipients"
+                ]
             },
             "ReminderDeliveryOutput": {
                 "type": "object",
@@ -10551,6 +10681,13 @@
                             "format": "email"
                         },
                         "nullable": true
+                    },
+                    "recipient_roles": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AddressRoleOutput"
+                        },
+                        "nullable": true
                     }
                 },
                 "required": [
@@ -10561,6 +10698,7 @@
                     "last_error",
                     "late",
                     "recipient_count",
+                    "recipient_roles",
                     "recipients",
                     "scheduled_for",
                     "sent_at",
@@ -10601,6 +10739,21 @@
                     "expected_revision": {
                         "type": "integer",
                         "minimum": 0
+                    },
+                    "hide_recipients": {
+                        "type": "boolean"
+                    },
+                    "address_roles": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AddressRoleInput"
+                        }
+                    },
+                    "member_roles": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/MemberRoleInput"
+                        }
                     }
                 },
                 "required": [
@@ -10611,6 +10764,11 @@
                     "recipients",
                     "times"
                 ]
+            },
+            "ReminderMemberKindEnum": {
+                "enum": ["administrator", "member"],
+                "type": "string",
+                "description": "* `administrator` - administrator\n* `member` - member"
             },
             "ReminderOutcomeOutput": {
                 "type": "object",
@@ -10648,6 +10806,9 @@
                         "type": "integer"
                     },
                     "include_workspace_members": {
+                        "type": "boolean"
+                    },
+                    "hide_recipients": {
                         "type": "boolean"
                     },
                     "language": {
@@ -10695,6 +10856,7 @@
                     "daily_reminder_limit",
                     "deliveries",
                     "enabled",
+                    "hide_recipients",
                     "include_workspace_members",
                     "language",
                     "recipient_count",

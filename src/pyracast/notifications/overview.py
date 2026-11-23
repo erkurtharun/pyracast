@@ -1,11 +1,14 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import StrEnum
 
+from pyracast.notifications.addressing import explicit_role
 from pyracast.notifications.eligibility import notifiable_regions
 from pyracast.notifications.models import (
     NotificationDelivery,
     NotificationDeliveryError,
+    RecipientRole,
     ReminderSchedule,
     ReminderState,
 )
@@ -13,9 +16,13 @@ from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.recipients import (
     Explicit,
     Workspace,
+    candidates,
     delivery_addresses,
+    delivery_roles,
     effective,
     explicit_recipients,
+    recipient_key,
+    stored_choices,
     workspace,
 )
 from pyracast.notifications.scheduler import recipient_refusal
@@ -28,10 +35,42 @@ STATE_OF_PAUSE: dict[str, ReminderState] = {
 }
 
 
+class MemberKind(StrEnum):
+    ADMINISTRATOR = "administrator"
+    MEMBER = "member"
+
+
+@dataclass(frozen=True)
+class MemberAddress:
+    membership: int
+    address: str
+    kind: MemberKind
+    role: RecipientRole | None
+
+
+@dataclass(frozen=True)
+class AddedAddress:
+    """`role` is the explicit choice the rule applies to the address, `membership` the active
+    member whose verified primary address it is."""
+
+    address: str
+    role: RecipientRole | None
+    eligible: bool
+    membership: int | None
+
+
+@dataclass(frozen=True)
+class AddressRole:
+    address: str
+    role: RecipientRole
+
+
 @dataclass(frozen=True)
 class ReminderAddresses:
     recipients: list[str]
     workspace_recipients: list[str]
+    members: list[MemberAddress]
+    added: list[AddedAddress]
 
 
 @dataclass(frozen=True)
@@ -49,6 +88,7 @@ class ReminderDelivery:
     sent_at: datetime | None
     recipient_count: int
     recipients: list[str] | None
+    recipient_roles: list[AddressRole] | None
 
 
 @dataclass(frozen=True)
@@ -57,6 +97,7 @@ class ReminderOverview:
     state: ReminderState
     revision: int
     include_workspace_members: bool
+    hide_recipients: bool
     language: str
     times: list[str]
     recipient_limit: int
@@ -135,6 +176,7 @@ def _delivery(
 ) -> ReminderDelivery:
     age = _source_age(delivery, now)
     addresses = delivery_addresses(delivery)
+    roles = delivery_roles(delivery) if administrator else None
     return ReminderDelivery(
         id=delivery.pk,
         scheduled_for=delivery.scheduled_for,
@@ -151,6 +193,40 @@ def _delivery(
         sent_at=delivery.sent_at,
         recipient_count=len(addresses),
         recipients=addresses if administrator else None,
+        recipient_roles=None
+        if roles is None
+        else [AddressRole(address, role) for address, role in roles],
+    )
+
+
+def _addresses(
+    schedule: ReminderSchedule, assessment: Assessment, members: Workspace
+) -> ReminderAddresses:
+    explicit = assessment.explicit
+    choices = stored_choices(schedule, explicit)
+    typed = candidates([row.address for row in explicit], explicit, members, choices)
+    holding = {recipient_key(member.address): member.membership for member in members.members}
+    return ReminderAddresses(
+        [row.address for row in explicit],
+        list(members.addresses),
+        [
+            MemberAddress(
+                member.membership,
+                member.address,
+                MemberKind.ADMINISTRATOR if member.administrator else MemberKind.MEMBER,
+                choices.chosen.get(member.membership),
+            )
+            for member in members.members
+        ],
+        [
+            AddedAddress(
+                row.address,
+                explicit_role(candidate),
+                not row.ties or bool(members.active & row.ties),
+                holding.get(recipient_key(row.address)),
+            )
+            for row, candidate in zip(explicit, typed, strict=True)
+        ],
     )
 
 
@@ -174,6 +250,7 @@ def reminder_overview(
         state=assessment.state,
         revision=schedule.revision,
         include_workspace_members=schedule.include_workspace_members,
+        hide_recipients=schedule.hide_recipients and schedule.pk is not None,
         language=schedule.language,
         times=list(schedule.times),
         recipient_limit=limit,
@@ -181,11 +258,7 @@ def reminder_overview(
         workspace_member_count=len(members.addresses),
         recipient_limit_exceeded=len(assessment.recipients) > limit,
         daily_reminder_limit=binding.provider_account.daily_quota if binding else None,
-        addresses=ReminderAddresses(
-            [row.address for row in assessment.explicit], list(members.addresses)
-        )
-        if administrator
-        else None,
+        addresses=_addresses(schedule, assessment, members) if administrator else None,
         deliveries=[
             _delivery(delivery, now, administrator=administrator) for delivery in deliveries
         ],

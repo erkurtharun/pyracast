@@ -79,7 +79,7 @@ test("shared reminder recipients and email language survive administrator transf
     await openReminders(page);
     await expect(
         page.getByText(
-            "1 recipient of at most 5. Only the workspace administrator sees the addresses.",
+            "1 recipient of at most 5. In this app only the workspace administrator sees the addresses.",
             { exact: true },
         ),
     ).toBeVisible();
@@ -445,7 +445,7 @@ test("viewers read the recipient count but no address", async ({ page }) => {
     await openReminders(page);
     await expect(
         page.getByText(
-            "1 recipient of at most 5. Only the workspace administrator sees the addresses.",
+            "1 recipient of at most 5. In this app only the workspace administrator sees the addresses.",
             { exact: true },
         ),
     ).toBeVisible();
@@ -556,10 +556,7 @@ test("Turkish automatic recipient labels preserve readable characters", async ({
         page.getByText("Diğer adresler", { exact: true }),
     ).toBeVisible();
     await expect(
-        page.getByText(
-            "Her gönderim saatinde tek e-posta. Alıcılar birbirini göremez (BCC).",
-            { exact: true },
-        ),
+        page.getByText("Her gönderim saatinde tek e-posta.", { exact: true }),
     ).toBeVisible();
 });
 

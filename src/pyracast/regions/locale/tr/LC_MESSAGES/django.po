@@ -821,6 +821,15 @@ msgstr ""
 "Alıcı adresleri büyük/küçük harf ayrımı olmadan birbirinden farklı "
 "olmalıdır."
 
+msgid "Recipients cannot be shown to each other yet."
+msgstr "Alıcılar henüz birbirine gösterilemez."
+
+msgid "Choose each member's role once."
+msgstr "Her üyenin rolünü bir kez seçin."
+
+msgid "Choose a role once for each address of the recipients."
+msgstr "Alıcılardaki her adres için rolü bir kez seçin."
+
 msgid "Recipients"
 msgstr "Alıcılar"
 

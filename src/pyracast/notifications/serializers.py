@@ -1,3 +1,6 @@
+from typing import Any
+
+from django.utils.translation import gettext
 from rest_framework import serializers
 
 from pyracast.accounts.models import Language
@@ -7,16 +10,39 @@ from pyracast.notifications.models import (
     NotificationDeliveryError,
     NotificationDeliveryStatus,
     PreparedMessageKind,
+    RecipientRole,
     ReminderState,
 )
-from pyracast.notifications.operations import MAX_RECIPIENT_LIMIT, RECIPIENT_MAX_LENGTH
+from pyracast.notifications.operations import (
+    MAX_RECIPIENT_LIMIT,
+    RECIPIENT_MAX_LENGTH,
+    MemberChoice,
+)
 from pyracast.notifications.overview import (
+    AddedAddress,
+    AddressRole,
+    MemberAddress,
+    MemberKind,
     ReminderAddresses,
     ReminderDelivery,
     ReminderOutcome,
     ReminderOverview,
     ReminderSummary,
 )
+from pyracast.notifications.recipients import recipient_key
+
+VISIBLE_MODE_RELEASED = False
+
+
+class AddressRoleInput(InputSerializer):
+    address = serializers.EmailField(max_length=RECIPIENT_MAX_LENGTH)
+    role = serializers.ChoiceField(choices=RecipientRole.choices)
+
+
+class MemberRoleInput(InputSerializer):
+    membership = serializers.IntegerField(min_value=1)
+    address = serializers.EmailField(max_length=RECIPIENT_MAX_LENGTH)
+    role = serializers.ChoiceField(choices=RecipientRole.choices, allow_null=True)
 
 
 class ReminderInput(InputSerializer):
@@ -32,6 +58,52 @@ class ReminderInput(InputSerializer):
         max_length=MAX_DAILY_QUOTA,
     )
     expected_revision = serializers.IntegerField(min_value=0)
+    hide_recipients = serializers.BooleanField(required=False)
+    address_roles: serializers.ListSerializer[dict[str, Any]] = serializers.ListSerializer(
+        child=AddressRoleInput(), required=False, max_length=MAX_RECIPIENT_LIMIT
+    )
+    member_roles: serializers.ListSerializer[dict[str, Any]] = serializers.ListSerializer(
+        child=MemberRoleInput(), required=False, max_length=MAX_RECIPIENT_LIMIT
+    )
+
+    def validate_hide_recipients(self, value: bool) -> bool:
+        if not value and not VISIBLE_MODE_RELEASED:
+            raise serializers.ValidationError(
+                gettext("Recipients cannot be shown to each other yet.")
+            )
+        return value
+
+    def validate_member_roles(self, value: list[dict[str, Any]]) -> list[MemberChoice]:
+        if len({entry["membership"] for entry in value}) != len(value):
+            raise serializers.ValidationError(gettext("Choose each member's role once."))
+        return [
+            MemberChoice(
+                entry["membership"],
+                entry["address"],
+                None if entry["role"] is None else RecipientRole(entry["role"]),
+            )
+            for entry in value
+        ]
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if (entries := attrs.get("address_roles")) is None:
+            return attrs
+        keys = [recipient_key(entry["address"]) for entry in entries]
+        if len(set(keys)) != len(keys) or not set(keys) <= {
+            recipient_key(address) for address in attrs["recipients"]
+        }:
+            raise serializers.ValidationError(
+                {"address_roles": gettext("Choose a role once for each address of the recipients.")}
+            )
+        attrs["address_roles"] = {
+            entry["address"]: RecipientRole(entry["role"]) for entry in entries
+        }
+        return attrs
+
+
+class AddressRoleOutput(serializers.Serializer[AddressRole]):
+    address = serializers.EmailField()
+    role = serializers.ChoiceField(choices=RecipientRole.choices)
 
 
 class ReminderDeliveryOutput(serializers.Serializer[ReminderDelivery]):
@@ -50,11 +122,28 @@ class ReminderDeliveryOutput(serializers.Serializer[ReminderDelivery]):
     sent_at = serializers.DateTimeField(allow_null=True)
     recipient_count = serializers.IntegerField()
     recipients = serializers.ListField(child=serializers.EmailField(), allow_null=True)
+    recipient_roles = AddressRoleOutput(many=True, allow_null=True)
+
+
+class MemberAddressOutput(serializers.Serializer[MemberAddress]):
+    membership = serializers.IntegerField()
+    address = serializers.EmailField()
+    kind = serializers.ChoiceField(choices=[kind.value for kind in MemberKind])
+    role = serializers.ChoiceField(choices=RecipientRole.choices, allow_null=True)
+
+
+class AddedAddressOutput(serializers.Serializer[AddedAddress]):
+    address = serializers.EmailField()
+    role = serializers.ChoiceField(choices=RecipientRole.choices, allow_null=True)
+    eligible = serializers.BooleanField()
+    membership = serializers.IntegerField(allow_null=True)
 
 
 class ReminderAddressesOutput(serializers.Serializer[ReminderAddresses]):
     recipients = serializers.ListField(child=serializers.EmailField())
     workspace_recipients = serializers.ListField(child=serializers.EmailField())
+    members = MemberAddressOutput(many=True)
+    added = AddedAddressOutput(many=True)
 
 
 class ReminderOutput(serializers.Serializer[ReminderOverview]):
@@ -62,6 +151,7 @@ class ReminderOutput(serializers.Serializer[ReminderOverview]):
     state = serializers.ChoiceField(choices=ReminderState.choices)
     revision = serializers.IntegerField()
     include_workspace_members = serializers.BooleanField()
+    hide_recipients = serializers.BooleanField()
     language = serializers.ChoiceField(choices=Language.choices)
     times = serializers.ListField(child=serializers.CharField())
     recipient_limit = serializers.IntegerField()
