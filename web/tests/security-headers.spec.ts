@@ -61,6 +61,29 @@ test("a fresh CSP nonce permits the app and blocks injected scripts", async ({
     );
 });
 
+test("the page policy admits workers from the own origin only", async ({
+    request,
+}) => {
+    const response = await request.get("/app/");
+    const policy = response.headers()["content-security-policy"] ?? "";
+    expect(policy.replace(/'nonce-[^']+'/g, "'nonce'").split("; ")).toEqual([
+        "default-src 'self'",
+        `script-src 'self' 'nonce' 'strict-dynamic'${productionServer ? "" : " 'unsafe-eval'"}`,
+        "style-src 'self'",
+        `style-src-elem 'self' ${productionServer ? "'nonce'" : "'unsafe-inline'"}`,
+        "style-src-attr 'unsafe-inline'",
+        "img-src 'self' data: blob:",
+        "font-src 'self'",
+        `connect-src 'self'${productionServer ? "" : " ws:"}`,
+        "worker-src 'self'",
+        "object-src 'none'",
+        "base-uri 'none'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+        "report-uri /api/csp-reports/",
+    ]);
+});
+
 test("pages send the same-origin referrer policy", async ({ request }) => {
     for (const path of ["/", "/tr/privacy/", "/app/"]) {
         const response = await request.get(path);

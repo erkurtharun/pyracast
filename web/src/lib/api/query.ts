@@ -4,6 +4,7 @@ import {
     QueryClient,
     useQuery,
     useQueryClient,
+    type QueryCacheNotifyEvent,
     type QueryFilters,
     type QueryKey,
 } from "@tanstack/react-query";
@@ -49,7 +50,7 @@ export function createQueryClient() {
 export const QueryOwner = createContext<string | undefined>(undefined);
 
 type Page<T> = { results: T[]; next: string | null };
-type Fetched<T> = { value: T; requests: number };
+type Fetched<T> = { value: T; requests: number; sentAt?: number };
 type Refusal = { status: number; code: ErrorCode | null; message: string };
 type Stored<T> = Fetched<T> | { refusal: Refusal };
 
@@ -165,6 +166,14 @@ function useOwner() {
     return owner;
 }
 
+async function withSentAt<T>(
+    read: (url: string) => Promise<Fetched<T>>,
+    url: string,
+): Promise<Fetched<T>> {
+    const sentAt = Date.now();
+    return { ...(await read(url)), sentAt };
+}
+
 function useLoaded<T>(
     path: string,
     options: object,
@@ -177,7 +186,7 @@ function useLoaded<T>(
     const queryKey = keys.request(owner, path, options);
     const query = useQuery<Stored<T>>({
         queryKey,
-        queryFn: answered(() => read(url)),
+        queryFn: answered(() => withSentAt(read, url)),
         refetchInterval: (query) => {
             const stored = query.state.data;
             return pollInterval(
@@ -195,6 +204,16 @@ function useLoaded<T>(
         replace: (value) =>
             client.setQueryData<Fetched<T>>(queryKey, { value, requests: 1 }),
     };
+}
+
+// When the read whose answer a cache event stored was sent; a refusal or a written value stores none.
+export function answerSentAt(event: QueryCacheNotifyEvent) {
+    if (event.type !== "updated" || event.action.type !== "success")
+        return undefined;
+    // Query Core marks setQueryData successes as manual.
+    if (event.action.manual) return undefined;
+    const stored = event.action.data as Stored<unknown> | undefined;
+    return stored && "sentAt" in stored ? stored.sentAt : undefined;
 }
 
 export function useApiQuery<P extends PathFor<"get">>(

@@ -212,6 +212,12 @@
         "attentionReason": "İlgi bekliyor: {reason}",
         "awaitingSetup": "Kurulumu bir yöneticinin tamamlaması bekleniyor"
     },
+    "Session": {
+        "signingOut": "Çıkış yapılıyor",
+        "unconfirmed": "Oturumunuz doğrulanamadı",
+        "unconfirmedHelp": "Bu sayfa ve girdikleriniz korunuyor. Sunucu yanıt verdiğinde yeniden gösterilir.",
+        "retry": "Tekrar dene"
+    },
     "InstallApp": {
         "install": "Uygulamayı yükle",
         "browserMenu": "Tarayıcı menüsünü açın ve adında yükle sözcüğü geçen komutu seçin; örneğin Bu siteyi uygulama olarak yükleyin ya da Yükle ve kısayol oluştur. Bazı tarayıcılarda bu komut bir alt menüdedir.",

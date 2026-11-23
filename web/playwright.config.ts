@@ -17,7 +17,11 @@ export default defineConfig({
         ? [["list"], ["./testing/coverage-reporter.ts"]]
         : "list",
     outputDir: coverage ? "coverage/test-results" : "test-results",
-    use: { baseURL: `http://127.0.0.1:${port}`, trace: "retain-on-failure" },
+    use: {
+        baseURL: `http://127.0.0.1:${port}`,
+        trace: "retain-on-failure",
+        serviceWorkers: "block",
+    },
     projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
     webServer: {
         command: coverage ? `npm run build && ${startCommand}` : normalCommand,

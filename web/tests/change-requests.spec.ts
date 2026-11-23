@@ -4,8 +4,8 @@ import {
     answer,
     mockApi,
     paged,
+    sessionIdentity,
     tenantRow,
-    user,
     type Mock,
 } from "./support/workspace";
 import type { components } from "../src/lib/schema";
@@ -71,9 +71,11 @@ function proposal(id = 1) {
 
 async function member(page: Page, language = "en") {
     await page.clock.setFixedTime(new Date("2026-11-10T12:00:00Z"));
-    await mockApi(page);
+    const account = await mockApi(page);
     await page.route("**/api/session/", (route) =>
-        route.fulfill({ json: { user, language, csrf_token: "signed-token" } }),
+        route.fulfill({
+            json: { ...sessionIdentity(account.current), language },
+        }),
     );
     await page.route("**/api/tenants/", (route) =>
         route.fulfill({
@@ -2060,10 +2062,10 @@ async function memberOnClock(
     role: () => "viewer" | "admin" = () => "viewer",
 ) {
     await page.clock.install({ time: new Date("2026-11-10T12:00:00Z") });
-    await mockApi(page);
+    const account = await mockApi(page);
     await page.route("**/api/session/", (route) =>
         route.fulfill({
-            json: { user, language: "en", csrf_token: "signed-token" },
+            json: { ...sessionIdentity(account.current), language: "en" },
         }),
     );
     await page.route("**/api/tenants/", (route) =>
