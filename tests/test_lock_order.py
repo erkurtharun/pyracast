@@ -254,8 +254,39 @@ def reminder_read(system: System) -> Callable[[], object]:
     )
 
 
+def reminder_preview(system: System) -> Callable[[], object]:
+    group(system, ["ops@example.com"])
+    alice = Membership.objects.get(user__username="alice@example.com").pk
+    client = Client()
+    client.force_login(system.member)
+    body = {
+        "enabled": True,
+        "include_workspace_members": True,
+        "language": "en",
+        "recipients": ["ops@example.com"],
+        "times": ["10:00"],
+        "expected_revision": 1,
+        "hide_recipients": False,
+        "address_roles": [{"address": "ops@example.com", "role": "to", "memberships": []}],
+        "member_roles": [{"memberships": [alice], "address": "alice@example.com", "role": "bcc"}],
+    }
+
+    def previewed() -> object:
+        response = client.post(
+            f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/preview/",
+            body,
+            content_type="application/json",
+        )
+        assert response.status_code == 200, response.content
+        return response
+
+    return previewed
+
+
 @pytest.mark.parametrize(
-    "operation", [reminder_save, reminder_send, reminder_read], ids=lambda op: op.__name__
+    "operation",
+    [reminder_save, reminder_send, reminder_read, reminder_preview],
+    ids=lambda op: op.__name__,
 )
 def test_reminders_lock_no_person_after_a_workspace_row(
     operation: Callable[[System], Callable[[], object]],
