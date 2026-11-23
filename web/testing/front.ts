@@ -9,6 +9,39 @@ const SCRIPT_FILES = new Map([
     ["withdrawal", "sw-withdraw.js"],
     ["previous", "sw-previous.js"],
 ]);
+const BODY_HEADERS = new Set([
+    "content-encoding",
+    "content-length",
+    "etag",
+    "last-modified",
+]);
+// Location stays behind: the front never sends the browser to another origin.
+const FORWARDED_HEADERS = [
+    "cache-control",
+    "content-encoding",
+    "content-length",
+    "content-security-policy",
+    "content-type",
+    "date",
+    "etag",
+    "last-modified",
+    "link",
+    "referrer-policy",
+    "set-cookie",
+    "vary",
+    "x-frame-options",
+    "x-nextjs-cache",
+    "x-nextjs-deployment-id",
+    "x-nextjs-postponed",
+    "x-nextjs-prerender",
+    "x-nextjs-rewritten-path",
+    "x-nextjs-rewritten-query",
+    "x-nextjs-stale-time",
+    "x-robots-tag",
+];
+const SCRIPT_HEADERS = FORWARDED_HEADERS.filter(
+    (name) => !BODY_HEADERS.has(name),
+);
 
 type State = { script: string; upstream: URL };
 const initial: State = {
@@ -23,8 +56,24 @@ function required(name: string) {
     return value;
 }
 
+function targetOf(request: http.IncomingMessage) {
+    return new URL(request.url ?? "/", initial.upstream);
+}
+
 function pathOf(request: http.IncomingMessage) {
-    return new URL(request.url ?? "/", "http://front").pathname;
+    return targetOf(request).pathname;
+}
+
+function encodedTarget(request: http.IncomingMessage) {
+    const target = targetOf(request);
+    const segments = target.pathname
+        .split("/")
+        .map((segment) => encodeURIComponent(decodeURIComponent(segment)));
+    const query = [...target.searchParams].map(
+        ([name, value]) =>
+            `${encodeURIComponent(name)}=${encodeURIComponent(value)}`,
+    );
+    return segments.join("/") + (query.length ? `?${query.join("&")}` : "");
 }
 
 async function bodyOf(request: http.IncomingMessage) {
@@ -67,20 +116,25 @@ async function control(
         .end(JSON.stringify({ ...state, upstream: state.upstream.origin }));
 }
 
-function withoutBodyHeaders(headers: http.IncomingHttpHeaders) {
-    const kept = { ...headers };
-    for (const name of [
-        "content-encoding",
-        "content-length",
-        "etag",
-        "last-modified",
-        "transfer-encoding",
-    ])
-        delete kept[name];
+function forwardedHeaders(
+    headers: http.IncomingHttpHeaders,
+    names: readonly string[],
+) {
+    const kept: http.OutgoingHttpHeaders = {};
+    for (const name of names) {
+        const value = headers[name];
+        if (value !== undefined) kept[name] = value;
+    }
     return kept;
 }
 
 function forward(request: http.IncomingMessage, response: http.ServerResponse) {
+    let target: string;
+    try {
+        target = encodedTarget(request);
+    } catch {
+        return response.writeHead(400).end();
+    }
     const file =
         pathOf(request) === WORKER_ADDRESS
             ? scriptFile(state.script)
@@ -95,21 +149,24 @@ function forward(request: http.IncomingMessage, response: http.ServerResponse) {
         {
             hostname: state.upstream.hostname,
             port: state.upstream.port,
-            path: request.url,
+            path: target,
             method: request.method,
             headers,
         },
         (answer) => {
             const status = answer.statusCode ?? 502;
             if (!replacement) {
-                response.writeHead(status, answer.headers);
+                response.writeHead(
+                    status,
+                    forwardedHeaders(answer.headers, FORWARDED_HEADERS),
+                );
                 answer.pipe(response);
                 return;
             }
             answer.resume();
             response
                 .writeHead(status, {
-                    ...withoutBodyHeaders(answer.headers),
+                    ...forwardedHeaders(answer.headers, SCRIPT_HEADERS),
                     "content-length": String(replacement.length),
                 })
                 .end(replacement);
