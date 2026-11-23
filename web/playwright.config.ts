@@ -1,11 +1,14 @@
-import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 import {
     coverage,
+    coveragePort,
+    coverageReadinessPath,
     productionServer,
     serverInspector,
+    serverSnapshots,
 } from "./tests/support/server";
-const port = coverage ? 3102 : 3100;
+const port = coverage ? coveragePort : 3100;
+const origin = `http://127.0.0.1:${port}`;
 const startCommand = `npm start -- --port ${port}`;
 const normalCommand = productionServer
     ? startCommand
@@ -24,14 +27,12 @@ export default defineConfig({
         ? [["list"], ["./testing/coverage-reporter.ts"]]
         : "list",
     outputDir: coverage ? "coverage/test-results" : "test-results",
-    use: { baseURL: `http://127.0.0.1:${port}`, trace: "retain-on-failure" },
+    use: { baseURL: origin, trace: "retain-on-failure" },
     projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
     webServer: {
         command: coverage ? coverageCommand : normalCommand,
-        env: coverage
-            ? { NODE_V8_COVERAGE: path.resolve("coverage", "server") }
-            : {},
-        url: `http://127.0.0.1:${port}`,
+        env: coverage ? { NODE_V8_COVERAGE: serverSnapshots } : {},
+        url: coverage ? `${origin}${coverageReadinessPath}` : origin,
         reuseExistingServer: !coverage && !process.env.CI,
         timeout: 120_000,
     },
