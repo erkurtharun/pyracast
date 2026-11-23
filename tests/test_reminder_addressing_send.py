@@ -329,7 +329,11 @@ def member_typed(system: System, *, include: bool = True) -> ReminderSchedule:
 def placed(schedule: ReminderSchedule) -> list[tuple[str, RecipientRole]]:
     resolved = resolve(schedule)
     return sorted(
-        zip(resolved.addresses, placements(schedule, resolved, resolved.addresses), strict=True)
+        zip(
+            resolved.addresses,
+            placements(schedule, resolved.members, resolved.addresses),
+            strict=True,
+        )
     )
 
 

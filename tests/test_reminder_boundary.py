@@ -122,16 +122,24 @@ def test_the_administrator_reads_the_addresses() -> None:
                 "address": "admin@example.com",
                 "kind": "administrator",
                 "role": None,
+                "placement": "bcc",
             },
             {
                 "memberships": [memberships["viewer@example.com"]],
                 "address": "viewer@example.com",
                 "kind": "member",
                 "role": None,
+                "placement": "bcc",
             },
         ],
         "added": [
-            {"address": "ops@example.com", "role": None, "eligible": True, "memberships": []}
+            {
+                "address": "ops@example.com",
+                "role": None,
+                "placement": "bcc",
+                "eligible": True,
+                "memberships": [],
+            }
         ],
     }
     assert body["state"] == "sending"

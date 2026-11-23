@@ -178,18 +178,38 @@ def test_a_save_with_roles_stores_them_and_answers_them_to_the_administrator() -
             "address": ADMIN,
             "kind": "administrator",
             "role": None,
+            "placement": "to",
         },
         {
             "memberships": [membership(alice)],
             "address": alice.email,
             "kind": "member",
             "role": "bcc",
+            "placement": "bcc",
         },
-        {"memberships": [membership(bob)], "address": bob.email, "kind": "member", "role": "cc"},
+        {
+            "memberships": [membership(bob)],
+            "address": bob.email,
+            "kind": "member",
+            "role": "cc",
+            "placement": "cc",
+        },
     ]
     assert body["addresses"]["added"] == [
-        {"address": "boss@example.com", "role": "to", "eligible": True, "memberships": []},
-        {"address": "outside@example.com", "role": None, "eligible": True, "memberships": []},
+        {
+            "address": "boss@example.com",
+            "role": "to",
+            "placement": "to",
+            "eligible": True,
+            "memberships": [],
+        },
+        {
+            "address": "outside@example.com",
+            "role": None,
+            "placement": "bcc",
+            "eligible": True,
+            "memberships": [],
+        },
     ]
     assert stored_roles(system) == (
         {"boss@example.com": "to", "outside@example.com": ""},
@@ -427,7 +447,13 @@ def test_a_typed_to_whose_tied_member_gave_the_address_up_is_answered_without_a_
     body = client_for(system.member).get(url(system)).json()
 
     assert body["addresses"]["added"] == [
-        {"address": "alice@example.com", "role": None, "eligible": True, "memberships": []}
+        {
+            "address": "alice@example.com",
+            "role": None,
+            "placement": "bcc",
+            "eligible": True,
+            "memberships": [],
+        }
     ]
 
 
@@ -678,7 +704,13 @@ def test_an_entry_naming_both_members_of_a_folded_address_stores_the_choice_for_
     assert response.status_code == 200, response.content
     assert stored_roles(system)[1] == {FOLDED[0]: "cc", FOLDED[1]: "cc"}
     (row,) = [row for row in response.json()["addresses"]["members"] if row["address"] == FOLDED[0]]
-    assert row == {"memberships": both, "address": FOLDED[0], "kind": "member", "role": "cc"}
+    assert row == {
+        "memberships": both,
+        "address": FOLDED[0],
+        "kind": "member",
+        "role": "cc",
+        "placement": "cc",
+    }
 
 
 @pytest.mark.parametrize("named", [0, 1])
@@ -718,6 +750,7 @@ def test_the_answer_combines_the_choices_and_kinds_of_a_folded_address() -> None
             "address": FOLDED[0],
             "kind": "administrator",
             "role": "bcc",
+            "placement": "bcc",
         }
     ]
 
@@ -772,7 +805,13 @@ def test_a_typed_to_whose_address_another_member_took_is_hidden_until_chosen_for
 
     chosen_again = put(system, **body, address_roles=to_for(address, bob))
     assert chosen_again.json()["addresses"]["added"] == [
-        {"address": address, "role": "to", "eligible": True, "memberships": [membership(bob)]}
+        {
+            "address": address,
+            "role": "to",
+            "placement": "to",
+            "eligible": True,
+            "memberships": [membership(bob)],
+        }
     ]
     assert (revision(system), len(events(system))) == (dropped[0] + 1, dropped[1] + 1)
     assert events(system)[-1]["visible_recipients"] == 1
@@ -836,6 +875,7 @@ def test_a_typed_to_whose_tied_members_are_all_inactive_is_not_sent_and_has_no_r
     assert added[0] == {
         "address": "alice@example.com",
         "role": None,
+        "placement": "bcc",
         "eligible": False,
         "memberships": [],
     }
@@ -1215,3 +1255,96 @@ def test_a_respelled_typed_address_keeps_its_choice() -> None:
     assert put(system, **body, recipients=[ACE_MAILBOX]).status_code == 200
 
     assert typed_rows(system) == {ACE_MAILBOX: ("cc", [])}
+
+
+def placed(rows: list[dict[str, Any]]) -> list[tuple[str, Any, str]]:
+    return [(row["address"], row["role"], row["placement"]) for row in rows]
+
+
+def preview(system: System, **changes: Any) -> Any:
+    return client_for(system.member).post(
+        url(system) + "preview/", put_body(system, changes), content_type="application/json"
+    )
+
+
+def test_a_preview_answers_where_each_address_would_be_placed_without_any_choice() -> None:
+    system, alice, bob = workspace()
+    body = {"recipients": ["outside@example.com"], "hide_recipients": False}
+
+    answer = preview(system, **body).json()["addresses"]
+    EmailAddress.objects.filter(email=ADMIN).update(verified=False)
+    without_administrator = preview(system, **body).json()["addresses"]
+
+    assert placed(answer["members"]) == [
+        (ADMIN, None, "to"),
+        (alice.email, None, "cc"),
+        (bob.email, None, "cc"),
+    ]
+    assert placed(answer["added"]) == [("outside@example.com", None, "bcc")]
+    assert placed(without_administrator["members"]) == [
+        (alice.email, None, "to"),
+        (bob.email, None, "to"),
+    ]
+
+
+def test_an_address_the_message_does_not_carry_is_answered_hidden() -> None:
+    system, alice, _ = workspace()
+    carol = member(system, "carol@example.com")
+    body = {
+        "include_workspace_members": False,
+        "recipients": [carol.email, "outside@example.com"],
+        "hide_recipients": False,
+        "address_roles": [*to_for(carol.email, carol)],
+        "member_roles": [
+            {"memberships": [membership(alice)], "address": alice.email, "role": "cc"}
+        ],
+    }
+    assert put(system, **body).status_code == 200
+    User.objects.filter(pk=carol.pk).update(is_active=False)
+
+    answer = client_for(system.member).get(url(system)).json()["addresses"]
+
+    assert [(row["address"], row["eligible"], row["placement"]) for row in answer["added"]] == [
+        (carol.email, False, "bcc"),
+        ("outside@example.com", True, "bcc"),
+    ]
+    assert placed(answer["members"]) == [
+        (ADMIN, None, "bcc"),
+        (alice.email, "cc", "bcc"),
+        ("bob@example.com", None, "bcc"),
+    ]
+
+
+def test_get_put_and_preview_answer_the_placements_the_next_send_records() -> None:
+    system, alice, bob = workspace()
+    body = {
+        "recipients": ["boss@example.com", "outside@example.com"],
+        "hide_recipients": False,
+        "address_roles": [{"address": "outside@example.com", "role": "cc", "memberships": []}],
+        "member_roles": [{"memberships": [membership(bob)], "address": bob.email, "role": "bcc"}],
+    }
+    put(system, **body)
+
+    answers = [
+        preview(system, **body).json()["addresses"],
+        put(system, **body).json()["addresses"],
+        client_for(system.member).get(url(system)).json()["addresses"],
+    ]
+    (delivery_id,) = enqueue_due(SLOT)
+    with replying(lambda message: None):
+        assert process_notification(delivery_id, SLOT)
+
+    assert answers[0] == answers[1] == answers[2]
+    recorded = dict(
+        DeliveryRecipient.objects.filter(delivery_id=delivery_id).values_list("address", "role")
+    )
+    assert {row["address"]: row["placement"] for row in answers[0]["added"]} | {
+        row["address"]: row["placement"] for row in answers[0]["members"]
+    } == recorded
+    assert recorded == {
+        "boss@example.com": "bcc",
+        "outside@example.com": "cc",
+        ADMIN: "to",
+        alice.email: "cc",
+        bob.email: "bcc",
+    }

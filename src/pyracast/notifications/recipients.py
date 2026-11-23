@@ -307,14 +307,17 @@ def candidates(addresses: Sequence[str], members: Workspace, choices: Choices) -
 
 
 def placements(
-    schedule: ReminderSchedule, resolved: Resolved, addresses: Sequence[str]
+    schedule: ReminderSchedule,
+    members: Workspace,
+    addresses: Sequence[str],
+    read: Choices | None = None,
 ) -> list[RecipientRole]:
     """The header of each address of the list; a schedule sent hidden reads no choice."""
     hidden = sent_hidden(schedule.hide_recipients)
     found = (
         [Candidate(address) for address in addresses]
         if hidden
-        else candidates(addresses, resolved.members, stored_choices(schedule))
+        else candidates(addresses, members, stored_choices(schedule) if read is None else read)
     )
     return roles(
         found,

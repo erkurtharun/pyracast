@@ -791,6 +791,7 @@ export interface components {
                       | components["schemas"]["NullEnum"]
                   )
                 | null;
+            placement: components["schemas"]["RecipientRoleEnum"];
             eligible: boolean;
             memberships: number[];
         };
@@ -2129,6 +2130,7 @@ export interface components {
                       | components["schemas"]["NullEnum"]
                   )
                 | null;
+            placement: components["schemas"]["RecipientRoleEnum"];
         };
         MemberRoleInput: {
             memberships: number[];

@@ -208,7 +208,10 @@ def get_reminder_schedule(
     membership = tenant_membership(actor, tenant_id)
     region = Region.objects.active().get(pk=region_id, tenant_id=tenant_id)
     schedule = ReminderSchedule.objects.filter(region=region).first() or ReminderSchedule(
-        region=region, effective_from=now, language=translation.get_language()
+        region=region,
+        effective_from=now,
+        language=translation.get_language(),
+        hide_recipients=False,
     )
     return schedule, membership.role == WorkspaceRole.ADMIN
 
@@ -306,7 +309,7 @@ def _audit_details(schedule: ReminderSchedule, resolved: Resolved) -> dict[str, 
         address
         for address, role in zip(
             resolved.addresses,
-            placements(schedule, resolved, resolved.addresses),
+            placements(schedule, resolved.members, resolved.addresses),
             strict=True,
         )
         if role != RecipientRole.BCC

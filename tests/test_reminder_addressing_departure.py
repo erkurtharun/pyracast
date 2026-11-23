@@ -66,7 +66,7 @@ def answer(system: System, user: User) -> dict[str, Any]:
     return body
 
 
-def save(system: System, **changes: Any) -> Any:
+def save(system: System, suffix: str = "", **changes: Any) -> Any:
     client = Client()
     client.force_login(system.member)
     body = {
@@ -80,7 +80,8 @@ def save(system: System, **changes: Any) -> Any:
         else 0,
         "hide_recipients": False,
     } | changes
-    response = client.put(url(system), body, content_type="application/json")
+    send = client.post if suffix else client.put
+    response = send(url(system, suffix), body, content_type="application/json")
     assert response.status_code == 200, response.content
     return response.json()
 
@@ -229,8 +230,13 @@ def test_a_departure_hides_a_resting_typed_to_whose_empty_binding_would_match_ag
         before.revision + 1,
     )
 
+    previewed = save(system, "preview/", recipients=[ACE])
     saved = save(system, recipients=[ACE])
 
+    assert previewed["addresses"] == saved["addresses"]
+    assert [(row["address"], row["placement"]) for row in saved["addresses"]["added"]] == [
+        (ACE, "to")
+    ]
     assert (saved["hidden_by_departure"], saved["revision"]) == (False, after.revision + 1)
     assert events(system) == 2
     assert next_send(3) == ([ACE, ADMIN], ["alice@example.com", "bob@example.com"], [])

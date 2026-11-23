@@ -135,11 +135,13 @@ class MemberAddressOutput(serializers.Serializer[MemberAddress]):
     address = serializers.EmailField()
     kind = serializers.ChoiceField(choices=[kind.value for kind in MemberKind])
     role = serializers.ChoiceField(choices=RecipientRole.choices, allow_null=True)
+    placement = serializers.ChoiceField(choices=RecipientRole.choices)
 
 
 class AddedAddressOutput(serializers.Serializer[AddedAddress]):
     address = serializers.EmailField()
     role = serializers.ChoiceField(choices=RecipientRole.choices, allow_null=True)
+    placement = serializers.ChoiceField(choices=RecipientRole.choices)
     eligible = serializers.BooleanField()
     memberships = serializers.ListField(child=serializers.IntegerField())
 

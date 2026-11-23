@@ -258,6 +258,7 @@ CUSTOMER_FIELDS = {
     "performance_ratio",
     "period_end",
     "period_start",
+    "placement",
     "plant",
     "plant_id",
     "plant_name",

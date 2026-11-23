@@ -5773,6 +5773,9 @@
                             }
                         ]
                     },
+                    "placement": {
+                        "$ref": "#/components/schemas/RecipientRoleEnum"
+                    },
                     "eligible": {
                         "type": "boolean"
                     },
@@ -5783,7 +5786,13 @@
                         }
                     }
                 },
-                "required": ["address", "eligible", "memberships", "role"]
+                "required": [
+                    "address",
+                    "eligible",
+                    "memberships",
+                    "placement",
+                    "role"
+                ]
             },
             "AddressRoleInput": {
                 "type": "object",
@@ -8593,9 +8602,18 @@
                                 "$ref": "#/components/schemas/NullEnum"
                             }
                         ]
+                    },
+                    "placement": {
+                        "$ref": "#/components/schemas/RecipientRoleEnum"
                     }
                 },
-                "required": ["address", "kind", "memberships", "role"]
+                "required": [
+                    "address",
+                    "kind",
+                    "memberships",
+                    "placement",
+                    "role"
+                ]
             },
             "MemberRoleInput": {
                 "type": "object",
