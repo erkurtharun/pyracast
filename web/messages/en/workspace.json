@@ -206,7 +206,7 @@
         "defaultRole": "Default",
         "chosenRole": "Set by you",
         "useDefault": "Use default",
-        "useDefaultFor": "Use the default for {address}",
+        "useDefaultFor": "Use default for {address}",
         "useDefaults": "Use the defaults for everyone",
         "whoSeesWhat": "Who sees what",
         "summaryTo": "To: {addresses}",

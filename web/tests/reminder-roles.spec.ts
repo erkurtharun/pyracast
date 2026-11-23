@@ -165,7 +165,7 @@ test("a chosen segment is sent and reads as set, and each way back returns to th
     await expect(placement(page, OUTSIDE)).toContainText("Set by you");
     await page
         .getByRole("button", {
-            name: `Use the default for ${OUTSIDE}`,
+            name: `Use default for ${OUTSIDE}`,
             exact: true,
         })
         .click();
@@ -448,7 +448,7 @@ test("keyboard users reach each group at its checked segment and change it with 
     await expect(line(page, "Hidden: 2 addresses")).toBeVisible();
     await page.keyboard.press("Tab");
     await expect(
-        page.getByRole("button", { name: `Use the default for ${MEMBER}` }),
+        page.getByRole("button", { name: `Use default for ${MEMBER}` }),
     ).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(
@@ -482,7 +482,8 @@ test("the section fits 320px and passes the accessibility scan at 390px", async 
     ).toBeVisible();
     expect(await fits(page)).toBe(true);
     const outside = await page
-        .locator("main input:visible, main button:visible")
+        .getByRole("region", { name: "Email reminders" })
+        .locator("input:visible, button:visible")
         .evaluateAll((controls) =>
             controls
                 .filter((control) => {
