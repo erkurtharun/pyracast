@@ -1989,10 +1989,11 @@ test("the coverage lock closes every connection it accepts", async () => {
     const holder = lockHolder();
     try {
         const client = connect({ host: "127.0.0.1", port: await holder.port });
-        await new Promise<void>((resolve, reject) => {
-            client.once("close", () => resolve());
+        const hadError = await new Promise<boolean>((resolve, reject) => {
+            client.once("close", resolve);
             client.once("error", reject);
         });
+        expect(hadError).toBe(false);
     } finally {
         holder.child.kill();
     }
