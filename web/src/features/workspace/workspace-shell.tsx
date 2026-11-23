@@ -1,4 +1,5 @@
 "use client";
+import { partialMatchKey, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -13,7 +14,8 @@ import type { Tenant } from "@/lib/api";
 import { deviceZone } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
 import { contactEmail } from "@/lib/public-metadata";
-import { cadence, useApiList } from "@/lib/api/query";
+import { keys } from "@/lib/api/keys";
+import { cadence, QueryOwner, useApiList } from "@/lib/api/query";
 import { routes, screenOf, type Screen } from "@/lib/routes";
 import {
     confirmAnswer,
@@ -98,10 +100,23 @@ export function WorkspaceShell({
         {},
         { poll: cadence.background },
     );
-    const { updatedAt } = tenants;
+    const owner = useContext(QueryOwner);
+    const client = useQueryClient();
     useEffect(() => {
-        if (updatedAt) confirmAnswer(updatedAt);
-    }, [updatedAt]);
+        if (owner === undefined) return;
+        const list = keys.path(owner, "/api/tenants/");
+        // Only a fetch whose answer arrived dispatches a success that is not manual; a cached,
+        // placeholder or cancelled result dispatches none.
+        return client.getQueryCache().subscribe((event) => {
+            if (
+                event.type === "updated" &&
+                event.action.type === "success" &&
+                !event.action.manual &&
+                partialMatchKey(event.query.queryKey, list)
+            )
+                confirmAnswer();
+        });
+    }, [client, owner]);
     const rows = tenants.data?.results ?? [];
     const tenant =
         tenantId === undefined

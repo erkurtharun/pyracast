@@ -23,11 +23,9 @@ type SessionState = {
     replaced: boolean;
     signOut: SignOutState;
 };
-// answeredAt is wall-clock time; listAnswer is the stamp of the last workspace-list answer seen,
-// so a remounted shell replaying it is no answer.
+// answeredAt is wall-clock time.
 type Confirmation = {
     answeredAt: number;
-    listAnswer?: number;
     covered: boolean;
 };
 
@@ -109,9 +107,8 @@ export function useSessionClock() {
     return now;
 }
 
-export function confirmAnswer(at: number) {
-    if (at === confirmation.listAnswer) return;
-    confirmation = { answeredAt: at, listAnswer: at, covered: false };
+export function confirmAnswer() {
+    confirmation = { answeredAt: Date.now(), covered: false };
     notify();
 }
 

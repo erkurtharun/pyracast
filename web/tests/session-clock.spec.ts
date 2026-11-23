@@ -234,6 +234,66 @@ test("a workspace-list answer after the clock was moved back lifts the cover", a
     await read;
 });
 
+async function serveLanguageChoice(page: Page) {
+    await page.route("**/api/session/language/", (route) => {
+        const language = route.request().postDataJSON().language as string;
+        const session = sessionAnswer(firstAccount, null);
+        return route.fulfill({
+            json: {
+                ...session,
+                user: { ...session.user, language_preference: language },
+                language,
+            },
+        });
+    });
+}
+
+async function chooseLanguage(page: Page, label: string, language: string) {
+    const saved = page.waitForResponse("**/api/session/language/");
+    await page.getByLabel(label, { exact: true }).selectOption(language);
+    expect((await saved).ok()).toBe(true);
+}
+
+test("a list cached in another language before the clock was moved back leaves a fresh session usable", async ({
+    page,
+}) => {
+    const server = await signedInOnClock(page);
+    await serveLanguageChoice(page);
+    const noon = new Date("2026-11-20T12:00:00Z");
+    await page.clock.setSystemTime(noon);
+    await openSettingsForm(page);
+    await page.clock.setSystemTime(new Date(noon.getTime() - 60 * 60_000));
+    const listed = page.waitForResponse("**/api/tenants/");
+    await chooseLanguage(page, "Language", "tr");
+    expect((await listed).ok()).toBe(true);
+    await page.clock.setSystemTime(new Date(noon.getTime() - 59 * 60_000));
+    await chooseLanguage(page, "Dil", "en");
+    await expect(page.getByLabel(capacity)).toBeVisible();
+    server.failing = true;
+    const failed = page.waitForResponse("**/api/session/");
+    await focusWindow(page);
+    expect((await failed).status()).toBe(503);
+    await page.clock.runFor(tick);
+    await expect(cover(page)).toHaveCount(0);
+    await expect(page.getByLabel(capacity)).toHaveValue("6.25");
+});
+
+test("a cached workspace list shown again keeps a set cover", async ({
+    page,
+}) => {
+    await signedInOnClock(page);
+    await openSettingsForm(page);
+    await page.getByRole("button", { name: "Account", exact: true }).click();
+    await expect(page).toHaveURL("/app/account/");
+    await page.route("**/api/**", abort);
+    await page.clock.runFor(idleLimit + tick);
+    await expect(cover(page)).toBeVisible();
+    await page.goBack();
+    await expect(page).toHaveURL(/\/app\/w\/1\//);
+    await page.clock.runFor(tick);
+    await expect(cover(page)).toBeVisible();
+});
+
 test("a clock moved back before a session read fails still covers the screens", async ({
     page,
 }) => {
