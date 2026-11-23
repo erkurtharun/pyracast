@@ -4,9 +4,11 @@ import re
 import shlex
 import shutil
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+import yaml
 
 from deploy import release_scope
 
@@ -456,56 +458,90 @@ def test_the_shipped_path_check_sees_every_re_include(
     assert _shipped_samples(context, _ignore_rules("\n".join(lines))) != []
 
 
-def _job(workflow: str, name: str) -> str:
-    lines = workflow.splitlines()
-    start = lines.index(f"  {name}:")
-    end = next(
-        (index for index in range(start + 1, len(lines)) if re.match(r"  \S", lines[index])),
-        len(lines),
-    )
-    return "\n".join(lines[start:end])
+def _workflow_texts(node: object, directory: str = ".") -> Iterator[tuple[str, str]]:
+    if isinstance(node, str):
+        yield directory, node
+    elif isinstance(node, list):
+        for item in node:
+            yield from _workflow_texts(item, directory)
+    elif isinstance(node, dict):
+        default = node.get("defaults", {}).get("run", {}).get("working-directory", directory)
+        here = node.get("working-directory", default)
+        for key, value in node.items():
+            if key != "name":
+                yield from _workflow_texts(value, here if key in {"jobs", "steps", "run"} else ".")
 
 
-def test_no_release_input_names_an_allowlisted_path() -> None:
+def _release_inputs() -> dict[str, list[tuple[str, str]]]:
     workflows = ROOT / ".github" / "workflows"
+    ci = yaml.safe_load((workflows / "ci.yml").read_text(encoding="utf-8"))
+    deployment = {
+        "defaults": ci.get("defaults", {}),
+        "jobs": {"deployment": ci["jobs"]["deployment"]},
+    }
+    release = yaml.safe_load((workflows / "release.yml").read_text(encoding="utf-8"))
     inputs = {
-        "ci.yml deployment job": _job(
-            (workflows / "ci.yml").read_text(encoding="utf-8"), "deployment"
-        ),
-        "release.yml": (workflows / "release.yml").read_text(encoding="utf-8"),
+        "ci.yml deployment job": list(_workflow_texts(deployment)),
+        "release.yml": list(_workflow_texts(release)),
     }
     tracked = _git(ROOT, "ls-files", "-z").split("\0")
     for path in tracked:
         release_input = path.startswith(("deploy/", "infra/")) or path.endswith("Dockerfile")
         if release_input and path != "deploy/release_scope.py":
-            inputs[path] = (ROOT / path).read_text(encoding="utf-8", errors="replace")
+            text = (ROOT / path).read_text(encoding="utf-8", errors="replace")
+            # A Dockerfile reads its own folder, the build context of its image.
+            directory = posixpath.dirname(path) if path.endswith("Dockerfile") else "."
+            inputs[path] = [(directory, text)]
+    return inputs
+
+
+def test_no_release_input_names_an_allowlisted_path() -> None:
+    inputs = _release_inputs()
     assert "deploy/install-release.sh" in inputs
     # The early release compares changed paths with these names; it reads none of those files.
     pipeline = re.compile(r"^PIPELINE_DIRECTORIES = .*?^\)\n", flags=re.DOTALL | re.MULTILINE)
-    gate = inputs["deploy/release_authorization.py"]
-    inputs["deploy/release_authorization.py"] = pipeline.sub("", gate, count=1)
-    assert inputs["deploy/release_authorization.py"] != gate
-    for source, text in inputs.items():
-        assert _named_entries(text) == [], source
+    [(directory, gate)] = inputs["deploy/release_authorization.py"]
+    inputs["deploy/release_authorization.py"] = [(directory, pipeline.sub("", gate, count=1))]
+    assert inputs["deploy/release_authorization.py"] != [(directory, gate)]
+    for source, texts in inputs.items():
+        for directory, text in texts:
+            assert _named_entries(text, directory) == [], source
 
 
-def _named_entries(text: str) -> list[str]:
+def _named_entries(text: str, directory: str = ".") -> list[str]:
     # Step names and comment lines are prose; any other mention of an entry's name counts.
     prose = re.compile(r"\s*(#|(- )?name:)")
     code = "\n".join(line for line in text.splitlines() if not prose.match(line))
+    production = "web/production/**"
     return [
         entry
         for entry in release_scope.ALLOWLIST
-        if re.search(_mention(entry), code, flags=re.IGNORECASE)
-    ]
+        if entry != production and re.search(_mention(entry), code, flags=re.IGNORECASE)
+    ] + ([production] if _reads_production_specs(code, directory) else [])
 
 
 def _mention(entry: str) -> str:
-    if entry == "web/production/**":
-        # The bare word names the deployment environment throughout the release inputs.
-        return r"(?<![\w.-])(?:web/production(?![\w-])|production/)"
     name = entry.removesuffix("/**").rsplit("/", 1)[-1]
     return rf"(?<![\w.-]){re.escape(name)}(?![\w-])"
+
+
+MOVE_INTO_WEB = re.compile(
+    r"(?:\b(?:cd|pushd)|(?<!\S)(?:-C|--prefix|--cwd|--chdir))[\s=]+[\"']?(?:\./)?web/?[\"']?(?![^\s;&|)])"
+)
+WORD = re.compile(r"(?P<value>[:=][\s\"']*)?(?P<word>[^\s\"'`,;:=(){}\[\]]+)")
+
+
+def _reads_production_specs(code: str, directory: str) -> bool:
+    moved = MOVE_INTO_WEB.search(code)
+    for match in WORD.finditer(code):
+        word = match["word"]
+        # The bare word as a value names the deployment environment, not the folder.
+        if match["value"] and "/" not in word:
+            continue
+        here = "web" if moved and match.start() >= moved.end() else directory
+        if "/web/production/" in f"/{posixpath.normpath(posixpath.join(here, word))}/":
+            return True
+    return False
 
 
 @pytest.mark.parametrize(
@@ -521,12 +557,67 @@ def _mention(entry: str) -> str:
         "python3 scripts/x.py",
         "COPY AGENTS.md ./",
         "cat web/.prettierignore",
-        'cp -r web/production "$stage/"',
-        "COPY production/ ./production/",
     ],
 )
 def test_the_release_input_guard_sees_a_named_allowlisted_path(line: str) -> None:
     assert _named_entries(line) != []
+
+
+@pytest.mark.parametrize(
+    ("directory", "line"),
+    [
+        (".", 'cp -r web/production "$stage/"'),
+        (".", "tar -C web -cf archive.tar production"),
+        (".", "cd web && tar -cf archive.tar production/app-worker.spec.ts"),
+        (".", 'npm --prefix web exec -- playwright test "production"'),
+        (".", '-v "$root/web/production:/specs:ro"'),
+        (".", "path: web/production/**/trace.zip"),
+        ("web", "COPY production/ ./production/"),
+        ("web", "COPY production ./specs"),
+        ("web", "COPY ./production/../production /specs"),
+    ],
+)
+def test_the_release_input_guard_sees_the_production_specs_however_named(
+    directory: str, line: str
+) -> None:
+    assert _named_entries(line, directory) == ["web/production/**"]
+
+
+@pytest.mark.parametrize(
+    ("directory", "line"),
+    [
+        (".", "cat web/production.md"),
+        (".", "tar -C web -cf archive.tar production.md"),
+        (".", "tar -cf archive.tar production"),
+        (".", "path: web/production-results/**/trace.zip"),
+        (".", "    environment: production"),
+        (".", "  group: production-release"),
+        (".", "echo '::error::The production deployments of this commit could not be read.'"),
+        (".", "...repository, environment: 'production', sha: main.commit.sha"),
+        (".", "tag = package + ':production'"),
+        ("infra/terraform", 'default     = "production"'),
+        ("web", "ENV NODE_ENV=production HOSTNAME=0.0.0.0 PORT=3000"),
+        ("web", "    environment: {NODE_ENV: production, NEXT_TELEMETRY_DISABLED: '1'}"),
+    ],
+)
+def test_the_release_input_guard_ignores_other_uses_of_production(
+    directory: str, line: str
+) -> None:
+    assert _named_entries(line, directory) == []
+
+
+def test_the_release_input_guard_follows_the_working_directory_of_a_workflow_step() -> None:
+    step = {"name": "Pack", "run": "tar -cf archive.tar production"}
+    workflow = {"jobs": {"pack": {"steps": [step, {**step, "working-directory": "web"}]}}}
+    defaults = {
+        "jobs": {"pack": {"defaults": {"run": {"working-directory": "web"}}, "steps": [step]}}
+    }
+
+    def named(node: object) -> list[list[str]]:
+        return [_named_entries(text, directory) for directory, text in _workflow_texts(node)]
+
+    assert named(workflow) == [[], ["web/production/**"], []]
+    assert named(defaults) == [[], ["web/production/**"]]
 
 
 @pytest.mark.parametrize(
@@ -537,8 +628,6 @@ def test_the_release_input_guard_sees_a_named_allowlisted_path(line: str) -> Non
         "# https://cloud.google.com/iap/docs/using-tcp-forwarding",
         "    # The smoke tests run against the stack.",
         "RUN npm ci --ignore-scripts",
-        "    environment: production",
-        "ENV NODE_ENV=production HOSTNAME=0.0.0.0 PORT=3000",
     ],
 )
 def test_the_release_input_guard_ignores_names_and_comments(line: str) -> None:
