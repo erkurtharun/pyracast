@@ -133,9 +133,7 @@ test("the admin console scripts refuse code generated from strings", async () =>
         const [result] = await consoleScripts.lintText(probe, {
             filePath: path.join(root, directory!, script),
         });
-        return result!.messages
-            .flatMap((message) => message.ruleId ?? [])
-            .sort();
+        return result!.messages.map((message) => message.ruleId).sort();
     };
     for (const script of ["admin-historical.js", "admin-workspace.js"])
         expect(await ruleIds(script), script).toEqual([
