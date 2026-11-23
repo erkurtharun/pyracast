@@ -522,10 +522,15 @@ def test_an_address_confirmed_after_the_markers_read_of_people_leaves_that_attem
     assert hook.fired
     assert User.objects.get(pk=alice.pk).email == "alice@example.com"
     (transaction,) = smtp_wire.transactions
-    assert "alice@example.com" in transaction.recipients
-    assert parsed(transaction.data)["To"] == ADMIN
+    assert transaction.recipients == [ADMIN, "alice@example.com", "alice.b@example.com"]
+    message = parsed(transaction.data)
+    assert (mailboxes(message, "To"), mailboxes(message, "Cc")) == ([ADMIN], [])
     assert b"alice@example.com" not in transaction.data
-    assert ("alice@example.com", BCC) in delivered_roles(delivery_id)
+    assert delivered_roles(delivery_id) == [
+        ("alice@example.com", BCC),
+        (ADMIN, TO),
+        ("alice.b@example.com", BCC),
+    ]
 
 
 def test_a_hidden_choice_of_the_higher_member_of_a_folded_address_keeps_it_off_the_wire(
