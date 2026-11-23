@@ -93,6 +93,7 @@ SUBPROCESS = frozenset(
         "test_er_diagram",
         "test_hooks",
         "test_irradiance_calibration",
+        "test_operations_contracts",
         "test_package",
         "test_postgres_workspace",
         "test_pytest_shard",
