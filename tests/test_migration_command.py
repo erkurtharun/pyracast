@@ -85,7 +85,11 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0006_collection_outcomes_and_ledger_status",
             "0007_remove_weather_reference",
         ),
-        "incidents": ("0002_incident_kind_choices", "0003_schema_naming_convention"),
+        "incidents": (
+            "0002_incident_kind_choices",
+            "0003_schema_naming_convention",
+            "0004_create_idempotency_key",
+        ),
         "metering": (
             "0002_epias_vocabulary_choices",
             "0003_lease_check_and_snapshot_trigger",

@@ -1,6 +1,7 @@
 from datetime import datetime
 from math import isfinite
 from typing import Any
+from uuid import UUID
 
 from django.contrib.auth.models import User
 from django.db import transaction
@@ -11,7 +12,12 @@ from django.utils.translation import gettext_lazy as _
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import WorkspaceRole
 from pyracast.errors import ConflictError, DomainError, ErrorCode
-from pyracast.incidents.models import IncidentKind, IncidentRevision, PlantIncident
+from pyracast.incidents.models import (
+    CREATE_KEY_FIELDS,
+    IncidentKind,
+    IncidentRevision,
+    PlantIncident,
+)
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.plants.preparation import incidents_changed
 from pyracast.regions.models import Region
@@ -118,11 +124,30 @@ def _validate_end(start: datetime, end: datetime, now: datetime) -> None:
         raise DomainError(ErrorCode.INCIDENT_ENDS_IN_FUTURE, field="ends_at")
 
 
-def _record(row: PlantIncident, actor: User) -> None:
+def _write(row: PlantIncident, actor: User) -> PlantIncident:
+    row.save()
     IncidentRevision.objects.create(
         incident=row, revision=row.revision, snapshot=_snapshot(row), actor=actor
     )
     incidents_changed(row.plant_id)
+    return row
+
+
+def _replay(
+    actor: User, plant: Plant, key: UUID | None, values: dict[str, Any]
+) -> PlantIncident | None:
+    if key is None:
+        return None
+    asked = PlantIncident(plant=plant, created_by=actor, idempotency_key=key, **values)
+    previous = PlantIncident.objects.filter(
+        **{name: getattr(asked, name) for name in CREATE_KEY_FIELDS}
+    ).first()
+    if previous is None:
+        return None
+    created = previous.revisions.get(revision=1).snapshot
+    if any(created[name] != value for name, value in _snapshot(asked).items() if name in values):
+        raise ConflictError(ErrorCode.IDEMPOTENCY_KEY_REUSED)
+    return previous
 
 
 def prepare_incident(
@@ -198,9 +223,27 @@ def save_incident(
             expected_revision=expected_revision,
             values=values,
         )
-        row.save()
-        _record(row, actor)
-        return row
+        return _write(row, actor)
+
+
+def create_incident(
+    actor: User,
+    tenant_id: int,
+    region_id: int,
+    plant_id: int,
+    *,
+    idempotency_key: UUID | None = None,
+    **values: Any,
+) -> PlantIncident:
+    with transaction.atomic():
+        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
+        plant = lock_incident_plant(tenant_id, region_id, plant_id)
+        previous = _replay(actor, plant, idempotency_key, values)
+        if previous is not None:
+            return previous
+        row = prepare_incident(actor, plant, values=values)
+        row.idempotency_key = idempotency_key
+        return _write(row, actor)
 
 
 def prepare_incident_finish(
@@ -258,6 +301,4 @@ def finish_incident(
             ends_at=ends_at,
             cancel=cancel,
         )
-        row.save()
-        _record(row, actor)
-        return row
+        return _write(row, actor)
