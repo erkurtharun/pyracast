@@ -34,6 +34,8 @@ const SAVED_LINE = "Saved successfully.";
 const LOADING = "Loading email reminders…";
 const UNAVAILABLE = "The service is unavailable.";
 const NO_ADDRESS_SHOWN = "No address will appear in To or Copy.";
+const DIGEST = /^[0-9a-f]{64}$/;
+const OTHER_DIGEST = "0".repeat(64);
 const LATER =
     "People who join this workspace later, or change their address, appear by the same rule.";
 const HIDDEN_TODAY =
@@ -929,41 +931,6 @@ test("a digest that differs at the save closes the review, keeps the draft and t
     await expect(line(page, SAVED_LINE)).toBeFocused();
     await expect(saveButton(page)).toBeEnabled();
     await expect(time(page, 1)).toHaveValue("09:00");
-});
-
-test("a review whose answer carries no digest is refused at the save and ends on the conflict line with the draft kept", async ({
-    page,
-}) => {
-    await reminderApi(page, {
-        recipients: [OUTSIDE],
-        members: TEAM,
-        includeMembers: true,
-        hidden: false,
-        disclosure: false,
-    });
-    await openReminders(page);
-    await time(page, 1).fill("09:00");
-    const { answer } = await review(page);
-    expect(answer).not.toHaveProperty("disclosure");
-    const put = nextRequest(page, isWrite);
-    const reading = nextRequest(page, isRead);
-    const after = order(page);
-    await confirmButton(page).click();
-    const write = await put;
-    expect(write.postDataJSON()).not.toHaveProperty("disclosure");
-    const refused = (await write.response())!;
-    expect([refused.status(), (await refused.json()).code]).toEqual([
-        409,
-        "reminder_disclosure_changed",
-    ]);
-    await expect(dialog(page)).toHaveCount(0);
-    await expect(line(page, CONFLICT)).toBeFocused();
-    const read = await reading;
-    expect(after(write, isRead)[0]).toBe(read);
-    await read.response();
-    await expect(time(page, 1)).toHaveValue("09:00");
-    const { previewed } = await review(page);
-    expect(previewed).toMatchObject({ times: ["09:00"] });
 });
 
 for (const after of [true, false])
@@ -2722,7 +2689,7 @@ test("the section has no horizontal scroll at 320px and no accessibility violati
     expect(await accessibilityViolations(page)).toEqual([]);
 });
 
-test("the mock binds a visible save to the preview's digest, writes nothing for a preview or a refusal and ignores the digest of a hidden save", async ({
+test("the mock gives every preview a digest of 64 hexadecimal characters and no other answer one, binds a visible save to it, writes nothing for a preview or a refusal and ignores the digest of a hidden save", async ({
     page,
 }) => {
     await reminderApi(page, {
@@ -2737,9 +2704,17 @@ test("the mock binds a visible save to the preview's digest, writes nothing for 
     const visible = { ...SAVED, hide_recipients: false };
     const preview = await call("POST", visible, "preview/");
     expect(preview.status).toBe(200);
-    expect(typeof preview.json.disclosure).toBe("string");
+    expect(preview.json.disclosure).toMatch(DIGEST);
+    expect(before).not.toHaveProperty("disclosure");
+    const hiddenPreview = await call(
+        "POST",
+        { ...SAVED, hide_recipients: true },
+        "preview/",
+    );
+    expect(hiddenPreview.json.disclosure).toMatch(DIGEST);
+    expect(hiddenPreview.json.disclosure).not.toBe(preview.json.disclosure);
     expect((await call("GET")).json).toEqual(before);
-    for (const body of [visible, { ...visible, disclosure: "other" }]) {
+    for (const body of [visible, { ...visible, disclosure: OTHER_DIGEST }]) {
         const answer = await call("PUT", body);
         expect([answer.status, answer.json.code]).toEqual([
             409,
@@ -2751,9 +2726,10 @@ test("the mock binds a visible save to the preview's digest, writes nothing for 
         ...SAVED,
         hide_recipients: true,
         times: ["09:00"],
-        disclosure: "other",
+        disclosure: OTHER_DIGEST,
     });
     expect(hidden.status).toBe(200);
+    expect(hidden.json).not.toHaveProperty("disclosure");
     expect(hidden.json.revision).toBe(1);
     const shown = await call("PUT", {
         ...visible,

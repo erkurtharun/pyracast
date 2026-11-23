@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, type Page, type Request, type Route } from "@playwright/test";
@@ -395,7 +396,7 @@ export async function mockApi(
 
 type Delivery = Schemas["ReminderDeliveryOutput"];
 type ReminderAnswer = Schemas["ReminderOutput"];
-type ReminderPayload = Schemas["ReminderInput"] & { disclosure?: string };
+type ReminderPayload = Schemas["ReminderInput"];
 type Role = Schemas["RecipientRoleEnum"];
 export type ReminderPerson = {
     membership: number;
@@ -435,14 +436,10 @@ export type ReminderOptions = {
     hidden?: boolean;
     hiddenByDeparture?: boolean;
     typed?: Record<string, Role | (TypedChoice & { ties?: number[] })>;
-    disclosure?: boolean;
 };
-// The backend does not publish this refusal code yet.
-const DISCLOSURE_CHANGED = "reminder_disclosure_changed";
-type Code = ErrorCode | typeof DISCLOSURE_CHANGED;
 type Refusal = {
     status: number;
-    code: Code;
+    code: ErrorCode;
     fields?: string[];
     message?: string;
 };
@@ -670,9 +667,9 @@ function disclosureOf(store: ReminderStore, found: People) {
     const placed = placements(sent, store, found);
     const listed = (role: Role) =>
         sent.filter((_, index) => placed[index] === role).map(identity);
-    return Buffer.from(
-        JSON.stringify([store.hide, listed("to"), listed("cc")]),
-    ).toString("base64url");
+    return createHash("sha256")
+        .update(JSON.stringify([store.hide, listed("to"), listed("cc")]))
+        .digest("hex");
 }
 
 const BASE_DELIVERY: Delivery = {
@@ -868,14 +865,7 @@ const published = (
         readFileSync(path.resolve(__dirname, "../../openapi.json"), "utf8"),
     ) as { components: { schemas: Record<string, Schema> } }
 ).components.schemas;
-// The published input does not carry the preview's digest yet.
-const REMINDER_INPUT: Schema = {
-    ...published.ReminderInput,
-    properties: {
-        ...published.ReminderInput!.properties,
-        disclosure: { type: "string" },
-    },
-};
+const REMINDER_INPUT = published.ReminderInput!;
 
 function resolved(schema: Schema): Schema {
     return schema.$ref
@@ -1076,11 +1066,11 @@ function refused(
     return null;
 }
 
-const messages: Partial<Record<Code, string>> = {
+const messages: Partial<Record<ErrorCode, string>> = {
     invalid_request: "The request input was refused.",
     reminder_schedule_changed:
         "The email reminders changed. Reload before saving.",
-    [DISCLOSURE_CHANGED]:
+    reminder_disclosure_changed:
         "The addresses this save would show changed. Review them before saving.",
     duplicate_recipients:
         "Recipient addresses must be distinct (case-insensitive).",
@@ -1181,7 +1171,7 @@ type Held = {
     released: Promise<void>;
     capture: (request: Request) => void;
 };
-type Status = { status: number; code?: Code };
+type Status = { status: number; code?: ErrorCode };
 type Failure = { method: Method } & (
     | { when: "before" | "after"; answer: "lost" | 503 }
     | { when: "before"; answer: Status }
@@ -1273,9 +1263,7 @@ export async function reminderApi(page: Page, options: ReminderOptions = {}) {
         if (preview)
             await respond(route, {
                 ...answer(preview, route),
-                ...(options.disclosure !== false && {
-                    disclosure: disclosureOf(preview, read(persons)),
-                }),
+                disclosure: disclosureOf(preview, read(persons)),
             });
     });
     await page.route("**/reminders/", async (route) => {
@@ -1290,7 +1278,7 @@ export async function reminderApi(page: Page, options: ReminderOptions = {}) {
             if (!next.hide && disclosure !== disclosureOf(next, read(persons)))
                 return refuse(route, {
                     status: 409,
-                    code: DISCLOSURE_CHANGED,
+                    code: "reminder_disclosure_changed",
                 });
             store = next;
         }

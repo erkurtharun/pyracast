@@ -24,13 +24,11 @@ import {
     type Form,
 } from "./reminder-body";
 import {
-    DISCLOSURE_CHANGED,
     edited,
     type Addresses,
     type Answer,
     type Body,
     type Choice,
-    type Confirmed,
     type Desk,
     type Draft,
     type Ending,
@@ -66,8 +64,7 @@ function endingOf(error: unknown, write: boolean): Ending | null {
         return {
             outcome:
                 error.code === "reminder_schedule_changed" ||
-                (error.body as { code?: unknown } | null)?.code ===
-                    DISCLOSURE_CHANGED
+                error.code === "reminder_disclosure_changed"
                     ? "changed"
                     : "refused",
             path: "conflict",
@@ -659,11 +656,7 @@ export function ReminderEditor({
         let previewed: Previewed | undefined;
         try {
             if (hidden) await api.put(PATH, { path: scope, body });
-            else
-                previewed = (await api.post(PREVIEW, {
-                    path: scope,
-                    body,
-                })) as Previewed;
+            else previewed = await api.post(PREVIEW, { path: scope, body });
         } catch (error) {
             const ending = endingOf(error, hidden);
             if (!ending) {
@@ -684,7 +677,7 @@ export function ReminderEditor({
             draft: review.draft,
         };
         setReview({ status: "confirming", ...reviewed });
-        const confirmed: Confirmed = {
+        const confirmed: Body = {
             ...reviewed.body,
             disclosure: reviewed.answer.disclosure,
         };

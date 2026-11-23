@@ -8,10 +8,7 @@ export type Addresses = Schemas["ReminderAddressesOutput"];
 export type Role = Schemas["RecipientRoleEnum"];
 export type Choice = Role | null;
 export type Body = Schemas["ReminderInput"];
-// The backend schema does not carry the preview's digest of the To and Copy it shows, or the refusal of a save whose digest differs, yet.
-export type Previewed = Answer & { disclosure: string };
-export type Confirmed = Body & { disclosure: string };
-export const DISCLOSURE_CHANGED = "reminder_disclosure_changed";
+export type Previewed = Schemas["ReminderPreviewOutput"];
 
 export type Target = {
     kind: "typed" | "member";
