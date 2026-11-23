@@ -1,11 +1,14 @@
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
+from typing import Any
 
 import pytest
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, connections, transaction
 from django.db.models.signals import pre_save
 
+from pyracast.connections import operations
 from pyracast.connections.models import ProviderAccount
 from pyracast.connections.operations import create_account
 from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
@@ -13,6 +16,7 @@ from pyracast.errors import ConflictError
 from pyracast.forecasts.models import RequestPurpose
 from pyracast.forecasts.quota import QuotaExceededError, reserve_account_request
 from pyracast.regions.models import AuditEvent
+from tests.support.concurrency import committed_elsewhere, paused_in
 from tests.support.domain import NOW, provider_key
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -121,6 +125,74 @@ def test_concurrent_unicode_account_creation_keeps_one_quota_identity() -> None:
         identifiers = list(pool.map(create, ["Stra\u00dfe", "STRASSE"]))
     assert identifiers[0] == identifiers[1]
     assert ProviderAccount.objects.count() == 1
+    assert AuditEvent.objects.filter(action="provider_account_created").count() == 1
+
+
+def create_with_one_key(admin: User, identity: str) -> int:
+    return create_account(
+        admin, provider="fixture", external_account_id=identity, api_key=provider_key()
+    ).pk
+
+
+def commit_before_key_check(
+    monkeypatch: pytest.MonkeyPatch, admin: User, identity: str
+) -> list[int]:
+    refuse = operations._refuse_shared_key
+    committed: list[int] = []
+
+    def commit_then_refuse(*args: Any, **kwargs: Any) -> None:
+        if not committed:
+            committed.append(0)
+            committed[0] = committed_elsewhere(lambda: create_with_one_key(admin, identity))
+        refuse(*args, **kwargs)
+
+    monkeypatch.setattr(operations, "_refuse_shared_key", commit_then_refuse)
+    return committed
+
+
+def test_an_equivalent_identity_committed_after_the_lookup_is_returned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
+    committed = commit_before_key_check(monkeypatch, admin, "STRASSE")
+
+    returned = create_with_one_key(admin, "Straße")
+
+    assert returned == committed[0]
+    assert ProviderAccount.objects.count() == 1
+    assert AuditEvent.objects.filter(action="provider_account_created").count() == 1
+
+
+def test_another_identity_committed_after_the_lookup_keeps_the_key_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
+    committed = commit_before_key_check(monkeypatch, admin, "STRASSE")
+
+    with pytest.raises(ValidationError, match="strasse"):
+        create_with_one_key(admin, "other")
+
+    assert list(ProviderAccount.objects.values_list("pk", flat=True)) == committed
+    assert AuditEvent.objects.filter(action="provider_account_created").count() == 1
+
+
+def test_another_identity_inserted_before_the_commit_keeps_the_key_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
+
+    with pytest.raises(ValidationError, match="strasse"):
+        paused_in(
+            monkeypatch,
+            operations,
+            "record_audit",
+            lambda: create_with_one_key(admin, "STRASSE"),
+            lambda: create_with_one_key(admin, "other"),
+        )
+
+    assert list(ProviderAccount.objects.values_list("external_account_id", flat=True)) == [
+        "strasse"
+    ]
     assert AuditEvent.objects.filter(action="provider_account_created").count() == 1
 
 

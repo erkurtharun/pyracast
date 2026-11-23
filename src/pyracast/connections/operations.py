@@ -4,7 +4,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Value
+from django.db.models import QuerySet, Value
 from django.utils import timezone
 from django.utils.translation import gettext
 from django.views.decorators.debug import sensitive_variables
@@ -18,10 +18,12 @@ from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditAction
 
 
-def _refuse_shared_key(fingerprints: Sequence[str], *, other_than: int | None = None) -> None:
-    holders = ProviderAccount.objects.filter(api_key_fingerprint__in=fingerprints)
-    if other_than is not None:
-        holders = holders.exclude(pk=other_than)
+def _refuse_shared_key(
+    fingerprints: Sequence[str], *, other_than: QuerySet[ProviderAccount]
+) -> None:
+    holders = ProviderAccount.objects.filter(api_key_fingerprint__in=fingerprints).exclude(
+        pk__in=other_than
+    )
     holder = holders.values_list("external_account_id", flat=True).first()
     if holder is not None:
         raise ValidationError(
@@ -77,7 +79,7 @@ def create_account(
     with transaction.atomic():
         existing: ProviderAccount | None = accounts.first()
         if existing is None:
-            _refuse_shared_key(fingerprints)
+            _refuse_shared_key(fingerprints, other_than=accounts)
             try:
                 with transaction.atomic():
                     created = ProviderAccount.objects.create(
@@ -94,7 +96,7 @@ def create_account(
             except IntegrityError:
                 existing = accounts.first()
                 if existing is None:
-                    _refuse_shared_key(fingerprints)
+                    _refuse_shared_key(fingerprints, other_than=accounts)
                     raise
             else:
                 created.refresh_from_db(fields=("provider", "external_account_id"))
@@ -121,12 +123,13 @@ def replace_api_key(actor: User, account_id: int, api_key: str, *, expected_revi
     encrypted_api_key = encrypt_secret(api_key)
     fingerprints = api_key_fingerprints(api_key)
     with transaction.atomic():
-        account = ProviderAccount.objects.select_for_update().get(pk=account_id)
+        this_account = ProviderAccount.objects.filter(pk=account_id)
+        account = this_account.select_for_update().get()
         if account.credential_revision != expected_revision:
             raise ConflictError(
                 ErrorCode.CONFLICT, gettext("The account changed. Reload this page.")
             )
-        _refuse_shared_key(fingerprints, other_than=account.pk)
+        _refuse_shared_key(fingerprints, other_than=this_account)
         account.encrypted_api_key = encrypted_api_key
         account.api_key_fingerprint = fingerprints[0]
         account.credential_revision += 1
@@ -142,7 +145,7 @@ def replace_api_key(actor: User, account_id: int, api_key: str, *, expected_revi
                     )
                 )
         except IntegrityError:
-            _refuse_shared_key(fingerprints, other_than=account.pk)
+            _refuse_shared_key(fingerprints, other_than=this_account)
             raise
         record_audit(
             actor=actor,
