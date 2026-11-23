@@ -1,11 +1,12 @@
 import { test, expect, type Page } from "./support/test";
 import {
+    accountWith,
     answer,
     mockApi,
     paged,
     plant,
     region,
-    user,
+    sessionIdentity,
 } from "./support/workspace";
 import type { components } from "../src/lib/schema";
 
@@ -49,7 +50,7 @@ async function openCollection(
     data: Schedule,
     status: Region["status"] = "approved",
 ) {
-    await mockApi(page);
+    const account = await mockApi(page);
     await page.route(
         (url) => url.pathname === "/api/tenants/1/sites/",
         (route) =>
@@ -60,16 +61,17 @@ async function openCollection(
                 ),
             }),
     );
-    if (language === "tr")
+    if (language === "tr") {
+        account.current = accountWith({ language_preference: "tr" });
         await page.route("**/api/session/", (route) =>
             route.fulfill({
                 json: answer("SessionOutput", {
-                    user: { ...user, language_preference: "tr" },
-                    csrf_token: "signed-token",
+                    ...sessionIdentity(account.current),
                     language: "tr",
                 }),
             }),
         );
+    }
     await page.route("**/collection-schedule/", (route) =>
         route.fulfill({ json: answer("CollectionScheduleOutput", data) }),
     );

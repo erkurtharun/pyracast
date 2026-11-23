@@ -1,6 +1,11 @@
 import { test, expect, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
-import { mockApi, user } from "./support/workspace";
+import {
+    accountWith,
+    adminUser,
+    firstAccount,
+    mockApi,
+} from "./support/workspace";
 import { allauthErrorBody, errorBody } from "./support/errors";
 
 test("signup entry opens registration with public information links", async ({
@@ -69,16 +74,7 @@ for (const [flow, title] of [
 }
 
 test("requires email verification after registration", async ({ page }) => {
-    await mockApi(page);
-    const signedIn = false;
-    await page.route("**/api/session/", async (route) =>
-        route.fulfill({
-            json: {
-                user: signedIn ? user : null,
-                csrf_token: signedIn ? "signed-token" : "anonymous-token",
-            },
-        }),
-    );
+    await mockApi(page, { anonymous: true });
     await page.route("**/api/auth/browser/v1/auth/signup", async (route) => {
         expect(route.request().headers()["x-csrftoken"]).toBe(
             "anonymous-token",
@@ -869,16 +865,7 @@ test("an unexplained 429 on sign-up asks to wait", async ({ page }) => {
 test("requires the second factor before opening the workspace", async ({
     page,
 }) => {
-    await mockApi(page, { anonymous: true });
-    let signedIn = false;
-    await page.route("**/api/session/", (route) =>
-        route.fulfill({
-            json: {
-                user: signedIn ? user : null,
-                csrf_token: signedIn ? "signed-token" : "anonymous-token",
-            },
-        }),
-    );
+    const account = await mockApi(page, { anonymous: true });
     await page.route("**/api/auth/browser/v1/auth/login", (route) =>
         route.fulfill({
             status: 401,
@@ -893,7 +880,7 @@ test("requires the second factor before opening the workspace", async ({
         "**/api/auth/browser/v1/auth/2fa/authenticate",
         (route) => {
             expect(route.request().postDataJSON()).toEqual({ code: "123456" });
-            signedIn = true;
+            account.current = firstAccount;
             return route.fulfill({
                 json: { status: 200, meta: { is_authenticated: true } },
             });
@@ -940,18 +927,7 @@ test("sign in only follows the permitted admin return path", async ({
 test("a console deep link survives sign in and the second factor", async ({
     page,
 }) => {
-    await mockApi(page, { anonymous: true, admin: true });
-    let signedIn = false;
-    await page.route("**/api/session/", (route) =>
-        route.fulfill({
-            json: {
-                user: signedIn
-                    ? { ...user, can_admin: true, mfa_required: true }
-                    : null,
-                csrf_token: signedIn ? "signed-token" : "anonymous-token",
-            },
-        }),
-    );
+    const account = await mockApi(page, { anonymous: true, admin: true });
     await page.route("**/api/auth/browser/v1/auth/login", (route) =>
         route.fulfill({
             status: 401,
@@ -965,7 +941,7 @@ test("a console deep link survives sign in and the second factor", async ({
     await page.route(
         "**/api/auth/browser/v1/auth/2fa/authenticate",
         (route) => {
-            signedIn = true;
+            account.current = accountWith(adminUser);
             return route.fulfill({
                 json: { status: 200, meta: { is_authenticated: true } },
             });
@@ -1151,4 +1127,27 @@ test("account access reflows on a narrow screen without accessibility violations
         ),
     ).toBe(true);
     expect(await accessibilityViolations(page)).toEqual([]);
+});
+
+test("a verification answered with a refusal that is not allauth's does not report the email verified", async ({
+    page,
+}) => {
+    await pendingVerification(page);
+    await page.route("**/api/auth/browser/v1/auth/email/verify", (route) =>
+        route.fulfill({ status: 401, json: { detail: "Unauthorized" } }),
+    );
+    await page.goto("/app/");
+    await page.getByLabel("Email code").fill("123456");
+    await page
+        .getByRole("button", { name: "Verify email", exact: true })
+        .click();
+    await expect(
+        page.getByText("Request failed (401). Please try again.", {
+            exact: true,
+        }),
+    ).toBeVisible();
+    await expect(
+        page.getByText("Email verified. You can sign in now."),
+    ).toHaveCount(0);
+    await expect(page.getByLabel("Email code")).toBeVisible();
 });

@@ -86,10 +86,12 @@ export function LanguageSelect() {
                                 return;
                             }
                             try {
+                                const sentAt = Date.now();
                                 adoptSession(
                                     await api.post("/api/session/language/", {
                                         body: { language },
                                     }),
+                                    sentAt,
                                 );
                                 if (mounted.current)
                                     setState({ status: "idle" });

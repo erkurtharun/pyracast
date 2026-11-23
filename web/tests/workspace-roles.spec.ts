@@ -1,16 +1,24 @@
 import { test, expect } from "./support/test";
-import { answer, mockApi, paged, user, tenantRow } from "./support/workspace";
+import { secondAccount, secondUser } from "./support/session";
+import {
+    answer,
+    firstAccount,
+    mockApi,
+    paged,
+    sessionIdentity,
+    tenantRow,
+} from "./support/workspace";
 import { allauthErrorBody, errorBody } from "./support/errors";
 import type { components } from "../src/lib/schema";
 
 test("Turkish workspace roles and invitation labels preserve readable characters", async ({
     page,
 }) => {
-    await mockApi(page);
+    const account = await mockApi(page);
     let role = "admin";
     await page.route("**/api/session/", (route) =>
         route.fulfill({
-            json: { user, language: "tr", csrf_token: "signed-token" },
+            json: { ...sessionIdentity(account.current), language: "tr" },
         }),
     );
     await page.route("**/api/tenants/", (route) =>
@@ -298,7 +306,7 @@ test("workspace administrator invites, sends again and cancels with the server's
 test("invitation signup preserves token without creating another workspace", async ({
     page,
 }) => {
-    await mockApi(page, { anonymous: true });
+    const account = await mockApi(page, { anonymous: true });
     page.on("request", (request) => {
         expect(request.url()).not.toContain("invite-secret");
         expect(request.headers()["referer"] ?? "").not.toContain(
@@ -306,31 +314,24 @@ test("invitation signup preserves token without creating another workspace", asy
         );
     });
     let payload: unknown;
-    let verified = false;
-    await page.route("**/api/session/", (route) =>
-        route.fulfill({
-            json: {
-                user: verified ? user : null,
-                csrf_token: verified ? "signed-token" : "anonymous-token",
-            },
-        }),
-    );
     await page.route("**/api/auth/browser/v1/auth/session", (route) =>
-        route.fulfill({
-            status: 401,
-            json: {
-                status: 401,
-                meta: { is_authenticated: false },
-                data: {
-                    flows: payload
-                        ? [{ id: "verify_email", is_pending: true }]
-                        : [],
-                },
-            },
-        }),
+        account.current
+            ? route.fallback()
+            : route.fulfill({
+                  status: 401,
+                  json: {
+                      status: 401,
+                      meta: { is_authenticated: false },
+                      data: {
+                          flows: payload
+                              ? [{ id: "verify_email", is_pending: true }]
+                              : [],
+                      },
+                  },
+              }),
     );
     await page.route("**/api/auth/browser/v1/auth/email/verify", (route) => {
-        verified = true;
+        account.current = firstAccount;
         return route.fulfill({
             json: { status: 200, meta: { is_authenticated: true } },
         });
@@ -472,27 +473,14 @@ for (const [status, code, detail] of [
 test("switching invited account signs out with CSRF and preserves invitation through login", async ({
     page,
 }) => {
-    await mockApi(page);
+    const account = await mockApi(page);
     let signouts = 0;
-    let leaving = false;
-    page.on("framenavigated", (frame) => {
-        if (frame === page.mainFrame()) leaving = false;
-    });
-    await page.route("**/api/session/", (route) =>
-        leaving
-            ? route.fulfill({
-                  status: 503,
-                  json: errorBody("busy", "Try again."),
-              })
-            : route.fallback(),
-    );
     await page.route("**/api/auth/browser/v1/auth/session", (route) => {
         if (route.request().method() === "DELETE") {
             expect(route.request().headers()["x-csrftoken"]).toBe(
                 "signed-token",
             );
             signouts++;
-            leaving = true;
         }
         return route.fallback();
     });
@@ -512,9 +500,11 @@ test("switching invited account signs out with CSRF and preserves invitation thr
         ),
     ).toBe("invite-secret");
     await page.reload();
-    await page
-        .getByLabel("Email", { exact: true })
-        .fill("invited@example.test");
+    await page.route("**/api/auth/browser/v1/auth/login", (route) => {
+        account.current = secondAccount;
+        return route.fallback();
+    });
+    await page.getByLabel("Email", { exact: true }).fill(secondUser.email);
     await page.getByLabel("Password", { exact: true }).fill("fixture-password");
     await page
         .locator("form")
@@ -523,6 +513,7 @@ test("switching invited account signs out with CSRF and preserves invitation thr
     await expect(
         page.getByRole("button", { name: "Accept invitation", exact: true }),
     ).toBeVisible();
+    expect(account.current?.user).toBe(secondUser);
     await expect(page).toHaveURL("/app/invitation/");
     expect(
         await page.evaluate(() =>
