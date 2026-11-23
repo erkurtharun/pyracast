@@ -16,6 +16,7 @@ import {
     useErrorMessage,
     formText,
 } from "@/ui/form";
+import { usePageTitle } from "@/ui/page-title";
 import { Notice, RefreshFailed } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
 
@@ -80,6 +81,7 @@ export function OperationalInbox({
     linked?: number;
 }) {
     const t = useTranslations("ChangeRequests");
+    usePageTitle(t("inbox"));
     const refresh = useRefresh();
     const [scope, setScope] = useState<Scope>("pending");
     const [update, setUpdate] = useState<{

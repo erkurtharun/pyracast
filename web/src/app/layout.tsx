@@ -5,7 +5,6 @@ import "./globals.css";
 export const metadata: Metadata = {
     metadataBase: new URL("https://pyracast.app"),
     title: { default: "Pyracast", template: "%s | Pyracast" },
-    applicationName: "Pyracast",
 };
 export default async function Layout({
     children,
