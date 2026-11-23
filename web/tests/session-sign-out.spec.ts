@@ -1,3 +1,4 @@
+import type { Route } from "@playwright/test";
 import { expect, test, type Page } from "./support/test";
 import { errorBody } from "./support/errors";
 import { answer, mockApi } from "./support/workspace";
@@ -86,45 +87,53 @@ test("a sign-out whose request fails stays signing out across history until Retr
     expect(server.deletes).toEqual(["tag-a", "tag-a"]);
 });
 
-test("a sign-out whose session read fails stays signing out until Retry confirms it", async ({
+function unopened(page: Page) {
+    return page.getByRole("heading", { name: "Pyracast could not be opened" });
+}
+
+test("a confirmed sign-out ends the document even when every request after it fails", async ({
     page,
 }) => {
     const account: { current: Account } = { current: firstAccount };
-    let readFails = false;
     await mockApi(page);
-    await page.route("**/api/session/", (route) =>
-        readFails
-            ? route.fulfill({
-                  status: 503,
-                  json: errorBody("busy", "The session could not be read."),
-              })
-            : route.fulfill({
-                  json: {
-                      user: account.current?.user ?? null,
-                      csrf_token: account.current
-                          ? "signed-token"
-                          : "anonymous-token",
-                      language: "en",
-                      expires_at: null,
-                      session_tag: account.current?.tag ?? null,
-                  },
-              }),
-    );
+    await serveSession(page, () => account.current);
     const server = await signOutServer(page, account);
     server.failing = false;
+    const afterSignOut: string[] = [];
+    const failAfterSignOut = (route: Route) => {
+        if (account.current) return route.fallback();
+        const request = route.request();
+        afterSignOut.push(
+            `${request.method()} ${new URL(request.url()).pathname} ${request.headers()["x-session-tag"] ?? "untagged"}`,
+        );
+        return route.fulfill({
+            status: 503,
+            json: errorBody("busy", "The session could not be read."),
+        });
+    };
+    await page.route("**/api/**", failAfterSignOut);
     await page.goto("/app/w/1/");
     await expect(plants(page)).toBeVisible();
-    readFails = true;
+    await markDocument(page);
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
-    await expect(signingOut(page)).toBeVisible();
+    await expect(unopened(page)).toBeVisible();
     await expect(
         page.getByText("The session could not be read."),
     ).toBeVisible();
-    readFails = false;
+    expect(await isMarked(page)).toBe(false);
+    await expect(plants(page)).toHaveCount(0);
+    await expect(signingOut(page)).toHaveCount(0);
+    await expect(page.getByText(firstAccount.user.email)).toHaveCount(0);
+    expect(server.deletes).toEqual(["tag-a"]);
+    expect(afterSignOut.length).toBeGreaterThan(0);
+    expect(new Set(afterSignOut)).toEqual(
+        new Set(["GET /api/session/ untagged"]),
+    );
+    await page.unroute("**/api/**", failAfterSignOut);
     await page.getByRole("button", { name: "Try again" }).click();
     await expect(welcome(page)).toBeVisible();
     await expect(page.getByText(expiredNotice)).toHaveCount(0);
-    expect(server.deletes[0]).toBe("tag-a");
+    expect(server.deletes).toEqual(["tag-a"]);
 });
 
 async function invitedTab(page: Page, account: () => Account) {
@@ -311,7 +320,7 @@ test("a sign-in with a pending invitation lands on the invitation", async ({
     await expect(page).toHaveURL("/app/invitation/");
 });
 
-test("a reload after a sign-out whose confirmation failed takes the tab's pending invitation with it", async ({
+test("a sign-out whose next document reads the session only at Retry takes the tab's pending invitation with it", async ({
     page,
 }) => {
     const account: { current: Account } = { current: firstAccount };
@@ -334,11 +343,12 @@ test("a reload after a sign-out whose confirmation failed takes the tab's pendin
     await openWithInvitation(page);
     readFails = true;
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    await expect(unopened(page)).toBeVisible();
     await expect(
         page.getByText("The session could not be read."),
     ).toBeVisible();
     readFails = false;
-    await page.reload();
+    await page.getByRole("button", { name: "Try again" }).click();
     await expect(welcome(page)).toBeVisible();
     await expect(page.getByText(expiredNotice)).toHaveCount(0);
     expect(await pendingInvitation(page)).toBeNull();

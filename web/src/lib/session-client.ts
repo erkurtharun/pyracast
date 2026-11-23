@@ -336,6 +336,11 @@ export async function signOut({ keepInvitation = false } = {}) {
     signingOut = true;
     try {
         await authRequest("auth/session", "DELETE");
+        if (shown) {
+            state = { ...state, replaced: true };
+            notify();
+            return;
+        }
         const session = await loadSession();
         if (session.user) throw changedSession();
     } catch (error) {

@@ -409,15 +409,14 @@ test("a session read that discovers expiry adopts it once a second read agrees",
     expect(calls).toHaveLength(2);
 });
 
-test("an explicit sign-out returns to sign-in without an expiry notice", async () => {
+test("a confirmed sign-out ends the document without reading the session", async () => {
     adoptSession(signedIn("token"));
-    answer(
-        () => json({ status: 401, meta: { is_authenticated: false } }, 401),
-        () => json(anonymous("anonymous")),
-    );
+    answer(() => json({ status: 401, meta: { is_authenticated: false } }, 401));
     await signOut();
-    expect(sessionState().session?.user).toBeNull();
-    expect(sessionState().ended).toBe(false);
+    expect(sessionState()).toMatchObject({ replaced: true, ended: false });
+    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+        "DELETE /api/auth/browser/v1/auth/session",
+    ]);
 });
 
 const signedOutAnswer = () =>
@@ -425,24 +424,15 @@ const signedOutAnswer = () =>
 
 test("a sign-out refused for a key another tab renewed signs out the renewed session", async () => {
     adoptSession(signedIn("token"));
-    answer(
-        changed,
-        () => json(signedIn("rotated")),
-        signedOutAnswer,
-        () => json(anonymous("anonymous")),
-    );
+    answer(changed, () => json(signedIn("rotated")), signedOutAnswer);
     await signOut();
-    expect(sessionState()).toMatchObject({
-        ended: false,
-        session: { user: null },
-    });
+    expect(sessionState()).toMatchObject({ ended: false, replaced: true });
     expect(
         calls.map((call) => `${call.method} ${call.url} ${call.token}`),
     ).toEqual([
         "DELETE /api/auth/browser/v1/auth/session token",
         "GET /api/session/ null",
         "DELETE /api/auth/browser/v1/auth/session rotated",
-        "GET /api/session/ null",
     ]);
 });
 
@@ -494,8 +484,8 @@ test("an account change answered as signed out is not repeated", async () => {
     expect(calls).toHaveLength(2);
 });
 
-test("a sign-out after which the browser holds another session is reported", async () => {
-    adoptSession(signedIn("token"));
+test("leaving a sign-in stage after which the browser holds a signed-in session is reported", async () => {
+    adoptSession(anonymous("token"));
     answer(signedOutAnswer, () =>
         json({ ...signedIn("other"), session_tag: "other-session" }),
     );
