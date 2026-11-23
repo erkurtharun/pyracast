@@ -400,30 +400,35 @@ test("a save whose connection failed may have been applied", async () => {
     expect(answerLost(lost)).toBe(true);
 });
 
-test("a request queued behind the sign-out sends nothing after the sign-out was confirmed", async () => {
+test("a read begun during this tab's sign-out is refused as not sent before the sign-out is answered", async () => {
     adoptSession(session("a"));
     const { gate, release } = held();
+    const { arrived, arrive } = arrival();
     answer(
         async () => {
+            arrive();
             await gate;
             return signedOutAnswer();
         },
         () => json({ status: 200, data: [] }),
     );
     const ending = signOut();
-    const read = authRequest("account/providers", "GET").catch(
-        (failure) => failure,
-    );
+    const read = recorded(authRequest("account/providers", "GET"));
+    await arrived;
+    await drained();
+    expect(read).toMatchObject({ settled: true, outcome: notSent });
+    expect(sent()).toEqual(["DELETE /api/auth/browser/v1/auth/session a"]);
     release();
     await ending;
-    expect(await read).toMatchObject(notSent);
     expect(sent()).toEqual(["DELETE /api/auth/browser/v1/auth/session a"]);
 });
 
 test("a read refused after the document adopted another session during this tab's sign-out is told the session changed", async () => {
     adoptSession(session("a"));
     const { gate, release } = held();
+    const { arrived, arrive } = arrival();
     answer(changed, async () => {
+        arrive();
         await gate;
         return json(session("b", 2));
     });
@@ -437,17 +442,18 @@ test("a read refused after the document adopted another session during this tab'
         },
     });
     const ending = signOut().catch((failure) => failure);
-    const first = authRequest("account/providers", "GET").catch(
-        (failure) => failure,
-    );
-    while (calls.length < 2) await drained();
-    const second = authRequest("account/providers", "GET").catch(
-        (failure) => failure,
-    );
+    const first = recorded(authRequest("account/providers", "GET"));
+    await arrived;
+    const second = recorded(authRequest("account/providers", "GET"));
+    await drained();
+    expect(first).toMatchObject({ settled: true, outcome: notSent });
+    expect(second).toMatchObject({ settled: true, outcome: notSent });
+    expect(sent()).toEqual([
+        "DELETE /api/auth/browser/v1/auth/session a",
+        "GET /api/session/ null",
+    ]);
     release();
     expect(await ending).toMatchObject({ code: "session_changed" });
-    expect(await first).toMatchObject(notSent);
-    expect(await second).toMatchObject(notSent);
     expect(await adopted).toMatchObject({ code: "session_changed" });
     expect(sent()).toEqual([
         "DELETE /api/auth/browser/v1/auth/session a",
@@ -653,6 +659,14 @@ function arrival() {
         arrive = resolve;
     });
     return { arrived, arrive };
+}
+
+function recorded(promise: Promise<unknown>) {
+    const record: { settled: boolean; outcome?: unknown } = { settled: false };
+    const settle = (outcome: unknown) =>
+        Object.assign(record, { settled: true, outcome });
+    promise.then(settle, settle);
+    return record;
 }
 
 test("a read that settles after another tab changed the session adopts the answer of a read sent after the change", async () => {
