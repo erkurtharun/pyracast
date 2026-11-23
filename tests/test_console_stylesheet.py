@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 
@@ -8,6 +9,11 @@ import pyracast
 PACKAGE = Path(pyracast.__file__).parent
 STATIC = PACKAGE / "regions" / "static" / "pyracast"
 TEMPLATES = PACKAGE / "regions" / "templates" / "admin"
+KIT_COLOURS = json.loads(
+    (
+        Path(__file__).resolve().parents[1] / "web" / "tests" / "support" / "brand-artwork.json"
+    ).read_text(encoding="utf-8")
+)["colours"]
 COLOUR = re.compile(
     r"#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})(?![\w-])"
     r"|(?<![\w-])(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(",
@@ -165,9 +171,9 @@ def test_the_console_tokens_carry_the_brand_kit_colours() -> None:
     rules = (STATIC / "admin-workspace.css").read_text(encoding="utf-8")
 
     assert {name: tokens[name] for name in ("--forest", "--amber", "--cream")} == {
-        "--forest": "#09383a",
-        "--amber": "#ffb545",
-        "--cream": "#f4f2e8",
+        "--forest": KIT_COLOURS["dark"],
+        "--amber": KIT_COLOURS["sun"],
+        "--cream": KIT_COLOURS["light"],
     }
     assert ".brand-mark-sun {\n    fill: var(--amber);\n}" in rules
     assert ".brand-mark-bar {\n    fill: var(--cream);\n}" in rules

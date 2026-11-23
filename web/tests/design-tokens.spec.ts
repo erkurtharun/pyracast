@@ -3,7 +3,8 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { ESLint } from "eslint";
 import { expect, test } from "@playwright/test";
-import { brand, brandProperties, imageShades } from "../src/styles/tokens";
+import { brandProperties, imageShades } from "../src/styles/tokens";
+import artwork from "./support/brand-artwork.json";
 
 const web = path.resolve();
 const eslint = new ESLint({ cwd: web });
@@ -226,10 +227,10 @@ function contrast(first: string, second: string) {
 }
 
 const families = {
-    forest: { kit: brand.forest, old: "#143c32" },
-    amber: { kit: brand.amber, old: "#a56a12" },
-    cream: { kit: brand.cream, old: "#f6f7f3" },
-    teal: { kit: brand.forest, old: "#176b56" },
+    forest: { kit: artwork.colours.dark, old: "#143c32" },
+    amber: { kit: artwork.colours.sun, old: "#a56a12" },
+    cream: { kit: artwork.colours.light, old: "#f6f7f3" },
+    teal: { kit: artwork.colours.dark, old: "#176b56" },
 };
 
 function composite(colour: string, alpha: number, surface: string) {
