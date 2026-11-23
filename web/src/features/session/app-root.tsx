@@ -119,7 +119,7 @@ function Bootstrap({
     return (
         <main className="auth-page">
             <div className="auth-card">
-                <Brand />
+                <Brand surface="light" />
                 {error ? (
                     <>
                         <h1>{t("title")}</h1>
@@ -287,7 +287,7 @@ function SessionUnconfirmed() {
     return (
         <main className="auth-page">
             <div className="auth-card">
-                <Brand />
+                <Brand surface="light" />
                 <h1>{t("unconfirmed")}</h1>
                 <p>{t("unconfirmedHelp")}</p>
                 <button
@@ -311,7 +311,7 @@ function SigningOut({
     return (
         <main className="auth-page">
             <div className="auth-card">
-                <Brand />
+                <Brand surface="light" />
                 <h1>{t("signingOut")}</h1>
                 {state.status === "failed" ? (
                     <>

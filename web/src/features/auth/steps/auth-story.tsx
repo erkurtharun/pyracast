@@ -1,13 +1,12 @@
 "use client";
 import { useTranslations } from "next-intl";
+import { Brand } from "@/ui/brand";
 
 export function AuthStory() {
     const t = useTranslations("Auth");
     return (
         <section className="auth-story" aria-label="Pyracast">
-            <div className="brand">
-                pyracast<span className="brand-dot">.</span>
-            </div>
+            <Brand surface="dark" />
             <div>
                 <p className="eyebrow">{t("solarIntelligence")}</p>
                 <h2>

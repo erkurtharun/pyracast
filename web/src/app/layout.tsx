@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { getLocale } from "next-intl/server";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import { brandProperties } from "@/styles/tokens";
 import "@/styles/tokens.css";
 import "./globals.css";
 
@@ -23,7 +24,7 @@ export default async function Layout({
 }: Readonly<{ children: ReactNode }>) {
     const locale = await getLocale();
     return (
-        <html lang={locale}>
+        <html lang={locale} style={brandProperties as CSSProperties}>
             <body>{children}</body>
         </html>
     );

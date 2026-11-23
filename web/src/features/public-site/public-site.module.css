@@ -1,8 +1,8 @@
 .site {
-    --paper: var(--neutral-47);
-    --ink: var(--green-835);
+    --paper: var(--cream-39);
+    --ink: var(--forest);
     --muted: var(--neutral-624);
-    --green: var(--green-722);
+    --accent: var(--teal-729);
     --rule: var(--olive-163);
     color: var(--ink);
     background: var(--paper);
@@ -49,7 +49,7 @@
     color: inherit;
 }
 .site a:focus-visible {
-    outline: 3px solid var(--amber-633);
+    outline: 3px solid var(--amber-684);
     outline-offset: 5px;
     border-radius: 3px;
 }
@@ -95,18 +95,11 @@
 .brand {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-2-4);
     min-height: 44px;
-    font-size: 1.75rem;
-    font-weight: 700;
-    letter-spacing: -0.07em;
 }
 .brand svg {
-    color: var(--green);
-    flex-shrink: 0;
-}
-.brandDot {
-    color: var(--amber-633);
+    width: 164px;
+    height: 32px;
 }
 .desktopNav {
     margin-left: auto;
@@ -169,7 +162,7 @@
 .site .heroCopy > .eyebrow,
 .site .productHeading > .eyebrow,
 .site .startHeading > .eyebrow {
-    color: var(--green);
+    color: var(--accent);
     margin-bottom: var(--space-6);
 }
 .hero h1 {
@@ -207,10 +200,10 @@
 }
 .site .primaryButton {
     color: var(--white);
-    background: var(--green);
+    background: var(--accent);
 }
 .primaryButton:hover {
-    background: var(--green-794);
+    background: var(--teal-802);
 }
 .textLink {
     font-size: 0.9rem;
@@ -244,7 +237,7 @@
     font-weight: 600;
 }
 .forecastHeading svg {
-    color: var(--green);
+    color: var(--accent);
     flex-shrink: 0;
 }
 .chart {
@@ -256,6 +249,7 @@
 }
 .chart > svg {
     display: block;
+    color: var(--green-722);
     width: 100%;
     height: auto;
     overflow: visible;
@@ -287,10 +281,10 @@
     flex-shrink: 0;
     width: 20px;
     height: 0;
-    border-top: 2px solid var(--green);
+    border-top: 2px solid var(--green-722);
 }
 .actualLine {
-    border-top: 2px dashed var(--amber-576);
+    border-top: 2px dashed var(--amber-608);
 }
 .forecastCaption {
     border-top: 1px solid var(--olive-178);
@@ -337,7 +331,7 @@
     border-bottom: 0;
 }
 .featureNumber {
-    color: var(--green);
+    color: var(--accent);
     font-size: 0.72rem;
     padding-top: var(--space-0-8);
     font-variant-numeric: tabular-nums;
@@ -380,9 +374,10 @@
     display: inline-flex;
     align-items: center;
     min-height: 44px;
-    font-size: 1.5rem;
-    font-weight: 700;
-    letter-spacing: -0.07em;
+}
+.footerBrand svg {
+    width: 133px;
+    height: 26px;
 }
 .footer p {
     font-size: 0.8rem;
@@ -420,7 +415,7 @@
 }
 .legalHeader .eyebrow {
     margin-bottom: var(--space-4);
-    color: var(--teal);
+    color: var(--teal-753);
 }
 .site .legalHeader h1 {
     font-size: clamp(2.3rem, 5vw, 3.5rem);
@@ -493,12 +488,12 @@
     border-top: 1px solid var(--line);
 }
 .site .legalContact a {
-    color: var(--teal);
+    color: var(--teal-753);
     text-decoration: underline;
     text-underline-offset: 3px;
 }
 .site .legalLink a {
-    color: var(--teal);
+    color: var(--teal-753);
     text-decoration: underline;
     text-underline-offset: 3px;
 }
@@ -533,8 +528,9 @@
         min-height: 80px;
         gap: var(--space-2) var(--space-4);
     }
-    .brand {
-        font-size: 1.6rem;
+    .brand svg {
+        width: 154px;
+        height: 30px;
     }
     .headerActions {
         gap: var(--space-2) var(--space-4);
@@ -623,13 +619,9 @@
     .headerInner {
         gap: var(--space-2);
     }
-    .brand {
-        font-size: 1.45rem;
-        gap: var(--space-1-4);
-    }
     .brand svg {
-        width: 23px;
-        height: 23px;
+        width: 133px;
+        height: 26px;
     }
     .headerActions {
         gap: var(--space-2) var(--space-2-6);

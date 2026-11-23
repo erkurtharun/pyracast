@@ -248,6 +248,27 @@ test("search discovery contains only public canonical pages", async ({
     }
 });
 
+test("every page names the brand mark as its SVG favicon", async ({
+    page,
+    request,
+}) => {
+    for (const path of ["/", "/tr/", "/app/"]) {
+        await page.goto(path);
+        const link = page.locator('link[rel="icon"]');
+        await expect(link, path).toHaveAttribute("type", "image/svg+xml");
+        const href = await link.getAttribute("href");
+        expect(new URL(href!, page.url()).pathname, path).toBe("/icon.svg");
+    }
+    const icon = await request.get("/icon.svg");
+    expect(icon.status()).toBe(200);
+    expect(icon.headers()["content-type"]).toContain("image/svg+xml");
+    const mark = await icon.text();
+    expect(mark).toContain(
+        '<path fill="#FFB545" d="M0 48a48 48 0 0 1 96 0Z"/>',
+    );
+    expect(mark).toContain('aria-label="pyracast"');
+});
+
 test("discovery files are served without page headers", async ({ request }) => {
     for (const path of [
         "/sitemap.xml",
