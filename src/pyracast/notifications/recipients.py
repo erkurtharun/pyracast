@@ -4,8 +4,11 @@ from dataclasses import dataclass, replace
 from email.headerregistry import AddressHeader
 from functools import cache
 
+from django.core.exceptions import ValidationError
 from django.core.mail.backends.smtp import EmailBackend as SMTPBackend
+from django.core.validators import validate_email
 from django.db.models import Case, F, Q, Value, When
+from django.utils.translation import gettext
 
 from pyracast.accounts.models import Membership, WorkspaceRole
 from pyracast.notifications.addressing import Candidate, members_choice, roles
@@ -27,6 +30,7 @@ OPEN_DELIVERIES = (
     NotificationDeliveryStatus.SENDING,
     NotificationDeliveryStatus.UNCERTAIN,
 )
+RECIPIENT_MAX_LENGTH = 254
 
 
 def recipient_key(address: str) -> str:
@@ -58,12 +62,40 @@ def prepared(address: str) -> str:
     return wire
 
 
+def addressable(address: str) -> str:
+    """The addr-spec both transports carry for the address, or `ValidationError`: the one test
+    of whether an address can be a recipient."""
+    text = address.strip()
+    if len(text) > RECIPIENT_MAX_LENGTH:
+        raise ValidationError(
+            gettext("Recipient addresses cannot exceed %(limit)s characters."),
+            params={"limit": RECIPIENT_MAX_LENGTH},
+        )
+    validate_email(text)
+    try:
+        wire = prepared(text)
+    except ValueError:
+        wire = ""
+    # Both wire policies and SMTP commands are ASCII only; RFC 5321 4.5.3.1.3 bounds the path.
+    if not wire or not wire.isascii() or len(wire) > RECIPIENT_MAX_LENGTH:
+        raise ValidationError(validate_email.message, code=validate_email.code)
+    return wire
+
+
+def _is_addressable(address: str) -> bool:
+    try:
+        addressable(address)
+    except ValidationError:
+        return False
+    return True
+
+
 def mailbox_key(address: str) -> str:
     """What addressing compares: one key for every spelling a message carries as one address."""
     try:
-        return recipient_key(prepared(address))
-    except ValueError:
-        # `recipient_key` strips whitespace, so no prepared form's key starts with a line feed.
+        return recipient_key(addressable(address))
+    except ValidationError:
+        # `recipient_key` strips whitespace, so no addressable form's key starts with a line feed.
         return "\n" + recipient_key(address)
 
 
@@ -95,9 +127,13 @@ class Member:
 
 @dataclass(frozen=True)
 class Workspace:
+    """`unaddressable`: a person of the read holds an address with no mailbox key, so no
+    placement from this read can tell whose mailbox it is."""
+
     active: frozenset[int]
     _members: Mapping[str, Member]
     _holders: Mapping[str, frozenset[int]]
+    unaddressable: bool = False
 
     @property
     def members(self) -> tuple[Member, ...]:
@@ -178,6 +214,12 @@ def _workspace(people: Sequence[Person]) -> Workspace:
             for key, found in grouped.items()
         },
         {key: frozenset(found) for key, found in holders.items()},
+        not all(
+            _is_addressable(address)
+            for person in people
+            for address in (person.primary, *person.verified)
+            if address.strip()
+        ),
     )
 
 
@@ -343,8 +385,9 @@ def placements(
     addresses: Sequence[str],
     read: Choices | None = None,
 ) -> list[RecipientRole]:
-    """The header of each address of the list; a schedule sent hidden reads no choice."""
-    hidden = schedule.hide_recipients
+    """The header of each address of the list; a schedule sent hidden, or a read of people
+    holding an address without a mailbox key, reads no choice and hides every address."""
+    hidden = schedule.hide_recipients or members.unaddressable
     found = (
         [Candidate(address) for address in addresses]
         if hidden
@@ -366,7 +409,7 @@ def headers(
     for address, role in zip(addresses, placed, strict=True):
         if (key := mailbox_key(address)) not in keys:
             keys.add(key)
-            found[role].append(prepared(address))
+            found[role].append(addressable(address))
     return found[RecipientRole.TO], found[RecipientRole.CC], found[RecipientRole.BCC]
 
 
@@ -527,29 +570,33 @@ def remove_member_recipients(tenant_id: int, membership_id: int, emails: set[str
     removed = rows.filter(
         Q(ties__membership_id=membership_id) | Q(ties__isnull=True, key__in=keys)
     ).values("pk")
-    changed = set(
-        ReminderRecipient.objects.filter(pk__in=removed).values_list("schedule_id", flat=True)
+    deleted = list(
+        ReminderRecipient.objects.filter(pk__in=removed).values_list("schedule_id", "address")
     )
     ReminderRecipient.objects.filter(pk__in=removed).delete()
+    changed = {schedule_id for schedule_id, _ in deleted}
     ReminderSchedule.objects.filter(pk__in=changed - hidden).update(revision=F("revision") + 1)
-    _revoke_unauthorized(tenant_id, membership_id, keys)
+    mailboxes = {mailbox_key(address) for address in emails if address.strip()}
+    mailboxes.update(mailbox_key(address) for _, address in deleted)
+    _revoke_unauthorized(tenant_id, membership_id, mailboxes)
 
 
-def _revoke_unauthorized(tenant_id: int, leaving: int, keys: set[str]) -> None:
-    """Revokes the open deliveries' rows of these keys that their schedule no longer authorizes
-    without the leaving membership; an address another active member holds stays."""
-    candidates = list(
-        DeliveryRecipient.objects.filter(
+def _revoke_unauthorized(tenant_id: int, leaving: int, mailboxes: set[str]) -> None:
+    """Revokes the open deliveries' rows of these mailboxes that their schedule no longer
+    authorizes without the leaving membership; an address another active member holds stays."""
+    candidates = [
+        row
+        for row in DeliveryRecipient.objects.filter(
             delivery__schedule__region__tenant_id=tenant_id,
             delivery__status__in=OPEN_DELIVERIES,
-            key__in=keys,
         ).values_list(
             "pk",
             "address",
             "delivery__schedule_id",
             "delivery__schedule__include_workspace_members",
         )
-    )
+        if mailbox_key(row[1]) in mailboxes
+    ]
     if not candidates:
         return
     schedules = {schedule_id: include for _, _, schedule_id, include in candidates}

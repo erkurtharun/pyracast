@@ -94,7 +94,7 @@ class ReminderRecipient(models.Model):
         ReminderSchedule, on_delete=models.CASCADE, related_name="recipient_rows"
     )
     address = models.TextField()
-    # `recipients.recipient_key(address)`: the identity used for uniqueness, removal and counts.
+    # `recipients.recipient_key(address)`: for uniqueness and SQL selection, not for addressing.
     key = models.TextField()
     role = models.CharField(max_length=3, choices=RecipientRole, blank=True, default="")
     # Plain membership ids, like the ties: the address's members when its To or Cc was chosen.

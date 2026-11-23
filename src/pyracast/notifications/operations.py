@@ -6,7 +6,6 @@ from django.contrib.admin.models import CHANGE, LogEntry
 from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
-from django.core.validators import validate_email
 from django.db import connection, transaction
 from django.utils import translation
 from django.utils.translation import gettext
@@ -31,6 +30,7 @@ from pyracast.notifications.recipients import (
     Resolved,
     TypedChoice,
     Workspace,
+    addressable,
     choices,
     effective,
     explicit_recipients,
@@ -39,7 +39,6 @@ from pyracast.notifications.recipients import (
     needs_members,
     placements,
     planned_recipients,
-    prepared,
     store_member_choices,
     store_recipients,
     typed_choices,
@@ -50,22 +49,12 @@ from pyracast.notifications.recipients import effective_recipients as effective_
 from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditAction, Region, RegionStatus, active_region
 
-RECIPIENT_MAX_LENGTH = 254
 # The largest per-plant recipient limit the console accepts (a smallint column).
 MAX_RECIPIENT_LIMIT = 32767
 
 
 def validate_recipient(address: str) -> None:
-    if len(address) > RECIPIENT_MAX_LENGTH:
-        raise ValidationError(
-            gettext("Recipient addresses cannot exceed %(limit)s characters."),
-            params={"limit": RECIPIENT_MAX_LENGTH},
-        )
-    validate_email(address)
-    try:
-        prepared(address)
-    except ValueError:
-        raise ValidationError(validate_email.message, code=validate_email.code) from None
+    addressable(address)
 
 
 def _all_valid(addresses: list[str]) -> bool:

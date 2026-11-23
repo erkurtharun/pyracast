@@ -39,11 +39,13 @@ from tests.support.notifications import (
     SLOT,
     StatementHook,
     after_statement,
+    candidates,
     chosen,
     mailboxes,
     moved,
     parsed,
     pending_address_change,
+    revoked,
     smtp_wire,
     store,
 )
@@ -414,19 +416,23 @@ def test_a_to_chosen_while_the_address_was_unverified_counts_until_its_member_ve
     assert headers(sent_on(1)) == ([ADMIN], ["alice@example.com"], [])
 
 
+def joined_again(system: System, account: User) -> None:
+    WorkspaceInvitation.objects.create(
+        tenant=system.tenant,
+        email=account.email,
+        token_hash=invitation_digest("again"),
+        created_by=system.member,
+        expires_at=timezone.now() + timedelta(days=7),
+    )
+    accept_workspace_invitation(account, "again")
+
+
 def test_a_member_who_left_and_joined_again_follows_the_default() -> None:
     system, schedule = visible_group()
     alice = user("alice@example.com")
     chosen(schedule, alice, BCC)
     assert remove_workspace_member(system.member, system.tenant.pk, alice.pk)
-    WorkspaceInvitation.objects.create(
-        tenant=system.tenant,
-        email=alice.email,
-        token_hash=invitation_digest("again"),
-        created_by=system.member,
-        expires_at=timezone.now() + timedelta(days=7),
-    )
-    accept_workspace_invitation(alice, "again")
+    joined_again(system, alice)
     assert "alice@example.com" in headers(sent_on(0))[2]
     configure_reminders(
         system.member,
@@ -516,10 +522,15 @@ def test_an_address_confirmed_after_the_markers_read_of_people_leaves_that_attem
     assert hook.fired
     assert User.objects.get(pk=alice.pk).email == "alice@example.com"
     (transaction,) = smtp_wire.transactions
-    assert "alice@example.com" in transaction.recipients
-    assert parsed(transaction.data)["To"] == ADMIN
+    assert transaction.recipients == [ADMIN, "alice@example.com", "alice.b@example.com"]
+    message = parsed(transaction.data)
+    assert (mailboxes(message, "To"), mailboxes(message, "Cc")) == ([ADMIN], [])
     assert b"alice@example.com" not in transaction.data
-    assert ("alice@example.com", BCC) in delivered_roles(delivery_id)
+    assert delivered_roles(delivery_id) == [
+        ("alice@example.com", BCC),
+        (ADMIN, TO),
+        ("alice.b@example.com", BCC),
+    ]
 
 
 def test_a_hidden_choice_of_the_higher_member_of_a_folded_address_keeps_it_off_the_wire(
@@ -607,3 +618,28 @@ def test_two_stored_spellings_of_one_mailbox_with_differing_choices_are_one_hidd
     assert list(DeliveryRecipient.objects.values_list("address", "role")) == [
         (UNICODE_MAILBOX, BCC)
     ]
+
+
+def test_a_rejoined_member_gets_no_queued_row_of_their_mailbox_in_another_spelling(
+    smtp_wire: Script,
+) -> None:
+    system, (holder,) = workspace_with_members(ACE_MAILBOX)
+    group(system, [UNICODE_MAILBOX])
+    (delivery_id,) = enqueue_due(SLOT)
+    delivery = NotificationDelivery.objects.get(pk=delivery_id)
+    DeliveryRecipient.objects.create(
+        delivery=delivery, address="gone@example.com", key="gone@example.com"
+    )
+    assert candidates(delivery) == [UNICODE_MAILBOX, ADMIN, "gone@example.com"]
+    group(system)
+
+    assert remove_workspace_member(system.member, system.tenant.pk, holder.pk)
+    revoked_by_removal = revoked(delivery)
+    joined_again(system, holder)
+    assert process_notification(delivery_id, SLOT)
+
+    (transaction,) = smtp_wire.transactions
+    message = parsed(transaction.data)
+    assert (mailboxes(message, "To"), mailboxes(message, "Cc")) == ([], [])
+    assert transaction.recipients == [ADMIN]
+    assert revoked_by_removal == [recipient_key(UNICODE_MAILBOX)]

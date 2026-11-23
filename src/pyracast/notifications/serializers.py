@@ -15,9 +15,9 @@ from pyracast.notifications.models import (
 )
 from pyracast.notifications.operations import (
     MAX_RECIPIENT_LIMIT,
-    RECIPIENT_MAX_LENGTH,
     AddressChoice,
     MemberChoice,
+    validate_recipient,
 )
 from pyracast.notifications.overview import (
     AddedAddress,
@@ -30,7 +30,7 @@ from pyracast.notifications.overview import (
     ReminderOverview,
     ReminderSummary,
 )
-from pyracast.notifications.recipients import mailbox_key
+from pyracast.notifications.recipients import RECIPIENT_MAX_LENGTH, mailbox_key
 
 
 class AddressRoleInput(InputSerializer):
@@ -70,6 +70,11 @@ class ReminderInput(InputSerializer):
     member_roles = serializers.ListField(
         child=MemberRoleInput(), required=False, max_length=MAX_RECIPIENT_LIMIT
     )
+
+    def validate_recipients(self, value: list[str]) -> list[str]:
+        for address in value:
+            validate_recipient(address)
+        return value
 
     def validate_member_roles(self, value: list[dict[str, Any]]) -> list[MemberChoice]:
         keys = {mailbox_key(entry["address"]) for entry in value}
