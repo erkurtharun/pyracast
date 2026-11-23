@@ -35,7 +35,10 @@ export type Hold = "held" | "pending_request_limit" | Ending;
 export type Ending = "cancelled" | "resolved" | "removed";
 
 type Phase =
-    { status: "idle" } | { status: "sending" } | { status: "held"; hold: Hold };
+    | { status: "idle" }
+    | { status: "sending" }
+    | { status: "saved" }
+    | { status: "held"; hold: Hold };
 
 type Target =
     | { kind: "create" }
@@ -44,7 +47,7 @@ type Target =
 // `outage` is the version the workflow sends against; `form` counts restarts of its form after a discarded stale change.
 export type Workflow = Target & {
     phase: Phase;
-    attempt: { payload: string; key: string } | null;
+    attempt: { payload: string; key: string; unanswered: boolean } | null;
     stale: Stale | null;
     form: number;
 };
@@ -64,8 +67,16 @@ export type OutageEvent =
     | { type: "send"; payload: string; key: string }
     // The answer and the reload that follows it have both finished.
     | { type: "sent"; proposed: boolean }
-    | { type: "sendFailed"; current: OutageRow | null; direct: boolean }
+    | SendFailed
     | { type: "rowsLoaded"; live: Live };
+
+type SendFailed = {
+    type: "sendFailed";
+    change: OutageChange;
+    current: OutageRow | null;
+    answered: boolean;
+    direct: boolean;
+};
 
 export type OutageControls = {
     create: boolean;
@@ -81,7 +92,7 @@ const atLimit = (live: Live) =>
     live.offer?.proposal_unavailable_reason === "pending_request_limit";
 
 const sending = (workflow: Workflow | null) =>
-    workflow?.phase.status === "sending";
+    workflow?.phase.status === "sending" || workflow?.phase.status === "saved";
 
 const targetOf = (workflow: Workflow | null) =>
     workflow && workflow.kind !== "create" ? workflow.outage.id : null;
@@ -186,11 +197,14 @@ export function reduceOutages(
             };
         case "send": {
             if (workflow?.phase.status !== "idle") return screen;
-            // The same payload sent again keeps its key, so the server recognises a retried proposal.
             const attempt =
                 workflow.attempt?.payload === event.payload
                     ? workflow.attempt
-                    : { payload: event.payload, key: event.key };
+                    : {
+                          payload: event.payload,
+                          key: event.key,
+                          unanswered: false,
+                      };
             return {
                 submitted: false,
                 workflow: {
@@ -205,7 +219,16 @@ export function reduceOutages(
             return { workflow: null, submitted: event.proposed };
         case "sendFailed": {
             if (workflow?.phase.status !== "sending") return screen;
+            if (lostAnswerApplied(workflow, event))
+                return {
+                    ...screen,
+                    workflow: { ...workflow, phase: { status: "saved" } },
+                };
             const { current } = event;
+            const attempt = workflow.attempt && {
+                ...workflow.attempt,
+                unanswered: !event.answered,
+            };
             // Only a conflict about the outage the workflow sends against moves it to that outage's current version.
             if (
                 workflow.kind === "create" ||
@@ -213,7 +236,11 @@ export function reduceOutages(
             )
                 return {
                     ...screen,
-                    workflow: { ...workflow, phase: { status: "idle" } },
+                    workflow: {
+                        ...workflow,
+                        attempt,
+                        phase: { status: "idle" },
+                    },
                 };
             const hold =
                 endingOf(workflow.kind, current) ??
@@ -224,6 +251,7 @@ export function reduceOutages(
                 ...screen,
                 workflow: {
                     ...workflow,
+                    attempt,
                     outage: current,
                     stale: {
                         before: workflow.stale?.before ?? workflow.outage,
@@ -251,7 +279,7 @@ export function reduceOutages(
     }
 }
 
-export function proposalBody(change: OutageChange) {
+function proposalBody(change: OutageChange) {
     const target =
         change.action === "create"
             ? {}
@@ -270,7 +298,51 @@ export function proposalBody(change: OutageChange) {
     };
 }
 
-// An administrator writes the outage; any other member proposes the same change for approval under the attempt's key.
+export function attemptPayload(change: OutageChange, direct: boolean) {
+    return JSON.stringify(direct ? change : proposalBody(change));
+}
+
+const VALUE_FIELDS = [
+    "kind",
+    "title",
+    "starts_at",
+    "ends_at",
+    "available_dc_mw",
+    "available_inverter_mw",
+    "available_export_mw",
+    "notes",
+] as const satisfies readonly (keyof OutageInput)[];
+
+const comparable = (field: string, value: unknown) =>
+    field.endsWith("_at") && typeof value === "string"
+        ? Date.parse(value)
+        : value;
+
+function lostAnswerApplied(
+    workflow: Workflow,
+    { change, current, direct }: SendFailed,
+): boolean {
+    if (
+        !direct ||
+        !workflow.attempt?.unanswered ||
+        change.action !== "update" ||
+        current?.id !== change.outage.id
+    )
+        return false;
+    const { outage, values } = change;
+    return (
+        current.revision === outage.revision + 1 &&
+        current.status !== "cancelled" &&
+        VALUE_FIELDS.every(
+            (field) =>
+                comparable(
+                    field,
+                    values[field] ?? (field === "notes" ? "" : null),
+                ) === comparable(field, current[field]),
+        )
+    );
+}
+
 export async function submitOutageChange(
     scope: PlantScope,
     change: OutageChange,
@@ -289,7 +361,7 @@ export async function submitOutageChange(
     if (change.action === "create") {
         await api.post(
             "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/",
-            { path: scope, body: change.values },
+            { path: scope, body: { ...change.values, idempotency_key: key } },
         );
         return;
     }
@@ -348,14 +420,7 @@ export function staleVersion(error: unknown, id: number): OutageRow | null {
 
 const OUTAGE_FIELDS = [
     "status",
-    "kind",
-    "title",
-    "starts_at",
-    "ends_at",
-    "available_dc_mw",
-    "available_inverter_mw",
-    "available_export_mw",
-    "notes",
+    ...VALUE_FIELDS,
 ] as const satisfies readonly (keyof Outage)[];
 
 export type OutageField = (typeof OUTAGE_FIELDS)[number];
