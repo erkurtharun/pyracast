@@ -2,7 +2,15 @@ import { cadence } from "../src/lib/api/query";
 import { errorBody } from "./support/errors";
 import { isMarked, markDocument } from "./support/session";
 import { expect, test, type Page } from "./support/test";
-import { mockApi, paged, plant, region, user } from "./support/workspace";
+import {
+    firstAccount,
+    mockApi,
+    paged,
+    plant,
+    region,
+    user,
+    type AccountState,
+} from "./support/workspace";
 
 const chunks = "**/_next/static/**/*.js";
 const englishCatalogue = (body: string) => body.includes("Calibration history");
@@ -517,12 +525,11 @@ test("a language whose catalogue cannot be loaded is not saved and offers a relo
 test("a language chosen before signing in whose catalogue arrives afterwards is not saved for the account", async ({
     page,
 }) => {
-    await mockApi(page, { anonymous: true });
-    let signedIn = false;
+    const account = await mockApi(page, { anonymous: true });
     let language = "en";
     const written: string[] = [];
     const session = () =>
-        signedIn
+        account.current
             ? {
                   user: { ...user, language_preference: language },
                   csrf_token: "signed-token",
@@ -530,7 +537,7 @@ test("a language chosen before signing in whose catalogue arrives afterwards is 
               }
             : { user: null, csrf_token: "anonymous-token", language };
     await page.route("**/api/auth/browser/v1/auth/login", (route) => {
-        signedIn = true;
+        account.current = firstAccount;
         return route.fulfill({
             json: { status: 200, meta: { is_authenticated: true } },
         });
@@ -540,7 +547,7 @@ test("a language chosen before signing in whose catalogue arrives afterwards is 
     );
     await page.route("**/api/session/language/", (route) => {
         language = route.request().postDataJSON().language as string;
-        written.push(`${signedIn ? "account" : "guest"}:${language}`);
+        written.push(`${account.current ? "account" : "guest"}:${language}`);
         return route.fulfill({ json: session() });
     });
     const turkish = await interceptScript(page, turkishCatalogue, "held");
@@ -656,12 +663,8 @@ function languageWrites(page: Page) {
     return written;
 }
 
-async function endSessionElsewhere(page: Page) {
-    await page.route("**/api/session/", (route) =>
-        route.fulfill({
-            json: { user: null, csrf_token: "anonymous-token", language: "en" },
-        }),
-    );
+async function endSessionElsewhere(page: Page, account: AccountState) {
+    account.current = null;
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect(
         page.getByRole("heading", { name: "Welcome back" }),
@@ -703,11 +706,10 @@ test("a language save refused after the session ended reports nothing on the scr
     context,
     page,
 }) => {
-    await mockApi(page);
-    let ended = false;
+    const account = await mockApi(page);
     await page.route("**/api/session/", (route) =>
         route.fulfill({
-            json: ended
+            json: !account.current
                 ? {
                       user: null,
                       csrf_token: "anonymous-token",
@@ -749,7 +751,7 @@ test("a language save refused after the session ended reports nothing on the scr
     await other.goto("/blank");
     await page.getByLabel("Language", { exact: true }).selectOption("tr");
     await reached;
-    ended = true;
+    account.current = null;
     await other.evaluate(() =>
         window.localStorage.setItem("pyracast.sessionTag", "tag-b"),
     );
@@ -771,7 +773,7 @@ test("a language save refused after the session ended reports nothing on the scr
 test("a language whose catalogue is still loading when the session ends elsewhere is not saved and the fresh document reports nothing", async ({
     page,
 }) => {
-    await mockApi(page);
+    const account = await mockApi(page);
     const written = languageWrites(page);
     const turkish = await interceptScript(page, turkishCatalogue, "held");
     await page.goto("/app/");
@@ -781,7 +783,7 @@ test("a language whose catalogue is still loading when the session ends elsewher
     await markDocument(page);
     await page.getByLabel("Language", { exact: true }).selectOption("tr");
     await turkish.reached;
-    await endSessionElsewhere(page);
+    await endSessionElsewhere(page, account);
     expect(await isMarked(page)).toBe(false);
     await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
     await expect(

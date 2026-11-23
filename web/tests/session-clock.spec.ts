@@ -1,11 +1,10 @@
 import type { Route } from "@playwright/test";
 import { expect, test, type Page } from "./support/test";
 import { errorBody } from "./support/errors";
-import { mockApi } from "./support/workspace";
+import { firstAccount, mockApi, type AccountState } from "./support/workspace";
 import {
     announceResentInvitation,
     expiredNotice,
-    firstAccount,
     focusWindow,
     isMarked,
     liveRegion,
@@ -13,7 +12,6 @@ import {
     outstandingAnswers,
     resentNotice,
     sessionAnswer,
-    type Account,
 } from "./support/session";
 
 const start = new Date("2026-11-20T09:00:00Z");
@@ -28,16 +26,19 @@ function cover(page: Page) {
     });
 }
 
-type SessionServer = { account: Account; failing: boolean; reads: number };
+type SessionServer = {
+    account: AccountState;
+    failing: boolean;
+    reads: number;
+};
 
 async function signedInOnClock(page: Page, expiresAt: string | null = null) {
+    await page.clock.install({ time: start });
     const server: SessionServer = {
-        account: firstAccount,
+        account: await mockApi(page),
         failing: false,
         reads: 0,
     };
-    await page.clock.install({ time: start });
-    await mockApi(page);
     await page.route("**/api/session/", (route) => {
         server.reads++;
         return server.failing
@@ -46,7 +47,7 @@ async function signedInOnClock(page: Page, expiresAt: string | null = null) {
                   json: errorBody("busy", "The session could not be read."),
               })
             : route.fulfill({
-                  json: sessionAnswer(server.account, expiresAt),
+                  json: sessionAnswer(server.account.current, expiresAt),
               });
     });
     return server;
@@ -140,7 +141,7 @@ test("a covered window whose session read finds no user becomes a fresh document
     await page.route("**/api/**", abort);
     await page.clock.runFor(idleLimit + tick);
     await expect(cover(page)).toBeVisible();
-    server.account = null;
+    server.account.current = null;
     await page.unroute("**/api/**", abort);
     await page.getByRole("button", { name: "Try again" }).click();
     await expect(page.getByText(expiredNotice)).toBeVisible();

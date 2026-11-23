@@ -1,9 +1,14 @@
 import { expect, test, type Page } from "./support/test";
-import { answer, mockApi, paged } from "./support/workspace";
+import {
+    answer,
+    firstAccount,
+    mockApi,
+    paged,
+    type AccountState,
+} from "./support/workspace";
 import {
     changedNotice,
     expiredNotice,
-    firstAccount,
     focusWindow,
     holdReload,
     isMarked,
@@ -16,7 +21,6 @@ import {
     secondUser,
     serveSession,
     tagObserver,
-    type Account,
 } from "./support/session";
 import { nativeProductionHistory } from "./support/native-production";
 
@@ -40,20 +44,20 @@ async function expectFreshDocument(page: Page, loadedWith?: string) {
     ).toEqual([]);
 }
 
-async function signedInDocument(page: Page, account: () => Account) {
-    await mockApi(page);
+async function signedInDocument(page: Page) {
+    const account = await mockApi(page);
     await serveSession(page, account);
     await page.goto(address);
     await expect(plants(page)).toBeVisible();
     await markDocument(page);
+    return account;
 }
 
 test("an expired session ends in a fresh document that tells once that the session expired", async ({
     page,
 }) => {
-    let account: Account = firstAccount;
-    await signedInDocument(page, () => account);
-    account = null;
+    const account = await signedInDocument(page);
+    account.current = null;
     await focusWindow(page);
     await expect(welcome(page)).toBeVisible();
     await expect(page.getByText(expiredNotice)).toBeVisible();
@@ -66,13 +70,7 @@ test("an expired session ends in a fresh document that tells once that the sessi
 test("a sign-out here ends in a fresh document without a notice", async ({
     page,
 }) => {
-    let account: Account = firstAccount;
-    await signedInDocument(page, () => account);
-    await page.route("**/api/auth/browser/v1/auth/session", (route) => {
-        if (route.request().method() !== "DELETE") return route.fallback();
-        account = null;
-        return route.fallback();
-    });
+    await signedInDocument(page);
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
     await expect(welcome(page)).toBeVisible();
     await expectFreshDocument(page, "tag-a");
@@ -84,15 +82,11 @@ test("a sign-out in another window ends in a fresh document", async ({
     page,
     context,
 }) => {
-    let account: Account = firstAccount;
+    const account: AccountState = { current: firstAccount };
     const other = await context.newPage();
     for (const tab of [page, other]) {
-        await mockApi(tab);
-        await serveSession(tab, () => account);
-        await tab.route("**/api/auth/browser/v1/auth/session", (route) => {
-            if (route.request().method() === "DELETE") account = null;
-            return route.fallback();
-        });
+        await mockApi(tab, { account });
+        await serveSession(tab, account);
     }
     await page.goto(address);
     await expect(plants(page)).toBeVisible();
@@ -114,10 +108,9 @@ for (const [change, next] of [
     test(`${change} ends in a fresh document that tells once that the session changed`, async ({
         page,
     }) => {
-        let account: Account = firstAccount;
-        await signedInDocument(page, () => account);
+        const account = await signedInDocument(page);
         const observe = await tagObserver(page);
-        account = next;
+        account.current = next;
         await observe(next.tag);
         await expect(page.getByText(changedNotice)).toBeVisible();
         await expect(plants(page)).toBeVisible();
@@ -131,13 +124,7 @@ for (const [change, next] of [
 test("a sign-in completed on the sign-in screen ends in a fresh document", async ({
     page,
 }) => {
-    let account: Account = null;
-    await mockApi(page, { anonymous: true });
-    await serveSession(page, () => account);
-    await page.route("**/api/auth/browser/v1/auth/login", (route) => {
-        account = firstAccount;
-        return route.fallback();
-    });
+    await serveSession(page, await mockApi(page, { anonymous: true }));
     await page.goto(address);
     await expect(welcome(page)).toBeVisible();
     await markDocument(page);
@@ -157,15 +144,11 @@ test("a sign-in completed in another window ends in a fresh document", async ({
     page,
     context,
 }) => {
-    let account: Account = null;
+    const account: AccountState = { current: null };
     const other = await context.newPage();
     for (const tab of [page, other]) {
-        await mockApi(tab, { anonymous: true });
-        await serveSession(tab, () => account);
-        await tab.route("**/api/auth/browser/v1/auth/login", (route) => {
-            account = firstAccount;
-            return route.fallback();
-        });
+        await mockApi(tab, { account });
+        await serveSession(tab, account);
     }
     await page.goto(address);
     await expect(welcome(page)).toBeVisible();
@@ -196,15 +179,14 @@ test("without session storage an expired session ends in one fresh document with
             },
         }),
     );
-    let account: Account = firstAccount;
-    await mockApi(page);
-    await serveSession(page, () => account);
+    const account = await mockApi(page);
+    await serveSession(page, account);
     await page.goto(address);
     await expect(plants(page)).toBeVisible();
     const mark = () =>
         page.evaluate(() => Object.assign(window, { documentMarker: true }));
     await mark();
-    account = null;
+    account.current = null;
     await focusWindow(page);
     await expect(welcome(page)).toBeVisible();
     expect(await isMarked(page)).toBe(false);
@@ -220,8 +202,7 @@ test("without session storage an expired session ends in one fresh document with
 test("a first load that is signed in stays the document it loaded as", async ({
     page,
 }) => {
-    await mockApi(page);
-    await serveSession(page, () => firstAccount);
+    await serveSession(page, await mockApi(page));
     await page.goto(address);
     await expect(plants(page)).toBeVisible();
     await expect(
@@ -233,7 +214,7 @@ test("a first load that is signed in stays the document it loaded as", async ({
 test("a document restored from the back-forward cache reloads", async ({
     page,
 }) => {
-    await signedInDocument(page, () => firstAccount);
+    await signedInDocument(page);
     const reloaded = page.waitForEvent("load");
     await restoreFromCache(page);
     await reloaded;
@@ -242,14 +223,14 @@ test("a document restored from the back-forward cache reloads", async ({
     await expect(page.getByText(changedNotice)).toHaveCount(0);
 });
 
-async function stagedCorrection(page: Page, account: () => Account) {
+async function stagedCorrection(page: Page) {
     const questions: string[] = [];
     page.on("dialog", (dialog) => {
         questions.push(dialog.type());
         void dialog.dismiss();
     });
     await page.clock.setFixedTime(new Date("2026-11-10T12:00:00Z"));
-    await mockApi(page);
+    const account = await mockApi(page);
     await serveSession(page, account);
     await page.route("**/api/tenants/", (route) =>
         route.fulfill({
@@ -312,15 +293,14 @@ async function stagedCorrection(page: Page, account: () => Account) {
         page.getByRole("region", { name: "Correction request", exact: true }),
     ).toBeVisible();
     await markDocument(page);
-    return questions;
+    return { questions, account };
 }
 
 test("an expired session reloads over a staged correction without asking", async ({
     page,
 }) => {
-    let account: Account = firstAccount;
-    const questions = await stagedCorrection(page, () => account);
-    account = null;
+    const { questions, account } = await stagedCorrection(page);
+    account.current = null;
     await focusWindow(page);
     await expect(welcome(page)).toBeVisible();
     await expect(page.getByText(expiredNotice)).toBeVisible();
@@ -331,7 +311,7 @@ test("an expired session reloads over a staged correction without asking", async
 test("a restored document hides a staged correction before it reloads and does not ask", async ({
     page,
 }) => {
-    const questions = await stagedCorrection(page, () => firstAccount);
+    const { questions } = await stagedCorrection(page);
     await page.evaluate(() =>
         window.addEventListener("beforeunload", () =>
             window.sessionStorage.setItem(
@@ -357,7 +337,7 @@ test("a restored document hides a staged correction before it reloads and does n
 test("a restored document asks for a fresh load with only the loading state shown", async ({
     page,
 }) => {
-    await signedInDocument(page, () => firstAccount);
+    await signedInDocument(page);
     const { refused } = await refuseReload(page);
     await restoreFromCache(page);
     await refused;
@@ -427,9 +407,8 @@ function heldAfter(holding: () => boolean) {
 test("an action still running when another user's session arrives sends nothing for that session", async ({
     page,
 }) => {
-    let account: Account = firstAccount;
-    await mockApi(page);
-    await serveSession(page, () => account);
+    const account = await mockApi(page);
+    await serveSession(page, account);
     let reset = false;
     const list = heldAfter(() => reset);
     const automation = heldAfter(() => reset);
@@ -467,7 +446,7 @@ test("an action still running when another user's session arrives sends nothing 
     await page.getByRole("button", { name: "Reset to baseline" }).click();
     await page.getByRole("button", { name: "Reset to baseline" }).click();
     await Promise.all([list.reached, automation.reached]);
-    account = { user: secondUser, tag: "tag-b" };
+    account.current = { user: secondUser, tag: "tag-b" };
     await observe("tag-b");
     await reload.reached;
     const automationOnly = outstanding(1);

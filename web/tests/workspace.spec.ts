@@ -2013,26 +2013,18 @@ test("a session that ends while the tab is open returns to sign in with a notice
     page,
 }) => {
     await page.clock.install();
-    await mockApi(page);
-    let ended = false;
+    const account = await mockApi(page);
     await page.route("**/api/tenants/", (route) =>
-        ended
-            ? route.fulfill({
+        account.current
+            ? route.fallback()
+            : route.fulfill({
                   status: 403,
                   json: errorBody("not_authenticated", "Sign in to continue."),
-              })
-            : route.fallback(),
-    );
-    await page.route("**/api/session/", (route) =>
-        ended
-            ? route.fulfill({
-                  json: { user: null, csrf_token: "anonymous-token" },
-              })
-            : route.fallback(),
+              }),
     );
     await page.goto("/app/");
     await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
-    ended = true;
+    account.current = null;
     await page.clock.fastForward(120_000);
     await expect(
         page.getByText("Your session has expired. Please sign in again."),

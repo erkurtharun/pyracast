@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
-import { mockApi, user } from "./support/workspace";
+import { firstAccount, mockApi } from "./support/workspace";
 import { allauthErrorBody, errorBody } from "./support/errors";
 
 test("signup entry opens registration with public information links", async ({
@@ -69,16 +69,7 @@ for (const [flow, title] of [
 }
 
 test("requires email verification after registration", async ({ page }) => {
-    await mockApi(page);
-    const signedIn = false;
-    await page.route("**/api/session/", async (route) =>
-        route.fulfill({
-            json: {
-                user: signedIn ? user : null,
-                csrf_token: signedIn ? "signed-token" : "anonymous-token",
-            },
-        }),
-    );
+    await mockApi(page, { anonymous: true });
     await page.route("**/api/auth/browser/v1/auth/signup", async (route) => {
         expect(route.request().headers()["x-csrftoken"]).toBe(
             "anonymous-token",
@@ -869,16 +860,7 @@ test("an unexplained 429 on sign-up asks to wait", async ({ page }) => {
 test("requires the second factor before opening the workspace", async ({
     page,
 }) => {
-    await mockApi(page, { anonymous: true });
-    let signedIn = false;
-    await page.route("**/api/session/", (route) =>
-        route.fulfill({
-            json: {
-                user: signedIn ? user : null,
-                csrf_token: signedIn ? "signed-token" : "anonymous-token",
-            },
-        }),
-    );
+    const account = await mockApi(page, { anonymous: true });
     await page.route("**/api/auth/browser/v1/auth/login", (route) =>
         route.fulfill({
             status: 401,
@@ -893,7 +875,7 @@ test("requires the second factor before opening the workspace", async ({
         "**/api/auth/browser/v1/auth/2fa/authenticate",
         (route) => {
             expect(route.request().postDataJSON()).toEqual({ code: "123456" });
-            signedIn = true;
+            account.current = firstAccount;
             return route.fulfill({
                 json: { status: 200, meta: { is_authenticated: true } },
             });
@@ -940,18 +922,7 @@ test("sign in only follows the permitted admin return path", async ({
 test("a console deep link survives sign in and the second factor", async ({
     page,
 }) => {
-    await mockApi(page, { anonymous: true, admin: true });
-    let signedIn = false;
-    await page.route("**/api/session/", (route) =>
-        route.fulfill({
-            json: {
-                user: signedIn
-                    ? { ...user, can_admin: true, mfa_required: true }
-                    : null,
-                csrf_token: signedIn ? "signed-token" : "anonymous-token",
-            },
-        }),
-    );
+    const account = await mockApi(page, { anonymous: true, admin: true });
     await page.route("**/api/auth/browser/v1/auth/login", (route) =>
         route.fulfill({
             status: 401,
@@ -965,7 +936,7 @@ test("a console deep link survives sign in and the second factor", async ({
     await page.route(
         "**/api/auth/browser/v1/auth/2fa/authenticate",
         (route) => {
-            signedIn = true;
+            account.current = firstAccount;
             return route.fulfill({
                 json: { status: 200, meta: { is_authenticated: true } },
             });

@@ -1,12 +1,16 @@
 import type { Route } from "@playwright/test";
 import { expect, test, type Page } from "./support/test";
 import { errorBody } from "./support/errors";
-import { answer, mockApi } from "./support/workspace";
+import {
+    answer,
+    firstAccount,
+    mockApi,
+    type AccountState,
+} from "./support/workspace";
 import {
     announceResentInvitation,
     changedNotice,
     expiredNotice,
-    firstAccount,
     focusWindow,
     isMarked,
     liveRegion,
@@ -17,7 +21,6 @@ import {
     secondUser,
     serveSession,
     sessionAnswer,
-    type Account,
 } from "./support/session";
 
 function plants(page: Page) {
@@ -34,7 +37,7 @@ function signingOut(page: Page) {
 
 type SignOutServer = { deletes: (string | undefined)[]; failing: boolean };
 
-async function signOutServer(page: Page, account: { current: Account }) {
+async function signOutServer(page: Page, account: AccountState) {
     const server: SignOutServer = { deletes: [], failing: true };
     await page.route("**/api/auth/browser/v1/auth/session", (route) => {
         if (route.request().method() !== "DELETE") return route.fallback();
@@ -56,9 +59,8 @@ async function signOutServer(page: Page, account: { current: Account }) {
 test("a sign-out whose request fails stays signing out across history until Retry ends the shown session", async ({
     page,
 }) => {
-    const account: { current: Account } = { current: firstAccount };
-    await mockApi(page);
-    await serveSession(page, () => account.current);
+    const account = await mockApi(page);
+    await serveSession(page, account);
     const server = await signOutServer(page, account);
     await page.goto("/app/w/1/");
     await expect(plants(page)).toBeVisible();
@@ -90,9 +92,8 @@ test("a sign-out whose request fails stays signing out across history until Retr
 test("a sign-out answered with a 401 that does not say the browser is signed out stays signing out until Retry", async ({
     page,
 }) => {
-    const account: { current: Account } = { current: firstAccount };
-    await mockApi(page);
-    await serveSession(page, () => account.current);
+    const account = await mockApi(page);
+    await serveSession(page, account);
     const server = await signOutServer(page, account);
     await page.route("**/api/auth/browser/v1/auth/session", (route) => {
         if (route.request().method() !== "DELETE" || !server.failing)
@@ -118,9 +119,8 @@ test("a sign-out answered with a 401 that does not say the browser is signed out
 test("a sign-out answered 200 with a signed-out body stays signing out until Retry", async ({
     page,
 }) => {
-    const account: { current: Account } = { current: firstAccount };
-    await mockApi(page);
-    await serveSession(page, () => account.current);
+    const account = await mockApi(page);
+    await serveSession(page, account);
     const server = await signOutServer(page, account);
     await page.route("**/api/auth/browser/v1/auth/session", (route) => {
         if (route.request().method() !== "DELETE" || !server.failing)
@@ -158,9 +158,8 @@ function unopened(page: Page) {
 test("a confirmed sign-out ends the document even when every request after it fails", async ({
     page,
 }) => {
-    const account: { current: Account } = { current: firstAccount };
-    await mockApi(page);
-    await serveSession(page, () => account.current);
+    const account = await mockApi(page);
+    await serveSession(page, account);
     const server = await signOutServer(page, account);
     server.failing = false;
     const afterSignOut: string[] = [];
@@ -200,10 +199,11 @@ test("a confirmed sign-out ends the document even when every request after it fa
     expect(server.deletes).toEqual(["tag-a"]);
 });
 
-async function invitedTab(page: Page, account: () => Account) {
-    await mockApi(page);
+async function invitedTab(page: Page) {
+    const account = await mockApi(page);
     await serveSession(page, account);
     await openWithInvitation(page);
+    return account;
 }
 
 async function openWithInvitation(page: Page) {
@@ -232,16 +232,7 @@ async function signInLandsOnWorkspaces(page: Page) {
 test("a sign-out here takes the tab's pending invitation with it", async ({
     page,
 }) => {
-    let account: Account = firstAccount;
-    await invitedTab(page, () => account);
-    await page.route("**/api/auth/browser/v1/auth/session", (route) => {
-        if (route.request().method() === "DELETE") account = null;
-        return route.fallback();
-    });
-    await page.route("**/api/auth/browser/v1/auth/login", (route) => {
-        account = firstAccount;
-        return route.fallback();
-    });
+    await invitedTab(page);
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
     await expect(welcome(page)).toBeVisible();
     expect(await pendingInvitation(page)).toBeNull();
@@ -252,19 +243,11 @@ test("a sign-out in another window takes this tab's pending invitation with it",
     page,
     context,
 }) => {
-    let account: Account = firstAccount;
+    const account: AccountState = { current: firstAccount };
     const other = await context.newPage();
     for (const tab of [page, other]) {
-        await mockApi(tab);
-        await serveSession(tab, () => account);
-        await tab.route("**/api/auth/browser/v1/auth/session", (route) => {
-            if (route.request().method() === "DELETE") account = null;
-            return route.fallback();
-        });
-        await tab.route("**/api/auth/browser/v1/auth/login", (route) => {
-            account = firstAccount;
-            return route.fallback();
-        });
+        await mockApi(tab, { account });
+        await serveSession(tab, account);
     }
     await openWithInvitation(page);
     await other.goto("/app/w/1/");
@@ -278,13 +261,8 @@ test("a sign-out in another window takes this tab's pending invitation with it",
 test("an expired session takes the tab's pending invitation with it", async ({
     page,
 }) => {
-    let account: Account = firstAccount;
-    await invitedTab(page, () => account);
-    await page.route("**/api/auth/browser/v1/auth/login", (route) => {
-        account = firstAccount;
-        return route.fallback();
-    });
-    account = null;
+    const account = await invitedTab(page);
+    account.current = null;
     await focusWindow(page);
     await expect(page.getByText(expiredNotice)).toBeVisible();
     expect(await pendingInvitation(page)).toBeNull();
@@ -294,9 +272,8 @@ test("an expired session takes the tab's pending invitation with it", async ({
 test("using another account signs out as a state of the document and ends on the invitation", async ({
     page,
 }) => {
-    const account: { current: Account } = { current: firstAccount };
-    await mockApi(page);
-    await serveSession(page, () => account.current);
+    const account = await mockApi(page);
+    await serveSession(page, account);
     const server = await signOutServer(page, account);
     await page.goto("/app/invitation/#token=invite-secret");
     await expect(
@@ -363,13 +340,7 @@ test("leaving a pending sign-in stage keeps the pending invitation", async ({
 test("a sign-in with a pending invitation lands on the invitation", async ({
     page,
 }) => {
-    let account: Account = null;
-    await mockApi(page, { anonymous: true });
-    await serveSession(page, () => account);
-    await page.route("**/api/auth/browser/v1/auth/login", (route) => {
-        account = firstAccount;
-        return route.fallback();
-    });
+    await serveSession(page, await mockApi(page, { anonymous: true }));
     await page.goto("/app/invitation/#token=invite-secret");
     await page
         .getByLabel("Email", { exact: true })
@@ -387,9 +358,8 @@ test("a sign-in with a pending invitation lands on the invitation", async ({
 test("a sign-out whose next document reads the session only at Retry takes the tab's pending invitation with it", async ({
     page,
 }) => {
-    const account: { current: Account } = { current: firstAccount };
     let readFails = false;
-    await mockApi(page);
+    const account = await mockApi(page);
     await page.route("**/api/session/", (route) =>
         readFails
             ? route.fulfill({
@@ -400,10 +370,6 @@ test("a sign-out whose next document reads the session only at Retry takes the t
     );
     const server = await signOutServer(page, account);
     server.failing = false;
-    await page.route("**/api/auth/browser/v1/auth/login", (route) => {
-        account.current = firstAccount;
-        return route.fallback();
-    });
     await openWithInvitation(page);
     readFails = true;
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
@@ -422,10 +388,9 @@ test("a sign-out whose next document reads the session only at Retry takes the t
 test("a tab restored after another user signed in drops its pending invitation and tells once that the session changed", async ({
     page,
 }) => {
-    let account: Account = firstAccount;
-    await invitedTab(page, () => account);
+    const account = await invitedTab(page);
     await markDocument(page);
-    account = { user: secondUser, tag: "tag-b" };
+    account.current = { user: secondUser, tag: "tag-b" };
     await restoreFromCache(page);
     await expect(page.getByText(changedNotice)).toBeVisible();
     expect(await isMarked(page)).toBe(false);
@@ -438,9 +403,8 @@ test("a tab restored after another user signed in drops its pending invitation a
 test("accepting an invitation and using another account exclude each other", async ({
     page,
 }) => {
-    const account: { current: Account } = { current: firstAccount };
-    await mockApi(page);
-    await serveSession(page, () => account.current);
+    const account = await mockApi(page);
+    await serveSession(page, account);
     const server = await signOutServer(page, account);
     let reach!: () => void;
     const reached = new Promise<void>((resolve) => (reach = resolve));
@@ -473,9 +437,8 @@ test("accepting an invitation and using another account exclude each other", asy
 test("signing out removes what the screens last announced", async ({
     page,
 }) => {
-    const account: { current: Account } = { current: firstAccount };
-    await mockApi(page);
-    await serveSession(page, () => account.current);
+    const account = await mockApi(page);
+    await serveSession(page, account);
     await signOutServer(page, account);
     await page.goto("/app/w/1/");
     await announceResentInvitation(page);
@@ -488,9 +451,8 @@ test("signing out removes what the screens last announced", async ({
 test("an acceptance answered after signing out began navigates nowhere", async ({
     page,
 }) => {
-    const account: { current: Account } = { current: firstAccount };
-    await mockApi(page);
-    await serveSession(page, () => account.current);
+    const account = await mockApi(page);
+    await serveSession(page, account);
     const server = await signOutServer(page, account);
     let release!: () => void;
     const released = new Promise<void>((resolve) => (release = resolve));
@@ -540,9 +502,8 @@ for (const first of ["Accept invitation", "Use another account"] as const) {
     test(`pressing ${first} and the other in one task starts only the first`, async ({
         page,
     }) => {
-        const account: { current: Account } = { current: firstAccount };
-        await mockApi(page);
-        await serveSession(page, () => account.current);
+        const account = await mockApi(page);
+        await serveSession(page, account);
         const server = await signOutServer(page, account);
         const accepts: string[] = [];
         await page.route("**/api/invitations/accept/", (route) => {

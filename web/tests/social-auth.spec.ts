@@ -398,13 +398,16 @@ test("provider errors explain how to link an existing email safely", async ({
 test("a social-only user can set the first password and follows the required sign-in", async ({
     page,
 }) => {
-    await mockApi(page);
-    let saved = false;
+    const account = await mockApi(page);
     await page.route("**/api/session/", (route) =>
         route.fulfill({
             json: {
-                user: saved ? null : { ...user, has_usable_password: false },
-                csrf_token: saved ? "anonymous-token" : "signed-token",
+                user: account.current
+                    ? { ...user, has_usable_password: false }
+                    : null,
+                csrf_token: account.current
+                    ? "signed-token"
+                    : "anonymous-token",
             },
         }),
     );
@@ -414,7 +417,7 @@ test("a social-only user can set the first password and follows the required sig
             expect(route.request().postDataJSON()).toEqual({
                 new_password: "Test-only-cobalt-79!",
             });
-            saved = true;
+            account.current = null;
             return route.fulfill({
                 status: 401,
                 json: {
@@ -486,12 +489,13 @@ test("social-only MFA setup requests email confirmation rather than an unavailab
 test("expired initial-password sessions never report that the password was saved", async ({
     page,
 }) => {
-    await mockApi(page);
-    let expired = false;
+    const account = await mockApi(page);
     await page.route("**/api/session/", (route) =>
         route.fulfill({
             json: {
-                user: expired ? null : { ...user, has_usable_password: false },
+                user: account.current
+                    ? { ...user, has_usable_password: false }
+                    : null,
                 csrf_token: "token",
             },
         }),
@@ -499,7 +503,7 @@ test("expired initial-password sessions never report that the password was saved
     await page.route(
         "**/api/auth/browser/v1/account/password/change",
         (route) => {
-            expired = true;
+            account.current = null;
             return route.fulfill({
                 status: 401,
                 json: {

@@ -92,11 +92,51 @@ export const paged = <T>(results: T[]) => ({
     next: null,
     previous: null,
 });
+export type Account = { user: typeof user; tag: string } | null;
+export type AccountState = { current: Account };
+export const firstAccount = { user, tag: "tag-a" } as const;
+
+// django-allauth's session view answers from request.user: 200 with the user, or 401 with flows.
+function allauthSession(account: Account) {
+    if (!account)
+        return {
+            status: 401,
+            data: { flows: [] },
+            meta: { is_authenticated: false },
+        };
+    const { id, username, email, has_usable_password } = account.user;
+    return {
+        status: 200,
+        data: {
+            user: {
+                id,
+                display: username,
+                email,
+                has_usable_password,
+                username,
+            },
+            methods: [{ method: "password", at: 1767225600, email }],
+        },
+        meta: { is_authenticated: true },
+    };
+}
+
 export async function mockApi(
     page: Page,
-    { anonymous = false, empty = false, failed = false, admin = false } = {},
-) {
-    let signedIn = !anonymous;
+    {
+        anonymous = false,
+        empty = false,
+        failed = false,
+        admin = false,
+        account = { current: anonymous ? null : firstAccount },
+    }: {
+        anonymous?: boolean;
+        empty?: boolean;
+        failed?: boolean;
+        admin?: boolean;
+        account?: AccountState;
+    } = {},
+): Promise<AccountState> {
     let automationEnabled = false;
     let submittedSite: Mock<Schemas["SiteOutput"]> | undefined;
     let submittedPlant: Mock<Schemas["PlantOutput"]> | undefined;
@@ -105,25 +145,21 @@ export async function mockApi(
             method = route.request().method();
         let data: unknown;
         if (path === "/api/auth/browser/v1/auth/session" && method === "GET") {
-            data = {
-                status: 401,
-                data: { flows: [] },
-                meta: { is_authenticated: false },
-            };
+            data = allauthSession(account.current);
         } else if (path === "/api/auth/browser/v1/auth/login") {
             expect(route.request().headers()["x-csrftoken"]).toBe(
                 "anonymous-token",
             );
-            signedIn = true;
+            account.current ??= firstAccount;
             data = { status: 200, meta: { is_authenticated: true } };
         } else if (
             path === "/api/auth/browser/v1/auth/session" &&
             method === "DELETE"
         ) {
             expect(route.request().headers()["x-csrftoken"]).toBe(
-                signedIn ? "signed-token" : "anonymous-token",
+                account.current ? "signed-token" : "anonymous-token",
             );
-            signedIn = false;
+            account.current = null;
             data = { status: 401, meta: { is_authenticated: false } };
         } else if (path === "/api/auth/browser/v1/config") {
             data = { status: 200, data: { socialaccount: { providers: [] } } };
@@ -140,10 +176,16 @@ export async function mockApi(
             data = { status: 200, data: [signedInSession] };
         } else if (path === "/api/session/") {
             data = answer("SessionOutput", {
-                user: signedIn
-                    ? { ...user, can_admin: admin, mfa_required: admin }
+                user: account.current
+                    ? {
+                          ...account.current.user,
+                          can_admin: admin,
+                          mfa_required: admin,
+                      }
                     : null,
-                csrf_token: signedIn ? "signed-token" : "anonymous-token",
+                csrf_token: account.current
+                    ? "signed-token"
+                    : "anonymous-token",
             });
         } else if (path === "/api/tenants/")
             data = answer(
@@ -352,4 +394,5 @@ export async function mockApi(
             json: data,
         });
     });
+    return account;
 }

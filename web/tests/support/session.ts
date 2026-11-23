@@ -1,9 +1,6 @@
 import { expect, type Page } from "@playwright/test";
-import { answer, user } from "./workspace";
+import { answer, user, type Account, type AccountState } from "./workspace";
 
-export type Account = { user: typeof user; tag: string } | null;
-
-export const firstAccount = { user, tag: "tag-a" } as const;
 export const secondUser = {
     ...user,
     id: 2,
@@ -27,11 +24,11 @@ export function sessionAnswer(account: Account, expiresAt: string | null) {
 
 export function serveSession(
     page: Page,
-    current: () => Account,
+    account: AccountState,
     expiresAt: string | null = null,
 ) {
     return page.route("**/api/session/", (route) =>
-        route.fulfill({ json: sessionAnswer(current(), expiresAt) }),
+        route.fulfill({ json: sessionAnswer(account.current, expiresAt) }),
     );
 }
 

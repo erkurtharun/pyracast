@@ -1,30 +1,26 @@
 import { expect, test } from "./support/test";
 import { errorBody } from "./support/errors";
-import { mockApi, user } from "./support/workspace";
+import { sessionAnswer, serveSession } from "./support/session";
+import {
+    firstAccount,
+    mockApi,
+    user,
+    type AccountState,
+} from "./support/workspace";
 
 test("a sign-out in another tab hides this tab's workspace without waiting for its focus", async ({
     context,
     page,
 }) => {
-    let signedIn = true;
+    const account: AccountState = { current: firstAccount };
     const other = await context.newPage();
     for (const tab of [page, other]) {
-        await mockApi(tab);
-        await tab.route("**/api/session/", (route) =>
-            route.fulfill({
-                json: {
-                    user: signedIn ? user : null,
-                    csrf_token: signedIn ? "signed-token" : "anonymous-token",
-                    language: "en",
-                    expires_at: null,
-                    session_tag: signedIn ? "tag-a" : null,
-                },
-            }),
-        );
+        await mockApi(tab, { account });
+        await serveSession(tab, account);
         await tab.route("**/api/auth/browser/v1/auth/session", (route) => {
             if (route.request().method() !== "DELETE") return route.fallback();
             expect(route.request().headers()["x-session-tag"]).toBe("tag-a");
-            signedIn = false;
+            account.current = null;
             return route.fulfill({
                 status: 401,
                 json: { status: 401, meta: { is_authenticated: false } },
@@ -50,11 +46,11 @@ test("a failed read after another tab's sign-out offers the same retry as a fail
     context,
     page,
 }) => {
-    let signedIn = true;
+    const account: AccountState = { current: firstAccount };
     let unavailable = false;
     const other = await context.newPage();
     for (const tab of [page, other]) {
-        await mockApi(tab);
+        await mockApi(tab, { account });
         await tab.route("**/api/session/", (route) =>
             tab === page && unavailable
                 ? route.fulfill({
@@ -65,20 +61,12 @@ test("a failed read after another tab's sign-out offers the same retry as a fail
                       ),
                   })
                 : route.fulfill({
-                      json: {
-                          user: signedIn ? user : null,
-                          csrf_token: signedIn
-                              ? "signed-token"
-                              : "anonymous-token",
-                          language: "en",
-                          expires_at: null,
-                          session_tag: signedIn ? "tag-a" : null,
-                      },
+                      json: sessionAnswer(account.current, null),
                   }),
         );
         await tab.route("**/api/auth/browser/v1/auth/session", (route) => {
             if (route.request().method() !== "DELETE") return route.fallback();
-            signedIn = false;
+            account.current = null;
             unavailable = true;
             return route.fulfill({
                 status: 401,
