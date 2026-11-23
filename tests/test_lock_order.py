@@ -154,7 +154,7 @@ def lock_order() -> Iterator[LockOrder]:
         workspace = bool(acquired & WORKSPACE)
         late_person = PERSON in acquired and (state.workspace or workspace) and not already_held
         late_workspace = workspace and state.open_person_cursor
-        if connection.in_atomic_block and (late_person or late_workspace):
+        if late_person or late_workspace:
             order.late.append(sql)
         if proven is not None:
             state.held_persons |= proven
@@ -635,6 +635,30 @@ def test_a_person_locked_in_a_committed_transaction_is_not_held_in_the_next() ->
         in_one_transaction(people, "lock workspace", "write alice")
 
     assert len(order.late) == 1
+
+
+def test_a_transaction_opened_by_turning_autocommit_off_is_checked_like_an_atomic_block() -> None:
+    alice, bob, tenant = alice_bob_and_workspace()
+    transaction.set_autocommit(False)
+    try:
+        with lock_order() as order:
+            STEPS["lock workspace"](alice, bob, tenant)
+            STEPS["lock bob by key"](alice, bob, tenant)
+        transaction.commit()
+    finally:
+        transaction.set_autocommit(True)
+
+    assert len(order.late) == 1
+
+
+def test_a_person_write_after_a_workspace_write_in_autocommit_is_not_late() -> None:
+    alice, bob, tenant = alice_bob_and_workspace()
+
+    with lock_order() as order:
+        STEPS["write workspace"](alice, bob, tenant)
+        STEPS["write alice"](alice, bob, tenant)
+
+    assert order.late == []
 
 
 @pytest.mark.parametrize(
