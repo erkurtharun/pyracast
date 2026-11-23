@@ -149,7 +149,6 @@ TYPED = {"other spelling": UNICODE}
 
 
 def successor(case: str, bob: User) -> Callable[[Callable[[], bool]], bool]:
-    """Bob takes the address over before the departure or while it runs."""
     if case == "same spelling":
         moved(bob, SHARED)
         return lambda depart: depart()
@@ -189,7 +188,13 @@ def test_a_departure_hides_the_visible_schedule_a_successor_of_the_address_would
 
     sends = [headers_of(queued, SLOT), next_send(1)]
     after = schedule_of(system)
-    assert ([(to, cc) for to, cc, _ in sends], after.hide_recipients) == ([([], [])] * 2, True)
+    held = ACE if case == "other spelling" else SHARED
+    frozen_row_erased = departure is erase and case == "other spelling"
+    assert sends == [
+        ([], [], [ADMIN] if frozen_row_erased else sorted([ADMIN, held])),
+        ([], [], sorted([ADMIN, held])),
+    ]
+    assert after.hide_recipients
     assert after.hidden_by_departure
     assert (after.configured_by_id, after.effective_from) == (
         before.configured_by_id,
