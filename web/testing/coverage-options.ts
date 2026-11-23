@@ -167,7 +167,11 @@ export function serverEntry(url: string): boolean {
     } catch {
         return false;
     }
-    return !!within(physical(filePath) ?? filePath, serverOutput());
+    const parent = physical(path.dirname(filePath)) ?? path.dirname(filePath);
+    return !!within(
+        physical(filePath) ?? path.join(parent, path.basename(filePath)),
+        serverOutput(),
+    );
 }
 
 export function builtUrl(part: BuildPart, relative: string): string {
