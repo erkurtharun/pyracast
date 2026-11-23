@@ -39,6 +39,10 @@ ESCAPED_NAME = 'u&"'
 ACQUIRING_WORD = re.compile(
     r"(?<![\w$])(?:insert|update|delete|merge|truncate|copy|lock|share)(?![\w$])"
 )
+UNREPORTED_ROWS_WORD = re.compile(
+    r"(?<![\w$])(?:offset|conflict|merge|truncate|copy|lock)(?![\w$])"
+)
+LEVEL_WORD = re.compile(r"(?<![\w$])(?:select|insert|update|delete|share)(?![\w$])")
 LATER_STATEMENT = re.compile(r";\s*\S")
 SAVEPOINT_WORD = re.compile(r"(?<![\w$])(?:savepoint|release|rollback)(?![\w$])")
 SAVEPOINT_CONTROL = re.compile(
@@ -78,6 +82,15 @@ def acquired_tables(sql: str) -> frozenset[str]:
     if ESCAPED_NAME in text:
         return GUARDED
     return frozenset(GUARDED_TABLE.findall(text))
+
+
+def locks_only_reported_rows(sql: str) -> bool:
+    text = sql.casefold()
+    if UNREPORTED_ROWS_WORD.search(text):
+        return False
+    words = LEVEL_WORD.findall(text)
+    selects = words.count("select")
+    return selects <= 1 and len(words) - selects <= 1
 
 
 def proven_persons(sql: str, params: Any, rows: int) -> frozenset[object] | None:
@@ -143,7 +156,8 @@ def lock_order() -> Iterator[LockOrder]:
             state = _Transaction(outer=outer)
         result = execute(sql, params, many, context)
         rows = -1 if LATER_STATEMENT.search(sql) else context["cursor"].rowcount
-        acquired = frozenset() if rows == 0 else acquired_tables(sql)
+        nothing = rows == 0 and locks_only_reported_rows(sql)
+        acquired = frozenset() if nothing else acquired_tables(sql)
         proven = None if many else proven_persons(sql, params, rows)
         if proven is not None:
             order.locked.add(PERSON)
@@ -447,6 +461,23 @@ STEPS: dict[str, Callable[[User, User, Tenant], object]] = {
     "write a missing person by name": lambda alice, bob, tenant: User.objects.filter(
         username="nobody"
     ).update(first_name="Renamed"),
+    "lock a missing person": lambda alice, bob, tenant: list(
+        User.objects.select_for_update().filter(pk=0)
+    ),
+    "write a missing person through a subquery locking bob": lambda alice, bob, tenant: (
+        User.objects.filter(
+            username="nobody",
+            pk=RawSQL("(select id from auth_user where id = %s for update)", (bob.pk,)),
+        ).update(first_name="Renamed")
+    ),
+    "lock bob on an empty page": lambda alice, bob, tenant: list(
+        User.objects.select_for_update().filter(pk=bob.pk)[1:2]
+    ),
+    "lock bob through an upsert that updates nothing": lambda alice, bob, tenant: raw(
+        "INSERT INTO auth_user (password, is_superuser, username, first_name, last_name, email,"
+        " is_staff, is_active, date_joined) VALUES ('', false, 'bob', '', '', '', false, true,"
+        " now()) ON CONFLICT (username) DO UPDATE SET first_name = 'Renamed' WHERE false"
+    ),
     "lock alice by key": lambda alice, bob, tenant: list(
         User.objects.select_for_update().filter(pk=alice.pk)
     ),
@@ -547,6 +578,9 @@ def test_a_person_row_is_held_only_after_a_whole_id_filter_matched_it(
         "lock bob in a lateral derived table",
         "lock bob with a comment inside the locking clause",
         "lock bob behind an empty statement",
+        "lock bob on an empty page",
+        "lock bob through an upsert that updates nothing",
+        "write a missing person through a subquery locking bob",
     ],
 )
 def test_an_unproven_person_lock_or_write_after_a_workspace_lock_is_late(step: str) -> None:
@@ -588,8 +622,12 @@ def test_a_rollback_to_a_savepoint_keeps_the_person_rows_locked_before_it() -> N
     )
 
 
-@pytest.mark.parametrize("step", ["write a missing person", "write a missing person by name"])
-def test_a_person_write_after_a_workspace_lock_that_matched_no_row_is_not_late(step: str) -> None:
+@pytest.mark.parametrize(
+    "step", ["write a missing person", "write a missing person by name", "lock a missing person"]
+)
+def test_a_person_lock_or_write_after_a_workspace_lock_that_matched_no_row_is_not_late(
+    step: str,
+) -> None:
     assert late_statements("lock workspace", step) == 0
 
 
