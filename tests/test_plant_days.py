@@ -796,6 +796,27 @@ def test_the_queries_do_not_grow_with_production_days_resolution_or_history(
     assert len(set(counts.values())) == 1, counts
 
 
+@pytest.mark.parametrize(
+    ("calibrated", "per_forecast_day"),
+    [(False, 10), (True, 14)],
+    ids=["without-calibration", "one-usable-calibration"],
+)
+def test_the_queries_stay_within_the_bound_per_forecast_day(
+    monkeypatch: pytest.MonkeyPatch, calibrated: bool, per_forecast_day: int
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    if calibrated:
+        usable_calibration(system, plant)
+    forecast_window(system)
+    for offset in range(1, 31):
+        metered(system, plant, TODAY - timedelta(days=offset))
+    client = client_for(system.member)
+    client.get(plant_path(system, plant))
+    forecast_days = 22
+    count = queries_of(client, system, plant)
+    assert count <= 40 + per_forecast_day * forecast_days, count
+
+
 def best_of_five_alternately(*reads: Callable[[], HttpResponseBase]) -> list[float]:
     durations: list[list[float]] = [[] for _ in reads]
     for _ in range(5):
