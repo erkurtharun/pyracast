@@ -383,6 +383,36 @@ Inspect the host from `/opt/pyracast/current` as root with
   planned maintenance. A PostgreSQL major upgrade needs its own rehearsed dump and restore. Never
   prune volumes in production.
 
+### App worker
+
+A browser that opened the app keeps the service worker served at `/app/sw.js`
+(`web/public/app/sw.js`) until a successful update check installs another script. A document
+navigation under `/app/` asks for the address (a move inside an open window does not); a check
+that fails, offline, on an answer other than the script or on a script that does not run, leaves
+the installed worker until a later check succeeds. So every release serves the address, and the
+release a failed one falls back to serves it as well, since every release from the installable
+app on does. The address answers `text/javascript` with `no-store` and its own policy; the
+container smoke pins those headers, the manifest and the icons.
+
+- **Withdrawal:** a release whose change is exactly these edits:
+  1. move `web/public/app/sw.js` with `git mv` to `sw-previous.js` in `web/testing/`; it keeps the worker that browsers hold, which
+     the proof installs first;
+  2. `cp web/testing/sw-withdraw.js web/public/app/sw.js` serves the script that unregisters itself;
+  3. remove the registering component `worker-registration.tsx` in `web/src/lib/` with `git rm`,
+     and its import and `<WorkerRegistration />` from `web/src/app/app/layout.tsx`.
+
+  `web/tests/support/worker-state.ts` reads an address serving `sw-withdraw.js` as the withdrawn
+  state, and the model test and `npm run test:production` then prove it: a fresh visit registers
+  nothing, and a browser holding the previous worker loses its registration at its next successful
+  update check and keeps its open window. A revert of the withdrawal commit makes the worker active
+  again.
+- **Rollback:** a revert of the faulty change through CI and Release, never an older image and
+  never a revert of the worker as a whole.
+- **Watch:** CSP reports for `worker-src` and the status of `/app/sw.js` and the manifest. A device
+  without a connection rightly shows the notice, and a report keeps only the blocked origin and the
+  first segment of the page's path, so a notice or a `worker-src` report starts a withdrawal or a
+  rollback only when an online client confirms it while `/health/ready/` is green.
+
 ### Alert events
 
 The host scripts write these events to the `pyracast-operations` log; `deploy/operations_events.py`

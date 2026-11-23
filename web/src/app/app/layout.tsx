@@ -3,6 +3,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { connection } from "next/server";
 import { Suspense, type ReactNode } from "react";
 import { AppRoot } from "@/features/session/app-root";
+import { WorkerRegistration } from "@/lib/worker-registration";
 import { appWindowColour } from "@/styles/tokens";
 
 const appName = "Pyracast";
@@ -29,6 +30,7 @@ export default async function AppLayout({
     return (
         <NextIntlClientProvider messages={null}>
             <title>{appName}</title>
+            <WorkerRegistration />
             <Suspense>
                 <AppRoot>{children}</AppRoot>
             </Suspense>
