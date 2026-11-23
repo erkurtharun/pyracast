@@ -2,7 +2,7 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import type { Plant, PlantScope } from "@/lib/api";
-import { DisplayError } from "@/lib/api/errors";
+import { ApiError, DisplayError } from "@/lib/api/errors";
 import { useApiList } from "@/lib/api/query";
 import { outagesExport } from "@/lib/exports";
 import { CsvDownload } from "@/ui/csv-download";
@@ -12,10 +12,10 @@ import { Notice } from "@/ui/ui";
 import { useCodeLabel, useLabel } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import {
+    attemptPayload,
     INITIAL_OUTAGES,
     isEnding,
     outageControls,
-    proposalBody,
     reduceOutages,
     staleVersion,
     submitOutageChange,
@@ -113,7 +113,7 @@ export function Outages({
     async function submit(change: OutageChange) {
         const next = reduceOutages(screen, {
             type: "send",
-            payload: JSON.stringify(direct ? null : proposalBody(change)),
+            payload: attemptPayload(change, direct),
             key: crypto.randomUUID(),
         });
         const attempt = next.workflow?.attempt;
@@ -129,12 +129,23 @@ export function Outages({
                 change.action === "create"
                     ? null
                     : staleVersion(error, change.outage.id);
-            apply({ type: "sendFailed", current, direct });
+            const failed = reduceOutages(next, {
+                type: "sendFailed",
+                change,
+                current,
+                answered: !(error instanceof ApiError && error.status === 0),
+                direct,
+            });
+            setScreen(failed);
+            if (failed.workflow?.phase.status === "saved") return finishSent();
             if (!current) throw error;
             // The list shows the version the change lost to while the form keeps what was typed.
             void reload();
             throw new DisplayError(t("staleEdit"));
         }
+        return finishSent();
+    }
+    async function finishSent() {
         try {
             await reload();
         } finally {

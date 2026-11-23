@@ -33,8 +33,11 @@ async function workspace(
         previous: null,
     });
     let incident: Mock<Schemas["IncidentOutput"]> | null = null;
+    let createdUnder: string | undefined;
+    let creations = 0;
     let outageReads = 0;
     let conflict = false;
+    let dropAnswer: (() => void) | null = null;
     const configuration = {
         id: 31,
         revision: 1,
@@ -115,14 +118,8 @@ async function workspace(
         } else if (path.includes("/outages/")) {
             expect(route.request().headers()["x-csrftoken"]).toBe("token");
             const body = route.request().postDataJSON();
-            if (conflict) {
-                conflict = false;
-                incident = {
-                    ...incident,
-                    title: "Changed meanwhile",
-                    revision: Number(incident?.revision) + 1,
-                };
-                await route.fulfill({
+            const refuseStale = () =>
+                route.fulfill({
                     status: 409,
                     json: answer("IncidentConflict", {
                         ...errorBody(
@@ -132,32 +129,66 @@ async function workspace(
                         current: { ...incident, pending_request_id: null },
                     }),
                 });
+            if (conflict) {
+                conflict = false;
+                incident = {
+                    ...incident,
+                    title: "Changed meanwhile",
+                    revision: Number(incident?.revision) + 1,
+                };
+                await refuseStale();
                 return;
             }
             if (method === "POST" && path.endsWith("/outages/")) {
-                expect(body.starts_at).toBe("2026-11-11T08:00:00.000Z");
-                incident = {
-                    ...body,
-                    id: 51,
-                    revision: 1,
-                    declared_configuration_id: configurationChanged ? 30 : 31,
-                    status: body.ends_at ? "resolved" : "active",
-                    created_at: "2026-11-11T12:00:00Z",
-                    updated_at: "2026-11-11T12:00:00Z",
-                };
+                const { idempotency_key, ...values } = body;
+                expect(values.starts_at).toBe("2026-11-11T08:00:00.000Z");
+                if (!incident || idempotency_key !== createdUnder) {
+                    creations++;
+                    createdUnder = idempotency_key;
+                    incident = {
+                        ...values,
+                        id: 51,
+                        revision: 1,
+                        declared_configuration_id: configurationChanged
+                            ? 30
+                            : 31,
+                        status: values.ends_at ? "resolved" : "active",
+                        created_at: "2026-11-11T12:00:00Z",
+                        updated_at: "2026-11-11T12:00:00Z",
+                    };
+                }
             } else {
-                expect(body.expected_revision).toBe(incident?.revision);
+                const { expected_revision, ...values } = body;
+                if (expected_revision !== incident?.revision) {
+                    await refuseStale();
+                    return;
+                }
                 incident = {
                     ...incident,
-                    ...body,
+                    ...values,
                     revision: Number(incident?.revision) + 1,
                 };
-                if (path.endsWith("/resolve/"))
-                    incident = { ...incident, status: "resolved" };
-                if (path.endsWith("/cancel/"))
-                    incident = { ...incident, status: "cancelled" };
+                const update = route.request().method() === "PUT";
+                incident = {
+                    ...incident,
+                    ...(update && !incident?.ends_at
+                        ? { declared_configuration_id: configuration.id }
+                        : {}),
+                    status: path.endsWith("/cancel/")
+                        ? "cancelled"
+                        : incident?.ends_at
+                          ? "resolved"
+                          : "active",
+                };
             }
             data = incident;
+            if (dropAnswer) {
+                const dropped = dropAnswer;
+                dropAnswer = null;
+                await route.abort("failed");
+                dropped();
+                return;
+            }
         } else if (path.endsWith("/forecast/")) {
             const intervals = [0, 2, 0].map((power, index) => ({
                 start: `2026-11-12T${String(index + 8).padStart(2, "0")}:00:00Z`,
@@ -213,9 +244,21 @@ async function workspace(
     return {
         reads: () => outageReads,
         incident: () => incident,
+        creations: () => creations,
         conflict: () => {
             conflict = true;
         },
+        elsewhere: (change: Partial<Schemas["IncidentOutput"]>) => {
+            incident = {
+                ...incident,
+                ...change,
+                revision: Number(incident?.revision) + 1,
+            };
+        },
+        dropAnswer: () =>
+            new Promise<void>((resolve) => {
+                dropAnswer = resolve;
+            }),
     };
 }
 
@@ -367,6 +410,215 @@ test("a failed reload after saving keeps the outages until a retry loads them", 
             .filter({ hasText: "Available panels" })
             .getByText("2 MW", { exact: true }),
     ).toBeVisible();
+});
+
+test("a creation saved again after its answer was lost keeps its key, also across a whitespace-only edit, and shows one outage, and an edit sends a new key", async ({
+    page,
+}) => {
+    const state = await workspace(page);
+    const keys: unknown[] = [];
+    let reachable = false;
+    await page.route("**/plants/21/outages/", (route) => {
+        if (route.request().method() !== "POST") return route.fallback();
+        keys.push(route.request().postDataJSON().idempotency_key);
+        return reachable ? route.fallback() : route.abort("failed");
+    });
+    await page.getByRole("button", { name: "Outages", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Report outage", exact: true })
+        .click();
+    await page.getByLabel("Incident title").fill("Inverter disconnected");
+    await page
+        .getByLabel("Started at", { exact: true })
+        .fill("2026-11-11T11:00");
+    await page
+        .getByLabel("Capacity impact")
+        .selectOption({ label: "Total outage" });
+    const save = page.getByRole("button", { name: "Save outage", exact: true });
+    const unconfirmed = page
+        .getByRole("alert")
+        .filter({ hasText: "did not confirm the change" });
+    await save.click();
+    await expect(unconfirmed).toBeVisible();
+    await page.getByLabel("Incident title").fill("Inverter tripped");
+    reachable = true;
+    const dropped = state.dropAnswer();
+    await save.click();
+    await dropped;
+    await expect(unconfirmed).toBeVisible();
+    await page.getByLabel("Incident title").fill("  Inverter tripped ");
+    await save.click();
+    await expect(
+        page.getByRole("heading", { name: "Inverter tripped", exact: true }),
+    ).toBeVisible();
+    await expect(save).toHaveCount(0);
+    await expect(page.locator("h3[data-outage]")).toHaveCount(1);
+    expect(keys).toHaveLength(3);
+    expect(keys[1]).not.toBe(keys[0]);
+    expect(keys[2]).toBe(keys[1]);
+    expect(typeof keys[1]).toBe("string");
+    expect(state.creations()).toBe(1);
+});
+
+test("an edit saved again after its answer was lost closes as saved, shows the outage once at its new revision and sends no further write", async ({
+    page,
+}) => {
+    const state = await workspace(page);
+    await create(page);
+    const revisions: unknown[] = [];
+    page.on("request", (request) => {
+        if (request.method() === "PUT")
+            revisions.push(request.postDataJSON().expected_revision);
+    });
+    await page
+        .getByRole("button", { name: "Edit report", exact: true })
+        .click();
+    await page.getByLabel("Capacity impact").selectOption("reduced");
+    await page.getByLabel("Available panel DC capacity (MW)").fill("2.50");
+    await page.getByLabel("Notes (optional)").fill(" Replaced fuse ");
+    const save = page.getByRole("button", { name: "Save outage changes" });
+    const dropped = state.dropAnswer();
+    await save.click();
+    await dropped;
+    await expect(
+        page
+            .getByRole("alert")
+            .filter({ hasText: "did not confirm the change" }),
+    ).toBeVisible();
+    await save.click();
+    await expect(page.getByRole("region", { name: "Edit outage" })).toHaveCount(
+        0,
+    );
+    await expect(page.locator("h3[data-outage]")).toHaveCount(1);
+    await expect(
+        page
+            .locator("dl > div")
+            .filter({ hasText: "Available panels" })
+            .getByText("2.5 MW", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByText("Someone changed this outage after you opened it."),
+    ).toHaveCount(0);
+    expect(state.incident()).toMatchObject({
+        revision: 2,
+        available_dc_mw: 2.5,
+        notes: "Replaced fuse",
+    });
+    expect(revisions).toEqual([1, 1]);
+});
+
+test("an edit that ends an active outage, saved again after its answer was lost, closes as saved although the status moved to resolved", async ({
+    page,
+}) => {
+    const state = await workspace(page);
+    await create(page);
+    const revisions: unknown[] = [];
+    page.on("request", (request) => {
+        if (request.method() === "PUT")
+            revisions.push(request.postDataJSON().expected_revision);
+    });
+    await page
+        .getByRole("button", { name: "Edit report", exact: true })
+        .click();
+    await page
+        .getByLabel("Resolved at (optional)", { exact: true })
+        .fill("2026-11-11T14:00");
+    const save = page.getByRole("button", { name: "Save outage changes" });
+    const dropped = state.dropAnswer();
+    await save.click();
+    await dropped;
+    await expect(
+        page
+            .getByRole("alert")
+            .filter({ hasText: "did not confirm the change" }),
+    ).toBeVisible();
+    await save.click();
+    await expect(page.getByRole("region", { name: "Edit outage" })).toHaveCount(
+        0,
+    );
+    await expect(
+        page.getByText("Someone changed this outage after you opened it."),
+    ).toHaveCount(0);
+    expect(state.incident()).toMatchObject({
+        revision: 2,
+        status: "resolved",
+        ends_at: "2026-11-11T11:00:00.000Z",
+    });
+    expect(revisions).toEqual([1, 1]);
+});
+
+test("a first save that meets an outage someone else saved with the same values shows the stale notice and saves only when asked", async ({
+    page,
+}) => {
+    const state = await workspace(page, false, true);
+    await create(page);
+    const revisions: unknown[] = [];
+    page.on("request", (request) => {
+        if (request.method() === "PUT")
+            revisions.push(request.postDataJSON().expected_revision);
+    });
+    await page
+        .getByRole("button", { name: "Edit report", exact: true })
+        .click();
+    state.elsewhere({});
+    const save = page.getByRole("button", { name: "Save outage changes" });
+    await save.click();
+    await expect(
+        page.getByRole("alert").filter({
+            hasText: "Someone changed this outage after you opened it.",
+        }),
+    ).toBeVisible();
+    await expect(save).toBeEnabled();
+    expect(revisions).toEqual([1]);
+    expect(state.incident()?.revision).toBe(2);
+    await save.click();
+    await expect(page.getByRole("region", { name: "Edit outage" })).toHaveCount(
+        0,
+    );
+    expect(revisions).toEqual([1, 2]);
+    expect(state.incident()).toMatchObject({
+        revision: 3,
+        declared_configuration_id: 31,
+    });
+});
+
+test("an edit sent again after an unanswered try to an outage cancelled meanwhile shows the cancelled outage and cannot send", async ({
+    page,
+}) => {
+    const state = await workspace(page);
+    await create(page);
+    const revisions: unknown[] = [];
+    let reachable = false;
+    await page.route("**/plants/21/outages/51/", (route) => {
+        revisions.push(route.request().postDataJSON().expected_revision);
+        return reachable ? route.fallback() : route.abort("failed");
+    });
+    await page
+        .getByRole("button", { name: "Edit report", exact: true })
+        .click();
+    const save = page.getByRole("button", { name: "Save outage changes" });
+    await save.click();
+    await expect(
+        page
+            .getByRole("alert")
+            .filter({ hasText: "did not confirm the change" }),
+    ).toBeVisible();
+    state.elsewhere({ status: "cancelled" });
+    reachable = true;
+    await save.click();
+    const editor = page.getByRole("region", { name: "Edit outage" });
+    await expect(
+        editor.getByRole("status").filter({
+            hasText:
+                "This outage is now Cancelled, so your change cannot be applied.",
+        }),
+    ).toBeVisible();
+    await expect(save).toHaveCount(0);
+    expect(revisions).toEqual([1, 1]);
+    expect(state.incident()).toMatchObject({
+        revision: 2,
+        status: "cancelled",
+    });
 });
 
 test("unknown impact remains missing and stale edits show a conflict", async ({
