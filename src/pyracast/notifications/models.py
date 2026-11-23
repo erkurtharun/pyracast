@@ -68,6 +68,22 @@ class ReminderSchedule(models.Model):
         return f"Reminders of region {self.region_id}"
 
 
+class Cardinality(models.Func):
+    function = "cardinality"
+    output_field = models.IntegerField()
+
+
+class Dimensions(models.Func):
+    function = "array_ndims"
+    output_field = models.IntegerField()
+
+
+class AllPositive(models.Func):
+    # A null element makes the comparison unknown, which IS TRUE refuses like an id below 1.
+    template = "(1 <= ALL(%(expressions)s)) IS TRUE"
+    output_field = models.BooleanField()
+
+
 class ReminderRecipient(models.Model):
     schedule = models.ForeignKey(
         ReminderSchedule, on_delete=models.CASCADE, related_name="recipient_rows"
@@ -84,6 +100,15 @@ class ReminderRecipient(models.Model):
         constraints = (
             models.UniqueConstraint(fields=("schedule", "key"), name="%(class)s_schedule_key_uniq"),
             choices_check("role", RecipientRole, blank=True),
+            models.CheckConstraint(
+                condition=models.Q(models.lookups.Exact(Cardinality("role_members"), 0))
+                | models.Q(
+                    models.lookups.Exact(Dimensions("role_members"), 1),
+                    AllPositive("role_members"),
+                    role__in=[RecipientRole.TO, RecipientRole.CC],
+                ),
+                name="%(class)s_role_members_chk",
+            ),
         )
 
     def __str__(self) -> str:

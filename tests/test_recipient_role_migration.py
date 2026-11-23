@@ -99,7 +99,10 @@ def test_existing_schedules_stay_hidden_and_their_rows_carry_no_visible_role(
         DeliveryRecipient.objects.filter(delivery_id=delivery_id).values_list("address", "role")
     ) == [("Ops@example.com", "bcc")]
     assert not ReminderMemberRole.objects.exists()
-    assert {"reminderrecipient_role_chk"} <= constraints("notifications_reminderrecipient").keys()
+    assert {
+        "reminderrecipient_role_chk",
+        "reminderrecipient_role_members_chk",
+    } <= constraints("notifications_reminderrecipient").keys()
     assert {"deliveryrecipient_role_chk"} <= constraints("notifications_deliveryrecipient").keys()
     assert {
         "remindermemberrole_schedule_membership_uniq",
@@ -188,3 +191,57 @@ def test_a_choice_for_a_member_of_another_workspace_is_refused_by_the_database()
     assert list(ReminderMemberRole.objects.values_list("membership_id", flat=True)) == [
         own.membership_id
     ]
+
+
+def typed_row() -> int:
+    system = make_system(approved=True)
+    schedule = ReminderSchedule.objects.create(region=system.region, effective_from=NOW)
+    return int(
+        ReminderRecipient.objects.create(
+            schedule=schedule, address="a@example.com", key="a@example.com"
+        ).pk
+    )
+
+
+def written(pk: int, role: str, members: str) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "UPDATE notifications_reminderrecipient SET role = %s, role_members = %s::bigint[] "
+            "WHERE id = %s",
+            [role, members, pk],
+        )
+
+
+@pytest.mark.parametrize(
+    ("role", "members"),
+    [
+        ("to", "{{1,2},{3,4}}"),
+        ("to", "{1,NULL}"),
+        ("cc", "{NULL}"),
+        ("to", "{0}"),
+        ("cc", "{3,-1}"),
+        ("", "{5}"),
+        ("bcc", "{5}"),
+    ],
+)
+def test_members_of_a_typed_choice_in_another_shape_are_refused_by_the_database(
+    role: str, members: str
+) -> None:
+    pk = typed_row()
+
+    with pytest.raises(IntegrityError), transaction.atomic():
+        written(pk, role, members)
+
+
+@pytest.mark.parametrize(("role", "members", "stored"), [("", "{}", []), ("to", "{5}", [5])])
+def test_members_of_a_typed_choice_in_its_shape_are_stored(
+    role: str, members: str, stored: list[int]
+) -> None:
+    pk = typed_row()
+
+    written(pk, role, members)
+
+    assert ReminderRecipient.objects.values_list("role", "role_members").get(pk=pk) == (
+        role,
+        stored,
+    )

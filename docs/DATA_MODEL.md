@@ -1096,6 +1096,7 @@ erDiagram
 #### `notifications_reminderrecipient`
 
 - `reminderrecipient_role_chk`: `CHECK ("role" IN ('', 'to', 'cc', 'bcc'))`
+- `reminderrecipient_role_members_chk`: `CHECK ((cardinality("role_members") = 0 OR (array_ndims("role_members") = 1 AND (1 <= ALL("role_members")) IS TRUE AND "role" IN ('to', 'cc'))))`
 - `reminderrecipient_schedule_key_uniq`: `UNIQUE ("schedule_id", "key")`
 
 #### `notifications_reminderrecipienttie`

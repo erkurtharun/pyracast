@@ -2,9 +2,11 @@ from typing import ClassVar
 
 import django.contrib.postgres.fields
 import django.db.models.deletion
+import django.db.models.lookups
 from django.db import migrations, models
 from django.db.migrations.operations.base import Operation
 
+import pyracast.notifications.models
 from pyracast import schema_objects
 
 ROLES = [("to", "To"), ("cc", "Cc"), ("bcc", "Bcc")]
@@ -41,6 +43,25 @@ class Migration(migrations.Migration):
             constraint=models.CheckConstraint(
                 condition=models.Q(role__in=["", "to", "cc", "bcc"]),
                 name="reminderrecipient_role_chk",
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="reminderrecipient",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    django.db.models.lookups.Exact(
+                        pyracast.notifications.models.Cardinality("role_members"), 0
+                    ),
+                    models.Q(
+                        django.db.models.lookups.Exact(
+                            pyracast.notifications.models.Dimensions("role_members"), 1
+                        ),
+                        pyracast.notifications.models.AllPositive("role_members"),
+                        ("role__in", ["to", "cc"]),
+                    ),
+                    _connector="OR",
+                ),
+                name="reminderrecipient_role_members_chk",
             ),
         ),
         migrations.AddField(
