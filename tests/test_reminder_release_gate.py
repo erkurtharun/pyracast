@@ -117,6 +117,32 @@ def test_until_the_release_a_visible_mode_is_refused_over_http_and_nothing_is_st
     assert saved.json()["hide_recipients"] is True
 
 
+def test_until_the_release_a_preview_of_the_visible_mode_answers_the_saves_refusal() -> None:
+    system = administered()
+    client = administrator_client(system)
+    body = {
+        "enabled": True,
+        "include_workspace_members": True,
+        "language": "en",
+        "recipients": ["ops@example.com"],
+        "times": ["17:00"],
+        "expected_revision": 0,
+        "hide_recipients": False,
+    }
+    url = reminders_url(system)
+
+    previewed = client.post(f"{url}preview/", body, content_type="application/json")
+    saved = client.put(url, body, content_type="application/json")
+
+    assert previewed.status_code == 400
+    assert (previewed.json()["code"], list(previewed.json()["fields"])) == (
+        "invalid_request",
+        ["hide_recipients"],
+    )
+    assert (saved.status_code, saved.json()) == (400, previewed.json())
+    assert not ReminderSchedule.objects.exists()
+
+
 def test_until_the_release_a_direct_save_of_the_visible_mode_is_refused_and_stores_nothing() -> (
     None
 ):
