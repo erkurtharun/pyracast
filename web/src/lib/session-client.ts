@@ -6,10 +6,11 @@ import {
     mutationEpoch,
     send,
     setCsrfToken,
+    type LaneRequest,
     type Tag,
 } from "./api/lane";
 import { ApiError } from "./api/errors";
-import { authRequest, type AuthResult } from "./auth-api";
+import { authRequest, authUrl, type AuthResult } from "./auth-api";
 import { browserErrors } from "@/i18n/browser";
 
 export type Session = components["schemas"]["SessionOutput"];
@@ -323,6 +324,9 @@ function setSignOut(signOut: SignOutState) {
     notify();
 }
 
+const signOutPath = "auth/session";
+const signOutUrl = authUrl(signOutPath);
+
 // allauth answers a completed sign-out with its anonymous 401; any other answer ended nothing.
 function signedOutBy(answer: AuthResult) {
     return answer.status === 401 && answer.meta?.is_authenticated === false;
@@ -342,7 +346,7 @@ export async function signOut({ keepInvitation = false } = {}) {
     }
     signingOut = true;
     try {
-        const ended = await authRequest("auth/session", "DELETE");
+        const ended = await authRequest(signOutPath, "DELETE");
         if (!signedOutBy(ended))
             throw new ApiError(browserErrors()("invalidResponse"));
         if (shown) {
@@ -367,11 +371,22 @@ function documentTag(): Tag {
     return tagOf(state.session);
 }
 
+// The lane releases a queued request when the sign-out's answer arrives, before signOut reads it.
+function sends(request: LaneRequest, tag: string) {
+    if (signingOut && !isSignOut(request)) return false;
+    return !state.replaced && tagOf(state.session) === tag;
+}
+
+function isSignOut({ method, url }: LaneRequest) {
+    return method === "DELETE" && url === signOutUrl;
+}
+
 // Session reads queue behind the session changes of this tab sent before them, so a read started
 // after a refused answer, and shared by the answers arriving while it runs, sees any key that
 // replaced the one those requests carried.
 confirmSessionWith({
     tag: documentTag,
+    sends,
     confirm: () => {
         confirming ??= startRead()
             .promise.then(tagOf)

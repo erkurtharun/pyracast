@@ -31,6 +31,10 @@ export type AuthResult<TData = AuthData> = {
     errors?: { message: string; param?: string; code?: string }[];
 };
 
+export function authUrl(path: string) {
+    return `/api/auth/browser/v1/${path}`;
+}
+
 export async function authRequest<TData = AuthData>(
     path: string,
     method: Method,
@@ -39,7 +43,7 @@ export async function authRequest<TData = AuthData>(
     const t = browserErrors();
     const { status, ok, data } = await prepared({
         method,
-        url: `/api/auth/browser/v1/${path}`,
+        url: authUrl(path),
         body,
     });
     if (!data || typeof data !== "object" || Array.isArray(data))

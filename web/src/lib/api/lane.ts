@@ -18,10 +18,12 @@ let serial: Promise<unknown> = Promise.resolve();
 export type Tag = string | undefined;
 type SessionCheck = {
     tag: () => Tag;
+    sends: (request: LaneRequest, tag: string) => boolean;
     confirm: () => Promise<Tag>;
 };
 let session: SessionCheck = {
     tag: () => undefined,
+    sends: () => true,
     confirm: () => Promise.resolve(undefined),
 };
 const unreadable = Symbol("unreadable");
@@ -113,10 +115,10 @@ async function attempt(request: LaneRequest, tag: Tag, retried = false) {
     return attempt(request, tag, true);
 }
 
-async function deliver(
-    { method, url, body }: LaneRequest,
-    tag: Tag,
-): Promise<Exchange> {
+async function deliver(request: LaneRequest, tag: Tag): Promise<Exchange> {
+    if (tag !== undefined && !session.sends(request, tag))
+        throw changedSession();
+    const { method, url, body } = request;
     const t = browserErrors();
     let response: Response;
     try {
