@@ -155,6 +155,15 @@ test("the next script at the worker address unregisters an installed worker with
 }) => {
     await switchFront(request, "script", REPLACED.installed);
     await installed(page);
+    await context.setOffline(true);
+    const incumbent = await context.newPage();
+    const notice = await incumbent.goto(PLANT_ADDRESS);
+    expect(notice?.fromServiceWorker()).toBe(true);
+    await expect(
+        incumbent.getByRole("heading", { name: "Pyracast cannot be reached" }),
+    ).toBeVisible();
+    await incumbent.close();
+    await context.setOffline(false);
     await page.evaluate(() => {
         (window as Marked).marker = "open";
     });
