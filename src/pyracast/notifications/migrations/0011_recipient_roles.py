@@ -1,8 +1,11 @@
 from typing import ClassVar
 
+import django.contrib.postgres.fields
 import django.db.models.deletion
 from django.db import migrations, models
 from django.db.migrations.operations.base import Operation
+
+from pyracast import schema_objects
 
 ROLES = [("to", "To"), ("cc", "Cc"), ("bcc", "Bcc")]
 
@@ -25,6 +28,13 @@ class Migration(migrations.Migration):
             model_name="reminderrecipient",
             name="role",
             field=models.CharField(blank=True, choices=ROLES, default="", max_length=3),
+        ),
+        migrations.AddField(
+            model_name="reminderrecipient",
+            name="role_members",
+            field=django.contrib.postgres.fields.ArrayField(
+                base_field=models.BigIntegerField(), blank=True, default=list, size=None
+            ),
         ),
         migrations.AddConstraint(
             model_name="reminderrecipient",
@@ -83,4 +93,5 @@ class Migration(migrations.Migration):
                 ],
             },
         ),
+        *schema_objects.operations("notifications", "0011_recipient_roles"),
     ]

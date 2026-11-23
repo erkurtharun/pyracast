@@ -1,6 +1,7 @@
 import uuid
 
 from django.conf import settings
+from django.contrib.postgres.fields import ArrayField
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils.translation import gettext_lazy
@@ -75,6 +76,8 @@ class ReminderRecipient(models.Model):
     # `recipients.recipient_key(address)`: the identity used for uniqueness, removal and counts.
     key = models.TextField()
     role = models.CharField(max_length=3, choices=RecipientRole, blank=True, default="")
+    # Plain membership ids, like the ties: the address's members when its To or Cc was chosen.
+    role_members = ArrayField(models.BigIntegerField(), blank=True, default=list)
 
     class Meta:
         ordering = ("pk",)

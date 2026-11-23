@@ -3,10 +3,11 @@ from datetime import timedelta
 
 import pytest
 from django.apps.registry import Apps
+from django.contrib.auth.models import User
 from django.db import IntegrityError, connection, models, transaction
 from django.db.migrations.executor import MigrationExecutor
 
-from pyracast.accounts.models import Membership
+from pyracast.accounts.models import Membership, Tenant
 from pyracast.notifications.models import (
     DeliveryRecipient,
     ReminderMemberRole,
@@ -72,6 +73,14 @@ def tables() -> set[str]:
         return set(connection.introspection.table_names(cursor))
 
 
+def functions(name: str) -> int:
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT count(*) FROM pg_proc WHERE proname = %s", [name])
+        row = cursor.fetchone()
+    assert row is not None
+    return int(row[0])
+
+
 def test_existing_schedules_stay_hidden_and_their_rows_carry_no_visible_role(
     previous: tuple[System, Apps],
 ) -> None:
@@ -82,8 +91,10 @@ def test_existing_schedules_stay_hidden_and_their_rows_carry_no_visible_role(
 
     assert ReminderSchedule.objects.get(pk=schedule_id).hide_recipients is True
     assert list(
-        ReminderRecipient.objects.filter(schedule_id=schedule_id).values_list("address", "role")
-    ) == [("Ops@example.com", "")]
+        ReminderRecipient.objects.filter(schedule_id=schedule_id).values_list(
+            "address", "role", "role_members"
+        )
+    ) == [("Ops@example.com", "", [])]
     assert list(
         DeliveryRecipient.objects.filter(delivery_id=delivery_id).values_list("address", "role")
     ) == [("Ops@example.com", "bcc")]
@@ -115,7 +126,9 @@ def test_the_migration_reverses_to_the_previous_schema_and_keeps_every_row(
     assert "hide_recipients" not in columns("notifications_reminderschedule")
     assert "role" not in columns("notifications_reminderrecipient")
     assert "role" not in columns("notifications_deliveryrecipient")
+    assert "role_members" not in columns("notifications_reminderrecipient")
     assert "notifications_remindermemberrole" not in tables()
+    assert functions("guard_remindermemberrole_workspace") == 0
     assert manager(apps, "ReminderRecipient").filter(schedule_id=schedule_id).count() == 1
     assert manager(apps, "DeliveryRecipient").filter(delivery_id=delivery_id).count() == 1
 
@@ -156,3 +169,22 @@ def test_one_member_has_one_choice_per_schedule() -> None:
     ReminderMemberRole.objects.create(schedule=schedule, membership=membership, role="to")
     with pytest.raises(IntegrityError), transaction.atomic():
         ReminderMemberRole.objects.create(schedule=schedule, membership=membership, role="cc")
+
+
+def test_a_choice_for_a_member_of_another_workspace_is_refused_by_the_database() -> None:
+    system = make_system(approved=True)
+    schedule = ReminderSchedule.objects.create(region=system.region, effective_from=NOW)
+    outsider = User.objects.create(username="outsider")
+    other = Membership.objects.create(tenant=Tenant.objects.create(name="Other"), user=outsider)
+    own = ReminderMemberRole.objects.create(
+        schedule=schedule, membership=Membership.objects.get(user=system.member), role="to"
+    )
+
+    with pytest.raises(IntegrityError), transaction.atomic():
+        ReminderMemberRole.objects.create(schedule=schedule, membership=other, role="cc")
+    with pytest.raises(IntegrityError), transaction.atomic():
+        ReminderMemberRole.objects.filter(pk=own.pk).update(membership=other)
+
+    assert list(ReminderMemberRole.objects.values_list("membership_id", flat=True)) == [
+        own.membership_id
+    ]
