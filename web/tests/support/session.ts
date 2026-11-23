@@ -99,26 +99,26 @@ export async function refuseReload(page: Page) {
     return { refused };
 }
 
+type Answers = { report: string; path: string; read: boolean };
+
 // Report from a message task: it runs after the answer's reactions, and a page clock does not hold it.
-export async function outstandingAnswers(page: Page) {
+async function settledAnswers(page: Page, answers: Answers) {
     const waiting: { count: number; resolve: () => void }[] = [];
-    await page.exposeFunction("answersOutstanding", (count: number) => {
+    await page.exposeFunction(answers.report, (count: number) => {
         for (const waiter of waiting.filter((item) => item.count === count)) {
             waiting.splice(waiting.indexOf(waiter), 1);
             waiter.resolve();
         }
     });
-    await page.evaluate(() => {
+    await page.evaluate(({ report, path, read }) => {
         let outstanding = 0;
         const settle = () => {
             outstanding--;
             const task = new MessageChannel();
             task.port1.onmessage = () =>
-                (
-                    window as unknown as {
-                        answersOutstanding: (count: number) => void;
-                    }
-                ).answersOutstanding(outstanding);
+                (Reflect.get(window, report) as (count: number) => void)(
+                    outstanding,
+                );
             task.port2.postMessage(null);
         };
         const send = window.fetch.bind(window);
@@ -127,7 +127,13 @@ export async function outstandingAnswers(page: Page) {
                 input instanceof Request ? input.url : String(input),
                 window.location.href,
             );
-            if (!address.pathname.startsWith("/api/")) return send(input, init);
+            const method =
+                init?.method ??
+                (input instanceof Request ? input.method : "GET");
+            const counted = read
+                ? address.pathname === path && method === "GET"
+                : address.pathname.startsWith(path);
+            if (!counted) return send(input, init);
             outstanding++;
             let response: Response;
             try {
@@ -150,9 +156,25 @@ export async function outstandingAnswers(page: Page) {
             };
             return response;
         };
-    });
+    }, answers);
     return (count: number) =>
         new Promise<void>((resolve) => waiting.push({ count, resolve }));
+}
+
+export function outstandingAnswers(page: Page) {
+    return settledAnswers(page, {
+        report: "answersOutstanding",
+        path: "/api/",
+        read: false,
+    });
+}
+
+export function outstandingSessionReads(page: Page) {
+    return settledAnswers(page, {
+        report: "sessionReadsOutstanding",
+        path: "/api/session/",
+        read: true,
+    });
 }
 
 export function isMarked(page: Page) {

@@ -1,6 +1,8 @@
 import { test as base } from "@playwright/test";
-import { CoverageReport } from "monocart-coverage-reports";
-import { coverageOptions } from "../../testing/coverage-options";
+import {
+    addBrowserCoverage,
+    startBrowserCoverage,
+} from "../../testing/coverage-maps";
 
 export { expect, type Page } from "@playwright/test";
 
@@ -14,14 +16,13 @@ export const test = base.extend<{ coverage: void }>({
                 await runTest();
                 return;
             }
-            await page.coverage.startJSCoverage({ resetOnNavigation: false });
+            const stop = await startBrowserCoverage(
+                await page.context().newCDPSession(page),
+            );
             try {
                 await runTest();
             } finally {
-                const coverage = await page.coverage.stopJSCoverage();
-                if (coverage.length) {
-                    await new CoverageReport(coverageOptions).add(coverage);
-                }
+                await addBrowserCoverage(await stop());
             }
         },
         { auto: true },
