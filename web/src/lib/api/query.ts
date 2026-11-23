@@ -94,6 +94,7 @@ export type Loaded<T> = {
     retry: () => void;
     reload: () => Promise<T>;
     replace(value: T): void;
+    discard(): void;
 };
 
 type Polling = { poll?: number | false };
@@ -159,6 +160,11 @@ export async function reload<T>(
     return (query.state.data as Fetched<T>).value;
 }
 
+// The data is gone at once, a read in flight is never stored, and a mounted reader reads again.
+export function discard(client: QueryClient, queryKey: QueryKey) {
+    void client.resetQueries({ queryKey, exact: true });
+}
+
 function useOwner() {
     const owner = useContext(QueryOwner);
     if (owner === undefined)
@@ -203,6 +209,7 @@ function useLoaded<T>(
         reload: () => reload<T>(client, queryKey),
         replace: (value) =>
             client.setQueryData<Fetched<T>>(queryKey, { value, requests: 1 }),
+        discard: () => discard(client, queryKey),
     };
 }
 
