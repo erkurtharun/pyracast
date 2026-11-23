@@ -1,5 +1,8 @@
 import { test as base } from "@playwright/test";
-import { addBrowserCoverage } from "../../testing/coverage-maps";
+import {
+    addBrowserCoverage,
+    startBrowserCoverage,
+} from "../../testing/coverage-maps";
 
 export { expect, type Page } from "@playwright/test";
 
@@ -13,11 +16,13 @@ export const test = base.extend<{ coverage: void }>({
                 await runTest();
                 return;
             }
-            await page.coverage.startJSCoverage({ resetOnNavigation: false });
+            const stop = await startBrowserCoverage(
+                await page.context().newCDPSession(page),
+            );
             try {
                 await runTest();
             } finally {
-                await addBrowserCoverage(await page.coverage.stopJSCoverage());
+                await addBrowserCoverage(await stop());
             }
         },
         { auto: true },

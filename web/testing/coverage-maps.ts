@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import type { CDPSession } from "@playwright/test";
 import { CoverageReport } from "monocart-coverage-reports";
 import ts from "typescript";
 import { byCodeUnit, lineCount } from "./coverage-combine";
@@ -361,19 +362,19 @@ const observed = new Map<
 >();
 
 type Observation = Script & { functions: { ranges: { count: number }[] }[] };
-type UnbuiltScript = {
+type UncountedScript = {
     url: string;
     observed: number | null;
     built: number;
     prefix: boolean;
     executed: boolean;
 };
-const unbuiltDirectory = path.join("coverage", "unbuilt");
+const uncountedDirectory = path.join("coverage", "uncounted");
 
 export async function addBrowserCoverage<T extends Observation>(
     entries: T[],
 ): Promise<void> {
-    const unbuilt: UnbuiltScript[] = [];
+    const uncounted: UncountedScript[] = [];
     const prepared = entries
         .filter((entry) => browserEntry(entry.url))
         .flatMap((entry) => {
@@ -385,7 +386,7 @@ export async function addBrowserCoverage<T extends Observation>(
                     "utf8",
                 );
                 if (entry.source !== built) {
-                    unbuilt.push({
+                    uncounted.push({
                         url: entry.url,
                         observed: entry.source?.length ?? null,
                         built: built.length,
@@ -408,25 +409,63 @@ export async function addBrowserCoverage<T extends Observation>(
                 ? [{ ...entry, sourceMap: known.sourceMap }]
                 : [];
         });
-    if (unbuilt.length) {
-        mkdirSync(unbuiltDirectory, { recursive: true });
+    if (uncounted.length) {
+        mkdirSync(uncountedDirectory, { recursive: true });
         writeFileSync(
-            path.join(unbuiltDirectory, `${randomUUID()}.json`),
-            JSON.stringify(unbuilt),
+            path.join(uncountedDirectory, `${randomUUID()}.json`),
+            JSON.stringify(uncounted),
         );
     }
     if (prepared.length)
         await new CoverageReport(browserCoverage()).add(prepared);
 }
 
-export function unbuiltScripts(): UnbuiltScript[] {
-    if (!existsSync(unbuiltDirectory)) return [];
-    return readdirSync(unbuiltDirectory)
+export async function startBrowserCoverage(session: CDPSession) {
+    const sources = new Map<string, Promise<string | undefined>>();
+    session.on("Debugger.scriptParsed", ({ scriptId, url }) => {
+        if (browserEntry(url))
+            sources.set(
+                scriptId,
+                session.send("Debugger.getScriptSource", { scriptId }).then(
+                    ({ scriptSource }) => scriptSource,
+                    () => undefined,
+                ),
+            );
+    });
+    await session.send("Profiler.enable");
+    await session.send("Profiler.startPreciseCoverage", {
+        callCount: true,
+        detailed: true,
+    });
+    await session.send("Debugger.enable");
+    await session.send("Debugger.setSkipAllPauses", { skip: true });
+    return async () => {
+        const { result } = await session.send("Profiler.takePreciseCoverage");
+        const texts = new Map(
+            await Promise.all(
+                [...sources].map(
+                    async ([scriptId, text]) => [scriptId, await text] as const,
+                ),
+            ),
+        );
+        await session.send("Profiler.stopPreciseCoverage");
+        await session.detach();
+        return result.flatMap(({ scriptId, url, functions }) =>
+            texts.has(scriptId)
+                ? [{ url, source: texts.get(scriptId), functions }]
+                : [],
+        );
+    };
+}
+
+export function uncountedScripts(): UncountedScript[] {
+    if (!existsSync(uncountedDirectory)) return [];
+    return readdirSync(uncountedDirectory)
         .flatMap(
             (file) =>
                 JSON.parse(
-                    readFileSync(path.join(unbuiltDirectory, file), "utf8"),
-                ) as UnbuiltScript[],
+                    readFileSync(path.join(uncountedDirectory, file), "utf8"),
+                ) as UncountedScript[],
         )
         .sort((a, b) => byCodeUnit(JSON.stringify(a), JSON.stringify(b)));
 }

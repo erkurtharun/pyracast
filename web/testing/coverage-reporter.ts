@@ -8,7 +8,6 @@ import {
 } from "monocart-coverage-reports";
 import {
     combineCoverage,
-    differingArms,
     executed,
     withoutFallback,
     type CoverageMap,
@@ -23,7 +22,7 @@ import {
     authoredSources,
     baselineEntries,
     convertedText,
-    unbuiltScripts,
+    uncountedScripts,
 } from "./coverage-maps";
 import {
     authoredText,
@@ -68,6 +67,25 @@ async function baselineRecords(sources: string[]): Promise<ScriptRecords> {
 
 export default class CoverageReporter implements Reporter {
     async onEnd() {
+        const uncounted = uncountedScripts();
+        for (const script of uncounted) {
+            const kind =
+                script.observed === null
+                    ? "whose text the browser did not give"
+                    : "that is not this build's output";
+            console.log(
+                `Browser script ${kind}, not counted: ${JSON.stringify(script)}`,
+            );
+        }
+        const foreign = new Set(
+            uncounted
+                .filter((script) => script.observed !== null && script.executed)
+                .map(({ url }) => url),
+        );
+        if (foreign.size)
+            throw new Error(
+                `Code that is not this build's output ran in the browser: ${[...foreign].join(", ")}`,
+            );
         const browser = await scriptRecords(browserCoverage());
         const server = await scriptRecords(serverCoverage());
         const idle = Object.entries({ browser, "Next server": server })
@@ -79,9 +97,14 @@ export default class CoverageReporter implements Reporter {
             );
         const sources = authoredSources();
         const baseline = await baselineRecords(sources);
-        const sides = { sources, browser, server, baseline };
+        const { coverage, shapes } = combineCoverage({
+            sources,
+            browser,
+            server,
+            baseline,
+        });
         const report = new CoverageReport(combinedCoverage());
-        await report.add(combineCoverage(sides));
+        await report.add(coverage);
         await report.generate();
         const lcov = (await readFile("coverage/lcov.info", "utf8")).replace(
             /^SF:(.+)$/gm,
@@ -106,20 +129,8 @@ export default class CoverageReporter implements Reporter {
             `Measured frontend coverage: ${JSON.stringify(coverageFigures(lcov))}`,
         );
         console.log(
-            `Branch groups whose arms differ between compilations: ${JSON.stringify(differingArms(sides))}`,
+            `Coverage items the compilations shape differently: ${JSON.stringify(shapes)}`,
         );
-        const unbuilt = unbuiltScripts();
-        for (const script of unbuilt)
-            console.log(
-                `Browser script that is not this build's output, not counted: ${JSON.stringify(script)}`,
-            );
-        const foreign = new Set(
-            unbuilt.filter((script) => script.executed).map(({ url }) => url),
-        );
-        if (foreign.size)
-            throw new Error(
-                `Code that is not this build's output ran in the browser: ${[...foreign].join(", ")}`,
-            );
         const floor = JSON.parse(
             await readFile("coverage-floor.json", "utf8"),
         ) as Floor;

@@ -127,29 +127,70 @@ function recordsOf(sides: Sides, name: string): FileCoverage[] {
 const point = (at: Partial<Location> | undefined) =>
     at?.line === undefined ? "none" : `${at.line}:${at.column}`;
 
-// Compilations place one construct's start differently; same-end ranges of one compiled record are nested.
-function numbered<T>(
-    items: T[],
-    kind: (item: T) => string,
+type Shapes = {
+    contested: { functions: number; groups: number; arms: number };
+    executedLeftOut: number;
+    partialArms: number;
+    otherTypePairs: number;
+};
+type Pairing<T> = {
+    slots: Map<string, T[]>;
+    contested: number;
+    leftOut: T[];
+    partial: number;
+};
+
+function append<T>(lists: Map<string, T[]>, key: string, item: T): void {
+    const list = lists.get(key);
+    if (list) list.push(item);
+    else lists.set(key, [item]);
+}
+
+// One authored construct can compile to differently many items of one end, so a record with fewer cannot be matched.
+function paired<T>(
+    records: T[][],
+    identity: (item: T) => string,
     range: (item: T) => Place | undefined,
-): [string, T][] {
+): Pairing<T> {
     const start = (item: T) => range(item)?.start;
-    const seen = new Map<string, number>();
-    return items
-        .toSorted(
+    const carried = new Map<string, T[][]>();
+    for (const items of records) {
+        const own = new Map<string, T[]>();
+        for (const item of items.toSorted(
             (a, b) =>
                 (start(a)?.line ?? Number.MAX_SAFE_INTEGER) -
                     (start(b)?.line ?? Number.MAX_SAFE_INTEGER) ||
                 (start(a)?.column ?? Number.MAX_SAFE_INTEGER) -
                     (start(b)?.column ?? Number.MAX_SAFE_INTEGER),
-        )
-        .map((item) => {
-            const identity = `${kind(item)}@${point(range(item)?.end)}`;
-            const occurrence = seen.get(identity) ?? 0;
-            seen.set(identity, occurrence + 1);
-            return [`${identity}#${occurrence}`, item];
-        });
+        ))
+            append(own, identity(item), item);
+        for (const [key, list] of own) append(carried, key, list);
+    }
+    const pairing: Pairing<T> = {
+        slots: new Map(),
+        contested: 0,
+        leftOut: [],
+        partial: 0,
+    };
+    for (const [key, lists] of carried) {
+        const most = Math.max(...lists.map(({ length }) => length));
+        if (lists.some(({ length }) => length < most)) pairing.contested += 1;
+        if (lists.length < records.length) pairing.partial += most;
+        for (const list of lists) {
+            if (list.length < most) pairing.leftOut.push(...list);
+            else
+                list.forEach((item, index) =>
+                    append(pairing.slots, `${key}#${index}`, item),
+                );
+        }
+    }
+    return pairing;
 }
+
+const total = (items: { count: number }[]) =>
+    items.reduce((sum, { count }) => sum + count, 0);
+const executions = (counts: number[]) =>
+    counts.filter((count) => count > 0).length;
 
 function byPosition<T>(
     items: Map<string, T>,
@@ -167,65 +208,88 @@ function byPosition<T>(
         .map(([, item]) => item);
 }
 
-type Arm = { location: Place; count: number; records: number };
-type Group = { branch: BranchMeta; records: number; arms: Map<string, Arm> };
+type Arm = { location: Place; count: number };
 
-function united(records: FileCoverage[]) {
-    const functions = new Map<string, { fn: FunctionMeta; count: number }>();
-    const groups = new Map<string, Group>();
-    for (const record of records) {
-        for (const [identity, [key, fn]] of numbered(
-            Object.entries(record.fnMap),
-            () => "",
-            ([, { loc }]) => loc,
-        )) {
-            const known = functions.get(identity);
-            functions.set(identity, {
-                fn: known?.fn ?? fn,
-                count: (known?.count ?? 0) + (record.f[key] ?? 0),
-            });
-        }
-        for (const [identity, [key, branch]] of numbered(
-            Object.entries(record.branchMap),
-            ([, { type }]) => type ?? "",
-            ([, { loc }]) => loc,
-        )) {
-            const group = groups.get(identity) ?? {
-                branch,
-                records: 0,
-                arms: new Map<string, Arm>(),
-            };
-            group.records += 1;
-            const counts = record.b[key] ?? [];
-            for (const [arm, [index, location]] of numbered(
-                [...(branch.locations ?? []).entries()],
-                () => "",
-                ([, location]) => location,
-            )) {
-                const known = group.arms.get(arm);
-                group.arms.set(arm, {
-                    location: known?.location ?? location,
-                    count: (known?.count ?? 0) + (counts[index] ?? 0),
-                    records: (known?.records ?? 0) + 1,
-                });
-            }
-            groups.set(identity, group);
-        }
-    }
-    return { functions, groups };
+function unitedArms(
+    groups: { branch: BranchMeta; counts: number[] }[],
+    shapes: Shapes,
+): Map<string, Arm> {
+    const arms = paired(
+        groups.map(({ branch, counts }) =>
+            (branch.locations ?? []).map((location, index) => ({
+                location,
+                count: counts[index] ?? 0,
+            })),
+        ),
+        ({ location }) => point(location.end),
+        ({ location }) => location,
+    );
+    shapes.contested.arms += arms.contested;
+    shapes.executedLeftOut += executions(
+        arms.leftOut.map(({ count }) => count),
+    );
+    shapes.partialArms += arms.partial;
+    return new Map(
+        [...arms.slots].map(([slot, items]) => [
+            slot,
+            { location: items[0]!.location, count: total(items) },
+        ]),
+    );
 }
 
 function tables(
     records: FileCoverage[],
+    shapes: Shapes,
 ): Pick<FileCoverage, "fnMap" | "f" | "branchMap" | "b"> {
-    const { functions, groups } = united(records);
-    const fns = byPosition(functions, ({ fn }) => fn.decl);
-    const branches = byPosition(groups, ({ branch }) => branch.loc).map(
-        ({ branch, arms }) => ({
-            branch,
-            arms: byPosition(arms, ({ location }) => location),
-        }),
+    const functions = paired(
+        records.map((record) =>
+            Object.entries(record.fnMap).map(([key, fn]) => ({
+                fn,
+                count: record.f[key] ?? 0,
+            })),
+        ),
+        ({ fn }) => point(fn.loc?.end),
+        ({ fn }) => fn.loc,
     );
+    shapes.contested.functions += functions.contested;
+    shapes.executedLeftOut += executions(
+        functions.leftOut.map(({ count }) => count),
+    );
+    const groups = paired(
+        records.map((record) =>
+            Object.entries(record.branchMap).map(([key, branch]) => ({
+                branch,
+                counts: record.b[key] ?? [],
+            })),
+        ),
+        ({ branch }) => `${branch.type ?? ""}@${point(branch.loc?.end)}`,
+        ({ branch }) => branch.loc,
+    );
+    shapes.contested.groups += groups.contested;
+    shapes.executedLeftOut += executions(
+        groups.leftOut.flatMap(({ counts }) => counts),
+    );
+    const fns = byPosition(
+        new Map(
+            [...functions.slots].map(([slot, items]) => [
+                slot,
+                { fn: items[0]!.fn, count: total(items) },
+            ]),
+        ),
+        ({ fn }) => fn.decl,
+    );
+    const branches = byPosition(
+        new Map(
+            [...groups.slots].map(([slot, items]) => [
+                slot,
+                { branch: items[0]!.branch, arms: unitedArms(items, shapes) },
+            ]),
+        ),
+        ({ branch }) => branch.loc,
+    ).map(({ branch, arms }) => ({
+        branch,
+        arms: byPosition(arms, ({ location }) => location),
+    }));
     return {
         fnMap: Object.fromEntries(
             fns.map(({ fn }, index) => [
@@ -256,37 +320,52 @@ function tables(
     };
 }
 
-export function combineCoverage(sides: Sides): CoverageMap {
-    return Object.fromEntries(
+function otherTypePairs(records: FileCoverage[]): number {
+    const typesAtEnd = new Map<string, Set<string>[]>();
+    for (const record of records) {
+        const own = new Map<string, Set<string>>();
+        for (const { type, loc } of Object.values(record.branchMap)) {
+            const end = point(loc?.end);
+            own.set(end, (own.get(end) ?? new Set()).add(type ?? ""));
+        }
+        for (const [end, types] of own) append(typesAtEnd, end, types);
+    }
+    let pairs = 0;
+    for (const sets of typesAtEnd.values()) {
+        const types = [...new Set(sets.flatMap((set) => [...set]))];
+        const without = (one: string, other: string) =>
+            sets.some((set) => set.has(one) && !set.has(other));
+        types.forEach((one, index) => {
+            for (const other of types.slice(index + 1))
+                if (without(one, other) && without(other, one)) pairs += 1;
+        });
+    }
+    return pairs;
+}
+
+export function combineCoverage(sides: Sides): {
+    coverage: CoverageMap;
+    shapes: Shapes;
+} {
+    const shapes: Shapes = {
+        contested: { functions: 0, groups: 0, arms: 0 },
+        executedLeftOut: 0,
+        partialArms: 0,
+        otherTypePairs: 0,
+    };
+    const coverage = Object.fromEntries(
         sides.sources.toSorted(byCodeUnit).map((name) => {
             const records = recordsOf(sides, name);
+            shapes.otherTypePairs += otherTypePairs(records);
             return [
                 name,
                 {
                     path: name,
                     ...statementTables(records.flatMap(statementsOf)),
-                    ...tables(records),
+                    ...tables(records, shapes),
                 },
             ];
         }),
     );
-}
-
-// Arms that compilations shape differently are counted apart; this bounds that excess.
-export function differingArms(sides: Sides): {
-    groups: number;
-    untaken: number;
-} {
-    const residue = { groups: 0, untaken: 0 };
-    for (const name of sides.sources) {
-        for (const group of united(recordsOf(sides, name)).groups.values()) {
-            const partial = [...group.arms.values()].filter(
-                (arm) => arm.records < group.records,
-            );
-            if (!partial.length) continue;
-            residue.groups += 1;
-            residue.untaken += partial.filter((arm) => !arm.count).length;
-        }
-    }
-    return residue;
+    return { coverage, shapes };
 }
