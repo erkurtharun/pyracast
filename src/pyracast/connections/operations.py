@@ -4,7 +4,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import QuerySet, Value
+from django.db.models import BooleanField, ExpressionWrapper, F, Q, QuerySet, Value
 from django.utils import timezone
 from django.utils.translation import gettext
 from django.views.decorators.debug import sensitive_variables
@@ -18,6 +18,21 @@ from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditAction
 
 
+def _shared_key_refusal(holder: str) -> ValidationError:
+    return ValidationError(
+        {
+            "api_key": ValidationError(
+                gettext(
+                    "This API key is already stored on the account %(account)s. "
+                    "Use that account instead."
+                )
+                % {"account": holder},
+                code="shared_api_key",
+            )
+        }
+    )
+
+
 def _refuse_shared_key(
     fingerprints: Sequence[str], *, other_than: QuerySet[ProviderAccount]
 ) -> None:
@@ -26,18 +41,29 @@ def _refuse_shared_key(
     )
     holder = holders.values_list("external_account_id", flat=True).first()
     if holder is not None:
-        raise ValidationError(
-            {
-                "api_key": ValidationError(
-                    gettext(
-                        "This API key is already stored on the account %(account)s. "
-                        "Use that account instead."
-                    )
-                    % {"account": holder},
-                    code="shared_api_key",
-                )
-            }
+        raise _shared_key_refusal(holder)
+
+
+def _requested_account_or_refusal(
+    provider: str, identity: str, fingerprints: Sequence[str]
+) -> ProviderAccount | None:
+    requested = Q(
+        canonical_provider__exact=canonical_account_identity(Value(provider)),
+        canonical_identity__exact=canonical_account_identity(Value(identity)),
+    )
+    found = (
+        ProviderAccount.objects.alias(
+            canonical_provider=canonical_account_identity("provider"),
+            canonical_identity=canonical_account_identity("external_account_id"),
         )
+        .annotate(is_requested=ExpressionWrapper(requested, output_field=BooleanField()))
+        .filter(requested | Q(api_key_fingerprint__in=fingerprints))
+        .order_by(F("is_requested").desc(), "pk")
+        .first()
+    )
+    if found is not None and not found.is_requested:
+        raise _shared_key_refusal(found.external_account_id)
+    return found
 
 
 @sensitive_variables()
@@ -69,17 +95,9 @@ def create_account(
         len(authorization_reference) > 500
     ):
         raise ValidationError(gettext("A service authorization reference is required."))
-    accounts = ProviderAccount.objects.alias(
-        canonical_provider=canonical_account_identity("provider"),
-        canonical_identity=canonical_account_identity("external_account_id"),
-    ).filter(
-        canonical_provider__exact=canonical_account_identity(Value(provider)),
-        canonical_identity__exact=canonical_account_identity(Value(identity)),
-    )
     with transaction.atomic():
-        existing: ProviderAccount | None = accounts.first()
+        existing = _requested_account_or_refusal(provider, identity, fingerprints)
         if existing is None:
-            _refuse_shared_key(fingerprints, other_than=accounts)
             try:
                 with transaction.atomic():
                     created = ProviderAccount.objects.create(
@@ -94,12 +112,9 @@ def create_account(
                         authorized_at=timezone.now(),
                     )
             except IntegrityError:
-                existing = accounts.first()
+                existing = _requested_account_or_refusal(provider, identity, fingerprints)
                 if existing is None:
-                    _refuse_shared_key(fingerprints, other_than=accounts)
-                    existing = accounts.first()
-                    if existing is None:
-                        raise
+                    raise
             else:
                 created.refresh_from_db(fields=("provider", "external_account_id"))
                 record_audit(

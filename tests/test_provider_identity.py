@@ -1,5 +1,6 @@
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier
+from threading import Barrier, get_ident
 from typing import Any
 
 import pytest
@@ -7,6 +8,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, connections, transaction
 from django.db.models.signals import pre_save
+from django.test.utils import CaptureQueriesContext
 
 from pyracast.connections import operations
 from pyracast.connections.models import ProviderAccount
@@ -128,25 +130,55 @@ def test_concurrent_unicode_account_creation_keeps_one_quota_identity() -> None:
     assert AuditEvent.objects.filter(action="provider_account_created").count() == 1
 
 
-def create_with_one_key(admin: User, identity: str) -> int:
+def create_with_one_key(admin: User, identity: str, *, require_new: bool = False) -> int:
     return create_account(
-        admin, provider="fixture", external_account_id=identity, api_key=provider_key()
+        admin,
+        provider="fixture",
+        external_account_id=identity,
+        api_key=provider_key(),
+        require_new=require_new,
     ).pk
 
 
-def commit_before_key_check(
-    monkeypatch: pytest.MonkeyPatch, admin: User, identity: str
-) -> list[int]:
-    refuse = operations._refuse_shared_key
-    committed: list[int] = []
+def keyed_account(admin: User, identity: str, key: str) -> ProviderAccount:
+    return ProviderAccount.objects.create(
+        provider="fixture",
+        external_account_id=identity,
+        encrypted_api_key=encrypt_secret(key),
+        api_key_fingerprint=api_key_fingerprints(key)[0],
+        authorization_reference="race",
+        authorized_by=admin,
+        authorized_at=NOW,
+    )
 
-    def commit_then_refuse(*args: Any, **kwargs: Any) -> None:
+
+def move_key(identity: str, key: str) -> None:
+    ProviderAccount.objects.filter(external_account_id=identity).update(
+        encrypted_api_key=encrypt_secret(key), api_key_fingerprint=api_key_fingerprints(key)[0]
+    )
+
+
+def commit_around_lookups(
+    monkeypatch: pytest.MonkeyPatch,
+    after_lookup: Callable[[], object],
+    at_recovery: Callable[[], object] | None = None,
+) -> list[Any]:
+    look = operations._requested_account_or_refusal
+    caller = get_ident()
+    committed: list[Any] = []
+
+    def interleave(*args: Any, **kwargs: Any) -> ProviderAccount | None:
+        if get_ident() != caller:
+            return look(*args, **kwargs)
         if not committed:
-            committed.append(0)
-            committed[0] = committed_elsewhere(lambda: create_with_one_key(admin, identity))
-        refuse(*args, **kwargs)
+            found = look(*args, **kwargs)
+            committed.append(committed_elsewhere(after_lookup))
+            return found
+        if at_recovery is not None:
+            committed.append(committed_elsewhere(at_recovery))
+        return look(*args, **kwargs)
 
-    monkeypatch.setattr(operations, "_refuse_shared_key", commit_then_refuse)
+    monkeypatch.setattr(operations, "_requested_account_or_refusal", interleave)
     return committed
 
 
@@ -154,7 +186,7 @@ def test_an_equivalent_identity_committed_after_the_lookup_is_returned(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
-    committed = commit_before_key_check(monkeypatch, admin, "STRASSE")
+    committed = commit_around_lookups(monkeypatch, lambda: create_with_one_key(admin, "STRASSE"))
 
     returned = create_with_one_key(admin, "Straße")
 
@@ -167,7 +199,7 @@ def test_another_identity_committed_after_the_lookup_keeps_the_key_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
-    committed = commit_before_key_check(monkeypatch, admin, "STRASSE")
+    committed = commit_around_lookups(monkeypatch, lambda: create_with_one_key(admin, "STRASSE"))
 
     with pytest.raises(ValidationError, match="strasse"):
         create_with_one_key(admin, "other")
@@ -196,49 +228,128 @@ def test_another_identity_inserted_before_the_commit_keeps_the_key_refused(
     assert AuditEvent.objects.filter(action="provider_account_created").count() == 1
 
 
+def key_holder() -> str:
+    return ProviderAccount.objects.get(
+        api_key_fingerprint=api_key_fingerprints(provider_key())[0]
+    ).external_account_id
+
+
 def test_the_requested_identity_given_the_key_during_recovery_is_returned(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
-    refuse = operations._refuse_shared_key
-    fingerprint = api_key_fingerprints(provider_key())[0]
-    holder: list[ProviderAccount] = []
-    requested: list[ProviderAccount] = []
 
-    def account(identity: str, key: str) -> ProviderAccount:
-        return ProviderAccount.objects.create(
-            provider="fixture",
-            external_account_id=identity,
-            encrypted_api_key=encrypt_secret(key),
-            api_key_fingerprint=api_key_fingerprints(key)[0],
-            authorization_reference="race",
-            authorized_by=admin,
-            authorized_at=NOW,
-        )
+    def move_the_key_to_the_requested_identity() -> ProviderAccount:
+        move_key("other", provider_key("OTHER"))
+        return keyed_account(admin, "strasse", provider_key())
 
-    def move_the_key() -> ProviderAccount:
-        ProviderAccount.objects.filter(pk=holder[0].pk).update(
-            encrypted_api_key=encrypt_secret(provider_key("OTHER")),
-            api_key_fingerprint=api_key_fingerprints(provider_key("OTHER"))[0],
-        )
-        return account("strasse", provider_key())
-
-    def interleave(*args: Any, **kwargs: Any) -> None:
-        if not holder:
-            refuse(*args, **kwargs)
-            holder.append(committed_elsewhere(lambda: account("other", provider_key())))
-        else:
-            requested.append(committed_elsewhere(move_the_key))
-            refuse(*args, **kwargs)
-
-    monkeypatch.setattr(operations, "_refuse_shared_key", interleave)
+    committed = commit_around_lookups(
+        monkeypatch,
+        lambda: keyed_account(admin, "other", provider_key()),
+        move_the_key_to_the_requested_identity,
+    )
 
     returned = create_with_one_key(admin, "Straße")
 
-    assert returned == requested[0].pk
-    assert ProviderAccount.objects.get(api_key_fingerprint=fingerprint).pk == returned
+    assert returned == committed[1].pk
+    assert key_holder() == "strasse"
     assert ProviderAccount.objects.count() == 2
     assert not AuditEvent.objects.filter(action="provider_account_created").exists()
+
+
+@pytest.mark.parametrize("require_new", [False, True])
+def test_the_requested_identity_created_during_recovery_takes_precedence_over_the_key_holder(
+    monkeypatch: pytest.MonkeyPatch, require_new: bool
+) -> None:
+    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
+    committed = commit_around_lookups(
+        monkeypatch,
+        lambda: keyed_account(admin, "other", provider_key()),
+        lambda: keyed_account(admin, "strasse", provider_key("OTHER")),
+    )
+
+    if require_new:
+        with pytest.raises(ConflictError):
+            create_with_one_key(admin, "Straße", require_new=True)
+    else:
+        assert create_with_one_key(admin, "Straße") == committed[1].pk
+
+    assert key_holder() == "other"
+    assert ProviderAccount.objects.count() == 2
+    assert not AuditEvent.objects.filter(action="provider_account_created").exists()
+
+
+def test_a_key_moved_to_a_third_account_during_recovery_is_refused_with_its_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
+
+    def move_the_key_to_a_third_account() -> None:
+        move_key("other", provider_key("OTHER"))
+        keyed_account(admin, "third", provider_key())
+
+    commit_around_lookups(
+        monkeypatch,
+        lambda: keyed_account(admin, "other", provider_key()),
+        move_the_key_to_a_third_account,
+    )
+
+    with pytest.raises(ValidationError, match="third"):
+        create_with_one_key(admin, "Straße")
+
+    assert key_holder() == "third"
+    assert ProviderAccount.objects.count() == 2
+    assert not AuditEvent.objects.filter(action="provider_account_created").exists()
+
+
+def test_recovery_that_finds_neither_account_raises_the_unique_violation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
+    commit_around_lookups(
+        monkeypatch,
+        lambda: keyed_account(admin, "other", provider_key()),
+        lambda: move_key("other", provider_key("OTHER")),
+    )
+
+    with pytest.raises(IntegrityError, match="provideraccount_api_key_fingerprint_uniq"):
+        create_with_one_key(admin, "Straße")
+
+    assert list(ProviderAccount.objects.values_list("external_account_id", flat=True)) == ["other"]
+    assert not AuditEvent.objects.filter(action="provider_account_created").exists()
+
+
+def test_recovery_from_a_lost_insert_reads_the_accounts_once() -> None:
+    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
+    raced: list[None] = []
+
+    def insert_competitor(**_: object) -> None:
+        if not raced:
+            raced.append(None)
+            committed_elsewhere(lambda: keyed_account(admin, "other", provider_key()))
+
+    pre_save.connect(insert_competitor, sender=ProviderAccount, weak=False)
+    try:
+        with (
+            CaptureQueriesContext(connection) as queries,
+            pytest.raises(ValidationError, match="other"),
+        ):
+            create_with_one_key(admin, "Straße")
+    finally:
+        pre_save.disconnect(insert_competitor, sender=ProviderAccount)
+
+    statements = [query["sql"] for query in queries.captured_queries]
+    insert = next(
+        index
+        for index, sql in enumerate(statements)
+        if sql.startswith('INSERT INTO "connections_provideraccount"')
+    )
+    recovery_reads = [
+        sql
+        for sql in statements[insert + 1 :]
+        if sql.startswith("SELECT") and '"connections_provideraccount"' in sql
+    ]
+    assert len(recovery_reads) == 1
 
 
 def test_account_index_uses_builtin_unicode_collation() -> None:
