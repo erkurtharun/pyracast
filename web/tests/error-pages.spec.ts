@@ -1,17 +1,19 @@
 import { test, expect } from "./support/test";
-import { mockApi, user } from "./support/workspace";
+import { standInDisplayMode } from "./support/display-mode";
+import { accountWith, mockApi, sessionIdentity } from "./support/workspace";
 
 async function breakSession(page: Parameters<typeof mockApi>[0]) {
+    const account = await mockApi(page);
     let broken = true;
     await page.route("**/api/session/", (route) =>
-        route.fulfill({
-            json: {
-                user: broken
-                    ? { ...user, username: 0 }
-                    : { ...user, can_admin: false, mfa_required: false },
-                csrf_token: "token",
-            },
-        }),
+        broken
+            ? route.fulfill({
+                  json: {
+                      ...sessionIdentity(account.current),
+                      user: { ...account.current?.user, username: 0 },
+                  },
+              })
+            : route.fallback(),
     );
     return () => {
         broken = false;
@@ -21,7 +23,6 @@ async function breakSession(page: Parameters<typeof mockApi>[0]) {
 test("a workspace render failure offers a localized retry", async ({
     page,
 }) => {
-    await mockApi(page);
     const repair = await breakSession(page);
     await page.goto("/app/");
     const failure = page.getByRole("heading", {
@@ -41,7 +42,6 @@ test("the workspace failure text follows the language cookie", async ({
     page,
     baseURL,
 }) => {
-    await mockApi(page);
     await breakSession(page);
     await page
         .context()
@@ -63,7 +63,6 @@ test("the workspace failure text follows the language cookie", async ({
 test("a workspace render failure offers a reload for a window without browser controls", async ({
     page,
 }) => {
-    await mockApi(page);
     const repair = await breakSession(page);
     await page.goto("/app/");
     await expect(
@@ -93,7 +92,6 @@ function startScreen(page: Parameters<typeof mockApi>[0]) {
 test("a workspace render failure leads to the start screen in a new document", async ({
     page,
 }) => {
-    await mockApi(page);
     const repair = await breakSession(page);
     await page.goto("/app/account/");
     await expect(
@@ -164,10 +162,8 @@ test("a failed language hand-off is titled and leads to the start screen without
     expect(attempts).toEqual(["POST"]);
 });
 
-test("a failure of the application frame offers a document reload", async ({
-    page,
-}) => {
-    await page.addInitScript(() => {
+function breakApplicationFrame(page: Parameters<typeof mockApi>[0]) {
+    return page.addInitScript(() => {
         const lang = Object.getOwnPropertyDescriptor(
             HTMLElement.prototype,
             "lang",
@@ -184,6 +180,99 @@ test("a failure of the application frame offers a document reload", async ({
             },
         });
     });
+}
+
+function breakPublicFrame(page: Parameters<typeof mockApi>[0]) {
+    return page.addInitScript(() => {
+        const startsWith = Object.getOwnPropertyDescriptor(
+            String.prototype,
+            "startsWith",
+        )!.value as (
+            this: unknown,
+            search: string,
+            position?: number,
+        ) => boolean;
+        String.prototype.startsWith = function (search, position) {
+            if (String(this) === location.pathname && search === "/app/")
+                throw new Error("The page could not read its address.");
+            return startsWith.call(this, search, position);
+        };
+    });
+}
+
+for (const [kind, address, breakFrame] of [
+    ["an app", "/app/", breakApplicationFrame],
+    ["a public", "/typo/", breakPublicFrame],
+] as const)
+    for (const [surface, mode, title] of [
+        [
+            "a browser tab",
+            "browser",
+            "This page could not be displayed | Pyracast",
+        ],
+        [
+            "an installed window",
+            "standalone",
+            "This page could not be displayed",
+        ],
+    ] as const)
+        test(`a failure of the frame at ${kind} address is titled for ${surface}`, async ({
+            page,
+        }) => {
+            await standInDisplayMode(page, mode);
+            await breakFrame(page);
+            await mockApi(page);
+            await page.goto(address);
+            await expect(
+                page.getByRole("button", {
+                    name: "Reload page / Sayfayı yenile",
+                }),
+            ).toBeVisible();
+            await expect(page).toHaveTitle(title);
+        });
+
+for (const [surface, mode, title] of [
+    ["a browser tab", "browser", "This page could not be displayed | Pyracast"],
+    ["an installed window", "standalone", "This page could not be displayed"],
+] as const)
+    test(`a failure of the frame under a named screen is titled for ${surface}`, async ({
+        page,
+    }) => {
+        await standInDisplayMode(page, mode);
+        await breakApplicationFrame(page);
+        await page.addInitScript(() =>
+            sessionStorage.setItem("frameRepaired", "yes"),
+        );
+        const account = await mockApi(page, {
+            account: { current: accountWith({ language_preference: "en" }) },
+        });
+        let language = "en";
+        const session = () => ({
+            ...sessionIdentity(account.current),
+            language,
+        });
+        await page.route("**/api/session/", (route) =>
+            route.fulfill({ json: session() }),
+        );
+        await page.route("**/api/session/language/", (route) => {
+            language = route.request().postDataJSON().language as string;
+            account.current = accountWith({ language_preference: language });
+            return route.fulfill({ json: session() });
+        });
+        await page.goto("/app/w/1/plants/11/forecast/");
+        await expect(page).toHaveTitle(/^Forecast · East array/);
+        await page.evaluate(() => sessionStorage.removeItem("frameRepaired"));
+        await page.getByLabel("Language", { exact: true }).selectOption("tr");
+        await expect(
+            page.getByRole("button", { name: "Reload page / Sayfayı yenile" }),
+        ).toBeVisible();
+        await expect(page).toHaveTitle(title);
+    });
+
+test("a failure of the application frame offers a document reload", async ({
+    page,
+}) => {
+    await breakApplicationFrame(page);
     await mockApi(page);
     await page.goto("/app/");
     await expect(

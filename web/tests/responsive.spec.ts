@@ -7,6 +7,7 @@ import {
     mockApi,
     paged,
     region,
+    sessionIdentity,
     user,
     tenantRow,
 } from "./support/workspace";
@@ -617,10 +618,10 @@ for (const width of [320, 390, 1440]) {
             page,
         }, testInfo) => {
             await page.setViewportSize({ width, height: 844 });
-            await mockApi(page);
+            const account = await mockApi(page);
             await page.route("**/api/session/", (route) =>
                 route.fulfill({
-                    json: { user, language, csrf_token: "signed-token" },
+                    json: { ...sessionIdentity(account.current), language },
                 }),
             );
             await page.route("**/api/tenants/", (route) =>

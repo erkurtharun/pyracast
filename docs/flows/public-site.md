@@ -6,9 +6,9 @@ a readable page or file whose calls to action hand off to the private applicatio
 
 ## Entry points
 
-- Pages: `web/src/app/page.tsx` (`/`) and `tr/page.tsx` render `WebsiteData` and `HomePage`; `privacy/page.tsx`,
-  `terms/page.tsx` and their `tr/` twins render `LegalPage` with `legalCopy(language, kind)`. All wrap `SiteShell`.
-- Discovery: `sitemap.ts`, `robots.ts`, `opengraph-image.tsx`, `tr/opengraph-image.tsx` (`createSocialImage`), `icon.svg`.
+- Pages: `web/src/app/page.tsx` (`/`) and `web/src/app/tr/page.tsx` render `WebsiteData` and `HomePage`; `web/src/app/privacy/page.tsx`,
+  `web/src/app/terms/page.tsx` and their `tr/` twins render `LegalPage` with `legalCopy(language, kind)`. All wrap `SiteShell`.
+- Discovery: `sitemap.ts`, `robots.ts`, `opengraph-image.tsx`, `web/src/app/tr/opengraph-image.tsx` (`createSocialImage`), `icon.svg`.
 - Handoff: `/app/?signup=1&language=<lang>` (sign-up) and `/app/?language=<lang>` (header sign-in) for `AppRoot`
   (`useLanguageHandoff`) and `RequireUser`; `Auth` links back. Traefik router `frontend` (`deploy/routes.yml`) takes
   every path the `api`, `authentication`, `admin` and `backend` routers do not (`/api`, `/admin`, `/static/`, `/health/`).

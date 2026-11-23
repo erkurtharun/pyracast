@@ -8,6 +8,7 @@ import type { components } from "@/lib/schema";
 import { useApiList, useRefresh } from "@/lib/api/query";
 import { routes } from "@/lib/routes";
 import { useErrorMessage } from "@/ui/form";
+import { usePageTitle } from "@/ui/page-title";
 import { Resource } from "@/ui/resource";
 import { Empty, Notice } from "@/ui/ui";
 import { useForgetDeletion } from "./recent-deletion";
@@ -21,6 +22,7 @@ type Restore =
 
 export function RecycleBin({ tenant }: { tenant: number }) {
     const t = useTranslations("RecycleBin");
+    usePageTitle(t("recycleBin"));
     const format = useFormat();
     const errorMessage = useErrorMessage();
     const router = useRouter();

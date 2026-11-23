@@ -1,11 +1,13 @@
 import { test as base } from "@playwright/test";
-import { CoverageReport } from "monocart-coverage-reports";
-import { coverageOptions } from "../../testing/coverage-options";
+import {
+    addBrowserCoverage,
+    startBrowserCoverage,
+} from "../../testing/coverage-maps";
 
 export { expect, type Page } from "@playwright/test";
 
-// Coverage is read once, when the test ends, and only from the document then shown: what ran in a
-// document the scenario reloaded or left is not counted. A scenario that must be counted ends in
+// Coverage is read once, when the test ends. Whether code that ran in a document the scenario
+// reloaded or left is still counted depends on Chromium, so a scenario that must be counted ends in
 // the document whose behaviour it shows.
 export const test = base.extend<{ coverage: void }>({
     coverage: [
@@ -14,14 +16,13 @@ export const test = base.extend<{ coverage: void }>({
                 await runTest();
                 return;
             }
-            await page.coverage.startJSCoverage({ resetOnNavigation: false });
+            const stop = await startBrowserCoverage(
+                await page.context().newCDPSession(page),
+            );
             try {
                 await runTest();
             } finally {
-                const coverage = await page.coverage.stopJSCoverage();
-                if (coverage.length) {
-                    await new CoverageReport(coverageOptions).add(coverage);
-                }
+                await addBrowserCoverage(await stop());
             }
         },
         { auto: true },

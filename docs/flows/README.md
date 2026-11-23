@@ -61,7 +61,7 @@ sections and a row here.
 | Flow | Covers |
 | --- | --- |
 | [forecast-view](forecast-view.md) | View a plant's generation forecast |
-| [irradiance-forecast-view](irradiance-forecast-view.md) | View the regional irradiance forecast and weather reference |
+| [irradiance-forecast-view](irradiance-forecast-view.md) | View the regional irradiance forecast |
 | [forecast-performance](forecast-performance.md) | Compare measured production with forecasts |
 | [csv-export](csv-export.md) | Download displayed data as CSV |
 

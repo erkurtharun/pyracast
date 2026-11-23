@@ -500,6 +500,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/days/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["tenants_regions_plants_days_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/forecast/": {
         parameters: {
             query?: never;
@@ -810,6 +826,12 @@ export interface components {
             /** Format: email */
             address: string;
             role: components["schemas"]["RecipientRoleEnum"];
+        };
+        AffectedDayOutput: {
+            status: components["schemas"]["OutageScenarioStatusEnum"];
+            /** Format: double */
+            total_mwh: number | null;
+            partial: boolean;
         };
         ApprovalInput: {
             review_fingerprint: string;
@@ -1323,6 +1345,18 @@ export interface components {
          * @enum {string}
          */
         CurrentCalibrationOutputOriginEnum: "manual" | "automatic";
+        /**
+         * @description * `configuration_unavailable` - Configuration Unavailable
+         *     * `forecast_unavailable` - Forecast Unavailable
+         *     * `estimated_actuals_unavailable` - Estimated Actuals Unavailable
+         *     * `calculation_out_of_range` - Calculation Out Of Range
+         * @enum {string}
+         */
+        DayUnavailableReasonEnum:
+            | "configuration_unavailable"
+            | "forecast_unavailable"
+            | "estimated_actuals_unavailable"
+            | "calculation_out_of_range";
         DaylightOutput: {
             policy?: string;
             energy_scope?: string;
@@ -1703,6 +1737,44 @@ export interface components {
          * @enum {string}
          */
         EvidenceStateEnum: "current" | "stale";
+        ForecastDayOutput: {
+            /** Format: date */
+            date: string;
+            timezone: string;
+            source_kind: components["schemas"]["ForecastSourceKindEnum"];
+            freshness: components["schemas"]["FreshnessEnum"];
+            stale_reason:
+                | (
+                      | components["schemas"]["StaleReasonEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+            unavailable_reason:
+                | (
+                      | components["schemas"]["DayUnavailableReasonEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+            /** Format: date-time */
+            collected_at: string | null;
+            /** Format: double */
+            total_mwh: number | null;
+            partial: boolean;
+            affected: components["schemas"]["AffectedDayOutput"] | null;
+            rows: components["schemas"]["ForecastDayRowOutput"][];
+        };
+        /** @description Energy in MWh on the measurement basis of the plant. */
+        ForecastDayRowOutput: {
+            /** Format: date-time */
+            start: string;
+            /** Format: date-time */
+            end: string;
+            /** Format: double */
+            mwh: number | null;
+            /** Format: double */
+            affected_mwh: number | null;
+            sources: string[] | null;
+        };
         ForecastOutput: {
             /** Format: date */
             date: string;
@@ -2531,6 +2603,14 @@ export interface components {
             message: string;
             current: components["schemas"]["PlantOutput"];
         };
+        PlantDaysOutput: {
+            plant_id: number;
+            name: string;
+            /** Format: date */
+            today: string;
+            forecast: components["schemas"]["ForecastDayOutput"][];
+            production: components["schemas"]["SavedProductionDayOutput"][];
+        };
         /**
          * @description * `suspended` - Suspended
          *     * `connection_unavailable` - Connection Unavailable
@@ -2795,6 +2875,17 @@ export interface components {
             /** Format: double */
             total_mwh: number | null;
             complete: boolean;
+        };
+        ProductionDayRowOutput: {
+            /** Format: date-time */
+            start: string;
+            /** Format: date-time */
+            end: string;
+            /** Format: double */
+            mwh: number | null;
+            quality: string | null;
+            source: string | null;
+            provisional: boolean | null;
         };
         ProductionDiagnosticOutput: {
             status: components["schemas"]["DiagnosticStatusEnum"];
@@ -3155,6 +3246,15 @@ export interface components {
         };
         RevisionInput: {
             expected_revision: number;
+        };
+        SavedProductionDayOutput: {
+            /** Format: date */
+            date: string;
+            timezone: string;
+            /** Format: double */
+            total_mwh: number | null;
+            complete: boolean;
+            rows: components["schemas"]["ProductionDayRowOutput"][];
         };
         SeenAllOutput: {
             marked: number;
@@ -5872,6 +5972,74 @@ export interface operations {
             };
             /** @description Send the request as JSON. */
             415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests; Retry-After gives the seconds to wait. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    tenants_regions_plants_days_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plant_id: number;
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlantDaysOutput"];
+                };
+            };
+            /** @description Sign-in is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Access was refused. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The addressed item or page does not exist. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

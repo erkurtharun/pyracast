@@ -4,10 +4,10 @@ An operator generates three JSON secrets locally with `deploy/host_secrets.py` a
 
 ## Entry points
 
-- Operator commands `uv run --locked python deploy/host_secrets.py create|check|rotate TARGET|drop-fallbacks|set KEY` (`main`); files go to the repository's git-ignored `secrets/` (`--directory` overrides). `create` writes the three files and asks the mail questions; `check` tests them against the host contract; `rotate secret-key|runtime-password|owner-password` replaces one generated value (the broker and database superuser passwords are refused: they only initialise a new data directory); `drop-fallbacks` finishes a secret-key rotation; `set` stores one setting typed without echo.
+- Operator commands `uv run --locked python deploy/host_secrets.py create|check|rotate TARGET|drop-fallbacks|set KEY|unset KEY` (`main`); files go to the repository's git-ignored `secrets/` (`--directory` overrides). `create` writes the three files and asks the mail questions; `check` tests them against the host contract; `rotate secret-key|runtime-password|owner-password` replaces one generated value (the broker and database superuser passwords are refused: they only initialise a new data directory); `drop-fallbacks` finishes a secret-key rotation; `set` stores one setting typed without echo; `unset` removes a runtime key the application no longer reads, after the release that stopped reading it (it refuses a key the host contract knows or the file lacks, and prints only the key's name).
 - Operator commands `gcloud secrets versions add pyracast-runtime|pyracast-migration|pyracast-database --data-file=secrets/<name>.json` (manual, `docs/DEPLOYMENT.md` "2. Add secrets"). `deploy/authorize_gmail.py` edits `runtime.json` in between (own flow).
-- Terraform variables `runtime_secret_version` and `database_secret_version` (`infra/terraform/variables.tf`), rendered into `/etc/pyracast/host.json` (mode `0600`) by the `startup-script` metadata (`infra/terraform/main.tf`, `templates/startup.sh.tftpl`) that runs at boot. Terraform creates the three secrets (`google_secret_manager_secret.application`) but never a version; the migration version is the GitHub variable `GCP_MIGRATION_SECRET_VERSION` (empty reads `latest`).
-- `deploy/install-release.sh` (root, run by `deploy/release_unit.py` from the `release.yml` step "Transfer the verified release and deploy through IAP") runs `deploy/runtime_secrets.py` (`main`) plain, which writes the runtime, broker and database files, then with `--migration`, which writes `migration.env`. It then applies the staged passwords to the roles (`deploy/bootstrap_database.py`) and runs `check_secrets` (see `database-migration`, `encryption-key-rotation`). `ExecStartPre` of `pyracast.service` (`templates/startup.sh.tftpl`) runs the helper plain whenever the unit starts: at boot, from the startup script, and from the `systemctl start` that ends the release. A resume of the previous release runs it plain too.
+- Terraform variables `runtime_secret_version` and `database_secret_version` (`infra/terraform/variables.tf`), rendered into `/etc/pyracast/host.json` (mode `0600`) by the `startup-script` metadata (`infra/terraform/main.tf`, `infra/terraform/templates/startup.sh.tftpl`) that runs at boot. Terraform creates the three secrets (`google_secret_manager_secret.application`) but never a version; the migration version is the GitHub variable `GCP_MIGRATION_SECRET_VERSION` (empty reads `latest`).
+- `deploy/install-release.sh` (root, run by `deploy/release_unit.py` from the `release.yml` step "Transfer the verified release and deploy through IAP") runs `deploy/runtime_secrets.py` (`main`) plain, which writes the runtime, broker and database files, then with `--migration`, which writes `migration.env`. It then applies the staged passwords to the roles (`deploy/bootstrap_database.py`) and runs `check_secrets` (see `database-migration`, `encryption-key-rotation`). `ExecStartPre` of `pyracast.service` (`infra/terraform/templates/startup.sh.tftpl`) runs the helper plain whenever the unit starts: at boot, from the startup script, and from the `systemctl start` that ends the release. A resume of the previous release runs it plain too.
 
 ## Sequence
 
@@ -22,7 +22,7 @@ sequenceDiagram
     participant RS as runtime_secrets.py
     participant RUN as "/run/pyracast/releases/RELEASE"
     participant SD as systemd
-    Op->>HS: "create and answer mail prompts, check, later rotate, set, drop-fallbacks"
+    Op->>HS: "create and answer mail prompts, check, later rotate, set, unset, drop-fallbacks"
     HS-->>Op: "refuse an existing file or bad input (exit 2), else write 0600 files, no value printed"
     Op->>SM: "gcloud secrets versions add, three secrets"
     Op->>TF: "pin versions, apply, boot or rerun writes /etc/pyracast/host.json"
@@ -50,7 +50,7 @@ No PostgreSQL table is read or written (`bootstrap_database.py` only sets the ro
 
 | Table | R/W | What |
 | --- | --- | --- |
-| `secrets/*.json` (workstation) | W `host_secrets.py`, R upload | `create` once; `rotate`, `set` and `drop-fallbacks` replace a file atomically; removed by the operator after upload |
+| `secrets/*.json` (workstation) | W `host_secrets.py`, R upload | `create` once; `rotate`, `set`, `unset` and `drop-fallbacks` replace a file atomically with mode 0600; removed by the operator after upload |
 | Secret Manager `pyracast-runtime`, `-migration`, `-database` | W operator, R VM and deploy identity | JSON objects of environment strings |
 | `/etc/pyracast/host.json` | W startup script, R `runtime_secrets.py` through `deploy/host_contract.py` | pinned version resource names from Terraform |
 | `migration.json` in the runner temp dir and the VM stage `/run/pyracast-release-<sha>-<run>-<attempt>` | W release job, R `--migration` | removed by the installer cleanup and the workflow cleanup |
@@ -68,7 +68,7 @@ No PostgreSQL table is read or written (`bootstrap_database.py` only sets the ro
 | --- | --- |
 | `create` finds a secret file, or the mail backend is not `gmail`/`smtp`, or the SMTP host is empty | Exit 2, no file written (an existing key is preserved); a failed write removes what it already wrote |
 | `check` finds a problem | Each one named by file and key, never a value; exit 1 |
-| `rotate`, `set` or `drop-fallbacks` on a file that is not environment strings, a runtime file without a key, a managed or unknown key, or no fallbacks to drop | Exit 2, the file is unchanged |
+| `rotate`, `set`, `unset` or `drop-fallbacks` on a file that is not environment strings, a runtime file without a key, a managed or unknown key for `set`, a key the application reads or the file lacks for `unset`, or no fallbacks to drop | Exit 2, the file is unchanged |
 | Version variable below 1 or not an integer; or a pinned version that does not exist | Plan error; or (inferred, not run) plan and apply succeed and boot or release fails at access time |
 | Any error in `runtime_secrets.py` | Exit 1 (at boot `pyracast.service` fails in `ExecStartPre`) with one line "Secret preparation failed (CATEGORY): ..." where the category is configuration, identity, permission, version, unavailable, format, write or unexpected, and the event `pyracast_secrets_failed` (an alert) naming the category and the secret. Answers 429, 5xx and network errors are retried for 60 s; no secret text is printed |
 | That or any other release failure before maintenance (staging, image pull, deploy check, role convergence, database wait, plan, `check_secrets`) | Abort; the serving release's secrets are untouched because each release has its own directory; `migration.json` and `migration.env` removed |
@@ -87,5 +87,5 @@ No PostgreSQL table is read or written (`bootstrap_database.py` only sets the ro
 
 ## Tests
 
-- `tests/test_host_secrets.py`: `create`, `check`, `rotate`, `set` and `drop-fallbacks` (private files, no printed value, refusals, atomic replacement). `tests/test_deployment_secrets.py`: entry validation without leaking the payload, broker separation, percent-encoding and literal `$`, key sets, the staged directory of the resolved release, one identity token, retry with backoff, failures by category and write failures. `tests/test_host_contract.py`, `tests/test_deployment_helpers.py` (`runtime_secrets.py` parses as Python 3.12, Ubuntu's system Python). `deploy/test-release.sh` (CI job `deployment`): release failure modes with `runtime_secrets.py` mocked; pins migration file cleanup, their survival after SIGKILL and `migration.json` after a lock timeout.
+- `tests/test_host_secrets.py`: `create`, `check`, `rotate`, `set`, `unset` and `drop-fallbacks` (private files, no printed value, refusals, atomic replacement). `tests/test_deployment_secrets.py`: entry validation without leaking the payload, broker separation, percent-encoding and literal `$`, key sets, the staged directory of the resolved release, one identity token, retry with backoff, failures by category and write failures. `tests/test_host_contract.py`, `tests/test_deployment_helpers.py` (`runtime_secrets.py` parses as Python 3.12, Ubuntu's system Python). `deploy/test-release.sh` (CI job `deployment`): release failure modes with `runtime_secrets.py` mocked; pins migration file cleanup, their survival after SIGKILL and `migration.json` after a lock timeout.
 - No Playwright test applies. Gaps: real Secret Manager and metadata answers (the helper is tested against stubs), the real `--migration` wiring end to end, and the `RuntimeDirectory` removal.

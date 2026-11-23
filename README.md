@@ -1,100 +1,59 @@
 # Pyracast
 
-Multi-tenant irradiance forecasts and plant energy estimates, with a Django API,
-Next.js customer interface and MFA-protected operations workspace. PostgreSQL owns
-jobs, quotas and immutable acquisitions; RabbitMQ/Dramatiq runs background work.
+Multi-tenant irradiance forecasts and daily plant energy estimates: a Django API, a Next.js
+interface for customers and an MFA-protected operations console at `/admin/`. PostgreSQL holds all
+durable state, including jobs and provider quotas; RabbitMQ wakes the Dramatiq workers.
 
-- [Architecture and business rules](docs/ARCHITECTURE.md)
-- [Calculation, calibration and provider contracts](docs/IRRADIANCE.md)
-- [Google Cloud deployment](docs/DEPLOYMENT.md)
-- [Contributor and agent instructions](AGENTS.md)
+Reconstructed irradiance and plant transfer estimates are model proxies. Fixture tests and
+successful provider requests do not establish measured accuracy.
 
-Reconstructed irradiance and plant transfer estimates are model proxies.
-Fixture tests and successful provider requests do not establish measured accuracy.
+## Documentation
 
-## Development setup
+| Read | For |
+| --- | --- |
+| [docs/README.md](docs/README.md) | Index of every document |
+| [docs/STACK.md](docs/STACK.md) | Versions and the external rules each part relies on |
+| [docs/flows/README.md](docs/flows/README.md) | One page per user, operator and background flow |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System-wide design decisions |
+| [docs/IRRADIANCE.md](docs/IRRADIANCE.md) | Calculations, calibration and provider contracts |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Production setup, release and recovery |
+| [AGENTS.md](AGENTS.md) | Working agreement for contributors and coding agents |
 
-Use CPython **3.15.2**, [uv](https://docs.astral.sh/uv/getting-started/installation/),
-Node.js **26.13.0+** and npm. Run commands from the repository root in PowerShell
-or a Unix shell:
+## Set up
+
+Install CPython **3.15.2**, [uv](https://docs.astral.sh/uv/getting-started/installation/) and
+Node.js **26.13.0+** with npm. From the repository root, in PowerShell or a Unix shell:
 
 ```text
 uv sync --locked
 npm --prefix web ci --ignore-scripts
 ```
 
-Provide PostgreSQL and RabbitMQ, copy `.env.example` to ignored `.env` and fill its
-values. Processes load that file from their working directory without overriding
-existing environment variables or expanding values. Plant-specific Solcast keys
-and reference settings belong in the operations workspace, not `.env`.
+Copy `.env.example` to `.env` (ignored); processes read it from their working directory and never
+override variables already set. Set `PYRACAST_SECRET_KEY` to a long random value, because nothing
+generates it and Django refuses an empty one; with the example's `PYRACAST_DEBUG=1` and console
+mail, every other empty entry may stay empty. Plant-specific Solcast accounts and keys belong in
+the operations console, not in `.env`.
 
-For isolated development dependencies:
+The launcher below starts a missing local PostgreSQL itself (pinned binaries on Windows, a pinned
+Docker image on Ubuntu), and a missing RabbitMQ on Windows only. To start them by hand, pass the
+port `.env` names:
 
 ```text
-uv run --locked python -m scripts.start_postgres
+uv run --locked python -m scripts.start_postgres --port 5432
+uv run --locked python -m scripts.start_rabbitmq
 ```
 
-This starts checksum-pinned PostgreSQL binaries on Windows (data in
-`%LOCALAPPDATA%\pyracast\postgres`) or a pinned Docker image with the volume
-`pyracast-postgres-data` on Ubuntu, using loopback-only trust authentication. A rerun
-reports or restarts the same cluster; never use it for production. Tests need
-permission to create databases. CI adds `--ephemeral --non-durable` (a throwaway
-cluster without `fsync`, `synchronous_commit` or `full_page_writes`).
-
-On Windows, `uv run --locked python -m scripts.start_rabbitmq` starts the pinned
-development broker with its state in `%LOCALAPPDATA%\pyracast\rabbitmq`; `start.cmd`
-runs both helpers when a dependency is down. On Ubuntu with Docker:
+`scripts.start_rabbitmq` is Windows-only. On Ubuntu, run RabbitMQ in Docker:
 
 ```text
 docker run -d --name pyracast-rabbitmq --hostname pyracast-rabbitmq -v pyracast-rabbitmq-data:/var/lib/rabbitmq -p 127.0.0.1:5672:5672 rabbitmq:4.4.1@sha256:183272aa2ff82718cabeef343de8d9a900931ea65fda4e563fed2a6d9efde578
 ```
 
-### Local settings
-
-The complete example is [`.env.example`](.env.example). The main groups are:
-
-| Settings | Purpose |
-| --- | --- |
-| `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` | PostgreSQL connection; the development helper uses port 55432 |
-| `PYRACAST_SECRET_KEY` | Shared application encryption/session secret; preserve it with backups |
-| `PYRACAST_DEBUG`, `PYRACAST_HOSTS` | Local debug mode and accepted hostnames |
-| `PYRACAST_PUBLIC_ORIGIN`, `PYRACAST_CSRF_ORIGINS` | Frontend origin and allowed mutation origins |
-| `PYRACAST_RABBITMQ_URL` | Broker connection; required unless `PYRACAST_DEBUG=1` |
-| `PYRACAST_EMAIL_BACKEND` | `console` for local development; `gmail` or `smtp` for delivery |
-| `EPIAS_USERNAME`, `EPIAS_PASSWORD` | Optional shared EP?A? transparency-service credentials |
-| `PYRACAST_WEATHER_ENABLED`, `PYRACAST_OPEN_METEO_API_KEY` | Auxiliary weather switch and optional commercial key |
-
-Console mail requires `PYRACAST_DEBUG=1`. Verification/reset codes appear in the API
-log; reminders appear in the mailer log. These logs contain usable private codes,
-and messages are not delivered to an inbox. Gmail uses only `gmail.send` with
-the `PYRACAST_GMAIL_CLIENT_ID`, `PYRACAST_GMAIL_CLIENT_SECRET` and
-`PYRACAST_GMAIL_REFRESH_TOKEN` credentials; follow the local authorization steps in
-the [deployment guide](docs/DEPLOYMENT.md#2-add-secrets). For SMTP, configure the
-`PYRACAST_EMAIL_*` connection values and `PYRACAST_FROM_EMAIL` from your authorized
-provider. STARTTLS defaults to port 587; implicit TLS uses port 465 and
-`PYRACAST_EMAIL_SSL=1` with `PYRACAST_EMAIL_TLS=0`. `pyracast check_mail` opens the
-configured transport without sending.
-
-Open-Meteo's free service is for evaluation/non-commercial use; commercial operation
-needs the [appropriate subscription](https://open-meteo.com/en/pricing) or disabled
-weather. EP?A? plant IDs/EIC and weather coordinates remain database records.
+Both helpers are for development only and listen on loopback; the PostgreSQL helper trusts every
+loopback connection.
 
 ## Run locally
-
-On the configured Windows development machine, double-click `start.cmd`.
-It checks dependencies, syncs locked packages, compiles the gettext catalogs, migrates
-the database, starts the API, frontend, collection worker, mailer and dispatcher, then opens
-`http://127.0.0.1:3000`. Use `start.cmd --no-browser` to suppress the browser.
-Overlapping launcher commands wait up to ten minutes for the current operation;
-the first dependency installation can take a few minutes.
-
-`status.cmd` inspects processes; `stop.cmd` requests graceful shutdown.
-PostgreSQL/RabbitMQ remain running. The launcher reuses recorded workspace processes
-and rejects foreign processes on ports 3000/8000. Logs and process identities live
-in ignored `.dev/`. A shutdown timeout preserves the process identity for a later
-stop attempt.
-
-The portable terminal equivalents are:
 
 ```text
 uv run --locked python -m scripts.dev start
@@ -102,254 +61,60 @@ uv run --locked python -m scripts.dev status
 uv run --locked python -m scripts.dev stop
 ```
 
-`stop --frontend-only` leaves background collection running. Dependency recovery
-from saved native paths is Windows-only; on Ubuntu or with remote dependencies,
-provide running PostgreSQL/RabbitMQ yourself.
-
-For manual startup, compile the gettext catalogs with
-`uv run --locked python scripts/translations.py` and apply migrations, then run these in
-separate terminals:
-
-```text
-uv run --locked pyracast runserver --noreload
-npm --prefix web run dev
-uv run --locked pyracast dispatch --loop
-uv run --locked pyracast worker --threads 4
-uv run --locked pyracast worker --queues notifications --threads 2
-```
-
-The dedicated notification process keeps provider waits and calibration from
-occupying mail threads. Use `PYRACAST_DEBUG=1` and allow
-`http://localhost:3000 http://127.0.0.1:3000` in `PYRACAST_CSRF_ORIGINS`.
-The frontend proxies Django routes to port 8000. For a different development API,
-copy `web/.env.example` to ignored `web/.env.local` and set `DJANGO_API_ORIGIN`.
+`start` compiles the translation catalogs, migrates the database and starts the API, frontend,
+collection worker, mailer and dispatcher; open `http://127.0.0.1:3000`. `stop` leaves PostgreSQL
+and RabbitMQ running. On Windows, `start.cmd`, `status.cmd` and `stop.cmd` do the same, and
+`start.cmd` also opens the browser unless given `--no-browser`. Processes, logs and failure
+messages: [local development stack](docs/flows/local-dev-stack.md).
 
 ### First administrator and demo
 
 ```text
-uv run --locked pyracast migrate --noinput
 uv run --locked pyracast bootstrap_admin --email admin@example.com
 uv run --locked pyracast fixture_demo --username USERNAME_SHOWN_BY_BOOTSTRAP
 ```
 
-`bootstrap_admin` asks for a new password and shows a private QR code, setup key and
-link; scan it in a Unicode terminal wide enough for the complete code, keep all three
-out of logs and tickets, and type the current code. It also enrolls an administrator
-whose second factor was removed with `reset_mfa --email ADDRESS --reason lost_device`.
-`--dry-run` shows what either command would do. Administrators verify email, sign in
-with password/TOTP and save recovery codes in **Account settings**; console changes
-then need a confirmation with the authenticator from the last five minutes.
-
-Sign in at `http://127.0.0.1:3000/`. Administrators open `/admin/`; customers open
-their plant portfolio. The synthetic demo processes its durable job directly,
-without RabbitMQ or provider requests. Its 7.2 kWh/m? output is a fixture,
-not an accuracy reference.
-
-## Operations
-
-In `/admin/`, **Overview** lists pending reviews, **Plants** searches plant/company
-records, **Provider accounts** shows each account's plants and request budget,
-**Operations** shows collection and email outcomes, and **Settings** controls the
-shared recipient limit. To approve a plant, review its declaration,
-select an authorized Solcast account, save verified reference settings, then
-**Validate connection** and **Approve plant**. Validation consumes account quota;
-saving setup does not. Approval queues collection for the worker.
-
-Solcast account authorization and Toolkit settings require operator evidence.
-The application encrypts write-only API keys and never creates provider accounts.
-A key is replaced on its provider account page; its plants then revalidate within quota.
-
-Customers configure forecast times in **Data collection**, EP?A? IDs in
-**Automatic production**, calibration in **Calibration**, and saved-forecast emails
-in **Settings ? Email reminders**. Keep dispatcher/workers running. Emails make no
-provider requests. Historical production, forecast vintages and estimated actuals
-remain separate; see the linked contracts for source selection and numerical limits.
-
-Monitor independently of the email service:
-
-```text
-uv run --locked pyracast check_delivery_health
-```
-
-It emits aggregate JSON and exits nonzero for missing/stale dispatcher progress,
-overdue work, provider blocks, failed/uncertain deliveries or incomplete next-day
-forecasts. Inspect individual outcomes in **Operations**. An `uncertain` send needs
-mail-provider acceptance evidence before any manual resend; provider acceptance is not
-proof of inbox delivery.
-
-### Database and secret maintenance
-
-Django migrations are the sole schema owner. Commit model changes with migrations;
-never change applied operations to repair data.
-
-```text
-uv run --locked pyracast makemigrations --check --dry-run
-uv run --locked pyracast migrate --plan
-uv run --locked pyracast migrate --noinput
-uv run --locked pyracast migrate --check
-```
-
-The overridden `migrate` command uses a PostgreSQL session advisory lock, a
-five-second lock timeout and a fifteen-minute statement timeout. Use a direct
-connection, not transaction-pooled PgBouncer or Django connection pooling.
-Reviewed maintenance can override `--lock-timeout-seconds` and
-`--statement-timeout-seconds`. Rehearse changes against a verified restored backup;
-see [database rollout](docs/ARCHITECTURE.md#database-invariants-and-rollout).
-
-During application-secret rotation, retain the old key in
-`PYRACAST_SECRET_KEY_FALLBACKS`, run `uv run --locked pyracast reencrypt_secrets --verify`,
-then remove the fallback once `pyracast check_secrets --require-primary` exits 0. Do not discard legacy
-authenticators, mark unverified emails verified, or invent account identities to
-bypass an upgrade failure.
-
-### Administrative data commands
-
-The UI owns ordinary configuration. These commands support authorized imports and
-operator workflows; inspect their `--help` for required declarations and limits:
-
-| Command | Purpose |
-| --- | --- |
-| `configure_plant` | Create/revise capacity, mounting and measurement declarations |
-| `import_production` | Atomically import interval energy CSV for a pinned configuration |
-| `calibrate_plant` | Queue a durable fit; `--run` executes it locally without RabbitMQ |
-| `activate_calibration` | Activate an eligible candidate or restore `--baseline` |
-| `import_historical_reference` | Archive an authorized JSON or CSV export through the console upload checks |
-| `normalize_reference_capacity` | Create an explicitly authorized capacity-only derived acquisition (`--dry-run` first) |
-
-Import paths must stay inside the repository. Use an ignored local directory.
-Production CSV values are interval energy, never instantaneous MW or cumulative
-meter readings; preserve units, offsets, night zeros and quality labels. Historical
-exports need matching source settings and retain their actual import time.
-These commands do not establish accuracy or bypass tenant/authorization checks.
-
-`web/openapi.json` (regenerated by `npm --prefix web run api:generate`) describes the
-customer API. `/api/session/` supplies the session projection and masked CSRF token;
-mutations send JSON with `X-CSRFToken`. Platform operations exist only in the `/admin/` console.
+`bootstrap_admin` asks for a password and shows a private authenticator QR code, setup key and
+link; keep them out of logs. `fixture_demo` creates a synthetic plant and its first forecast
+without RabbitMQ or provider requests; its output is a fixture, not an accuracy reference. See
+[platform administrator bootstrap](docs/flows/platform-admin-bootstrap.md) and
+[fixture demo](docs/flows/fixture-demo.md).
 
 ## Verification
 
 ```text
 uv run --locked python scripts/check.py
-uv build --no-sources
-npm --prefix web exec -- playwright install chromium
-npm --prefix web run check
 ```
 
-The backend gate runs formatting, Ruff, strict mypy, the translation, ER-diagram,
-migration and Django checks, then parallel pytest with the 100% branch-coverage floor
-configured in `pyproject.toml`. With `web/node_modules` installed it also runs
-`scripts/generate_api_schema.py --check` and `npm --prefix web run check:static`;
-without it, it prints one `SKIPPED web` line; with it but no `npm` on PATH, it exits 2.
-`--static-only` skips pytest, `--tests-only` compiles the gettext catalogs and runs pytest, and
-arguments after `--` are passed to pytest (add `--no-cov` when selecting tests: the floor applies
-to the whole suite); a direct `pytest` call needs `uv run --locked python scripts/translations.py`
-first. It runs as many pytest
-workers as physical cores, at most six, unless `PYTEST_XDIST_AUTO_NUM_WORKERS` is
-set, and a test that runs longer than 300 seconds prints every thread's stack. Use
-`uv run --locked ruff format .` for formatting. Deliberate dependency upgrades
-must review the lock diff and rerun checks; prereleases are disallowed.
+It runs the static stages, the API schema and web static checks (only when `web/node_modules`
+exists), then parallel pytest at the coverage floor of `pyproject.toml`. `--static-only` skips
+pytest, `--tests-only` runs only pytest, and arguments after `--` go to pytest (add `--no-cov` when
+selecting tests). A direct `pytest` call needs `uv run --locked python scripts/translations.py`
+first. Stages, skips and CI jobs: [developer quality gate](docs/flows/developer-quality-gate.md).
 
-CI verifies Windows/Ubuntu installation, PostgreSQL migrations, API behavior,
-RabbitMQ delivery and isolated wheel imports. Routine provider tests use synthetic
-or sanitized captured responses. Local Windows checks do not prove native Ubuntu,
-live-provider accuracy or inbox delivery.
+Further checks:
 
-Additional checks:
-
-| Command or opt-in | Boundary |
+| Command | Checks |
 | --- | --- |
-| `npm --prefix web run check:coverage` | Production-browser V8 coverage of authored TypeScript; writes `web/coverage/lcov.info` and fails below `web/coverage-floor.json` |
-| `npm --prefix web run build`, then `uv run --locked pytest tests/e2e -m browser -n 1 --no-cov` | Browser ? real Django/PostgreSQL behind the production routes and web build, fixture providers/mail |
-| `PYRACAST_LIVE_QUEUE=1` and dedicated `PYRACAST_RABBITMQ_URL` | Real-broker tests; uses default/calibration queues |
-| `uv run --no-project --python 3.15.2 python scripts/check_scientific.py` | Locked optional scientific stack with checksum-pinned HDF5 build; pvlib recomputation of the tracker gain table |
+| `npm --prefix web exec -- playwright install chromium`, then `npm --prefix web run check` | Web static checks and the mocked-API browser suite |
+| `npm --prefix web run build`, then `uv run --locked pytest tests/e2e -m browser -n 1 --no-cov` with PostgreSQL running and the catalogs compiled | Browser scenarios against real Django and PostgreSQL behind the production build |
+| `uv run --no-project --python 3.15.2 python scripts/check_scientific.py` | The optional `scientific` extra (needs a C compiler) and the pvlib recomputation of the tracker gain table |
+| `npm --prefix web run api:generate` | Regenerates `web/openapi.json` and its types after an API change; commit both |
+| `uv build --no-sources` | Packaging |
 
-The scientific helper needs a C compiler. It checks installation, linked HDF5 and a
-pvlib calculation, then recomputes the tracker gain reference table with pvlib and fails
-when the table or `tracking_gain` leaves its tolerance; it does not check irradiance
-provider accuracy. Persistent installation of the
-`scientific` extra needs [native h5py setup](https://docs.h5py.org/en/stable/build.html);
-Windows also needs an open `os.add_dll_directory` handle before importing h5py/pvlib.
-The default application does not require this extra.
+Live checks reach real services and run only on request; the Solcast capture spends account quota:
 
-Regenerate the API schema and types after API changes:
+| Command or setting | Checks |
+| --- | --- |
+| `PYRACAST_LIVE_QUEUE=1` with a dedicated `PYRACAST_RABBITMQ_URL`, then `uv run --locked pytest tests/test_live_queue.py tests/test_calibration_runtime.py tests/test_metering_runtime.py tests/test_notifications_runtime.py --no-cov` | Real-broker delivery tests ([worker runtime](docs/flows/worker-runtime.md)) |
+| `uv run --locked python scripts/check_solcast.py --live --binding-id BINDING_ID --kind settings` (or `--kind forecast`) | One quota-counted Solcast capture per binding, kind and UTC day ([provider connection setup](docs/flows/provider-connection-setup.md)) |
+| `PYRACAST_EPIAS_LIVE=1`, `EPIAS_LIVE_PLANT_ID` and `EPIAS_LIVE_EIC`, then `uv run --locked pytest tests/test_epias_live.py --no-cov` | Authorized EPİAŞ transparency-service access |
 
-```text
-npm --prefix web run api:generate
-```
-
-This uses production defaults without reading local application settings or credentials.
-Commit both generated files. `uv run --locked python scripts/generate_api_schema.py --check`
-generates the schema in a temporary directory, formats both files without writing to `web/`
-and fails on any byte difference with the committed files; CI and `check.py` run it.
-
-### Dependency and static analysis
+Dependency audit:
 
 ```text
 uv export --locked --all-groups --all-extras --no-emit-project --no-hashes --output-file audit-requirements.txt
 uv run --locked pip-audit --strict --no-deps --disable-pip --requirement audit-requirements.txt
 ```
 
-Dependabot proposes dependency/image/action updates; no auto-merge is configured.
-CI pins workflow actions to immutable commits.
-
-[SonarQube Cloud](https://sonarcloud.io/project/overview?id=erkurtharun_pyracast)
-requires automatic analysis disabled and these GitHub settings:
-
-| Kind | Name | Value |
-| --- | --- | --- |
-| Secret | `SONAR_TOKEN` | Project analysis token |
-| Variable | `SONAR_ORGANIZATION` | `erkurtharun` |
-| Variable | `SONAR_PROJECT_KEY` | `erkurtharun_pyracast` |
-| Variable | `SONAR_ENABLED` | `true` after configuration |
-
-The quality gate consumes backend `coverage.xml` and frontend LCOV. Fork,
-Dependabot and merge-group runs do not receive an analysis token. The scanner
-targets Python 3.15; analyzer support does not replace the executable checks.
-
-### Authorized live checks
-
-Configure the approved Solcast binding in the admin first:
-
-```text
-uv run --locked python scripts/check_solcast.py --live --binding-id BINDING_ID --kind settings
-uv run --locked python scripts/check_solcast.py --live --binding-id BINDING_ID --kind forecast
-```
-
-Each kind is allowed once per binding/UTC day and reserves shared account quota before HTTP,
-without automatic retries. Sanitized captures go to ignored `.dev/solcast/`.
-Other applications' quota use remains unknown; coordinate consumers. Never create a
-second account record to reset the budget or infer AC/DC semantics from output.
-
-EP?A? checks require `PYRACAST_EPIAS_LIVE=1`, `EPIAS_LIVE_PLANT_ID` and
-`EPIAS_LIVE_EIC`, then `uv run --locked pytest tests/test_epias_live.py --no-cov`.
-The captured [forecast](tests/fixtures/solcast_forecasts.json) and
-[estimated-actuals](tests/fixtures/solcast_estimated_actuals.json) fixtures preserve
-integration evidence, not matched irradiance labels. Large historical downloads
-and generated case artifacts stay local and ignored.
-
-## Deployment and contributor tools
-
-Production setup, HTTPS, secrets, backups and delivery commands live in the
-[deployment guide](docs/DEPLOYMENT.md). The initial deployment runs the web, API,
-workers, broker and PostgreSQL on one 4 GiB Compute Engine VM. Hourly off-host
-database backups target a one-hour recovery point; VM downtime is accepted.
-Deployment remains disabled until the operator configures the project and sets
-`GCP_DEPLOY_ENABLED=true`.
-
-[AGENTS.md](AGENTS.md) is the shared workflow; `CLAUDE.md` imports it without copying
-instructions. Both clients use the same skill paths listed there. Hook adapters in
-`.codex/hooks.json` and `.claude/settings.json` call `.agents/hooks.py` to format
-edited Python files (ruff) and web files (the local prettier, when `web/node_modules`
-exists), to refuse direct and IDE reads of generated output, credentials and backups,
-and to refuse agent shell commands that publish (see `AGENTS.md`). It is an accident
-guard: shell reads, search and dependency execution remain available. Run the full
-check explicitly before delivery.
-Codex hooks must be enabled and trusted through `/hooks`; changed hook hashes need
-new trust. Claude needs workspace trust. Personal settings and MCP credentials stay ignored.
-
-`ctx7` and `code-review-graph` are user-level CLIs. Initialize the graph with
-`uv run --locked python scripts/agent_graph.py build`; use the wrapper for updates
-and queries too. It shares an external per-user cache via child-only `CRG_HOME`
-and `CRG_DATA_DIR`, honors an external absolute override, and rejects checkout paths.
-The optional [Sonar MCP server](https://github.com/SonarSource/sonarqube-mcp-server)
-uses ignored local configuration and Java 21+ or Docker.
+Scanning and dependency updates: [dependency and code scanning](docs/flows/dependency-and-code-scanning.md).

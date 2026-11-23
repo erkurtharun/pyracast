@@ -1,6 +1,7 @@
 "use client";
 import { useTranslations } from "next-intl";
 import type { Tenant } from "@/lib/api";
+import { usePageTitle } from "@/ui/page-title";
 import { InviteMember } from "./members/invite-member";
 import { MemberList } from "./members/member-list";
 import { PendingInvitations } from "./members/pending-invitations";
@@ -13,6 +14,7 @@ export function WorkspaceMembers({
     userId: number;
 }) {
     const t = useTranslations("WorkspaceMembers");
+    usePageTitle(`${t("title")} · ${tenant.name}`);
     return (
         <>
             <div className="page-heading">

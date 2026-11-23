@@ -4,6 +4,7 @@ node_modules/
 playwright-report/
 test-results/
 integration-results/
+production-results/
 .env.local
 *.tsbuildinfo
 next-env.d.ts

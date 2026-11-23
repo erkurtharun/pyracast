@@ -1,4 +1,5 @@
 "use client";
+import { partialMatchKey, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -6,7 +7,6 @@ import {
     Suspense,
     useContext,
     useEffect,
-    useState,
     useTransition,
     type ReactNode,
 } from "react";
@@ -14,15 +14,17 @@ import type { Tenant } from "@/lib/api";
 import { deviceZone } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
 import { contactEmail } from "@/lib/public-metadata";
-import { cadence, useApiList } from "@/lib/api/query";
+import { keys } from "@/lib/api/keys";
+import { answerSentAt, cadence, QueryOwner, useApiList } from "@/lib/api/query";
 import { routes, screenOf, type Screen } from "@/lib/routes";
 import {
+    confirmAnswer,
     signOut,
+    useSessionClock,
     useSessionState,
     type SessionUser,
 } from "@/lib/session-client";
 import { Brand } from "@/ui/brand";
-import { useErrorMessage } from "@/ui/form";
 import { LanguageSelect } from "@/ui/language-select";
 import { Empty, Notice, RefreshFailed } from "@/ui/ui";
 import { WorkspaceAccess } from "@/ui/workspace-access";
@@ -87,10 +89,10 @@ export function WorkspaceShell({
     children: ReactNode;
 }) {
     const t = useTranslations("Dashboard");
-    const format = useFormat();
+    const errors = useTranslations("Errors");
     const router = useRouter();
     const screen = screenOf(usePathname());
-    const { session } = useSessionState();
+    const { session, changed } = useSessionState();
     const user = session?.user;
     if (!user) throw new Error("The workspace shell needs a signed-in user.");
     const tenants = useApiList(
@@ -98,9 +100,20 @@ export function WorkspaceShell({
         {},
         { poll: cadence.background },
     );
-    const endingSoon = useEndingSoon(session?.expires_at ?? null);
-    const [logoutError, setLogoutError] = useState("");
-    const errorMessage = useErrorMessage();
+    const owner = useContext(QueryOwner);
+    const client = useQueryClient();
+    useEffect(() => {
+        if (owner === undefined) return;
+        const list = keys.path(owner, "/api/tenants/");
+        return client.getQueryCache().subscribe((event) => {
+            const sentAt = answerSentAt(event);
+            if (
+                sentAt !== undefined &&
+                partialMatchKey(event.query.queryKey, list)
+            )
+                confirmAnswer(sentAt);
+        });
+    }, [client, owner]);
     const rows = tenants.data?.results ?? [];
     const tenant =
         tenantId === undefined
@@ -237,15 +250,7 @@ export function WorkspaceShell({
                     <button
                         title={t("signOut")}
                         aria-label={t("signOut")}
-                        onClick={() =>
-                            void (async () => {
-                                try {
-                                    await signOut();
-                                } catch (error) {
-                                    setLogoutError(errorMessage(error));
-                                }
-                            })()
-                        }
+                        onClick={() => void signOut().catch(() => {})}
                     >
                         ↪
                     </button>
@@ -267,16 +272,10 @@ export function WorkspaceShell({
                         screen === "account" ? "account-settings" : undefined
                     }
                 >
-                    {endingSoon && (
-                        <Notice>
-                            {t("sessionEndingSoon", {
-                                time: format.time(endingSoon, deviceZone(), {
-                                    timeStyle: "short",
-                                }),
-                            })}
-                        </Notice>
+                    {session.expires_at && (
+                        <SessionEndingSoon expiresAt={session.expires_at} />
                     )}
-                    {logoutError && <Notice error>{logoutError}</Notice>}
+                    {changed && <Notice>{errors("sessionChanged")}</Notice>}
                     <RefreshFailed resource={tenants} />
                     <WorkspaceAccess value={screen === "account" || canManage}>
                         <Workspace value={{ tenant, user, navigating }}>
@@ -327,16 +326,20 @@ export function WorkspaceShell({
     );
 }
 
-function useEndingSoon(expiresAt: string | null) {
-    const [endingAt, setEndingAt] = useState<string>();
-    useEffect(() => {
-        if (!expiresAt) return;
-        // Five minutes (300 000 ms) before the absolute session limit.
-        const timer = setTimeout(
-            () => setEndingAt(expiresAt),
-            Math.max(0, new Date(expiresAt).getTime() - Date.now() - 300_000),
-        );
-        return () => clearTimeout(timer);
-    }, [expiresAt]);
-    return endingAt;
+const endingSoonMs = 5 * 60_000;
+
+function SessionEndingSoon({ expiresAt }: { expiresAt: string }) {
+    const t = useTranslations("Dashboard");
+    const format = useFormat();
+    const now = useSessionClock();
+    if (now < new Date(expiresAt).getTime() - endingSoonMs) return null;
+    return (
+        <Notice>
+            {t("sessionEndingSoon", {
+                time: format.time(expiresAt, deviceZone(), {
+                    timeStyle: "short",
+                }),
+            })}
+        </Notice>
+    );
 }

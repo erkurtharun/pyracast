@@ -117,9 +117,6 @@ PINS: dict[str, list[Text | ActionInput]] = {
         Text("README.md", rf"CPython \*\*{VERSION}\*\*"),
         Text("README.md", rf"--python {VERSION}"),
         Text("AGENTS.md", rf"CPython {VERSION}"),
-        Text("docs/ARCHITECTURE.md", rf"CPython \*\*{VERSION}\*\*"),
-        Text("docs/ARCHITECTURE.md", rf"^Python {VERSION} is fixed"),
-        Text("docs/ARCHITECTURE.md", rf"\[Python {VERSION}\]"),
         Text("docs/DEPLOYMENT.md", rf"Python {VERSION} and uv"),
         Text("docs/STACK.md", rf"CPython {VERSION}"),
     ],
@@ -150,8 +147,7 @@ PINS: dict[str, list[Text | ActionInput]] = {
         Text("deploy/postgres/Dockerfile", r"FROM postgres:(\d+\.\d+)-"),
         Text("scripts/start_postgres.py", r'^ARCHIVE_VERSION = "(\d+\.\d+)"$'),
         Text("docs/DEPLOYMENT.md", r"PostgreSQL (\d+\.\d+) on Alpine"),
-        Text("docs/STACK.md", r"PostgreSQL (\d+\.\d+) \(production image and CI tests\)"),
-        Text("docs/ARCHITECTURE.md", r"CI tests run production's (\d+\.\d+)"),
+        Text("docs/STACK.md", r"PostgreSQL (\d+\.\d+) in every cluster"),
     ],
     "RabbitMQ": [
         Text("deploy/rabbitmq/Dockerfile", rf"^FROM rabbitmq:{VERSION}@"),
@@ -312,6 +308,126 @@ def test_ci_clusters_run_the_production_postgresql_image() -> None:
     assert start_postgres.PRODUCTION_DOCKERFILE == ROOT / "deploy/postgres/Dockerfile"
 
 
+def postgresql_minors(text: str) -> set[str]:
+    return set(
+        re.findall(
+            r"postgres(?:ql)?[\W_]{0,12}(?:v|version[\W_]{1,12})?(\d+\.\d+)(?!\d)", text, re.I
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "text", ["FROM postgres:18.6-alpine", "PostgreSQL: 18.6", "the PostgreSQL (18.6) client"]
+)
+def test_a_postgresql_minor_is_read_from_an_image_source(text: str) -> None:
+    assert postgresql_minors(text) == {"18.6"}
+
+
+def stack_postgresql_minors(stack: str, major: str) -> set[str]:
+    """Every minor of `major` in the PostgreSQL row and section of the stack reference, whatever
+    surrounds it, and every version after the product's name, whatever its major; other numbers
+    (the driver, linked framework releases) are not server versions."""
+    lines = stack.splitlines()
+    start = lines.index("## PostgreSQL")
+    end = next(
+        (index for index in range(start + 1, len(lines)) if re.match(r"#{1,2} ", lines[index])),
+        len(lines),
+    )
+    text = "\n".join(
+        [*(line for line in lines if line.startswith("| PostgreSQL |")), *lines[start:end]]
+    )
+    return postgresql_minors(text) | {
+        f"{found}.{minor}"
+        for found, minor in re.findall(r"(?<!\d)(?<!\d\.)(\d+)\.(\d+)(?!\d)", text)
+        if found == major
+    }
+
+
+def stack_reference() -> tuple[str, str, str]:
+    """The stack reference, the production PostgreSQL minor and its major."""
+    production = single("PostgreSQL in production and CI")
+    stack = (ROOT / "docs/STACK.md").read_text(encoding="utf-8")
+    return stack, production, production.split(".")[0]
+
+
+def with_postgresql_line(line: str) -> tuple[str, str, str]:
+    """The stack reference with `line` in its PostgreSQL section, or in place of the version
+    cell's start when `line` begins with it; `{other}` is another minor of the production major,
+    `{older}` a minor of the previous major."""
+    stack, production, major = stack_reference()
+    other = f"{major}.{int(production.split('.')[1]) + 1}"
+    filled = line.format(
+        major=major, other=other, older=f"{int(major) - 1}.9", production=production
+    )
+    cell = f"PostgreSQL {production} in every cluster"
+    page = (
+        stack.replace(cell, filled, 1)
+        if filled.startswith(cell)
+        else stack.replace("## PostgreSQL\n", f"## PostgreSQL\n\n{filled}\n", 1)
+    )
+    assert page != stack
+    return page, other, major
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Development runs **PostgreSQL** **{other}**.",
+        "Development runs PostgreSQL `{other}`.",
+        "| Backups | PostgreSQL **{other}** dumps |",
+        "the PostgreSQL ({other}) client",
+        "- Development runs {other}.1.",
+        "Clusters run *pg{other}*.",
+        "PostgreSQL {production} in every cluster, development {other}",
+    ],
+)
+def test_another_minor_of_the_production_major_in_the_stack_postgresql_text_is_read(
+    line: str,
+) -> None:
+    page, other, major = with_postgresql_line(line)
+
+    assert other in stack_postgresql_minors(page, major)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Development runs PostgreSQL {older}.",
+        "Development runs **PostgreSQL** `{older}`.",
+        "Development runs **PostgreSQL** **{older}**.",
+        "Development runs PostgreSQL\n{older} with the same settings.",
+        "PostgreSQL {production} in every cluster, development PostgreSQL {older}",
+        "PostgreSQL {production} in every cluster, development **PostgreSQL** **{older}**",
+        "Development runs _PostgreSQL_ (`{older}`).",
+        "Development runs PostgreSQL v{older}.",
+        "Development runs PostgreSQL version {older}.",
+        "Development runs _PostgreSQL_\n    __{older}__ with the same settings.",
+        "PostgreSQL {production} in every cluster, development _PostgreSQL_ (`{older}`)",
+        "PostgreSQL {production} in every cluster, development PostgreSQL v{older}",
+    ],
+)
+def test_a_version_after_the_postgresql_name_in_the_stack_text_is_read_whatever_its_major(
+    line: str,
+) -> None:
+    page, _, major = with_postgresql_line(line)
+
+    assert f"{int(major) - 1}.9" in stack_postgresql_minors(page, major)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "[PostgreSQL docs](https://www.postgresql.org/docs/{major}/index.html)",
+        "psycopg 3.3.9 is the driver",
+        "moving within {major}.x needs no dump",
+    ],
+)
+def test_a_major_a_link_or_the_driver_names_no_other_postgresql_minor(line: str) -> None:
+    page, _, major = with_postgresql_line(line)
+
+    assert stack_postgresql_minors(page, major) == {single("PostgreSQL in production and CI")}
+
+
 def test_no_image_source_names_another_postgresql_minor() -> None:
     production = single("PostgreSQL in production and CI")
 
@@ -319,11 +435,15 @@ def test_no_image_source_names_another_postgresql_minor() -> None:
         (found.relative_to(ROOT).as_posix(), version)
         for path in IMAGE_SOURCES
         for found in ROOT.glob(path)
-        for version in re.findall(
-            r"postgres(?:ql)?:? ?(\d+\.\d+)\b", found.read_text(encoding="utf-8"), re.I
-        )
+        for version in postgresql_minors(found.read_text(encoding="utf-8"))
         if version != production
     } == set()
+
+
+def test_the_stack_reference_names_only_the_production_postgresql_minor() -> None:
+    stack, production, major = stack_reference()
+
+    assert stack_postgresql_minors(stack, major) == {production}
 
 
 def test_the_build_backend_range_admits_the_pinned_uv() -> None:

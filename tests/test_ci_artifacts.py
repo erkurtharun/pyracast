@@ -8,7 +8,7 @@ from tests.support.workflows import WORKFLOWS, ci_jobs, release_jobs, step, work
 SONAR = WORKFLOWS.parents[1] / "sonar-project.properties"
 UPLOAD = "actions/upload-artifact@"
 DOWNLOAD = "actions/download-artifact@"
-REPORTS = ("pytest-results-", "playwright-results-")
+REPORTS = ("pytest-results-", "playwright-results-", "playwright-production-results-")
 GUARD = "Require the artifacts the producing jobs uploaded"
 NEEDS_OUTPUT = re.compile(r"\$\{\{ needs\.(?P<job>[\w-]+)\.outputs\.(?P<key>[\w-]+) \}\}")
 ENV = re.compile(r"\$\{\{ env\.(?P<name>\w+) \}\}")

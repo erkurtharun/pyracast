@@ -594,6 +594,7 @@ RELEASE_TESTED_JOBS = {
     "verify_windows",
     "web_ubuntu",
     "web_windows",
+    "web_production",
     "scientific",
     "audit",
 }

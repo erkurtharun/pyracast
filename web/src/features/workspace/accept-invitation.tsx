@@ -1,10 +1,11 @@
 "use client";
 import { useTranslations } from "next-intl";
+import { useRef, useState } from "react";
 import { api } from "@/lib/api/client";
-import { authRequest } from "@/lib/auth-api";
 import { routes } from "@/lib/routes";
-import { useSessionState } from "@/lib/session-client";
+import { sessionState, signOut, useSessionState } from "@/lib/session-client";
 import { AsyncButton } from "@/ui/form";
+import { usePageTitle } from "@/ui/page-title";
 import { InvitationDetails, type PreviewState } from "./invitation-preview";
 import { clearWorkspaceInvitation } from "./workspace-invitation";
 
@@ -16,7 +17,35 @@ export function AcceptInvitation({
     preview: PreviewState;
 }) {
     const t = useTranslations("WorkspaceMembers");
+    usePageTitle(t("joinWorkspace"));
     const { session } = useSessionState();
+    const [accepting, setAccepting] = useState(false);
+    const claimed = useRef(false);
+    const claim = () => {
+        if (claimed.current || sessionState().signOut.status !== "idle")
+            return false;
+        claimed.current = true;
+        return true;
+    };
+    const accept = async () => {
+        if (!claim()) return;
+        setAccepting(true);
+        try {
+            await api.post("/api/invitations/accept/", {
+                body: { token: invitationToken },
+            });
+        } catch (error) {
+            claimed.current = false;
+            setAccepting(false);
+            throw error;
+        }
+        if (sessionState().signOut.status !== "idle") return;
+        clearWorkspaceInvitation();
+        window.location.replace(routes.workspaces());
+    };
+    const switchAccount = () => {
+        if (claim()) void signOut({ keepInvitation: true }).catch(() => {});
+    };
     return (
         <main className="auth-page">
             <section className="auth-card">
@@ -27,28 +56,21 @@ export function AcceptInvitation({
                     <AsyncButton
                         permitted
                         errorTitle={t("acceptFailed")}
-                        onClick={async () => {
-                            await api.post("/api/invitations/accept/", {
-                                body: { token: invitationToken },
-                            });
-                            clearWorkspaceInvitation();
-                            window.location.replace(routes.workspaces());
-                        }}
+                        onClick={accept}
                     >
                         {t("accept")}
                     </AsyncButton>
                 )}
-                <AsyncButton
-                    permitted
-                    variant="secondary"
-                    errorTitle={t("signOutFailed")}
-                    onClick={async () => {
-                        await authRequest("auth/session", "DELETE");
-                        window.location.replace(routes.invitation());
-                    }}
-                >
-                    {t("useAnotherAccount")}
-                </AsyncButton>
+                <div>
+                    <button
+                        type="button"
+                        className="button secondary"
+                        disabled={accepting}
+                        onClick={switchAccount}
+                    >
+                        {t("useAnotherAccount")}
+                    </button>
+                </div>
                 <button
                     type="button"
                     className="text-button"

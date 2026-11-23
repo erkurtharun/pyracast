@@ -1,11 +1,13 @@
 "use client";
 import { useTranslations } from "next-intl";
 import { useSessionState } from "@/lib/session-client";
+import { usePageTitle } from "@/ui/page-title";
 import { AccountSecurity } from "./account-security";
 import { EmailChange } from "./email-change";
 
 export function AccountSettings() {
     const t = useTranslations("Dashboard");
+    usePageTitle(t("accountSettings"));
     const user = useSessionState().session?.user;
     if (!user) return null;
     return (

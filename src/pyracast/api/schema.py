@@ -49,7 +49,7 @@ class AutoSchema(openapi.AutoSchema):
     ) -> dict[str, Any] | None:
         operation = super().get_operation(path, path_regex, path_prefix, method, registry)
         if operation is not None:
-            route = re.sub(r"\{(\w+)\}", r"<int:\1>", path.removeprefix("/"))
+            route = re.sub(r"\{(\w+)}", r"<int:\1>", path.removeprefix("/"))
             policy = ROUTE_POLICIES[route][self.method]
             for status in documented_refusals(policy, self.method, operation):
                 declared = operation["responses"].get(status, {}).get("content")

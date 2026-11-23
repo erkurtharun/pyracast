@@ -232,34 +232,162 @@ function webCodes(file: string, literals: Set<string>) {
         ts.ScriptTarget.Latest,
     );
     ts.forEachChild(source, function visit(node): void {
-        if (ts.isStringLiteral(node) && CODE.test(node.text))
+        if (ts.isStringLiteralLike(node) && CODE.test(node.text))
             literals.add(node.text);
         ts.forEachChild(node, visit);
     });
 }
 
-// The codes a family can label: every lower-case code a string literal of the backend or a screen
-// holds, and every Python f-string that composes one. Migrations freeze retired values.
-function codePatterns(root: string): RegExp[] {
+type EnumerationMembers = {
+    module: string;
+    enumeration: string;
+    definedIn: string;
+};
+type FirstArguments = {
+    module: string;
+    call: string;
+};
+type Producer = string | EnumerationMembers | FirstArguments;
+export type Producers = Readonly<Record<string, readonly Producer[]>>;
+
+// Each code family's producers, from the repository root; a code no producer yields labels nothing.
+const PRODUCERS: Producers = {
+    "Calibrations.values": ["src/pyracast/plants/numerics.py"],
+    "Calibrations.status_messages": [
+        { module: "src/pyracast/plants/numerics.py", call: "FitResult" },
+        {
+            module: "src/pyracast/plants/calibration_runs.py",
+            enumeration: "CalibrationStatus",
+            definedIn: "src/pyracast/plants/models.py",
+        },
+        {
+            module: "src/pyracast/plants/training.py",
+            enumeration: "CalibrationStatus",
+            definedIn: "src/pyracast/plants/models.py",
+        },
+    ],
+    "Calibrations.reasons": ["src/pyracast/plants/numerics.py"],
+    "CalibrationAutomation.reasons": [
+        "src/pyracast/plants/automation.py",
+        "src/pyracast/plants/calibration_runs.py",
+        {
+            module: "src/pyracast/plants/activation.py",
+            enumeration: "ErrorCode",
+            definedIn: "src/pyracast/errors.py",
+        },
+    ],
+    "ForecastPerformance.reasons": ["src/pyracast/plants/performance.py"],
+    "Forecast.qualityFlags": [
+        "src/pyracast/calculation.py",
+        "src/pyracast/forecasts/intraday.py",
+        "src/pyracast/forecasts/sources.py",
+        "src/pyracast/irradiance/__init__.py",
+        "src/pyracast/plants/automatic_forecast.py",
+        "src/pyracast/plants/current_forecast.py",
+        "src/pyracast/plants/forecast_sources.py",
+        "src/pyracast/plants/forecasting.py",
+        "src/pyracast/plants/history.py",
+        "src/pyracast/plants/incident_forecasts.py",
+        "src/pyracast/plants/numerics.py",
+        "web/src/features/forecast/panel/model.ts",
+    ],
+    "Outages.proposalReasons": [
+        {
+            module: "src/pyracast/change_requests/policy.py",
+            enumeration: "ErrorCode",
+            definedIn: "src/pyracast/errors.py",
+        },
+        "web/src/features/plant/outage/model.ts",
+    ],
+    "ProductionHistory.reasons": ["src/pyracast/plants/production.py"],
+};
+
+const ENUMERATION_MEMBER = /^[ \t]+([A-Z][A-Z0-9_]*) = (["'])([a-z0-9_]+)\2/gm;
+
+function enumerationValues(
+    root: string,
+    producer: EnumerationMembers,
+): string[] {
+    const definition = readFileSync(
+        path.join(root, producer.definedIn),
+        "utf8",
+    );
+    const body =
+        new RegExp(
+            `^class ${producer.enumeration}\\b.*\\n((?:[ \\t]+.*\\n?|\\n)*)`,
+            "m",
+        ).exec(definition)?.[1] ?? "";
+    const values = new Map(
+        [...body.matchAll(ENUMERATION_MEMBER)].map(([, member, , value]) => [
+            member,
+            value,
+        ]),
+    );
+    const code = readFileSync(path.join(root, producer.module), "utf8").replace(
+        PYTHON_TOKEN,
+        " ",
+    );
+    const reference = new RegExp(
+        `\\b${producer.enumeration}\\.([A-Z][A-Z0-9_]*)\\b`,
+        "g",
+    );
+    return [...code.matchAll(reference)].flatMap(([, member]) => {
+        const value = member === undefined ? undefined : values.get(member);
+        return value === undefined ? [] : [value];
+    });
+}
+
+// The text up to the first comma stands for the first argument: a comma in it only drops a code.
+function firstArgumentValues(root: string, producer: FirstArguments): string[] {
+    const code = readFileSync(path.join(root, producer.module), "utf8");
+    const literals = new Set<string>();
+    const call = new RegExp(`\\b${producer.call}\\(([^,]*)`, "g");
+    for (const [, argument] of code.matchAll(call))
+        if (argument !== undefined) pythonCodes(argument, literals, new Set());
+    return [...literals];
+}
+
+function codePatterns(root: string, producers: readonly Producer[]): RegExp[] {
     const literals = new Set<string>();
     const composed = new Set<string>();
-    for (const file of files(path.join(root, "src", "pyracast"), /\.py$/))
-        if (!file.split(path.sep).includes("migrations"))
+    for (const producer of producers) {
+        if (typeof producer !== "string") {
+            const values =
+                "call" in producer
+                    ? firstArgumentValues(root, producer)
+                    : enumerationValues(root, producer);
+            for (const value of values) literals.add(value);
+            continue;
+        }
+        const file = path.join(root, producer);
+        if (producer.endsWith(".py"))
             pythonCodes(readFileSync(file, "utf8"), literals, composed);
-    for (const file of files(path.join(root, "web", "src"), /\.tsx?$/))
-        webCodes(file, literals);
+        else webCodes(file, literals);
+    }
     return [...literals, ...composed].map((code) => new RegExp(`^${code}$`));
 }
 
-export function unusedKeys(web: string, messages: object): string[] {
+export function unusedKeys(
+    web: string,
+    messages: object,
+    producers: Producers = PRODUCERS,
+): string[] {
     const use = keyUse(web);
-    const codes = codePatterns(path.join(web, ".."));
+    const root = path.join(web, "..");
+    const codes = new Map(
+        [...use.families].map((family) => [
+            family,
+            codePatterns(root, producers[family] ?? []),
+        ]),
+    );
     return messageKeys(messages).filter((key) => {
         if (key.startsWith(`${ENUMS}.`) || use.used.has(key)) return false;
         const family = [...use.families].find((name) =>
             key.startsWith(`${name}.`),
         );
         const code = family && key.slice(family.length + 1);
-        return !code || !codes.some((pattern) => pattern.test(code));
+        return (
+            !code || !codes.get(family)?.some((pattern) => pattern.test(code))
+        );
     });
 }

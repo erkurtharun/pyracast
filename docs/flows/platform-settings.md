@@ -4,7 +4,7 @@ A platform administrator (active staff superuser with authenticator evidence) op
 
 ## Entry points
 
-- Screen: `regions/templates/admin/workspace/settings.html`, extending `admin/workspace/base.html` (rail and mobile menu link "Settings"). It is a Django template, not Next.js.
+- Screen: `regions/templates/admin/workspace/settings.html`, extending `src/pyracast/regions/templates/admin/workspace/base.html` (rail and mobile menu link "Settings"). It is a Django template, not Next.js.
 - `GET|POST /admin/settings/` (URL name `admin:workspace_settings`) -> `pyracast.platform_admin.pages.settings` -> `read_models.settings_context`, `recipient_limit.crowded_plants` and `newly_paused`, `WorkspaceSettingsForm` (`platform_admin/forms.py`, validation only) and `pyracast.notifications.operations.set_recipient_limit`. Other methods get 405.
 - `/admin/notifications/notificationsettings/` (changelist, `1/change/`, `1/history/`) -> `pyracast.platform_admin.records.NotificationSettingsAdmin`: a read-only view of the same row (no add, change or delete route or permission). No console template links it.
 - Readers of the value: `notifications.operations.recipient_limit` (callers: `configure_reminders`, `scheduler._create_slot`, `jobs.process_notification`, `jobs._mark_transmit` with the share lock; `overview.reminder_overview`, `plants_at_recipient_limit` and `settings_context` without it).

@@ -16,7 +16,7 @@ SESSION = json.dumps(
         "session_tag": None,
     }
 ).encode()
-APP = b"<!doctype html><html><head><title>Pyracast workspace</title></head></html>"
+APP = b"<!doctype html><html><head><title>Pyracast</title></head></html>"
 
 
 def site(answers: dict[str, list[tuple[int, bytes]]]) -> Callable[[str], tuple[int, bytes]]:

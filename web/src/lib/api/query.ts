@@ -6,6 +6,7 @@ import {
     useQuery,
     useQueryClient,
     type DefaultError,
+    type QueryCacheNotifyEvent,
     type QueryKey,
 } from "@tanstack/react-query";
 import { useLocale } from "next-intl";
@@ -43,7 +44,7 @@ export function createQueryClient() {
 export const QueryOwner = createContext<string | undefined>(undefined);
 
 type Page<T> = { results: T[]; next: string | null };
-type Fetched<T> = { value: T; requests: number };
+type Fetched<T> = { value: T; requests: number; sentAt?: number };
 
 export async function fetchList<T>(url: string): Promise<Fetched<Page<T>>> {
     const first = await send<Page<T>>({ method: "GET", url });
@@ -134,7 +135,10 @@ function useLoaded<T>(
     const queryKey = keys.request(owner, path, options, locale);
     const query = useQuery({
         queryKey,
-        queryFn: () => read(url),
+        queryFn: async () => {
+            const sentAt = Date.now();
+            return { ...(await read(url)), sentAt };
+        },
         select: (fetched) => fetched.value,
         placeholderData: languagePlaceholder(queryKey),
         refetchInterval: (query) =>
@@ -157,6 +161,15 @@ function useLoaded<T>(
         replace: (value) =>
             client.setQueryData<Fetched<T>>(queryKey, { value, requests: 1 }),
     };
+}
+
+// When the read whose answer a cache event stored was sent; a cached or placeholder result stores none.
+export function answerSentAt(event: QueryCacheNotifyEvent) {
+    if (event.type !== "updated" || event.action.type !== "success")
+        return undefined;
+    // Query Core marks setQueryData successes as manual.
+    if (event.action.manual) return undefined;
+    return (event.action.data as Fetched<unknown> | undefined)?.sentAt;
 }
 
 export function useApiQuery<P extends PathFor<"get">>(

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { ESLint } from "eslint";
 import { expect, test } from "@playwright/test";
@@ -71,6 +72,76 @@ test("accessibility rules hold in every component", async () => {
             "jsx-a11y-x/no-static-element-interactions",
         ]);
     }
+});
+
+test("code generated from strings is refused in every source kind", async () => {
+    const typed = [
+        "export function probe(source: string) {",
+        "    eval(source);",
+        "    setTimeout(source, 1);",
+        "    return new Function(source);",
+        "}",
+        "",
+    ].join("\n");
+    for (const file of [
+        "src/lib/routes.ts",
+        "src/ui/ui.tsx",
+        "tests/support/test.ts",
+    ]) {
+        expect(await rules(file, typed), file).toEqual([
+            "@typescript-eslint/no-implied-eval",
+            "@typescript-eslint/no-implied-eval",
+            "no-eval",
+        ]);
+    }
+    expect(
+        await rules(
+            "testing/run-coverage.mjs",
+            [
+                "export function probe(source) {",
+                "    eval(source);",
+                '    globalThis.setTimeout("probe()", 1);',
+                "    return new Function(source);",
+                "}",
+                "",
+            ].join("\n"),
+        ),
+    ).toEqual(["no-eval", "no-implied-eval", "no-new-func"]);
+});
+
+test("the admin console scripts refuse code generated from strings", async () => {
+    const { scripts } = JSON.parse(
+        readFileSync(path.join(web, "package.json"), "utf8"),
+    ) as { scripts: Record<string, string> };
+    const [, config, directory] =
+        /&& cd \.\. && eslint --config (\S+) (\S+)$/.exec(scripts.lint ?? "") ??
+        [];
+    expect(directory).toBe("src/pyracast/regions/static/pyracast");
+    const root = path.join(web, "..");
+    const consoleScripts = new ESLint({
+        cwd: root,
+        overrideConfigFile: config,
+    });
+    const probe = [
+        '"use strict";',
+        "eval(source);",
+        'setTimeout("probe()", 1);',
+        "new Function(source);",
+        "",
+    ].join("\n");
+    const ruleIds = async (script: string) => {
+        const [result] = await consoleScripts.lintText(probe, {
+            filePath: path.join(root, directory!, script),
+        });
+        return result!.messages.map((message) => message.ruleId).sort();
+    };
+    for (const script of ["admin-historical.js", "admin-workspace.js"])
+        expect(await ruleIds(script), script).toEqual([
+            "no-eval",
+            "no-implied-eval",
+            "no-new-func",
+        ]);
+    expect(await ruleIds("hypothetical.js")).toEqual([]);
 });
 
 test("configuration scripts are linted as JavaScript modules", async () => {

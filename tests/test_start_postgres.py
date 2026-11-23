@@ -110,6 +110,14 @@ def test_the_port_argument_overrides_pgport(
     assert options == "-h 127.0.0.1 -p 5432"
 
 
+def test_without_a_port_or_pgport_the_server_listens_on_the_application_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PGPORT", raising=False)
+
+    assert start_postgres.parse([]).port == 5432
+
+
 def test_durable_data_lives_in_the_per_user_data_directory(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -155,6 +163,10 @@ def windows_cluster(
         "database": False,
         "createdb_fails": False,
         "version": start_postgres.ARCHIVE_VERSION,
+        "port": "55432",
+        "accepting": True,
+        "status": None,
+        "pid": None,
     }
     root = tmp_path / "pyracast" / "postgres"
 
@@ -172,6 +184,24 @@ def windows_cluster(
     def execute(command: list[str], **options: object) -> subprocess.CompletedProcess[str]:
         if Path(command[0]).name == "pg_isready.exe":
             return subprocess.CompletedProcess(command, 0, stdout="")
+        if Path(command[0]).name == "pg_ctl.exe" and command[1] == "status":
+            if server["status"] is not None:
+                return subprocess.CompletedProcess(
+                    command, server["status"], stdout="", stderr="pg_ctl: access denied\n"
+                )
+            if not server["running"]:
+                return subprocess.CompletedProcess(command, 3, stdout="")
+            pid = server["pid"] or [
+                "4242",
+                str(root / "data"),
+                "1700000000",
+                server["port"],
+                "",
+                "127.0.0.1",
+            ]
+            if pid != ["vanished"]:
+                (root / "data" / "postmaster.pid").write_text("\n".join(pid), encoding="utf-8")
+            return subprocess.CompletedProcess(command, 0, stdout="")
         if Path(command[0]).name == "pg_ctl.exe":
             assert command[1:] == ["--version"]
             version = f"pg_ctl (PostgreSQL) {server['version']}\n"
@@ -188,7 +218,11 @@ def windows_cluster(
     monkeypatch.setattr(start_postgres, "run", run)
     monkeypatch.setattr(start_postgres, "execute", execute)
     monkeypatch.setattr(start_postgres, "start_server", lambda *args: run(*args[0]))
-    monkeypatch.setattr(start_postgres, "accepts_connections", lambda port: server["running"])
+    monkeypatch.setattr(
+        start_postgres,
+        "accepts_connections",
+        lambda port: server["running"] and server["accepting"] and port == server["port"],
+    )
     monkeypatch.setattr(start_postgres, "windows_preflight", lambda binary, env: None)
     monkeypatch.setattr(
         start_postgres, "ARCHIVE_SHA256", hashlib.sha256(archive.read_bytes()).hexdigest()
@@ -245,6 +279,72 @@ def test_windows_provisioning_creates_the_database_an_interrupted_initialization
     assert server["database"]
 
 
+def test_a_bare_rerun_names_the_port_of_a_windows_cluster_running_on_another_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root, commands, server = windows_cluster(monkeypatch, tmp_path)
+    start_postgres.provision_windows(root, "55432", ())
+    server["running"] = True
+    commands.clear()
+    monkeypatch.delenv("PGPORT", raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(start_postgres, "durable_root", lambda: root.parent)
+    monkeypatch.setattr(start_postgres, "require_durable", lambda path: None)
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"running on port 55432, not 5432; nothing was changed\. Set PGPORT=55432",
+    ):
+        start_postgres.main([])
+
+    assert commands == []
+
+
+def test_a_windows_cluster_running_on_the_requested_port_is_checked_and_never_started_again(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root, commands, server = windows_cluster(monkeypatch, tmp_path)
+    start_postgres.provision_windows(root, "55432", ())
+    server.update(running=True, accepting=False)
+    commands.clear()
+
+    assert start_postgres.provision_windows(root, "55432", ()) == "running"
+
+    assert commands == []
+
+
+def test_a_failing_windows_cluster_status_is_reported_as_itself(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root, commands, server = windows_cluster(monkeypatch, tmp_path)
+    start_postgres.provision_windows(root, "55432", ())
+    server["status"] = 4
+    commands.clear()
+
+    with pytest.raises(
+        RuntimeError, match=r"exit status 4: pg_ctl: access denied; nothing was changed"
+    ):
+        start_postgres.provision_windows(root, "55432", ())
+
+    assert commands == []
+
+
+@pytest.mark.parametrize("pid", [["vanished"], ["4242", "C:/data", "1700000000"]])
+def test_a_running_windows_cluster_without_a_readable_port_gets_a_diagnostic(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, pid: list[str]
+) -> None:
+    root, commands, server = windows_cluster(monkeypatch, tmp_path)
+    start_postgres.provision_windows(root, "55432", ())
+    (root / "data" / "postmaster.pid").unlink(missing_ok=True)
+    server.update(running=True, pid=pid)
+    commands.clear()
+
+    with pytest.raises(RuntimeError, match=r"names no port; nothing was changed"):
+        start_postgres.provision_windows(root, "55432", ())
+
+    assert commands == []
+
+
 def test_windows_provisioning_refuses_a_directory_that_is_not_a_cluster(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -296,9 +396,28 @@ def inspected(running: bool, volumes: list[str], command: list[str]) -> str:
                 "HostConfig": {
                     "PortBindings": {"5432/tcp": [{"HostIp": "127.0.0.1", "HostPort": "55432"}]}
                 },
+                "NetworkSettings": {
+                    "Ports": (
+                        {"5432/tcp": [{"HostIp": "127.0.0.1", "HostPort": "55432"}]}
+                        if running
+                        else {}
+                    )
+                },
             }
         ]
     )
+
+
+def published(
+    details: str,
+    requested: list[dict[str, str]],
+    effective: list[dict[str, str]],
+    network: str = "bridge",
+) -> str:
+    (container,) = json.loads(details)
+    container["HostConfig"] = {"PortBindings": {"5432/tcp": requested}, "NetworkMode": network}
+    container["NetworkSettings"] = {"Ports": {"5432/tcp": effective} if effective else {}}
+    return json.dumps([container])
 
 
 def fake_docker(
@@ -394,18 +513,107 @@ def test_durable_container_requires_a_writable_volume_at_the_data_location(
 
 
 @pytest.mark.parametrize("running", [False, True])
+@pytest.mark.parametrize(("host", "port"), [("127.0.0.1", "55433"), ("192.0.2.1", "55432")])
 def test_existing_container_requires_the_requested_loopback_port(
-    monkeypatch: pytest.MonkeyPatch, running: bool
+    monkeypatch: pytest.MonkeyPatch, running: bool, host: str, port: str
 ) -> None:
-    details = json.loads(inspected(running, ["data"], ["postgres"]))
-    details[0]["HostConfig"] = {
-        "PortBindings": {"5432/tcp": [{"HostIp": "127.0.0.1", "HostPort": "55433"}]}
-    }
-    commands = fake_docker(monkeypatch, {"pyracast-postgres": json.dumps(details)})
+    binding = [{"HostIp": host, "HostPort": port}]
+    details = published(
+        inspected(running, ["data"], ["postgres"]), binding, binding if running else []
+    )
+    commands = fake_docker(monkeypatch, {"pyracast-postgres": details})
 
     with pytest.raises(RuntimeError, match="port"):
         start_postgres.provision_docker("docker", "55432", (), volume="data")
 
+    assert commands == []
+
+
+@pytest.mark.parametrize("running", [False, True])
+def test_a_bare_rerun_names_the_port_of_a_durable_container_published_on_another_one(
+    monkeypatch: pytest.MonkeyPatch, running: bool
+) -> None:
+    durable = inspected(running, [start_postgres.VOLUME], ["postgres"])
+    commands = fake_docker(monkeypatch, {start_postgres.CONTAINER: durable})
+    monkeypatch.delenv("PGPORT", raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(shutil, "which", lambda name: "docker")
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"publishes loopback port 55432, not 5432; nothing was changed\. Set PGPORT=55432",
+    ):
+        start_postgres.main([])
+
+    assert commands == []
+
+
+def test_a_running_container_names_the_port_docker_allocated_for_its_loopback_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    details = published(
+        inspected(True, ["data"], ["postgres"]),
+        [{"HostIp": "127.0.0.1", "HostPort": ""}],
+        [{"HostIp": "127.0.0.1", "HostPort": "49153"}],
+    )
+    commands = fake_docker(monkeypatch, {"pyracast-postgres": details})
+
+    with pytest.raises(
+        RuntimeError, match=r"publishes loopback port 49153, not 55432.*PGPORT=49153"
+    ):
+        start_postgres.provision_docker("docker", "55432", (), volume="data")
+
+    assert commands == []
+
+
+@pytest.mark.parametrize(
+    ("running", "requested", "effective"),
+    [
+        (False, [{"HostIp": "127.0.0.1", "HostPort": ""}], []),
+        (False, [{"HostIp": "127.0.0.1", "HostPort": "0"}], []),
+        (False, [{"HostIp": "::1", "HostPort": "55433"}], []),
+        (
+            True,
+            [
+                {"HostIp": "127.0.0.1", "HostPort": "55433"},
+                {"HostIp": "127.0.0.1", "HostPort": "55434"},
+            ],
+            [
+                {"HostIp": "127.0.0.1", "HostPort": "55433"},
+                {"HostIp": "127.0.0.1", "HostPort": "55434"},
+            ],
+        ),
+        (True, [{"HostIp": "127.0.0.1", "HostPort": "55433"}], []),
+    ],
+)
+def test_a_container_without_one_numeric_ipv4_loopback_port_is_refused_without_an_override(
+    monkeypatch: pytest.MonkeyPatch,
+    running: bool,
+    requested: list[dict[str, str]],
+    effective: list[dict[str, str]],
+) -> None:
+    details = published(inspected(running, ["data"], ["postgres"]), requested, effective)
+    commands = fake_docker(monkeypatch, {"pyracast-postgres": details})
+
+    with pytest.raises(RuntimeError, match="does not publish only loopback port 55432") as refusal:
+        start_postgres.provision_docker("docker", "55432", (), volume="data")
+
+    assert "PGPORT" not in str(refusal.value)
+    assert commands == []
+
+
+@pytest.mark.parametrize("port", ["55433", "55432"])
+def test_a_stopped_container_on_the_host_network_publishes_no_port(
+    monkeypatch: pytest.MonkeyPatch, port: str
+) -> None:
+    requested = [{"HostIp": "127.0.0.1", "HostPort": port}]
+    details = published(inspected(False, ["data"], ["postgres"]), requested, [], network="host")
+    commands = fake_docker(monkeypatch, {"pyracast-postgres": details})
+
+    with pytest.raises(RuntimeError, match="does not publish only loopback port 55432") as refusal:
+        start_postgres.provision_docker("docker", "55432", (), volume="data")
+
+    assert "PGPORT" not in str(refusal.value)
     assert commands == []
 
 
@@ -447,7 +655,10 @@ def test_windows_server_identity_is_checked_before_creating_a_database(
     server["running"] = True
 
     def execute(command: list[str], **options: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(command, 0, stdout=str(tmp_path / "foreign"))
+        stopped = Path(command[0]).name == "pg_ctl.exe" and command[1] == "status"
+        return subprocess.CompletedProcess(
+            command, 3 if stopped else 0, stdout=str(tmp_path / "foreign")
+        )
 
     monkeypatch.setattr(start_postgres, "execute", execute)
     with pytest.raises(RuntimeError, match="different PostgreSQL cluster"):
