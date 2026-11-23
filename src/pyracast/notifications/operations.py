@@ -62,6 +62,10 @@ def validate_recipient(address: str) -> None:
             params={"limit": RECIPIENT_MAX_LENGTH},
         )
     validate_email(address)
+    try:
+        prepared(address)
+    except ValueError:
+        raise ValidationError(validate_email.message, code=validate_email.code) from None
 
 
 def _all_valid(addresses: list[str]) -> bool:
@@ -217,13 +221,10 @@ def get_reminder_schedule(
 
 def _check_recipients(submitted: ReminderSettings) -> None:
     for address in submitted.recipients:
-        validate_recipient(address)
         try:
-            prepared(address)
-        except ValueError:
-            raise ValidationError(
-                {"recipients": ValidationError(validate_email.message, code=validate_email.code)}
-            ) from None
+            validate_recipient(address)
+        except ValidationError as error:
+            raise ValidationError({"recipients": error}) from None
     if len({mailbox_key(address) for address in submitted.recipients}) != len(submitted.recipients):
         raise DomainError(ErrorCode.DUPLICATE_RECIPIENTS, field="recipients")
     if submitted.enabled and not (submitted.recipients or submitted.include_workspace_members):

@@ -1,6 +1,7 @@
 from collections import defaultdict
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from email.headerregistry import AddressHeader
 from functools import cache
 
 from django.core.mail.backends.smtp import EmailBackend as SMTPBackend
@@ -38,16 +39,23 @@ def _smtp() -> SMTPBackend:
 
 
 def prepared(address: str) -> str:
-    """The addr-spec the SMTP backend puts in `RCPT TO`; `ValueError` where it refuses one."""
-    return _smtp().prep_address(address)
-
-
-def wire_form(address: str) -> str:
-    """What a header carries: the prepared form, or the address as stored where it has none."""
+    """The addr-spec the SMTP backend puts in `RCPT TO`, only where it is stable: it prepares to
+    itself, the header parser reads it as that one mailbox, and the folded address prepares to
+    the same key. `ValueError` otherwise."""
+    prepare = _smtp().prep_address
+    wire = prepare(address)
     try:
-        return prepared(address)
+        stable = (
+            prepare(wire) == wire
+            and [found.addr_spec for found in AddressHeader.value_parser(wire).all_mailboxes]
+            == [wire]
+            and recipient_key(prepare(recipient_key(address))) == recipient_key(wire)
+        )
     except ValueError:
-        return address
+        stable = False
+    if not stable:
+        raise ValueError("The address has no stable wire form.")
+    return wire
 
 
 def mailbox_key(address: str) -> str:
@@ -206,10 +214,10 @@ def effective(
     addresses: dict[str, str] = {}
     for row in explicit:
         if not row.ties or members.active & row.ties:
-            addresses.setdefault(recipient_key(row.address), row.address)
+            addresses.setdefault(mailbox_key(row.address), row.address)
     if include_workspace_members:
         for address in members.addresses:
-            addresses.setdefault(recipient_key(address), address)
+            addresses.setdefault(mailbox_key(address), address)
     return list(addresses.values())
 
 
@@ -358,7 +366,7 @@ def headers(
     for address, role in zip(addresses, placed, strict=True):
         if (key := mailbox_key(address)) not in keys:
             keys.add(key)
-            found[role].append(wire_form(address))
+            found[role].append(prepared(address))
     return found[RecipientRole.TO], found[RecipientRole.CC], found[RecipientRole.BCC]
 
 
@@ -437,9 +445,9 @@ def freeze_recipients(delivery: NotificationDelivery, addresses: Sequence[str]) 
 
 def narrow_recipients(delivery: NotificationDelivery, current: Sequence[str]) -> list[str]:
     """Deletes the candidate rows that are revoked or no longer current; rows never return."""
-    keys = {recipient_key(address) for address in current}
+    keys = {mailbox_key(address) for address in current}
     rows = list(DeliveryRecipient.objects.filter(delivery=delivery).order_by("pk"))
-    kept = [row for row in rows if not row.revoked and row.key in keys]
+    kept = [row for row in rows if not row.revoked and mailbox_key(row.address) in keys]
     if excluded := [row.pk for row in rows if row not in kept]:
         DeliveryRecipient.objects.filter(pk__in=excluded).delete()
     return [row.address for row in kept]
@@ -488,12 +496,17 @@ def delivery_roles(delivery: NotificationDelivery) -> list[tuple[str, RecipientR
     return [(row.address, RecipientRole(row.role)) for row in _envelope(delivery)]
 
 
-def hide_visible_schedules(tenant_ids: Collection[int]) -> set[int]:
-    """Hides every visible schedule of the workspaces until an administrator saves again."""
-    visible = ReminderSchedule.objects.filter(
-        region__tenant_id__in=tenant_ids, hide_recipients=False
+def hide_visible_schedules(
+    tenant_ids: Collection[int], schedule_ids: Collection[int] = ()
+) -> set[int]:
+    """Hides every visible schedule of the workspaces and of the ids until an administrator
+    saves again; the schedules it changed."""
+    hidden = set(
+        ReminderSchedule.objects.select_for_update(of=("self",))
+        .filter(Q(region__tenant_id__in=tenant_ids) | Q(pk__in=schedule_ids), hide_recipients=False)
+        .order_by("pk")
+        .values_list("pk", flat=True)
     )
-    hidden = set(visible.values_list("pk", flat=True))
     ReminderSchedule.objects.filter(pk__in=hidden).update(
         hide_recipients=True, hidden_by_departure=True, revision=F("revision") + 1
     )
@@ -532,7 +545,7 @@ def _revoke_unauthorized(tenant_id: int, leaving: int, keys: set[str]) -> None:
             key__in=keys,
         ).values_list(
             "pk",
-            "key",
+            "address",
             "delivery__schedule_id",
             "delivery__schedule__include_workspace_members",
         )
@@ -543,12 +556,14 @@ def _revoke_unauthorized(tenant_id: int, leaving: int, keys: set[str]) -> None:
     explicit = explicit_recipients(schedules)
     members = workspace(tenant_id, leaving=leaving)
     authorized = {
-        (schedule_id, recipient_key(address))
+        (schedule_id, mailbox_key(address))
         for schedule_id, include in schedules.items()
         for address in effective(include, explicit.get(schedule_id, []), members)
     }
     DeliveryRecipient.objects.filter(
         pk__in=[
-            pk for pk, key, schedule_id, _ in candidates if (schedule_id, key) not in authorized
+            pk
+            for pk, address, schedule_id, _ in candidates
+            if (schedule_id, mailbox_key(address)) not in authorized
         ]
     ).update(revoked=True)
