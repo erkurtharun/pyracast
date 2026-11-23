@@ -5,11 +5,10 @@ import dynamic from "next/dynamic";
 import {
     Fragment,
     createContext,
-    useCallback,
     useContext,
     useEffect,
+    useEffectEvent,
     useId,
-    useLayoutEffect,
     useRef,
     useState,
     type RefObject,
@@ -21,7 +20,7 @@ import { ApiError } from "@/lib/api/errors";
 import { MISSING } from "@/lib/format/number";
 import { useFormat } from "@/lib/format/use-format";
 import { isLanguage } from "@/i18n/language";
-import { useApiQuery, useRefresh } from "@/lib/api/query";
+import { useApiQuery, useRefresh, type Loaded } from "@/lib/api/query";
 import {
     ActionForm,
     AsyncButton,
@@ -38,14 +37,13 @@ import { sectionUnavailable } from "@/lib/on-demand";
 import {
     addressingOf,
     committedDraft,
-    filled,
     initialDraft,
     sameAddressing,
     type AddedRow,
     type Addresses,
     type Answer,
     type Draft,
-    type TypedRow,
+    type MemberRow,
 } from "./reminder-draft";
 import { ReminderOutcome } from "./reminder-line";
 import { useRowFocus } from "./row-focus";
@@ -89,155 +87,175 @@ function RecipientsLoading() {
 export type RecipientState = NonNullable<
     ReturnType<typeof useRecipientSection>
 >;
-type Known = Record<number, { text: string; added: AddedRow }>;
 export type Outcome =
     | { status: "answered"; answer: Answer }
     | { status: "refused"; error: ApiError }
     | { status: "failed" };
-type Section = {
+type Settings = Pick<ReminderBody, "enabled" | "times" | "language">;
+export type Section = {
     base: Answer;
+    addresses: Addresses;
     takenAt: number;
     draft: Draft;
-    known: Known;
+    known: Record<number, { text: string; added: AddedRow }>;
+    members: MemberRow[];
     check: (Outcome & { generation: number }) | null;
+    attempt: (Settings & { generation: number }) | null;
+    saved: { revision: number; settled: boolean } | null;
 };
-type FormState = { generation: number; mount: number; section: Section | null };
+type FormState = {
+    generation: number;
+    mount: number;
+    section: Section | null;
+};
+const EMPTY: FormState = {
+    generation: 0,
+    mount: 0,
+    section: null,
+};
 
-function knownOf(rows: TypedRow[], addresses: Addresses, known: Known = {}) {
-    const learnt = { ...known };
-    filled(rows).forEach((row, index) => {
-        const added = addresses.added[index];
-        if (added) learnt[row.id] = { text: row.committed.trim(), added };
-    });
-    return learnt;
-}
-
-function fresh(answer: Answer, takenAt: number): Section | null {
-    if (!answer.addresses) return null;
-    const draft = initialDraft(answer, answer.addresses);
+function fresh(
+    form: FormState,
+    answer: Answer,
+    addresses: Addresses,
+    takenAt: number,
+): FormState {
     return {
-        base: answer,
-        takenAt,
-        draft,
-        known: knownOf(draft.rows, answer.addresses),
-        check: null,
+        generation: form.generation + 1,
+        mount: form.mount + 1,
+        section: {
+            base: answer,
+            addresses,
+            takenAt,
+            draft: initialDraft(answer, addresses),
+            known: {},
+            members: addresses.members,
+            check: null,
+            attempt: null,
+            saved: null,
+        },
     };
 }
 
-const unsavedIn = ({ base, draft }: Section) =>
-    !base.addresses ||
-    !sameAddressing(draft, initialDraft(base, base.addresses));
+const unsavedIn = ({ base, addresses, draft }: Section) =>
+    !sameAddressing(draft, initialDraft(base, addresses));
 
-function adopted(form: FormState, answer: Answer, takenAt: number) {
+function adopted(
+    form: FormState,
+    answer: Answer,
+    takenAt: number,
+    canManage: boolean,
+): FormState {
     const { section } = form;
-    if (!answer.addresses)
+    const addresses = canManage ? answer.addresses : null;
+    if (!addresses)
         return section
             ? { ...form, generation: form.generation + 1, section: null }
             : form;
-    if (!section)
-        return {
-            generation: form.generation + 1,
-            mount: form.mount + 1,
-            section: fresh(answer, takenAt),
-        };
-    if (
-        takenAt === section.takenAt ||
-        answer.revision !== section.base.revision
-    )
-        return form;
-    const next = { ...section, base: answer, takenAt, check: null };
+    if (!section) return fresh(form, answer, addresses, takenAt);
+    if (takenAt === section.takenAt) return form;
+    if (section.saved)
+        return answer.revision >= section.saved.revision
+            ? fresh(form, answer, addresses, takenAt)
+            : form;
+    if (answer.revision !== section.base.revision) return form;
+    const next = {
+        ...section,
+        base: answer,
+        addresses,
+        takenAt,
+        members: addresses.members,
+        check: null,
+    };
     return {
         ...form,
         generation: form.generation + 1,
-        section: unsavedIn(next)
-            ? next
-            : { ...next, known: knownOf(next.draft.rows, answer.addresses) },
+        section: unsavedIn(next) ? next : { ...next, known: {} },
     };
 }
 
 function useRecipientSection(
     answer: Answer,
     takenAt: number,
-    onStale: () => void,
+    canManage: boolean,
 ) {
-    const [form, setForm] = useState<FormState>(() => ({
-        generation: 0,
-        mount: 0,
-        section: fresh(answer, takenAt),
-    }));
-    const current = adopted(form, answer, takenAt);
+    const [form, setForm] = useState(() =>
+        adopted(EMPTY, answer, takenAt, canManage),
+    );
+    const current = adopted(form, answer, takenAt, canManage);
     if (current !== form) setForm(current);
     const { generation, section } = current;
-    const unsaved = section !== null && unsavedIn(section);
+    if (!section) return null;
     const check =
-        section?.check?.generation === generation ? section.check : null;
-    const present = !unsaved
-        ? (section?.base ?? null)
-        : check?.status === "answered" && check.answer.addresses
-          ? check.answer
-          : null;
-    const changed =
-        (check?.status === "refused" &&
-            check.error.code === "reminder_schedule_changed") ||
-        (section !== null && answer.revision > section.base.revision);
-    useEffect(() => {
-        if (changed) onStale();
-    }, [changed, onStale]);
-    if (!section?.base.addresses) return null;
+        section.check?.generation === generation ? section.check : null;
+    const newer = !section.saved && answer.revision > section.base.revision;
+    const change = (
+        apply: (section: Section, generation: number) => Section,
+        advance = true,
+    ) =>
+        setForm((form) => {
+            if (!form.section) return form;
+            const generation = form.generation + Number(advance);
+            const next = apply(form.section, generation);
+            return next === form.section
+                ? form
+                : { ...form, generation, section: next };
+        });
     return {
-        base: section.base,
-        addresses: section.base.addresses,
-        draft: section.draft,
-        known: section.known,
-        generation,
-        unsaved,
-        present,
+        section,
         check,
+        generation,
+        base: section.base,
+        addresses: section.addresses,
+        draft: section.draft,
+        unsaved: !section.saved && unsavedIn(section),
+        newer,
+        answered:
+            !newer &&
+            !section.saved &&
+            check?.status === "answered" &&
+            check.answer.addresses
+                ? check.answer
+                : null,
+        reload:
+            newer ||
+            section.saved?.settled === true ||
+            (check?.status === "refused" &&
+                check.error.code === "reminder_schedule_changed"),
         mount: current.mount,
-        update: (change: (draft: Draft) => Draft, decided = true) =>
-            setForm((form) => {
-                if (!form.section) return form;
-                const draft = change(form.section.draft);
-                return draft === form.section.draft
-                    ? form
-                    : {
-                          ...form,
-                          generation: form.generation + Number(decided),
-                          section: { ...form.section, draft },
-                      };
-            }),
-        record: (asked: number, outcome: Outcome | null) =>
-            setForm((form) =>
-                form.generation === asked && form.section
-                    ? {
-                          ...form,
-                          section: {
-                              ...form.section,
-                              check: outcome && {
-                                  generation: asked,
-                                  ...outcome,
-                              },
-                              known:
-                                  outcome?.status === "answered" &&
-                                  outcome.answer.addresses
-                                      ? knownOf(
-                                            form.section.draft.rows,
-                                            outcome.answer.addresses,
-                                            form.section.known,
-                                        )
-                                      : form.section.known,
-                          },
-                      }
-                    : form,
-            ),
-        accept: (saved: Answer, takenAt: number) =>
-            setForm((form) => ({
-                generation: form.generation + 1,
-                mount: form.mount + 1,
-                section: fresh(saved, takenAt),
+        change,
+        hold: (settings: Settings) =>
+            change((section, generation) => ({
+                ...section,
+                draft: committedDraft(section.draft),
+                attempt: { ...settings, generation },
+                check: null,
             })),
+        refused: (error: ApiError) =>
+            change(
+                (section, generation) => ({
+                    ...section,
+                    check: { generation, status: "refused", error },
+                }),
+                false,
+            ),
+        saved: (revision: number) =>
+            change((section) => ({
+                ...section,
+                saved: { revision, settled: false },
+                check: null,
+            })),
+        settled: (revision: number) =>
+            change(
+                (section) =>
+                    section.saved?.revision === revision
+                        ? { ...section, saved: { revision, settled: true } }
+                        : section,
+                false,
+            ),
     };
 }
+
 function RecipientCount({ answer }: { answer: Answer }) {
     const t = useTranslations("Reminders");
     return (
@@ -361,34 +379,40 @@ function entered(form: FormData, name: string) {
         .filter(Boolean);
 }
 
+function settingsOf(form: FormData): Settings {
+    const language = formText(form, "language");
+    return {
+        enabled: form.get("enabled") === "on",
+        language: isLanguage(language) ? language : "en",
+        times: entered(form, "times"),
+    };
+}
+
 function ReminderForm({
     answer,
     takenAt,
     region,
     scope,
-    save,
-    onStale,
+    reload,
 }: {
     answer: Answer;
     takenAt: number;
     region: Region;
     scope: RegionScope;
-    save: (body: ReminderBody) => Promise<Answer>;
-    onStale: () => void;
+    reload: () => Promise<void>;
 }) {
     const t = useTranslations("Reminders");
     const format = useFormat();
-    const canManage = useCanManageWorkspace();
     const refresh = useRefresh();
-    const recipients = useRecipientSection(answer, takenAt, onStale);
+    const recipients = useRecipientSection(
+        answer,
+        takenAt,
+        useCanManageWorkspace(),
+    );
     const [held, setHeld] = useState(false);
     const heldId = useId();
     const heading = useRef<HTMLHeadingElement>(null);
     const loading = useRef<HTMLParagraphElement>(null);
-    const latest = useRef({ answer, takenAt });
-    useLayoutEffect(() => {
-        latest.current = { answer, takenAt };
-    });
     const base = recipients?.base ?? answer;
     const hold = held ? heldId : undefined;
     return (
@@ -397,8 +421,6 @@ function ReminderForm({
                 if (!recipients || !(event.target instanceof HTMLFormElement))
                     return;
                 const draft = committedDraft(recipients.draft);
-                if (draft !== recipients.draft)
-                    recipients.update((now) => committedDraft(now));
                 const ready =
                     draft.hide ||
                     sameAddressing(
@@ -407,33 +429,51 @@ function ReminderForm({
                     ) ||
                     (draft === recipients.draft &&
                         heading.current !== null &&
-                        recipients.present !== null);
+                        recipients.answered !== null);
                 if (ready) {
                     setHeld(false);
                     return;
                 }
                 event.preventDefault();
                 event.stopPropagation();
+                recipients.hold(settingsOf(new FormData(event.target)));
                 setHeld(true);
                 (heading.current ?? loading.current)?.focus();
             }}
         >
+            {recipients?.reload && (
+                <AsyncButton variant="secondary" onClick={reload}>
+                    {t("reloadReminders")}
+                </AsyncButton>
+            )}
             <ActionForm
                 submit={t("saveReminders")}
-                permitted={canManage && answer.addresses !== null}
+                permitted={recipients !== null}
                 onSubmit={async (values) => {
                     if (!recipients) return;
-                    const language = formText(values, "language");
-                    const saved = await save({
-                        enabled: values.get("enabled") === "on",
-                        language: isLanguage(language) ? language : "en",
-                        times: entered(values, "times"),
-                        expected_revision: base.revision,
-                        ...addressingOf(committedDraft(recipients.draft)),
-                    });
-                    if (latest.current.answer.addresses)
-                        recipients.accept(saved, latest.current.takenAt);
+                    let revision: number;
+                    try {
+                        ({ revision } = await api.put(PATH, {
+                            path: scope,
+                            body: {
+                                ...settingsOf(values),
+                                expected_revision: base.revision,
+                                ...addressingOf(
+                                    committedDraft(recipients.draft),
+                                ),
+                            },
+                        }));
+                    } catch (error) {
+                        if (
+                            error instanceof ApiError &&
+                            error.code === "reminder_schedule_changed"
+                        )
+                            recipients.refused(error);
+                        throw error;
+                    }
+                    recipients.saved(revision);
                     await refresh.workspace(scope.tenant_id);
+                    recipients.settled(revision);
                 }}
             >
                 <Fragment key={recipients?.mount ?? 0}>
@@ -488,14 +528,15 @@ function ReminderForm({
 
 function DeliveryRecipients({ delivery }: { delivery: Delivery }) {
     const t = useTranslations("Reminders");
-    if (delivery.recipient_roles)
+    const addresses = useCanManageWorkspace();
+    if (addresses && delivery.recipient_roles)
         return delivery.recipient_roles.map(({ address, role }, index) => (
             <div key={index}>
                 <span>{address}</span>{" "}
                 <span className="field-hint">{t(`roles.${role}`)}</span>
             </div>
         ));
-    if (delivery.recipients)
+    if (addresses && delivery.recipients)
         return delivery.recipients.map((email, index) => (
             <div key={index}>{email}</div>
         ));
@@ -601,28 +642,34 @@ function DeliveryHistory({
     );
 }
 
+function useRevocation(resource: Loaded<Answer>, canManage: boolean) {
+    const countOnly = resource.data?.addresses === null;
+    const revoke = useEffectEvent((keepShown: boolean) =>
+        resource.forget({ keepShown }),
+    );
+    const managed = useRef(canManage);
+    useEffect(() => {
+        const lost = managed.current && !canManage;
+        managed.current = canManage;
+        if (lost || countOnly) revoke(!lost);
+    }, [canManage, countOnly, resource.updatedAt]);
+}
+
 function ReminderSettings({ scope, region }: ReminderProps) {
     const t = useTranslations("Reminders");
     const headingId = useId();
     const resource = useApiQuery(PATH, { path: scope });
-    const [form, setForm] = useState({ generation: 0, stale: false });
-    const onStale = useCallback(
-        () => setForm((current) => ({ ...current, stale: true })),
-        [],
-    );
-    const save = async (body: ReminderBody) => {
+    const canManage = useCanManageWorkspace();
+    const [generation, setGeneration] = useState(0);
+    useRevocation(resource, canManage);
+    const reload = async () => {
         try {
-            const saved = await api.put(PATH, { path: scope, body });
-            setForm((current) => ({ ...current, stale: false }));
-            return saved;
-        } catch (error) {
-            if (
-                error instanceof ApiError &&
-                error.code === "reminder_schedule_changed"
-            )
-                onStale();
-            throw error;
+            await resource.reload();
+        } catch {
+            // RefreshFailed reports it and the offer stays.
+            return;
         }
+        setGeneration((current) => current + 1);
     };
     return (
         <Resource resource={resource} loading={t("loadingEmailReminders")}>
@@ -648,33 +695,13 @@ function ReminderSettings({ scope, region }: ReminderProps) {
                                 t("noEmailYet")
                             )}
                         </p>
-                        {form.stale && (
-                            <AsyncButton
-                                variant="secondary"
-                                onClick={async () => {
-                                    try {
-                                        await resource.reload();
-                                    } catch {
-                                        // RefreshFailed reports it and the offer stays.
-                                        return;
-                                    }
-                                    setForm((current) => ({
-                                        generation: current.generation + 1,
-                                        stale: false,
-                                    }));
-                                }}
-                            >
-                                {t("reloadReminders")}
-                            </AsyncButton>
-                        )}
                         <ReminderForm
-                            key={form.generation}
+                            key={generation}
                             answer={answer}
                             takenAt={resource.updatedAt}
                             region={region}
                             scope={scope}
-                            save={save}
-                            onStale={onStale}
+                            reload={reload}
                         />
                     </section>
                     <DeliveryHistory

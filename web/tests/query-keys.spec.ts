@@ -4,6 +4,7 @@ import { ApiError } from "../src/lib/api/errors";
 import { keys } from "../src/lib/api/keys";
 import {
     fetchList,
+    forget,
     invalidate,
     languagePlaceholder,
     pollInterval,
@@ -147,6 +148,59 @@ for (const status of [403, 404])
             unsubscribe();
         }
     });
+
+test("forgetting a request drops it in every language with its reads in flight and keeps or reads again the one shown", async () => {
+    const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+    });
+    const reminders = "/api/tenants/{tenant_id}/regions/{region_id}/reminders/";
+    const read = (locale: string, region = 11) =>
+        keys.request(
+            "1:a",
+            reminders,
+            { path: { tenant_id: 5, region_id: region } },
+            locale,
+        );
+    let answer!: (value: string) => void;
+    const late = client.fetchQuery({
+        queryKey: read("tr"),
+        queryFn: () => new Promise<string>((resolve) => (answer = resolve)),
+    });
+    client.setQueryData(read("de"), "German addresses");
+    client.setQueryData(read("en", 12), "Another plant");
+    let reads = 0;
+    const observer = new QueryObserver(client, {
+        queryKey: read("en"),
+        queryFn: () => Promise.resolve(`English read ${++reads}`),
+    });
+    const unsubscribe = observer.subscribe(() => {});
+    const cached = () =>
+        client
+            .getQueryCache()
+            .findAll()
+            .filter((query) => query.state.data !== undefined)
+            .map((query) => query.state.data);
+    try {
+        await expect
+            .poll(() => observer.getCurrentResult().data)
+            .toBe("English read 1");
+        forget(client, read("en"), { keepShown: true });
+        answer("Turkish addresses");
+        await expect(late).rejects.toThrow();
+        expect(cached()).toEqual(["Another plant", "English read 1"]);
+        expect(reads).toBe(1);
+
+        client.setQueryData(read("tr"), "Turkish addresses");
+        forget(client, read("en"), { keepShown: false });
+        expect(observer.getCurrentResult().data).toBeUndefined();
+        await expect
+            .poll(() => observer.getCurrentResult().data)
+            .toBe("English read 2");
+        expect(cached()).toEqual(["Another plant", "English read 2"]);
+    } finally {
+        unsubscribe();
+    }
+});
 
 function json(body: unknown, status = 200) {
     return new Response(JSON.stringify(body), {

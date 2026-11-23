@@ -13,15 +13,19 @@ const ADMIN = user.email;
 const MEMBER = "member@example.test";
 const OUTSIDE = "outside@example.test";
 const TEAM = [ADMIN, MEMBER];
-const HELD =
-    "This save waits until who sees what is shown. Check it, then save again.";
+const HELD = "Nothing was saved. Review the recipients, then save again.";
 const NOT_SAVED =
-    "Not saved yet. On the next send, every recipient can see the To and Copy addresses.";
+    "Not saved yet. If you save these settings, every recipient will see the To and Copy addresses shown here.";
+const CHANGED =
+    "These reminders were changed elsewhere. Reload them to see who sees what.";
+const EDITING = "Leave the address field to check who sees what.";
+const HIDDEN_TODAY =
+    "Every recipient is hidden today. You can address the administrator directly and keep members in copy.";
+const UNICODE = "ops@bücher.de";
+const ACE = "ops@xn--bcher-kva.de";
 const outsideWarning = (address: string) =>
     `${address} is not the verified primary address of an active member and will be visible to every recipient.`;
 const NO_RECIPIENT = "This address adds no recipient.";
-const UNICODE = "ops@bücher.de";
-const ACE = "ops@xn--bcher-kva.de";
 const DEPARTURE =
     "Every recipient was hidden again because a member left or an account was deleted. The remaining choices are kept.";
 
@@ -134,11 +138,49 @@ async function watchFor(page: Page, needles: string[]) {
             characterData: true,
             attributes: true,
         });
+        look();
         (window as unknown as { seen: string[] }).seen = seen;
     }, needles);
     return () =>
         page.evaluate(() => (window as unknown as { seen: string[] }).seen);
 }
+
+async function speaking(page: Page) {
+    await page.route("**/api/session/language/", (route) => {
+        const { language } = route.request().postDataJSON() as {
+            language: "en" | "tr";
+        };
+        return route.fulfill({
+            json: {
+                user: { ...user, language_preference: language },
+                csrf_token: "signed-token",
+                language,
+            },
+        });
+    });
+}
+
+async function speak(page: Page, language: "en" | "tr") {
+    await page.getByLabel(/^(Language|Dil)$/).selectOption(language);
+    await expect(
+        page.getByRole("heading", {
+            name:
+                language === "en"
+                    ? "Email reminders"
+                    : "E-posta hatırlatıcıları",
+            exact: true,
+        }),
+    ).toBeVisible();
+}
+
+async function revisit(page: Page) {
+    await page.getByRole("button", { name: "Location", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Email reminders", exact: true })
+        .click();
+}
+
+const typedFields = (page: Page) => page.locator('input[name="recipients"]');
 
 async function openSettings(page: Page) {
     await page.goto("/app/");
@@ -321,51 +363,542 @@ async function laterAnswer(
     await page.getByText("Recent deliveries", { exact: true }).click();
     await page.getByLabel("Delivery time 1", { exact: true }).fill("09:00");
     const write = hold(page, "**/reminders/", "PUT");
-    await write.installed;
-    const writing = page.waitForRequest((request) =>
-        isWrite(request.method(), request.url()),
+    let after: ReturnType<typeof hold> | undefined;
+    try {
+        await write.installed;
+        const writing = page.waitForRequest((request) =>
+            isWrite(request.method(), request.url()),
+        );
+        await saveButton(page).click();
+        await writing;
+        for (const step of steps) {
+            if (step === "viewer") {
+                viewing = true;
+                await refetch(page);
+            } else if (step === "failed") {
+                failing = true;
+                await refetch(page);
+                failing = false;
+            } else {
+                viewing = true;
+                const read = page.waitForResponse((response) =>
+                    isRead(response.request().method(), response.url()),
+                );
+                await page
+                    .getByLabel("Language", { exact: true })
+                    .selectOption("tr");
+                await read;
+            }
+        }
+        await expect(page.getByText(MEMBER)).toHaveCount(0);
+        const seen = await watchFor(page, [MEMBER, OUTSIDE]);
+        after = hold(page, "**/reminders/", "GET");
+        await after.installed;
+        if (refresh !== "held") after.release();
+        failing = refresh === "failed";
+        const refreshing = page.waitForRequest((request) =>
+            isRead(request.method(), request.url()),
+        );
+        const answered = page.waitForResponse((response) =>
+            isRead(response.request().method(), response.url()),
+        );
+        write.release();
+        await refreshing;
+        expect(await seen()).toEqual([]);
+        after.release();
+        await answered;
+        expect(await seen()).toEqual([]);
+        await expect(page.getByText(OUTSIDE)).toHaveCount(0);
+    } finally {
+        write.release();
+        after?.release();
+    }
+}
+
+const SENT_TO_TEAM = {
+    recipients: [ADMIN, MEMBER, OUTSIDE],
+    recipient_roles: [
+        { address: ADMIN, role: "to" as const },
+        { address: MEMBER, role: "cc" as const },
+        { address: OUTSIDE, role: "bcc" as const },
+    ],
+    recipient_count: 3,
+};
+
+test("a read without addresses withdraws the addresses read earlier in another language", async ({
+    page,
+}) => {
+    let viewing = false;
+    await page.clock.install();
+    const { answerLater } = await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: TEAM,
+        includeMembers: true,
+        hidden: false,
+        viewer: (method) => viewing && method === "GET",
+        deliveries: [SENT_TO_TEAM],
+    });
+    let failing = false;
+    await speaking(page);
+    await page.route("**/reminders/", (route) =>
+        failing && route.request().method() === "GET"
+            ? route.fulfill({
+                  status: 503,
+                  json: { code: "busy", message: "" },
+              })
+            : route.fallback(),
+    );
+    await openReminders(page);
+    await expect(typedFields(page)).toHaveValue(OUTSIDE);
+    await speak(page, "tr");
+    await expect(typedFields(page)).toHaveValue(OUTSIDE);
+    await speak(page, "en");
+    await expect(typedFields(page)).toHaveValue(OUTSIDE);
+    await page.getByLabel("Delivery time 1", { exact: true }).fill("09:00");
+    const deliver = answerLater("PUT");
+    let turkish: ReturnType<typeof hold> | undefined;
+    try {
+        const writing = page.waitForRequest((request) =>
+            isWrite(request.method(), request.url()),
+        );
+        await saveButton(page).click();
+        await writing;
+        viewing = true;
+        await refetch(page);
+        await expect(typedFields(page)).toHaveCount(0);
+        const seen = await watchFor(page, [MEMBER, OUTSIDE]);
+        turkish = hold(page, "**/reminders/", "GET");
+        await turkish.installed;
+        failing = true;
+        const failed = page.waitForResponse(
+            (response) =>
+                isRead(response.request().method(), response.url()) &&
+                response.status() === 503,
+        );
+        await speak(page, "tr");
+        expect(await seen()).toEqual([]);
+        turkish.release();
+        await failed;
+        expect(await seen()).toEqual([]);
+        deliver();
+        await expect(saveButton(page)).toHaveCount(0);
+        expect(await seen()).toEqual([]);
+    } finally {
+        deliver();
+        turkish?.release();
+    }
+});
+
+test("a read in another language that answers after a read without addresses shows none of them", async ({
+    page,
+}) => {
+    let viewing = false;
+    await page.clock.install();
+    const { answerLater } = await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: TEAM,
+        includeMembers: true,
+        hidden: false,
+        viewer: (method) => viewing && method === "GET",
+        deliveries: [SENT_TO_TEAM],
+    });
+    await speaking(page);
+    await openReminders(page);
+    await speak(page, "tr");
+    await expect(typedFields(page)).toHaveValue(OUTSIDE);
+    const deliver = answerLater("GET");
+    try {
+        const turkish = page.waitForRequest((request) =>
+            isRead(request.method(), request.url()),
+        );
+        await page.clock.fastForward("00:10");
+        await page.evaluate(() =>
+            window.dispatchEvent(new Event("visibilitychange")),
+        );
+        await turkish;
+        viewing = true;
+        const english = page.waitForResponse((response) =>
+            isRead(response.request().method(), response.url()),
+        );
+        await speak(page, "en");
+        await english;
+        await expect(typedFields(page)).toHaveCount(0);
+        const late = page.waitForResponse((response) =>
+            isRead(response.request().method(), response.url()),
+        );
+        deliver();
+        await late;
+        const seen = await watchFor(page, [MEMBER, OUTSIDE]);
+        await speak(page, "tr");
+        expect(await seen()).toEqual([]);
+        await expect(
+            page.getByText(
+                "En fazla 5 alıcıdan 3 alıcı. Adresleri bu uygulamada yalnızca çalışma alanı yöneticisi görür.",
+                { exact: true },
+            ),
+        ).toBeVisible();
+        expect(await seen()).toEqual([]);
+    } finally {
+        deliver();
+    }
+});
+
+test("losing administration withdraws every address and the save at once, also after coming back", async ({
+    page,
+}) => {
+    let role: "admin" | "viewer" = "admin";
+    let viewing = false;
+    await page.clock.install();
+    await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: TEAM,
+        includeMembers: true,
+        hidden: false,
+        viewer: () => viewing,
+        deliveries: [SENT_TO_TEAM],
+    });
+    await page.route("**/api/tenants/", (route) =>
+        route.fulfill({
+            json: paged([tenantRow({ id: 1, name: "Sunfield Energy", role })]),
+        }),
+    );
+    const reads = sent(page, isRead);
+    await openReminders(page);
+    await expect(typedFields(page)).toHaveValue(OUTSIDE);
+    await page.getByText("Recent deliveries", { exact: true }).click();
+    await expect(page.getByText(`${MEMBER} Copy`)).toBeVisible();
+    const read = hold(page, "**/reminders/", "GET");
+    try {
+        await read.installed;
+        const before = reads.length;
+        role = "viewer";
+        viewing = true;
+        const tenants = page.waitForResponse((response) =>
+            response.url().endsWith("/api/tenants/"),
+        );
+        await page.clock.fastForward("00:10");
+        await page.evaluate(() =>
+            window.dispatchEvent(new Event("visibilitychange")),
+        );
+        await tenants;
+        await expect(typedFields(page)).toHaveCount(0);
+        await expect(page.getByText(MEMBER)).toHaveCount(0);
+        await expect(page.getByText(OUTSIDE)).toHaveCount(0);
+        await expect(saveButton(page)).toHaveCount(0);
+        await expect
+            .poll(() => reads.length)
+            .toBeGreaterThanOrEqual(before + 2);
+    } finally {
+        read.release();
+    }
+    await expect(
+        line(
+            page,
+            "3 recipients of at most 5. In this app only the workspace administrator sees the addresses.",
+        ),
+    ).toBeVisible();
+    const seen = await watchFor(page, [MEMBER, OUTSIDE]);
+    await revisit(page);
+    await expect(
+        line(
+            page,
+            "3 recipients of at most 5. In this app only the workspace administrator sees the addresses.",
+        ),
+    ).toBeVisible();
+    expect(await seen()).toEqual([]);
+});
+
+for (const touched of [true, false]) {
+    test(`a newer revision withdraws what the form says about the next email${touched ? " and keeps an edited time" : ""}`, async ({
+        page,
+    }) => {
+        await page.clock.install();
+        await reminderApi(page, {
+            recipients: [OUTSIDE],
+            members: TEAM,
+            includeMembers: true,
+            hidden: true,
+        });
+        await openReminders(page);
+        await expect(line(page, HIDDEN_TODAY)).toBeVisible();
+        if (touched)
+            await page
+                .getByLabel("Delivery time 1", { exact: true })
+                .fill("09:00");
+        const elsewhere = await caller(page)("PUT", {
+            ...SAVED,
+            hide_recipients: false,
+            address_roles: [{ address: OUTSIDE, role: "cc", memberships: [] }],
+        });
+        expect(elsewhere.json.revision).toBe(1);
+        await refetch(page);
+        await expect(line(page, CHANGED)).toBeVisible();
+        await expect(line(page, HIDDEN_TODAY)).toHaveCount(0);
+        await expect(checked(page)).toHaveCount(0);
+        await expect(reloadButton(page)).toBeVisible();
+        if (touched)
+            await expect(
+                page.getByLabel("Delivery time 1", { exact: true }),
+            ).toHaveValue("09:00");
+        await reloadButton(page).click();
+        await expect(radio(page, OUTSIDE, "Copy")).toBeChecked();
+        await expect(line(page, `Copy: ${MEMBER}, ${OUTSIDE}`)).toBeVisible();
+        await expect(line(page, CHANGED)).toHaveCount(0);
+    });
+}
+
+test("a save answered after a read of its own revision shows that read's placement", async ({
+    page,
+}) => {
+    await page.clock.install();
+    const { persons, answerLater } = await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: [
+            ADMIN,
+            MEMBER,
+            { membership: 3, primary: OUTSIDE, verified: [] },
+        ],
+        includeMembers: true,
+        hidden: false,
+    });
+    let failing = false;
+    await page.route("**/reminders/", (route) =>
+        failing && route.request().method() === "GET"
+            ? route.fulfill({
+                  status: 503,
+                  json: { code: "busy", message: "" },
+              })
+            : route.fallback(),
+    );
+    await openReminders(page);
+    await expect(radio(page, OUTSIDE, "Hidden")).toBeChecked();
+    await expect(placement(page, OUTSIDE)).toContainText("Default");
+    await page.getByLabel("Delivery time 1", { exact: true }).fill("09:00");
+    const deliver = answerLater("PUT");
+    let refresh: ReturnType<typeof hold> | undefined;
+    try {
+        const writing = page.waitForRequest((request) =>
+            isWrite(request.method(), request.url()),
+        );
+        await saveButton(page).click();
+        await writing;
+        persons[2]!.verified = [OUTSIDE];
+        await refetch(page);
+        refresh = hold(page, "**/reminders/", "GET");
+        await refresh.installed;
+        failing = true;
+        const refreshing = page.waitForRequest((request) =>
+            isRead(request.method(), request.url()),
+        );
+        deliver();
+        await refreshing;
+        await expect(radio(page, OUTSIDE, "Copy")).toBeChecked();
+        await expect(line(page, `Copy: ${MEMBER}, ${OUTSIDE}`)).toBeVisible();
+        refresh.release();
+        await expect(
+            page.getByText("Saved successfully.", { exact: true }),
+        ).toBeVisible();
+        await expect(radio(page, OUTSIDE, "Copy")).toBeChecked();
+        await expect(radio(page, OUTSIDE, "Hidden")).not.toBeChecked();
+        await expect(reloadButton(page)).toHaveCount(0);
+    } finally {
+        deliver();
+        refresh?.release();
+    }
+});
+
+for (const first of ["read", "save"] as const) {
+    test(`a save answered around a newer read from another tab ends on that read without a reload, the ${first} first`, async ({
+        page,
+    }) => {
+        await page.clock.install();
+        const { answerLater } = await reminderApi(page, {
+            recipients: [OUTSIDE],
+            members: TEAM,
+            includeMembers: true,
+            hidden: false,
+        });
+        await openReminders(page);
+        await expect(radio(page, OUTSIDE, "Hidden")).toBeChecked();
+        await page.getByLabel("Delivery time 1", { exact: true }).fill("09:00");
+        const deliver = answerLater("PUT");
+        const deliverRead = first === "save" ? answerLater("GET") : () => {};
+        try {
+            const writing = page.waitForRequest((request) =>
+                isWrite(request.method(), request.url()),
+            );
+            await saveButton(page).click();
+            await writing;
+            const elsewhere = await caller(page)("PUT", {
+                ...SAVED,
+                times: ["09:00"],
+                language: "tr",
+                expected_revision: 1,
+            });
+            expect(elsewhere.json.revision).toBe(2);
+            if (first === "read") {
+                await refetch(page);
+                deliver();
+            } else {
+                const reading = page.waitForRequest((request) =>
+                    isRead(request.method(), request.url()),
+                );
+                await page.clock.fastForward("00:10");
+                await page.evaluate(() =>
+                    window.dispatchEvent(new Event("visibilitychange")),
+                );
+                await reading;
+                deliver();
+                await expect(
+                    page.getByText("Saved successfully.", { exact: true }),
+                ).toBeVisible();
+                deliverRead();
+            }
+            await expect(
+                page.getByText("Saved successfully.", { exact: true }),
+            ).toBeVisible();
+            await expect(
+                page.getByLabel("Email language", { exact: true }),
+            ).toHaveValue("tr");
+            await expect(reloadButton(page)).toHaveCount(0);
+            await expect(line(page, CHANGED)).toHaveCount(0);
+            await expect(line(page, `Copy: ${MEMBER}`)).toBeVisible();
+        } finally {
+            deliver();
+            deliverRead();
+        }
+    });
+}
+
+test("editing a visible address withdraws the summary until the field is left", async ({
+    page,
+}) => {
+    await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: [ADMIN],
+        hidden: false,
+        typed: { [OUTSIDE]: "cc" },
+    });
+    await openReminders(page);
+    await expect(line(page, `Copy: ${OUTSIDE}`)).toBeVisible();
+    await address(page, 1).fill("outsidf@example.test");
+    await expect(address(page, 1)).toBeFocused();
+    await expect(
+        page.getByText("All recipients are hidden", { exact: false }),
+    ).toHaveCount(0);
+    await expect(page.getByText(/^Hidden:/)).toHaveCount(0);
+    await expect(line(page, EDITING)).toBeVisible();
+    await expect(summaryLines(page)).toHaveCount(0);
+    await expect(checked(page)).toHaveCount(0);
+    await expect(counter(page)).toHaveText("");
+    await address(page, 1).blur();
+    await expect(radio(page, "outsidf@example.test", "Hidden")).toBeChecked();
+    await expect(line(page, EDITING)).toHaveCount(0);
+});
+
+test("a held save of a paused schedule is checked with the values it would send", async ({
+    page,
+}) => {
+    await reminderApi(page, {
+        recipients: [OUTSIDE, "two@example.test", "three@example.test"],
+        members: TEAM,
+        hidden: true,
+        enabled: true,
+        limit: 2,
+    });
+    const previews = sent(page, isPreview);
+    await openReminders(page);
+    await review(page);
+    await expect(
+        line(
+            page,
+            "This plant allows at most 2 distinct recipient addresses in total.",
+        ),
+    ).toBeVisible();
+    const asked = previews.length;
+    await page
+        .getByLabel("Enable forecast emails for this plant", { exact: true })
+        .uncheck();
+    await saveButton(page).click();
+    await expect.poll(() => previews.length).toBe(asked + 1);
+    await expect(line(page, HELD)).toBeVisible();
+    expect(previews.at(-1)).toMatchObject({
+        enabled: false,
+        times: ["08:00"],
+        language: "en",
+        hide_recipients: false,
+    });
+    await expect(line(page, "Hidden: 3 addresses")).toBeVisible();
+    const answered = page.waitForResponse((response) =>
+        isWrite(response.request().method(), response.url()),
     );
     await saveButton(page).click();
-    await writing;
-    for (const step of steps) {
-        if (step === "viewer") {
-            viewing = true;
-            await refetch(page);
-        } else if (step === "failed") {
-            failing = true;
-            await refetch(page);
-            failing = false;
-        } else {
-            viewing = true;
-            const read = page.waitForResponse((response) =>
-                isRead(response.request().method(), response.url()),
-            );
-            await page
-                .getByLabel("Language", { exact: true })
-                .selectOption("tr");
-            await read;
-        }
+    expect((await answered).status()).toBe(200);
+    await expect(
+        page.getByText("Saved successfully.", { exact: true }),
+    ).toBeVisible();
+});
+
+test("a member first shown by a check keeps its group and the focus while the next check runs", async ({
+    page,
+}) => {
+    const { persons } = await reminderApi(page, {
+        recipients: [],
+        members: [ADMIN],
+        includeMembers: true,
+        hidden: false,
+    });
+    await openReminders(page);
+    await expect(radio(page, ADMIN, "To")).toBeChecked();
+    persons.push({ membership: 2, primary: MEMBER });
+    await type(page, 1, OUTSIDE);
+    await expect(radio(page, MEMBER, "Copy")).toBeChecked();
+    const preview = hold(page, "**/reminders/preview/");
+    try {
+        await preview.installed;
+        await radio(page, MEMBER, "Copy").focus();
+        await page.keyboard.press("ArrowRight");
+        await expect(line(page, "Checking who sees what…")).toBeVisible();
+        await expect(group(page, MEMBER)).toHaveCount(1);
+        await expect(checked(page)).toHaveCount(0);
+        await expect(radio(page, MEMBER, "Hidden")).toBeFocused();
+    } finally {
+        preview.release();
     }
-    await expect(page.getByText(MEMBER)).toHaveCount(0);
-    const seen = await watchFor(page, [MEMBER, OUTSIDE]);
-    const after = hold(page, "**/reminders/", "GET");
-    await after.installed;
-    if (refresh !== "held") after.release();
-    failing = refresh === "failed";
-    const refreshing = page.waitForRequest((request) =>
-        isRead(request.method(), request.url()),
-    );
-    const answered = page.waitForResponse((response) =>
-        isRead(response.request().method(), response.url()),
-    );
-    write.release();
-    await refreshing;
-    expect(await seen()).toEqual([]);
-    after.release();
-    await answered;
-    expect(await seen()).toEqual([]);
-    await expect(page.getByText(OUTSIDE)).toHaveCount(0);
-}
+    await expect(radio(page, MEMBER, "Hidden")).toBeChecked();
+    await expect(radio(page, MEMBER, "Hidden")).toBeFocused();
+});
+
+test("an address added again after its removal offers no choice until it is checked again", async ({
+    page,
+}) => {
+    const AGAIN = "again@example.test";
+    await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: [ADMIN],
+        hidden: false,
+    });
+    await openReminders(page);
+    const add = page.getByRole("button", { name: "Add address", exact: true });
+    await add.click();
+    await type(page, 2, AGAIN);
+    await expect(radio(page, AGAIN, "Hidden")).toBeChecked();
+    await page
+        .getByRole("button", { name: "Remove email address 2", exact: true })
+        .click();
+    await expect(group(page, AGAIN)).toHaveCount(0);
+    const preview = hold(page, "**/reminders/preview/");
+    try {
+        await preview.installed;
+        await add.click();
+        await type(page, 2, AGAIN);
+        await expect(group(page, AGAIN)).toHaveCount(0);
+        await expect(line(page, "Checking this address…")).toBeVisible();
+    } finally {
+        preview.release();
+    }
+    await expect(radio(page, AGAIN, "Hidden")).toBeChecked();
+});
 
 test("while who sees what is checked, refused or failed no row shows a placement, a default or a count", async ({
     page,
@@ -1925,7 +2458,7 @@ test("the section reads in Turkish with every text of the screen", async ({
     await expect(
         line(
             page,
-            "Henüz kaydedilmedi. Bir sonraki gönderimde tüm alıcılar Kime ve Bilgi adreslerini görebilir.",
+            "Henüz kaydedilmedi. Bu ayarları kaydederseniz her alıcı burada gösterilen Kime ve Bilgi adreslerini görebilir.",
         ),
     ).toBeVisible();
     await expect(
@@ -1937,4 +2470,31 @@ test("the section reads in Turkish with every text of the screen", async ({
     await expect(
         line(page, "Yeni üyeler varsayılan rolle eklenir."),
     ).toBeVisible();
+    await page
+        .getByLabel("E-posta adresi 1", { exact: true })
+        .fill("x@example.test");
+    await expect(
+        line(
+            page,
+            "Kimin neyi göreceğini denetlemek için adres alanından çıkın.",
+        ),
+    ).toBeVisible();
+    const preview = hold(page, "**/reminders/preview/");
+    try {
+        await preview.installed;
+        await page
+            .getByRole("button", {
+                name: "Hatırlatıcıları kaydet",
+                exact: true,
+            })
+            .click();
+        await expect(
+            line(
+                page,
+                "Hiçbir şey kaydedilmedi. Alıcıları gözden geçirip yeniden kaydedin.",
+            ),
+        ).toBeVisible();
+    } finally {
+        preview.release();
+    }
 });

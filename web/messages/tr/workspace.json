@@ -220,14 +220,16 @@
         "recipientsHidden": "Alıcılar birbirinin adresini göremez.",
         "recipientsVisible": "Alıcılar e-postada birbirinin adresini görebilir; buna çalışma alanı yöneticisi karar verir.",
         "newMembersDefault": "Yeni üyeler varsayılan rolle eklenir.",
-        "savingShowsAddresses": "Bir sonraki gönderimde tüm alıcılar Kime ve Bilgi adreslerini görebilir.",
+        "savingShowsAddresses": "Bu ayarları kaydederseniz her alıcı burada gösterilen Kime ve Bilgi adreslerini görebilir.",
         "hiddenByDeparture": "Bir üye ayrıldığı ya da bir hesap silindiği için tüm alıcılar yeniden gizlendi. Kalan seçimler korunuyor.",
         "checking": "Kimin neyi göreceği denetleniyor…",
         "checkFailed": "Kimin neyi göreceği denetlenemedi.",
         "checkAgain": "Yeniden denetle",
         "checkingAddress": "Bu adres denetleniyor…",
         "nobodyReceives": "Bu e-postayı henüz kimse almıyor.",
-        "saveWaitsForCheck": "Bu kayıt, kimin neyi göreceği gösterilene kadar bekler. Kontrol edip yeniden kaydedin."
+        "saveWaitsForCheck": "Hiçbir şey kaydedilmedi. Alıcıları gözden geçirip yeniden kaydedin.",
+        "changedElsewhere": "Bu hatırlatıcılar başka bir yerde değiştirildi. Kimin neyi göreceğini görmek için yeniden yükleyin.",
+        "leaveAddressField": "Kimin neyi göreceğini denetlemek için adres alanından çıkın."
     },
     "Outages": {
         "plantOutages": "Santral kesintileri",

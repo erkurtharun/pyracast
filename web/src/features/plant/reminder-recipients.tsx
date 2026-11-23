@@ -2,7 +2,6 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import { flushSync } from "react-dom";
-import type { components } from "@/lib/schema";
 import type { RegionScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/errors";
@@ -15,17 +14,69 @@ import {
     memberKey,
     settled,
     type AddedRow,
+    type Addresses,
     type Answer,
     type Choice,
     type Draft,
+    type MemberRow,
     type Role,
     type TypedRow,
 } from "./reminder-draft";
 import styles from "./reminder-recipients.module.css";
-import type { Outcome, RecipientState } from "./reminders";
+import type { Outcome, RecipientState, Section } from "./reminders";
 import { useRowFocus } from "./row-focus";
 
-type MemberRow = components["schemas"]["MemberAddressOutput"];
+type Known = Section["known"];
+
+function knownOf(rows: TypedRow[], addresses: Addresses, known: Known) {
+    const learnt = { ...known };
+    filled(rows).forEach((row, index) => {
+        const added = addresses.added[index];
+        if (added) learnt[row.id] = { text: row.committed.trim(), added };
+    });
+    return learnt;
+}
+
+function editing({ change }: RecipientState) {
+    return {
+        update: (apply: (draft: Draft) => Draft, decided = true) =>
+            change((section) => {
+                const draft = apply(section.draft);
+                if (draft === section.draft) return section;
+                const rows = new Set(draft.rows.map((row) => row.id));
+                return {
+                    ...section,
+                    draft,
+                    known: Object.fromEntries(
+                        Object.entries(section.known).filter(([id]) =>
+                            rows.has(Number(id)),
+                        ),
+                    ),
+                };
+            }, decided),
+        record: (asked: number, outcome: Outcome | null) =>
+            change((section, generation) => {
+                if (generation !== asked) return section;
+                const addresses =
+                    outcome?.status === "answered"
+                        ? outcome.answer.addresses
+                        : null;
+                return {
+                    ...section,
+                    check: outcome && { generation, ...outcome },
+                    ...(addresses && {
+                        known: knownOf(
+                            section.draft.rows,
+                            addresses,
+                            section.known,
+                        ),
+                        members: addresses.members,
+                    }),
+                };
+            }, false),
+    };
+}
+
 const PREVIEW =
     "/api/tenants/{tenant_id}/regions/{region_id}/reminders/preview/";
 const ROLES = ["to", "cc", "bcc"] as const satisfies readonly Role[];
@@ -40,7 +91,7 @@ function focusChecked(name: string) {
 
 type Status =
     | { status: "answered"; answer: Answer }
-    | { status: "checking" }
+    | { status: "checking" | "changed" | "editing" }
     | { status: "refused"; message: string }
     | { status: "failed"; retry: () => void };
 
@@ -50,8 +101,21 @@ function outcomeOf(error: unknown): Outcome {
         : { status: "failed" };
 }
 
-function useCheck(recipients: RecipientState, scope: RegionScope) {
-    const { generation, unsaved, base, draft, check, record } = recipients;
+function useCheck(
+    recipients: RecipientState,
+    scope: RegionScope,
+    record: ReturnType<typeof editing>["record"],
+) {
+    const { generation, unsaved, check, base, draft, section } = recipients;
+    const settings =
+        section.attempt?.generation === generation
+            ? section.attempt
+            : {
+                  enabled: base.enabled,
+                  times: base.times,
+                  language: base.language,
+              };
+    const asking = unsaved && check === null;
     const asked = useRef(-1);
     const ask = () => {
         asked.current = generation;
@@ -59,9 +123,9 @@ function useCheck(recipients: RecipientState, scope: RegionScope) {
             .post(PREVIEW, {
                 path: scope,
                 body: {
-                    enabled: base.enabled,
-                    times: base.times,
-                    language: base.language,
+                    enabled: settings.enabled,
+                    times: settings.times,
+                    language: settings.language,
                     expected_revision: base.revision,
                     ...addressingOf(draft),
                 },
@@ -72,7 +136,7 @@ function useCheck(recipients: RecipientState, scope: RegionScope) {
             );
     };
     useEffect(() => {
-        if (unsaved && !check && asked.current !== generation) ask();
+        if (asking && asked.current !== generation) ask();
     });
     return () => {
         record(generation, null);
@@ -81,10 +145,12 @@ function useCheck(recipients: RecipientState, scope: RegionScope) {
 }
 
 function statusOf(
-    { present, check }: RecipientState,
+    { section, check, newer, unsaved, answered, base, draft }: RecipientState,
     retry: () => void,
 ): Status {
-    if (present) return { status: "answered", answer: present };
+    if (newer || section.saved?.settled) return { status: "changed" };
+    if (draft.rows.some((row) => !settled(row))) return { status: "editing" };
+    if (section.saved) return { status: "checking" };
     if (check?.status === "refused") {
         const fields = Object.values(check.error.fields);
         return {
@@ -92,8 +158,11 @@ function statusOf(
             message: fields.length ? fields.join(" ") : check.error.message,
         };
     }
-    if (check?.status === "failed") return { status: "failed", retry };
-    return { status: "checking" };
+    if (!unsaved) return { status: "answered", answer: base };
+    if (answered) return { status: "answered", answer: answered };
+    return check?.status === "failed"
+        ? { status: "failed", retry }
+        : { status: "checking" };
 }
 
 type Shown = { checked: Role; set: boolean } | null;
@@ -104,13 +173,22 @@ type TypedView = {
     shown: Shown | undefined;
 };
 
-function rowsOf({ draft, known, addresses }: RecipientState, status: Status) {
+function rowsOf(recipients: RecipientState, status: Status) {
+    const { draft, addresses, section } = recipients;
     const present =
         status.status === "answered" ? status.answer.addresses : null;
     const answered = new Map(
         filled(draft.rows).map((row, index) => [row.id, present?.added[index]]),
     );
-    const members = (present ?? addresses).members;
+    const members = present?.members ?? section.members;
+    const learntFor = (row: TypedRow) =>
+        [
+            section.known[row.id],
+            addresses.added[row.id] && {
+                text: addresses.recipients[row.id]?.trim(),
+                added: addresses.added[row.id],
+            },
+        ].find((entry) => entry?.text === row.committed.trim())?.added;
     const membersByKey = new Map(
         members.map((member) => [memberKey(member.memberships), member]),
     );
@@ -119,14 +197,11 @@ function rowsOf({ draft, known, addresses }: RecipientState, status: Status) {
             ? { checked: answer.placement, set: answer.role !== null }
             : null;
     const typed: TypedView[] = draft.rows.map((row) => {
-        const learnt = known[row.id];
         const added = !settled(row)
             ? undefined
             : present
               ? answered.get(row.id)
-              : learnt?.text === row.committed.trim()
-                ? learnt.added
-                : undefined;
+              : learntFor(row);
         const member =
             added?.eligible && added.memberships.length
                 ? membersByKey.get(memberKey(added.memberships))
@@ -159,37 +234,39 @@ function rowsOf({ draft, known, addresses }: RecipientState, status: Status) {
     };
 }
 
-function summaryOf(
-    { typed, members }: ReturnType<typeof rowsOf>,
-    count: number,
-) {
+function summaryOf(answer: Answer) {
+    const { members, added } = answer.addresses ?? { members: [], added: [] };
+    const sent = added.filter((item) => item.eligible);
+    const typed = new Set(
+        sent.flatMap((item) =>
+            item.memberships.length ? [memberKey(item.memberships)] : [],
+        ),
+    );
     const placed = [
-        ...members.flatMap(({ member, shown }) =>
-            shown ? [{ address: member.address, role: shown.checked }] : [],
-        ),
-        ...typed.flatMap(({ added, shown }) =>
-            added && shown
-                ? [
-                      {
-                          address: added.address,
-                          role: shown.checked,
-                          outside: !added.memberships.length,
-                      },
-                  ]
-                : [],
-        ),
+        ...(answer.include_workspace_members ? members : [])
+            .filter((member) => !typed.has(memberKey(member.memberships)))
+            .map((member) => ({
+                address: member.address,
+                role: member.placement,
+                outside: false,
+            })),
+        ...sent.map((item) => ({
+            address: item.address,
+            role: item.placement,
+            outside: !item.memberships.length,
+        })),
     ];
     const listed = (role: Role) =>
         placed.filter((item) => item.role === role).map((item) => item.address);
     const to = listed("to");
     const cc = listed("cc");
+    const count = answer.recipient_count;
     return {
         to,
         cc,
         hidden: Math.max(0, count - to.length - cc.length),
         outside: placed.filter(
-            (item) =>
-                "outside" in item && item.outside && visibleRole(item.role),
+            (item) => item.outside && visibleRole(item.role),
         ),
         count,
     };
@@ -246,43 +323,48 @@ function Placement({
     );
 }
 
-function CheckState({ status }: { status: Status }) {
+function StateLine({ status }: { status: Status }) {
     const t = useTranslations("Reminders");
-    if (status.status === "refused")
-        return <p className={styles.warning}>{status.message}</p>;
-    if (status.status !== "failed") return null;
-    return (
-        <>
-            <p>{t("checkFailed")}</p>
-            <button
-                type="button"
-                className="button secondary"
-                onClick={status.retry}
-            >
-                {t("checkAgain")}
-            </button>
-        </>
-    );
+    switch (status.status) {
+        case "answered":
+            return null;
+        case "refused":
+            return <p className={styles.warning}>{status.message}</p>;
+        case "failed":
+            return (
+                <>
+                    <p>{t("checkFailed")}</p>
+                    <button
+                        type="button"
+                        className="button secondary"
+                        onClick={status.retry}
+                    >
+                        {t("checkAgain")}
+                    </button>
+                </>
+            );
+        case "changed":
+            return <p>{t("changedElsewhere")}</p>;
+        case "editing":
+            return <p>{t("leaveAddressField")}</p>;
+        case "checking":
+            return <p>{t("checking")}</p>;
+    }
 }
 
 function Summary({
     unsaved,
     status,
-    rows,
     heading,
     hold,
 }: {
     unsaved: boolean;
     status: Status;
-    rows: ReturnType<typeof rowsOf>;
     heading: RefObject<HTMLHeadingElement | null>;
     hold: string | undefined;
 }) {
     const t = useTranslations("Reminders");
-    const view =
-        status.status === "answered"
-            ? summaryOf(rows, status.answer.recipient_count)
-            : null;
+    const view = status.status === "answered" ? summaryOf(status.answer) : null;
     return (
         <div className={styles.summary}>
             <h3 tabIndex={-1} ref={heading} aria-describedby={hold}>
@@ -294,8 +376,7 @@ function Summary({
                         {t("saveWaitsForCheck")}
                     </p>
                 )}
-                {status.status === "checking" && <p>{t("checking")}</p>}
-                <CheckState status={status} />
+                <StateLine status={status} />
                 {view && (
                     <>
                         {view.to.length > 0 && (
@@ -397,8 +478,9 @@ export function RecipientSection({
     hold: string | undefined;
 }) {
     const t = useTranslations("Reminders");
-    const { base, addresses, draft, update } = recipients;
-    const status = statusOf(recipients, useCheck(recipients, scope));
+    const { base, addresses, draft } = recipients;
+    const { update, record } = editing(recipients);
+    const status = statusOf(recipients, useCheck(recipients, scope, record));
     const present = status.status === "answered" ? status.answer : null;
     const { prefix, focusRow } = useRowFocus(draft.rows);
     const pendingFocus = useRef<string | null>(null);
@@ -421,6 +503,10 @@ export function RecipientSection({
             return {
                 ...committed,
                 rows: next,
+                next: Math.max(
+                    committed.next,
+                    ...next.map((row) => row.id + 1),
+                ),
                 typed: Object.fromEntries(
                     Object.entries(committed.typed).filter(([id]) =>
                         kept.has(Number(id)),
@@ -510,15 +596,20 @@ export function RecipientSection({
                     })}
                 </Notice>
             )}
-            {base.hide_recipients && draft.hide && (
+            {!visible && !base.hide_recipients && <StateLine status={status} />}
+            {!visible && base.hide_recipients && (
                 <div className={styles.review}>
-                    <p>
-                        {t(
-                            base.hidden_by_departure
-                                ? "hiddenByDeparture"
-                                : "hiddenToday",
-                        )}
-                    </p>
+                    {present ? (
+                        <p>
+                            {t(
+                                base.hidden_by_departure
+                                    ? "hiddenByDeparture"
+                                    : "hiddenToday",
+                            )}
+                        </p>
+                    ) : (
+                        <StateLine status={status} />
+                    )}
                     <button
                         type="button"
                         className="button secondary"
@@ -720,20 +811,17 @@ export function RecipientSection({
                 className="button secondary"
                 type="button"
                 onClick={() => {
-                    const id =
-                        Math.max(-1, ...draft.rows.map((row) => row.id)) + 1;
+                    const id = draft.next;
                     focusRow(id);
                     setRows((now) => [...now, { id, text: "", committed: "" }]);
                 }}
             >
                 {t("addAddress")}
             </button>
-            {!visible && <CheckState status={status} />}
             {visible && (
                 <Summary
                     unsaved={recipients.unsaved}
                     status={status}
-                    rows={rows}
                     heading={heading}
                     hold={hold}
                 />

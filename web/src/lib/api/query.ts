@@ -84,6 +84,7 @@ export type Loaded<T> = {
     retry: () => void;
     reload: () => Promise<T>;
     replace(value: T): void;
+    forget(options: { keepShown: boolean }): void;
 };
 
 type Polling = { poll?: number | false };
@@ -112,6 +113,20 @@ export function languagePlaceholder(queryKey: QueryKey) {
         sameRequest(previousQuery.queryKey, queryKey)
             ? previous
             : undefined;
+}
+
+// Removing or resetting a query cancels its read in flight, so no answer read before this call is kept.
+export function forget(
+    client: QueryClient,
+    queryKey: QueryKey,
+    { keepShown }: { keepShown: boolean },
+) {
+    const shown = hashKey(queryKey);
+    client.removeQueries({
+        predicate: (query) =>
+            query.queryHash !== shown && sameRequest(query.queryKey, queryKey),
+    });
+    if (!keepShown) void client.resetQueries({ queryKey, exact: true });
 }
 
 function useOwner() {
@@ -156,6 +171,7 @@ function useLoaded<T>(
         },
         replace: (value) =>
             client.setQueryData<Fetched<T>>(queryKey, { value, requests: 1 }),
+        forget: (options) => forget(client, queryKey, options),
     };
 }
 

@@ -220,14 +220,16 @@
         "recipientsHidden": "Recipients cannot see each other's addresses.",
         "recipientsVisible": "Recipients may see each other's addresses in the email; the workspace administrator decides.",
         "newMembersDefault": "New members are added with the default role.",
-        "savingShowsAddresses": "On the next send, every recipient can see the To and Copy addresses.",
+        "savingShowsAddresses": "If you save these settings, every recipient will see the To and Copy addresses shown here.",
         "hiddenByDeparture": "Every recipient was hidden again because a member left or an account was deleted. The remaining choices are kept.",
         "checking": "Checking who sees what…",
         "checkFailed": "Who sees what could not be checked.",
         "checkAgain": "Check again",
         "checkingAddress": "Checking this address…",
         "nobodyReceives": "Nobody receives this email yet.",
-        "saveWaitsForCheck": "This save waits until who sees what is shown. Check it, then save again."
+        "saveWaitsForCheck": "Nothing was saved. Review the recipients, then save again.",
+        "changedElsewhere": "These reminders were changed elsewhere. Reload them to see who sees what.",
+        "leaveAddressField": "Leave the address field to check who sees what."
     },
     "Outages": {
         "plantOutages": "Plant outages",

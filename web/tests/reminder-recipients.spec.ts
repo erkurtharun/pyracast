@@ -97,7 +97,7 @@ test("shared reminder recipients and email language survive administrator transf
     expect(saves).toBe(1);
 });
 
-test("a failed reload after saving keeps the answer of the save and the history until a retry loads them", async ({
+test("a failed reload after saving keeps the fields as sent, offers a reload and shows the read once a retry loads it", async ({
     page,
 }) => {
     await reminderApi(page, { enabled: true });
@@ -135,12 +135,15 @@ test("a failed reload after saving keeps the answer of the save and the history 
     await expect(notice).toBeVisible();
     await expect(
         page.getByLabel("Delivery time 1", { exact: true }),
-    ).toHaveValue("07:00");
-    await expect(
-        page.getByLabel("Delivery time 2", { exact: true }),
     ).toHaveValue("08:00");
     await expect(
+        page.getByLabel("Delivery time 2", { exact: true }),
+    ).toHaveValue("07:00");
+    await expect(
         page.getByText("Saved successfully.", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "Reload reminders", exact: true }),
     ).toBeVisible();
     await expect(history).toBeVisible();
 
@@ -157,6 +160,9 @@ test("a failed reload after saving keeps the answer of the save and the history 
     await expect(
         page.getByLabel("Delivery time 2", { exact: true }),
     ).toHaveValue("08:00");
+    await expect(
+        page.getByRole("button", { name: "Reload reminders", exact: true }),
+    ).toHaveCount(0);
     await expect(history).toBeVisible();
 });
 

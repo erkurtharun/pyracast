@@ -4,6 +4,7 @@ type Schemas = components["schemas"];
 export type Answer = Schemas["ReminderOutput"];
 export type Addresses = Schemas["ReminderAddressesOutput"];
 export type AddedRow = Schemas["AddedAddressOutput"];
+export type MemberRow = Schemas["MemberAddressOutput"];
 export type Role = Schemas["RecipientRoleEnum"];
 export type Choice = Role | null;
 type MemberRole = Schemas["MemberRoleInput"];
@@ -26,6 +27,7 @@ export type Draft = {
     hide: boolean;
     include: boolean;
     rows: TypedRow[];
+    next: number;
     members: Record<string, MemberRole>;
     typed: Record<number, TypedDecision>;
 };
@@ -42,6 +44,7 @@ export function initialDraft(answer: Answer, addresses: Addresses): Draft {
         hide: answer.hide_recipients,
         include: answer.include_workspace_members,
         rows: rows.length ? rows : [{ id: 0, text: "", committed: "" }],
+        next: Math.max(rows.length, 1),
         members: {},
         typed: {},
     };
