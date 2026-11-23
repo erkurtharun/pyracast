@@ -965,3 +965,66 @@ def test_a_hidden_typed_choice_is_stored_whatever_members_the_form_saw() -> None
     assert response.status_code == 200, response.content
     assert list(ReminderRecipient.objects.values_list("role", "role_members")) == [("bcc", [])]
     assert sent_headers(0) == ([], [], [alice.email])
+
+
+UNICODE_MAILBOX, ACE_MAILBOX = "ops@b\u00fccher.de", "ops@xn--bcher-kva.de"
+
+
+def test_two_spellings_of_one_mailbox_are_refused_as_duplicate_recipients() -> None:
+    system, _, _ = workspace()
+
+    response = put(system, recipients=[UNICODE_MAILBOX, ACE_MAILBOX])
+
+    assert response.status_code == 400
+    assert (response.json()["code"], list(response.json()["fields"])) == (
+        "duplicate_recipients",
+        ["recipients"],
+    )
+    assert not ReminderSchedule.objects.exists()
+
+
+def test_two_typed_role_entries_for_spellings_of_one_mailbox_are_refused() -> None:
+    system, _, _ = workspace()
+
+    response = put(
+        system,
+        recipients=[UNICODE_MAILBOX, ACE_MAILBOX],
+        address_roles=[
+            {"address": UNICODE_MAILBOX, "role": "to", "memberships": []},
+            {"address": ACE_MAILBOX, "role": "cc", "memberships": []},
+        ],
+    )
+
+    assert response.status_code == 400
+    assert list(response.json()["fields"]) == ["address_roles"]
+    assert not ReminderSchedule.objects.exists()
+
+
+@pytest.mark.parametrize("departure", [remove, erase])
+def test_a_departure_leaves_the_other_spelling_of_the_address_on_the_list_hidden(
+    departure: Any,
+) -> None:
+    system, _, _ = workspace()
+    holder = member(system, UNICODE_MAILBOX)
+    held = membership(holder)
+    configure_reminders(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        enabled=True,
+        recipients=[ACE_MAILBOX],
+        include_workspace_members=True,
+        times=["10:00"],
+        language="en",
+        now=NOW,
+        hide_recipients=False,
+        address_roles=[AddressChoice(ACE_MAILBOX, TO, frozenset({held}))],
+    )
+    assert ACE_MAILBOX in sent_headers(0)[0]
+
+    assert departure(system, holder)
+
+    assert list(ReminderRecipient.objects.values_list("address", "role", "role_members")) == [
+        (ACE_MAILBOX, "to", [held])
+    ]
+    assert sent_headers(1) == ([ADMIN], ["alice@example.com", "bob@example.com"], [ACE_MAILBOX])

@@ -2,6 +2,7 @@ import pytest
 
 from pyracast.notifications.addressing import Candidate, explicit_role, members_choice, roles
 from pyracast.notifications.models import RecipientRole
+from pyracast.notifications.recipients import mailbox_key
 
 TO, CC, BCC = RecipientRole.TO, RecipientRole.CC, RecipientRole.BCC
 ADMIN = Candidate("admin@example.com", member=True, administrator=True)
@@ -129,3 +130,40 @@ def test_the_members_of_an_address_choose_hidden_if_any_does_or_if_they_disagree
     choices: tuple[RecipientRole, ...], combined: RecipientRole | None
 ) -> None:
     assert members_choice(choices) == combined
+
+
+UNICODE_MAILBOX = "ops@b\u00fccher.de"
+SPELLINGS = [
+    "ops@xn--bcher-kva.de",
+    "OPS@XN--BCHER-KVA.DE",
+    "ops@Xn--Bcher-Kva.De",
+    "ops@xn--bcher-kva\u3002de",
+    "ops@b\u00fccher\uff0ede",
+    "ops@b\u00fccher\uff61de",
+    "\uff4f\uff50\uff53@\uff42\u00fc\uff43\uff48\uff45\uff52.\uff44\uff45",
+    "ops@bu\u0308cher.de",
+    " Ops@B\u00dcCHER.de ",
+]
+UNDECODABLE = ["xn--99999999999999999999", "xn--abc-", "xn--xn--abc-", "xn--", "xn--a\u00fc"]
+
+
+@pytest.mark.parametrize("spelling", SPELLINGS)
+def test_every_spelling_of_one_mailbox_has_one_key(spelling: str) -> None:
+    assert mailbox_key(spelling) == mailbox_key(UNICODE_MAILBOX) == UNICODE_MAILBOX
+
+
+def test_the_local_part_is_only_normalised_and_folded() -> None:
+    assert mailbox_key("Stra\u00dfe@example.com") == "strasse@example.com"
+    assert mailbox_key("xn--bcher-kva@example.com") == "xn--bcher-kva@example.com"
+
+
+@pytest.mark.parametrize("label", UNDECODABLE)
+def test_a_label_that_does_not_decode_stays_as_it_is(label: str) -> None:
+    assert mailbox_key(f"ops@{label}.de") == f"ops@{label}.de"
+
+
+@pytest.mark.parametrize(
+    "address", [*SPELLINGS, *(f"ops@{label}.de" for label in UNDECODABLE), "ops@xn--\u00df.de"]
+)
+def test_a_mailbox_key_is_its_own_key(address: str) -> None:
+    assert mailbox_key(mailbox_key(address)) == mailbox_key(address)

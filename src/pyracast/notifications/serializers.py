@@ -30,7 +30,7 @@ from pyracast.notifications.overview import (
     ReminderOverview,
     ReminderSummary,
 )
-from pyracast.notifications.recipients import recipient_key
+from pyracast.notifications.recipients import mailbox_key
 
 
 class AddressRoleInput(InputSerializer):
@@ -70,7 +70,7 @@ class ReminderInput(InputSerializer):
     )
 
     def validate_member_roles(self, value: list[dict[str, Any]]) -> list[MemberChoice]:
-        keys = {recipient_key(entry["address"]) for entry in value}
+        keys = {mailbox_key(entry["address"]) for entry in value}
         if len({entry["membership"] for entry in value}) != len(value) or len(keys) != len(value):
             raise serializers.ValidationError(gettext("Choose each member's role once."))
         return [
@@ -85,9 +85,9 @@ class ReminderInput(InputSerializer):
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         if (entries := attrs.get("address_roles")) is None:
             return attrs
-        keys = [recipient_key(entry["address"]) for entry in entries]
+        keys = [mailbox_key(entry["address"]) for entry in entries]
         if len(set(keys)) != len(keys) or not set(keys) <= {
-            recipient_key(address) for address in attrs["recipients"]
+            mailbox_key(address) for address in attrs["recipients"]
         }:
             raise serializers.ValidationError(
                 {"address_roles": gettext("Choose a role once for each address of the recipients.")}

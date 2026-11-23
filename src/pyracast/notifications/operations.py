@@ -1,4 +1,4 @@
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 
@@ -24,22 +24,25 @@ from pyracast.notifications.models import (
     ReminderSchedule,
 )
 from pyracast.notifications.recipients import (
+    HIDDEN,
     NO_CHOICE,
     NO_MEMBERS,
+    Choices,
     Explicit,
     Resolved,
     TypedChoice,
     Workspace,
+    choices,
     effective,
     explicit_recipients,
     grouped_recipients,
+    mailbox_key,
     needs_members,
     placements,
     planned_recipients,
-    recipient_key,
-    recipient_roles,
     store_member_choices,
     store_recipients,
+    typed_choices,
     workspace,
     workspaces,
 )
@@ -212,7 +215,7 @@ def get_reminder_schedule(
 def _check_recipients(submitted: ReminderSettings) -> None:
     for address in submitted.recipients:
         validate_recipient(address)
-    if len({address.casefold() for address in submitted.recipients}) != len(submitted.recipients):
+    if len({mailbox_key(address) for address in submitted.recipients}) != len(submitted.recipients):
         raise DomainError(ErrorCode.DUPLICATE_RECIPIENTS, field="recipients")
     if submitted.enabled and not (submitted.recipients or submitted.include_workspace_members):
         raise DomainError(ErrorCode.RECIPIENT_REQUIRED, field="recipients")
@@ -274,31 +277,29 @@ def _member_choices(
 
 def _typed_choices(
     planned: Sequence[Explicit],
-    stored: Mapping[str, TypedChoice],
+    stored: Choices,
     address_roles: Sequence[AddressChoice] | None,
     members: Workspace,
-) -> dict[str, TypedChoice]:
+) -> list[TypedChoice]:
     """Without `address_roles` an address that stays keeps its stored choice. Otherwise a To or
     Cc is kept only while the members the form saw are the address's members, so a choice made
     for other members is dropped rather than bound to new ones; Hidden is always kept."""
-    keys = [recipient_key(row.address) for row in planned]
     if address_roles is None:
-        return {key: stored.get(key, NO_CHOICE) for key in keys}
-    entries = {recipient_key(entry.address): entry for entry in address_roles}
-    chosen = {}
-    for key in keys:
-        entry = entries.get(key)
+        return [stored.typed(row.address) or NO_CHOICE for row in planned]
+    entries = {mailbox_key(entry.address): entry for entry in address_roles}
+    chosen = []
+    for row in planned:
+        entry = entries.get(mailbox_key(row.address))
         if entry is not None and entry.role == RecipientRole.BCC:
-            chosen[key] = TypedChoice(RecipientRole.BCC)
-        elif entry is not None and entry.memberships == members.memberships(entry.address):
-            chosen[key] = TypedChoice(entry.role, entry.memberships)
+            chosen.append(HIDDEN)
+        elif entry is not None and members.are_members(entry.address, entry.memberships):
+            chosen.append(TypedChoice(entry.role, entry.memberships))
         else:
-            chosen[key] = NO_CHOICE
+            chosen.append(NO_CHOICE)
     return chosen
 
 
 def _audit_details(schedule: ReminderSchedule, resolved: Resolved) -> dict[str, int]:
-    member_keys = {recipient_key(address) for address in resolved.members.addresses}
     visible = [
         address
         for address, role in zip(
@@ -311,7 +312,7 @@ def _audit_details(schedule: ReminderSchedule, resolved: Resolved) -> dict[str, 
     return {
         "schedule_revision": schedule.revision,
         "visible_recipients": len(visible),
-        "visible_outside": sum(recipient_key(address) not in member_keys for address in visible),
+        "visible_outside": sum(resolved.members.member(address) is None for address in visible),
     }
 
 
@@ -378,8 +379,9 @@ def configure_reminders(
         unchanged_pause = not enabled and replace(submitted, enabled=stored.enabled) == stored
         addresses = effective(include_workspace_members, planned, members)
         _check_recipient_limit(len(addresses), current, limit, unchanged_pause)
-        stored_roles = recipient_roles(schedule)
-        roles = _typed_choices(planned, stored_roles, address_roles, members)
+        stored_typed = typed_choices(schedule)
+        stored_roles = [choice for _, choice in stored_typed]
+        roles = _typed_choices(planned, choices(stored_typed, {}), address_roles, members)
         store_recipients(schedule, explicit, planned, roles=roles, stored_roles=stored_roles)
         chosen = store_member_choices(schedule, decided)
         mode = schedule.hide_recipients != hide_recipients

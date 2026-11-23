@@ -1,5 +1,7 @@
+import re
+import unicodedata
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from django.db.models import Case, F, Q, Value, When
@@ -26,8 +28,33 @@ OPEN_DELIVERIES = (
 )
 
 
+IDNA_FULL_STOPS = re.compile("[.\u3002\uff0e\uff61]")
+
+
 def recipient_key(address: str) -> str:
     return address.strip().casefold()
+
+
+def _normalized(text: str) -> str:
+    return unicodedata.normalize("NFKC", text)
+
+
+def _decoded_label(label: str) -> str:
+    if label[:4].casefold() != "xn--":
+        return label
+    try:
+        decoded = label[4:].encode("ascii").decode("punycode")
+    except UnicodeError:
+        return label
+    # An A-label encodes a non-ASCII character (RFC 5890); any other label is another DNS name.
+    return label if _normalized(_normalized(decoded).casefold()).isascii() else decoded
+
+
+def mailbox_key(address: str) -> str:
+    """What addressing compares: every spelling of one mailbox has one key."""
+    local, at, domain = _normalized(address).rpartition("@")
+    labels = (_decoded_label(label) for label in IDNA_FULL_STOPS.split(domain))
+    return _normalized(recipient_key(local + at + _normalized(".".join(labels))))
 
 
 @dataclass(frozen=True)
@@ -40,8 +67,6 @@ class Explicit:
 
 @dataclass(frozen=True)
 class Person:
-    """One membership with its account: `verified` holds the keys of its verified addresses."""
-
     membership: int
     administrator: bool
     active: bool
@@ -51,38 +76,40 @@ class Person:
 
 @dataclass(frozen=True)
 class Member:
-    """A verified primary address of active members, in the spelling of the lowest membership,
-    with every membership whose address has its key, ascending."""
+    """A verified primary address of active members, in the lowest membership's spelling."""
 
     address: str
     memberships: tuple[int, ...]
     administrator: bool
 
-    @property
-    def membership(self) -> int:
-        return self.memberships[0]
-
 
 @dataclass(frozen=True)
 class Workspace:
-    """Active memberships, the members of each address by key, and who holds each address:
-    the memberships, active or not, with the address as a verified or primary one."""
+    """`holders` maps each stored key to the memberships, active or not, holding it as a verified
+    or primary address."""
 
     active: frozenset[int]
-    by_key: Mapping[str, Member]
+    _members: Mapping[str, Member]
     holders: Mapping[str, frozenset[int]]
 
     @property
     def members(self) -> tuple[Member, ...]:
-        return tuple(self.by_key.values())
+        return tuple(self._members.values())
 
     @property
     def addresses(self) -> tuple[str, ...]:
-        return tuple(member.address for member in self.by_key.values())
+        return tuple(member.address for member in self._members.values())
+
+    def member(self, address: str) -> Member | None:
+        return self._members.get(mailbox_key(address))
 
     def memberships(self, address: str) -> frozenset[int]:
-        found = self.by_key.get(recipient_key(address))
+        found = self.member(address)
         return frozenset(found.memberships) if found else frozenset()
+
+    def are_members(self, address: str, memberships: Collection[int]) -> bool:
+        """Whether these are exactly the members of the address in this read of people."""
+        return self.memberships(address) == frozenset(memberships)
 
 
 NO_MEMBERS = Workspace(frozenset(), {}, {})
@@ -116,7 +143,7 @@ def workspaces(tenant_ids: Iterable[int], *, leaving: int | None = None) -> dict
             pk, role == WorkspaceRole.ADMIN, active, primary, frozenset()
         )
         if verified:
-            known = replace(known, verified=known.verified | {recipient_key(address)})
+            known = replace(known, verified=known.verified | {address})
         people[tenant_id][pk] = known
     return {tenant_id: _workspace(list(found.values())) for tenant_id, found in people.items()}
 
@@ -125,11 +152,12 @@ def _workspace(people: Sequence[Person]) -> Workspace:
     grouped: dict[str, list[Person]] = {}
     holders: dict[str, set[int]] = defaultdict(set)
     for person in people:
-        key = recipient_key(person.primary)
-        if person.active and key in person.verified:
+        key = mailbox_key(person.primary)
+        if person.active and key in {mailbox_key(address) for address in person.verified}:
             grouped.setdefault(key, []).append(person)
-        for held in {key, *person.verified} - {""}:
-            holders[held].add(person.membership)
+        for held in {recipient_key(address) for address in (person.primary, *person.verified)}:
+            if held:
+                holders[held].add(person.membership)
     return Workspace(
         frozenset(person.membership for person in people if person.active),
         {
@@ -210,44 +238,60 @@ def effective_recipients(schedule: ReminderSchedule) -> list[str]:
 
 @dataclass(frozen=True)
 class TypedChoice:
-    """A typed row's choice, `""` for none, and the members of its address when its To or Cc
-    was chosen."""
+    """`members` are the address's members when its To or Cc was chosen."""
 
     role: str
     members: frozenset[int] = frozenset()
 
 
 NO_CHOICE = TypedChoice("")
+HIDDEN = TypedChoice(RecipientRole.BCC)
 
 
 @dataclass(frozen=True)
 class Choices:
-    typed: dict[str, TypedChoice]
-    chosen: dict[int, RecipientRole]
+    _typed: Mapping[str, TypedChoice]
+    _chosen: Mapping[int, RecipientRole]
+
+    def typed(self, address: str) -> TypedChoice | None:
+        return self._typed.get(mailbox_key(address))
 
     def of(self, member: Member) -> RecipientRole | None:
-        return members_choice(self.chosen[pk] for pk in member.memberships if pk in self.chosen)
+        return members_choice(self._chosen[pk] for pk in member.memberships if pk in self._chosen)
+
+
+def choices(
+    typed: Iterable[tuple[str, TypedChoice]], chosen: Mapping[int, RecipientRole]
+) -> Choices:
+    found: dict[str, set[TypedChoice]] = defaultdict(set)
+    for address, choice in typed:
+        found[mailbox_key(address)].add(choice)
+    # Rows stored before two spellings of one mailbox were refused: Hidden unless they agree.
+    combined = {key: next(iter(same)) if len(same) == 1 else HIDDEN for key, same in found.items()}
+    return Choices({key: choice for key, choice in combined.items() if choice.role}, chosen)
+
+
+def typed_choices(schedule: ReminderSchedule) -> list[tuple[str, TypedChoice]]:
+    return [
+        (address, TypedChoice(role, frozenset(members)))
+        for address, role, members in ReminderRecipient.objects.filter(schedule_id=schedule.pk)
+        .order_by("pk")
+        .values_list("address", "role", "role_members")
+    ]
 
 
 def stored_choices(schedule: ReminderSchedule) -> Choices:
-    """The typed rows' choices by key and the members' choices by membership."""
-    typed = ReminderRecipient.objects.filter(schedule_id=schedule.pk).exclude(role="")
     chosen = ReminderMemberRole.objects.filter(schedule_id=schedule.pk)
-    return Choices(
-        {
-            key: TypedChoice(role, frozenset(members))
-            for key, role, members in typed.values_list("key", "role", "role_members")
-        },
+    return choices(
+        typed_choices(schedule),
         {pk: RecipientRole(role) for pk, role in chosen.values_list("membership_id", "role")},
     )
 
 
 def candidates(addresses: Sequence[str], members: Workspace, choices: Choices) -> list[Candidate]:
-    """A typed To or Cc counts while the address's members are those it was chosen for."""
     found = []
     for address in addresses:
-        key = recipient_key(address)
-        member, typed = members.by_key.get(key), choices.typed.get(key)
+        member, typed = members.member(address), choices.typed(address)
         found.append(
             Candidate(
                 address,
@@ -255,7 +299,7 @@ def candidates(addresses: Sequence[str], members: Workspace, choices: Choices) -
                 administrator=member is not None and member.administrator,
                 chosen=choices.of(member) if member else None,
                 typed=RecipientRole(typed.role) if typed else None,
-                counts=typed is None or typed.members == members.memberships(address),
+                counts=typed is None or members.are_members(address, typed.members),
             )
         )
     return found
@@ -294,37 +338,27 @@ def planned_recipients(
     ]
 
 
-def recipient_roles(schedule: ReminderSchedule) -> dict[str, TypedChoice]:
-    """The choice of each typed row by key."""
-    return {
-        key: TypedChoice(role, frozenset(members))
-        for key, role, members in ReminderRecipient.objects.filter(schedule=schedule)
-        .order_by("pk")
-        .values_list("key", "role", "role_members")
-    }
-
-
 def store_recipients(
     schedule: ReminderSchedule,
     stored: Sequence[Explicit],
     planned: Sequence[Explicit],
     *,
-    roles: Mapping[str, TypedChoice],
-    stored_roles: Mapping[str, TypedChoice],
+    roles: Sequence[TypedChoice],
+    stored_roles: Sequence[TypedChoice],
 ) -> None:
-    """`roles` holds the choice of each planned row by key; it is carried into the rebuilt rows."""
-    if list(stored) == list(planned) and roles == stored_roles:
+    """`roles` holds the choice of each planned row and `stored_roles` that of each stored one."""
+    if list(stored) == list(planned) and list(roles) == list(stored_roles):
         return
     ReminderRecipient.objects.filter(schedule=schedule).delete()
     rows = ReminderRecipient.objects.bulk_create(
         ReminderRecipient(
             schedule=schedule,
             address=row.address,
-            key=(key := recipient_key(row.address)),
-            role=(choice := roles.get(key, NO_CHOICE)).role,
+            key=recipient_key(row.address),
+            role=choice.role,
             role_members=sorted(choice.members),
         )
-        for row in planned
+        for row, choice in zip(planned, roles, strict=True)
     )
     ReminderRecipientTie.objects.bulk_create(
         ReminderRecipientTie(recipient=stored_row, membership_id=membership_id)

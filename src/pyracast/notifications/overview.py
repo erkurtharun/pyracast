@@ -209,7 +209,7 @@ def _addresses(
         list(members.addresses),
         [
             MemberAddress(
-                member.membership,
+                member.memberships[0],
                 member.address,
                 MemberKind.ADMINISTRATOR if member.administrator else MemberKind.MEMBER,
                 choices.of(member),

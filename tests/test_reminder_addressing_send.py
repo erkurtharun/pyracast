@@ -27,7 +27,7 @@ from pyracast.notifications.models import (
     ReminderSchedule,
 )
 from pyracast.notifications.operations import configure_reminders
-from pyracast.notifications.recipients import placements, resolve
+from pyracast.notifications.recipients import placements, recipient_key, resolve
 from pyracast.notifications.scheduler import enqueue_due
 from tests.smtp_server import Script
 from tests.support.concurrency import committed_elsewhere
@@ -44,6 +44,7 @@ from tests.support.notifications import (
     parsed,
     pending_address_change,
     smtp_wire,
+    store,
 )
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -518,3 +519,46 @@ def test_an_address_whose_higher_member_administers_the_workspace_defaults_to_to
 
     assert headers(sent_on()) == (["ops@strasse.de"], [ADMIN], [])
     assert lower.pk < higher.pk
+
+
+UNICODE_MAILBOX, ACE_MAILBOX = "ops@b\u00fccher.de", "ops@xn--bcher-kva.de"
+
+
+@pytest.mark.parametrize(
+    ("held", "typed", "binding"),
+    [
+        (UNICODE_MAILBOX, ACE_MAILBOX, True),
+        (UNICODE_MAILBOX, ACE_MAILBOX, False),
+        (ACE_MAILBOX, UNICODE_MAILBOX, True),
+        (ACE_MAILBOX, UNICODE_MAILBOX, False),
+    ],
+)
+def test_a_members_hidden_mailbox_is_in_no_header_in_any_spelling(
+    smtp_wire: Script, held: str, typed: str, binding: bool
+) -> None:
+    system, (holder,) = workspace_with_members(held)
+    schedule = visible(group(system, [typed]))
+    bound(schedule, recipient_key(typed), TO, *([holder] if binding else []))
+    chosen(schedule, holder, BCC)
+
+    delivery_id = send_on()
+
+    (transaction,) = smtp_wire.transactions
+    message = parsed(transaction.data)
+    assert (message["To"], message["Cc"]) == (ADMIN, None)
+    for spelling in (b"ops@", b"xn--bcher", "b\u00fccher".encode()):
+        assert spelling not in transaction.data
+    assert sorted(delivered_roles(delivery_id)) == sorted([(typed, BCC), (held, BCC), (ADMIN, TO)])
+
+
+def test_two_stored_spellings_of_one_mailbox_with_differing_choices_are_both_hidden() -> None:
+    system, _ = workspace_with_members()
+    schedule = visible(typed_schedule(system, ["first@example.com"]))
+    store(schedule, [UNICODE_MAILBOX, ACE_MAILBOX])
+    ReminderRecipient.objects.filter(schedule=schedule, key=recipient_key(UNICODE_MAILBOX)).update(
+        role=TO
+    )
+
+    to, cc, bcc = headers(sent_on())
+
+    assert (to, cc, sorted(bcc)) == ([], [], sorted([UNICODE_MAILBOX, ACE_MAILBOX]))
