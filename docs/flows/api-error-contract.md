@@ -67,7 +67,7 @@ sequenceDiagram
 | Condition | Result |
 | --- | --- |
 | Django or DRF `ValidationError` (serializers, operations, forms) | 400 `invalid_request`; `message` joins the general errors, `fields` keys each input path (list items by index) |
-| `DomainError` | its status (400 unless set) and own code (for example `plant_edit_blocked` with the block's reason); `field` adds `fields`; `ConflictError` is 409 (`idempotency_key_reused`, `pending_request_limit`, `request_already_closed`, `request_conflict`, `review_context_changed`, `production_revision_changed`, `incident_revision_changed` and `plant_parameters_changed` with `current`, `region_revision_changed`, `workspace_admin_changed`, `configuration_changed`, ...) |
+| `DomainError` | its status (400 unless set) and own code (for example `plant_edit_blocked` with the block's reason); `field` adds `fields`; `ConflictError` is 409 (`idempotency_key_reused`, `pending_request_limit`, `request_already_closed`, `request_conflict`, `review_context_changed`, `production_revision_changed`, `incident_revision_changed` with `current`, the outage as the actor's outage list shows it (`IncidentListOutput` with `pending_request_id`), `plant_parameters_changed` with the plant as `current`, `region_revision_changed`, `workspace_admin_changed`, `configuration_changed`, ...) |
 | `ForbiddenError`; any other `PermissionDenied` | 403 with its code; 403 `permission_denied` |
 | DRF `NotAuthenticated`, `AuthenticationFailed` | 401 `not_authenticated`, `WWW-Authenticate` header |
 | `ObjectDoesNotExist` (model name logged at WARNING), `Http404`, invalid `?page`, unknown `/api/` path | 404 `not_found` |

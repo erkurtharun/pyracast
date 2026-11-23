@@ -5,6 +5,7 @@ import { authRequest } from "@/lib/auth-api";
 import { routes } from "@/lib/routes";
 import { useSessionState } from "@/lib/session-client";
 import { AsyncButton } from "@/ui/form";
+import { usePageTitle } from "@/ui/page-title";
 import { InvitationDetails, type PreviewState } from "./invitation-preview";
 import { clearWorkspaceInvitation } from "./workspace-invitation";
 
@@ -16,6 +17,7 @@ export function AcceptInvitation({
     preview: PreviewState;
 }) {
     const t = useTranslations("WorkspaceMembers");
+    usePageTitle(t("joinWorkspace"));
     const { session } = useSessionState();
     return (
         <main className="auth-page">

@@ -1,3 +1,4 @@
+from threading import Lock
 from typing import Any, cast
 
 from django.contrib.auth.models import User
@@ -5,6 +6,7 @@ from django.db.models import Model, QuerySet
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
+from rest_framework.exceptions import Throttled
 from rest_framework.generics import GenericAPIView
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -26,6 +28,7 @@ from pyracast.plants.models import (
     Plant,
 )
 from pyracast.plants.performance import forecast_performance
+from pyracast.plants.plant_days import plant_days
 from pyracast.plants.production import production_history
 from pyracast.plants.production_changes import (
     AuditContext,
@@ -48,6 +51,7 @@ from pyracast.plants.serializers import (
     PerformanceOutput,
     PerformanceQuery,
     PlantConflict,
+    PlantDaysOutput,
     PlantForecastOutput,
     PlantInput,
     PlantOutput,
@@ -284,3 +288,20 @@ class PlantForecastView(ScopedView[Plant]):
             source=values["data_source"],
         )
         return Response(PlantForecastOutput(result).data)
+
+
+# One days read at a time leaves the process's other thread (deploy/gunicorn_conf.py) to the rest.
+_days_read = Lock()
+DAYS_READ_RETRY_SECONDS = 5
+
+
+class PlantDaysView(ScopedView[Plant]):
+    @extend_schema(responses=PlantDaysOutput)
+    def get(self, _request: Request, **_kwargs: Any) -> Response:
+        if not _days_read.acquire(blocking=False):
+            raise Throttled(wait=DAYS_READ_RETRY_SECONDS)
+        try:
+            data = PlantDaysOutput(plant_days(*self.scope())).data
+        finally:
+            _days_read.release()
+        return Response(data)
