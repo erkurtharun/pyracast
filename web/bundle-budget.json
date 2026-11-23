@@ -1,18 +1,18 @@
 {
     "tolerancePercent": 1,
     "firstLoad": {
-        "/app": 646673,
-        "/app/w/[tenantId]": 681054,
-        "/app/w/[tenantId]/plants/[siteId]/[section]": 763963
+        "/app": 651972,
+        "/app/w/[tenantId]": 678652,
+        "/app/w/[tenantId]/plants/[siteId]/[section]": 765731
     },
     "onDemand": {
         "Calibrations": 15147,
         "Outages": 19206,
         "ProductionSection": 30543,
         "ForecastPerformance": 7130,
-        "ReminderEditor": 13502,
-        "english": 73154,
-        "turkish": 79307
+        "ReminderEditor": 12412,
+        "english": 73287,
+        "turkish": 79483
     },
-    "otherOnDemand": 17957
+    "otherOnDemand": 17698
 }
