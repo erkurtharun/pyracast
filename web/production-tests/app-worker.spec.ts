@@ -342,7 +342,7 @@ if (!workerWithdrawn)
             request,
         }) => {
             await controlled(page);
-            await switchFront(request, "upstream", "http://127.0.0.1:1");
+            await switchFront(request, "upstream", "absent");
             const answer = await page.goto(PLANT_ADDRESS);
             expect(answer?.status()).toBe(503);
             expect(answer?.fromServiceWorker()).toBe(true);

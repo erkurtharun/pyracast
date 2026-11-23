@@ -9,45 +9,11 @@ const SCRIPT_FILES = new Map([
     ["withdrawal", "sw-withdraw.js"],
     ["previous", "sw-previous.js"],
 ]);
-const BODY_HEADERS = new Set([
-    "content-encoding",
-    "content-length",
-    "etag",
-    "last-modified",
-]);
-// Location stays behind: the front never sends the browser to another origin.
-const FORWARDED_HEADERS = [
-    "cache-control",
-    "content-encoding",
-    "content-length",
-    "content-security-policy",
-    "content-type",
-    "date",
-    "etag",
-    "last-modified",
-    "link",
-    "referrer-policy",
-    "set-cookie",
-    "vary",
-    "x-frame-options",
-    "x-nextjs-cache",
-    "x-nextjs-deployment-id",
-    "x-nextjs-postponed",
-    "x-nextjs-prerender",
-    "x-nextjs-rewritten-path",
-    "x-nextjs-rewritten-query",
-    "x-nextjs-stale-time",
-    "x-robots-tag",
-];
-const SCRIPT_HEADERS = FORWARDED_HEADERS.filter(
-    (name) => !BODY_HEADERS.has(name),
-);
+const UPSTREAM_STATES = new Set(["answering", "absent"]);
+const UPSTREAM = new URL(required("FRONT_UPSTREAM"));
 
-type State = { script: string; upstream: URL };
-const initial: State = {
-    script: "build",
-    upstream: new URL(required("FRONT_UPSTREAM")),
-};
+type State = { script: string; upstream: string };
+const initial: State = { script: "build", upstream: "answering" };
 let state = { ...initial };
 
 function required(name: string) {
@@ -56,24 +22,8 @@ function required(name: string) {
     return value;
 }
 
-function targetOf(request: http.IncomingMessage) {
-    return new URL(request.url ?? "/", initial.upstream);
-}
-
 function pathOf(request: http.IncomingMessage) {
-    return targetOf(request).pathname;
-}
-
-function encodedTarget(request: http.IncomingMessage) {
-    const target = targetOf(request);
-    const segments = target.pathname
-        .split("/")
-        .map((segment) => encodeURIComponent(decodeURIComponent(segment)));
-    const query = [...target.searchParams].map(
-        ([name, value]) =>
-            `${encodeURIComponent(name)}=${encodeURIComponent(value)}`,
-    );
-    return segments.join("/") + (query.length ? `?${query.join("&")}` : "");
+    return new URL(request.url ?? "/", "http://front").pathname;
 }
 
 async function bodyOf(request: http.IncomingMessage) {
@@ -96,8 +46,8 @@ function servable(script: string) {
 
 function apply(setting: string, value: string) {
     if (setting === "script" && servable(value)) state.script = value;
-    else if (setting === "upstream" && URL.canParse(value))
-        state.upstream = new URL(value);
+    else if (setting === "upstream" && UPSTREAM_STATES.has(value))
+        state.upstream = value;
     else return false;
     return true;
 }
@@ -113,27 +63,34 @@ async function control(
         return response.writeHead(400).end();
     response
         .writeHead(200, { "Content-Type": "application/json" })
-        .end(JSON.stringify({ ...state, upstream: state.upstream.origin }));
+        .end(JSON.stringify(state));
 }
 
-function forwardedHeaders(
-    headers: http.IncomingHttpHeaders,
-    names: readonly string[],
-) {
-    const kept: http.OutgoingHttpHeaders = {};
-    for (const name of names) {
-        const value = headers[name];
-        if (value !== undefined) kept[name] = value;
-    }
+function withoutBodyHeaders(headers: http.IncomingHttpHeaders) {
+    const kept = { ...headers };
+    for (const name of [
+        "content-encoding",
+        "content-length",
+        "etag",
+        "last-modified",
+        "transfer-encoding",
+    ])
+        delete kept[name];
     return kept;
 }
 
+function unavailable(response: http.ServerResponse) {
+    if (response.headersSent) response.destroy();
+    else
+        response
+            .writeHead(503, { "Content-Type": "text/plain; charset=utf-8" })
+            .end(UNAVAILABLE);
+}
+
 function forward(request: http.IncomingMessage, response: http.ServerResponse) {
-    let target: string;
-    try {
-        target = encodedTarget(request);
-    } catch {
-        return response.writeHead(400).end();
+    if (state.upstream === "absent") {
+        request.resume();
+        return unavailable(response);
     }
     const file =
         pathOf(request) === WORKER_ADDRESS
@@ -147,38 +104,29 @@ function forward(request: http.IncomingMessage, response: http.ServerResponse) {
     }
     const upstream = http.request(
         {
-            hostname: state.upstream.hostname,
-            port: state.upstream.port,
-            path: target,
+            hostname: UPSTREAM.hostname,
+            port: UPSTREAM.port,
+            path: request.url,
             method: request.method,
             headers,
         },
         (answer) => {
             const status = answer.statusCode ?? 502;
             if (!replacement) {
-                response.writeHead(
-                    status,
-                    forwardedHeaders(answer.headers, FORWARDED_HEADERS),
-                );
+                response.writeHead(status, answer.headers);
                 answer.pipe(response);
                 return;
             }
             answer.resume();
             response
                 .writeHead(status, {
-                    ...forwardedHeaders(answer.headers, SCRIPT_HEADERS),
+                    ...withoutBodyHeaders(answer.headers),
                     "content-length": String(replacement.length),
                 })
                 .end(replacement);
         },
     );
-    upstream.on("error", () => {
-        if (response.headersSent) response.destroy();
-        else
-            response
-                .writeHead(503, { "Content-Type": "text/plain; charset=utf-8" })
-                .end(UNAVAILABLE);
-    });
+    upstream.on("error", () => unavailable(response));
     request.pipe(upstream);
 }
 
