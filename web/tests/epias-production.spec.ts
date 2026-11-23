@@ -3,13 +3,20 @@ import { createHash } from "node:crypto";
 import { accessibilityViolations } from "./support/accessibility";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
-import { mockApi, paged, region, user, tenantRow } from "./support/workspace";
+import {
+    accountWith,
+    mockApi,
+    paged,
+    region,
+    sessionIdentity,
+    tenantRow,
+} from "./support/workspace";
 import { errorBody } from "./support/errors";
 
 type Saved = { id: number; energy: number; quality: string; source: string };
 async function productionApi(page: Page, viewer = false) {
     await page.clock.setFixedTime(new Date("2026-11-10T12:00:00Z"));
-    await mockApi(page);
+    const account = await mockApi(page);
     if (viewer)
         await page.route("**/api/tenants/", (route) =>
             route.fulfill({
@@ -26,6 +33,7 @@ async function productionApi(page: Page, viewer = false) {
     const writes: Record<string, unknown>[] = [];
     let id = 0;
     const state = {
+        account,
         provider,
         saved,
         heads,
@@ -1379,13 +1387,10 @@ test("Turkish production at 320px keeps native corrections, decimal commas and i
         quality: "valid",
         source: "meter",
     });
+    state.account.current = accountWith({ language_preference: "tr" });
     await page.route("**/api/session/", (route) =>
         route.fulfill({
-            json: {
-                user: { ...user, language_preference: "tr" },
-                language: "tr",
-                csrf_token: "signed-token",
-            },
+            json: { ...sessionIdentity(state.account.current), language: "tr" },
         }),
     );
     await page.route("**/api/**/production/?*", (route) =>

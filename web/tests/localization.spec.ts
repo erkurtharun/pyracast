@@ -5,7 +5,14 @@ import {
 } from "@formatjs/icu-messageformat-parser";
 import { test, expect, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
-import { mockApi, user, region, plant, paged } from "./support/workspace";
+import {
+    accountWith,
+    mockApi,
+    paged,
+    plant,
+    region,
+    sessionIdentity,
+} from "./support/workspace";
 import { messages } from "../src/i18n/messages";
 import { parseProduction } from "../src/lib/production";
 import { csvTexts } from "./support/production-csv";
@@ -14,13 +21,15 @@ import { errorBody } from "./support/errors";
 type Language = "en" | "tr";
 
 async function mockLanguage(page: Page, initial: Language, anonymous = false) {
-    await mockApi(page, { anonymous });
-    let language = initial;
-    const session = () => ({
-        user: anonymous ? null : { ...user, language_preference: language },
-        csrf_token: anonymous ? "anonymous-token" : "signed-token",
-        language,
+    const account = await mockApi(page, {
+        account: {
+            current: anonymous
+                ? null
+                : accountWith({ language_preference: initial }),
+        },
     });
+    let language = initial;
+    const session = () => ({ ...sessionIdentity(account.current), language });
     await page.route("**/api/session/", (route) =>
         route.fulfill({ json: session() }),
     );
@@ -30,6 +39,8 @@ async function mockLanguage(page: Page, initial: Language, anonymous = false) {
             session().csrf_token,
         );
         language = route.request().postDataJSON().language as Language;
+        if (account.current)
+            account.current = accountWith({ language_preference: language });
         await route.fulfill({
             json: session(),
             headers: {
@@ -37,6 +48,7 @@ async function mockLanguage(page: Page, initial: Language, anonymous = false) {
             },
         });
     });
+    return account;
 }
 
 test("a Turkish public signup applies guest language before showing the form and keeps a later choice", async ({
@@ -123,7 +135,7 @@ for (const outcome of ["success", "failure"] as const) {
     test(`an obsolete public language ${outcome} cannot replace a newer selection`, async ({
         page,
     }) => {
-        await mockLanguage(page, "en", true);
+        const account = await mockLanguage(page, "en", true);
         let release!: () => void;
         const pending = new Promise<void>((resolve) => {
             release = resolve;
@@ -134,8 +146,7 @@ for (const outcome of ["success", "failure"] as const) {
                 outcome === "success"
                     ? {
                           json: {
-                              user: null,
-                              csrf_token: "anonymous-token",
+                              ...sessionIdentity(account.current),
                               language: "tr",
                           },
                       }
@@ -507,12 +518,11 @@ test.describe("the session end notice", () => {
             await page.clock.install({
                 time: new Date("2026-11-18T18:54:00Z"),
             });
-            await mockLanguage(page, language);
+            const account = await mockLanguage(page, language);
             await page.route("**/api/session/", (route) =>
                 route.fulfill({
                     json: {
-                        user: { ...user, language_preference: language },
-                        csrf_token: "signed-token",
+                        ...sessionIdentity(account.current),
                         language,
                         expires_at: "2026-11-18T19:00:00Z",
                     },

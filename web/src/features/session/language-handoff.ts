@@ -16,23 +16,25 @@ export function useLanguageHandoff(current: Session | undefined): Handoff {
     useEffect(() => {
         if (!current || !language || status !== "pending") return;
         let active = true;
-        const finish = (updated: Session) => {
+        const finish = (updated: Session, sentAt?: number) => {
             if (!active) return;
             window.history.replaceState(
                 window.history.state,
                 "",
                 addressWithout(new URL(window.location.href), ["language"]),
             );
-            adoptSession(updated);
+            adoptSession(updated, sentAt);
             setStatus("ready");
         };
         if (current.user || current.language === language) finish(current);
-        else
+        else {
+            const sentAt = Date.now();
             api.post("/api/session/language/", { body: { language } })
-                .then(finish)
+                .then((updated) => finish(updated, sentAt))
                 .catch(() => {
                     if (active) setStatus("failed");
                 });
+        }
         return () => {
             active = false;
         };

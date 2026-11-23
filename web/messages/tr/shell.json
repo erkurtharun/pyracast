@@ -25,6 +25,7 @@
         "network": "Sunucuya ulaşılamadı. Bağlantınızı kontrol edip tekrar deneyin.",
         "unconfirmed": "Sunucu değişikliği onaylamadı. Kaydedilip kaydedilmediğini görmek için sayfayı yenileyin.",
         "sessionChanged": "Oturum başka bir sekmede değişti. Sayfa artık geçerli oturumu gösteriyor.",
+        "notSentSigningOut": "Oturum kapatma sürdüğü için bu istek gönderilmedi.",
         "invalidPage": "Sunucu geçersiz bir sonraki sayfa döndürdü.",
         "unexpected": "Bir sorun oluştu. Lütfen yeniden deneyin."
     }

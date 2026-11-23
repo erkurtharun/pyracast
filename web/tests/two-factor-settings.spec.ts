@@ -3,7 +3,14 @@ import { expect, test, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
 import jsQR from "jsqr";
 import { PNG } from "pngjs";
-import { mockApi, paged, user, tenantRow } from "./support/workspace";
+import {
+    accountWith,
+    mockApi,
+    paged,
+    sessionIdentity,
+    user,
+    tenantRow,
+} from "./support/workspace";
 import { allauthErrorBody, errorBody } from "./support/errors";
 
 const secret = "JBSWY3DPEHPK3PXP";
@@ -36,7 +43,7 @@ async function mockTwoFactor(
     page: Page,
     { enabled = false, admin = false, viewer = false } = {},
 ) {
-    await mockApi(page, { admin });
+    const account = await mockApi(page, { admin });
     if (viewer)
         await page.route("**/api/tenants/", (route) =>
             route.fulfill({
@@ -50,6 +57,7 @@ async function mockTwoFactor(
             }),
         );
     const state = {
+        account,
         enabled,
         setupRequests: 0,
         activations: [] as string[],
@@ -646,12 +654,9 @@ test("switching language preserves the in-progress QR, code draft and shown-once
     const state = await mockTwoFactor(page);
     await page.route("**/api/session/language/", (route) => {
         const language = route.request().postDataJSON().language as string;
+        state.account.current = accountWith({ language_preference: language });
         return route.fulfill({
-            json: {
-                user: { ...user, language_preference: language },
-                csrf_token: "signed-token",
-                language,
-            },
+            json: { ...sessionIdentity(state.account.current), language },
         });
     });
     await openSettings(page);
@@ -725,15 +730,12 @@ test("refreshing a masked CSRF token preserves displayed recovery codes", async 
     page,
 }) => {
     const state = await mockTwoFactor(page, { enabled: true });
-    let refreshed = false;
+    let freshToken: string | undefined;
     await page.route("**/api/session/", (route) =>
         route.fulfill({
             json: {
-                user: {
-                    ...user,
-                    username: refreshed ? "solar.refreshed" : user.username,
-                },
-                csrf_token: refreshed ? "fresh-masked-token" : "signed-token",
+                ...sessionIdentity(state.account.current),
+                ...(freshToken && { csrf_token: freshToken }),
             },
         }),
     );
@@ -753,7 +755,8 @@ test("refreshing a masked CSRF token preserves displayed recovery codes", async 
         }),
     );
     await page.route("**/api/auth/browser/v1/auth/email/verify", (route) => {
-        refreshed = true;
+        freshToken = "fresh-masked-token";
+        state.account.current = accountWith({ username: "solar.refreshed" });
         return route.fulfill({ json: { status: 200 } });
     });
     await openSettings(page);

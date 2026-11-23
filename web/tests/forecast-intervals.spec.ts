@@ -2,7 +2,12 @@ import { expect, test, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
-import { mockApi, region, user } from "./support/workspace";
+import {
+    accountWith,
+    mockApi,
+    region,
+    sessionIdentity,
+} from "./support/workspace";
 
 const start = Date.parse("2026-11-14T09:00:00Z");
 function intervals(resolution = 60) {
@@ -28,17 +33,15 @@ async function openForecast(
     } = {},
 ) {
     const { electrical = true, scenario, missing, flagged, mixed } = options;
-    await mockApi(page);
-    if (options.language === "tr")
+    const account = await mockApi(page);
+    if (options.language === "tr") {
+        account.current = accountWith({ language_preference: "tr" });
         await page.route("**/api/session/", (route) =>
             route.fulfill({
-                json: {
-                    user: { ...user, language_preference: "tr" },
-                    csrf_token: "signed-token",
-                    language: "tr",
-                },
+                json: { ...sessionIdentity(account.current), language: "tr" },
             }),
         );
+    }
     await page.route(
         electrical ? "**/plants/21/forecast/**" : "**/regions/11/forecast/**",
         (route) => {
