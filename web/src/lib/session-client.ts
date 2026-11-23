@@ -330,7 +330,7 @@ function setSignOut(signOut: SignOutState) {
 const signOutPath = "auth/session";
 const signOutUrl = authUrl(signOutPath);
 
-// allauth answers a completed sign-out with its anonymous 401; any other answer ended nothing.
+// allauth answers a completed sign-out with its anonymous 401.
 function signedOutBy(answer: AuthResult) {
     return answer.status === 401 && answer.meta?.is_authenticated === false;
 }

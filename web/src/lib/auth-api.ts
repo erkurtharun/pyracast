@@ -35,6 +35,20 @@ export function authUrl(path: string) {
     return `/api/auth/browser/v1/${path}`;
 }
 
+// django-allauth headless writes every 401 with that status in the body and meta.is_authenticated, null at a sign-in stage.
+function allauthUnauthorized(status: number, data: Record<string, unknown>) {
+    const { meta } = data;
+    return (
+        status === 401 &&
+        data.status === 401 &&
+        typeof meta === "object" &&
+        meta !== null &&
+        "is_authenticated" in meta &&
+        (typeof meta.is_authenticated === "boolean" ||
+            meta.is_authenticated === null)
+    );
+}
+
 export async function authRequest<TData = AuthData>(
     path: string,
     method: Method,
@@ -51,10 +65,10 @@ export async function authRequest<TData = AuthData>(
             ok ? t("invalidResponse") : t("request", { status }),
             { status },
         );
-    // A 401 carries allauth's flows and the 404 means no authenticator yet: callers read both.
+    // Callers read allauth's 401 and the 404 that means no authenticator yet.
     if (
         !ok &&
-        status !== 401 &&
+        !allauthUnauthorized(status, data as Record<string, unknown>) &&
         !(
             status === 404 &&
             method === "GET" &&

@@ -889,3 +889,30 @@ test("a connected account says when it cannot be disconnected or used to sign in
     ).toBeVisible();
     await expect(accounts.getByText(/Your only way to sign in/)).toBeVisible();
 });
+
+test("a disconnection answered with a refusal that is not allauth's shows an error and keeps the account", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/api/auth/browser/v1/account/providers", (route) =>
+        route.request().method() === "GET"
+            ? route.fulfill({
+                  json: { status: 200, data: [connectedAccount] },
+              })
+            : route.fulfill({ status: 401, json: { detail: "Unauthorized" } }),
+    );
+    await page.goto("/app/account/");
+    const accounts = page.getByRole("region", { name: "Connected accounts" });
+    await accounts
+        .getByRole("button", { name: "Disconnect solar@example.test" })
+        .click();
+    await expect(accounts.getByRole("alert")).toContainText(
+        "Request failed (401). Please try again.",
+    );
+    await expect(
+        accounts.getByText("Account disconnected.", { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+        accounts.getByRole("button", { name: "Disconnect solar@example.test" }),
+    ).toBeVisible();
+});

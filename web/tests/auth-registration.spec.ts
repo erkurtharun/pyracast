@@ -1152,3 +1152,26 @@ test("account access reflows on a narrow screen without accessibility violations
     ).toBe(true);
     expect(await accessibilityViolations(page)).toEqual([]);
 });
+
+test("a verification answered with a refusal that is not allauth's does not report the email verified", async ({
+    page,
+}) => {
+    await pendingVerification(page);
+    await page.route("**/api/auth/browser/v1/auth/email/verify", (route) =>
+        route.fulfill({ status: 401, json: { detail: "Unauthorized" } }),
+    );
+    await page.goto("/app/");
+    await page.getByLabel("Email code").fill("123456");
+    await page
+        .getByRole("button", { name: "Verify email", exact: true })
+        .click();
+    await expect(
+        page.getByText("Request failed (401). Please try again.", {
+            exact: true,
+        }),
+    ).toBeVisible();
+    await expect(
+        page.getByText("Email verified. You can sign in now."),
+    ).toHaveCount(0);
+    await expect(page.getByLabel("Email code")).toBeVisible();
+});

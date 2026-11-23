@@ -340,6 +340,46 @@ test("an allauth flow answer does not end the session", async () => {
     expect(calls).toHaveLength(2);
 });
 
+for (const [name, body] of [
+    ["a body without allauth's fields", { detail: "Unauthorized" }],
+    [
+        "a body without the authentication state",
+        { status: 401, data: { flows: [] } },
+    ],
+    [
+        "a body whose status is not 401",
+        { status: 200, meta: { is_authenticated: true } },
+    ],
+] as const) {
+    test(`an authentication request answered 401 with ${name} fails`, async () => {
+        adoptSession(signedIn("token"));
+        answer(() => json(body, 401));
+        const error = await authRequest("account/providers", "DELETE", {
+            provider: "google",
+            account: "account-42",
+        }).catch((failure) => failure);
+        expect(error).toBeInstanceOf(ApiError);
+        expect(error).toMatchObject({ status: 401 });
+        expect(calls).toHaveLength(1);
+    });
+}
+
+for (const authenticated of [false, true, null]) {
+    test(`allauth's 401 with is_authenticated ${authenticated} is returned to its caller`, async () => {
+        adoptSession(signedIn("token"));
+        const body = {
+            status: 401,
+            data: { flows: [] },
+            meta: { is_authenticated: authenticated },
+        };
+        answer(() => json(body, 401));
+        const result = await authRequest("auth/email/verify", "POST", {
+            key: "123456",
+        });
+        expect(result).toEqual(body);
+    });
+}
+
 test("path parameters and query values build one encoded URL", () => {
     expect(
         apiUrl("/api/tenants/{tenant_id}/change-requests/", {
