@@ -197,9 +197,15 @@ const addresses: Address[] = [
     },
 ];
 
-async function visit(page: Page, { address, session, shown }: Address) {
+async function visit(
+    page: Page,
+    baseURL: string | undefined,
+    { address, session, shown }: Address,
+) {
     if (session) await mockApi(page, { anonymous: session === "anonymous" });
     const response = (await page.goto(address))!;
+    expect(response.request().redirectedFrom()).toBeNull();
+    expect(response.url()).toBe(new URL(address, baseURL).href);
     const served = await response.text();
     await expect(shown(page)).toBeVisible();
     return served;
@@ -237,8 +243,9 @@ for (const address of addresses)
         address.layout === "app" ? "with" : "without"
     } the theme colour, and the browser processes that manifest with the app's identity, start, scope and display`, async ({
         page,
+        baseURL,
     }) => {
-        const served = await visit(page, address);
+        const served = await visit(page, baseURL, address);
         await expectServedHead(page, served, address.layout);
         await expectLiveHead(page, address.layout);
         await expectProcessedManifest(page);
