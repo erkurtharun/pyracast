@@ -42,7 +42,7 @@ from pyracast.notifications.models import (
     ReminderRecipientTie,
     ReminderSchedule,
 )
-from pyracast.notifications.recipients import recipient_key
+from pyracast.notifications.recipients import hide_visible_schedules, recipient_key
 from pyracast.regions.models import Region
 
 # Mail that names an address the account changed away from or removed, beside its current one.
@@ -268,7 +268,11 @@ def _refuse_administrator(account_id: int) -> None:
 
 
 def _forget_recipients(
-    account_id: int, addresses: Collection[str], regions: Collection[int], changes: Counter[str]
+    account_id: int,
+    addresses: Collection[str],
+    regions: Collection[int],
+    workspaces: Collection[int],
+    changes: Counter[str],
 ) -> None:
     # Only rows of the locked regions, each deleted by the id it was locked under: a row another
     # client commits later is left, and no schedule changes without its revision.
@@ -281,12 +285,15 @@ def _forget_recipients(
         .exclude(recipient__in=list(entries)),
         "recipient__schedule_id",
     )
+    deleted_from = {*entries.values(), *ties.values()}
+    hidden = hide_visible_schedules(workspaces, deleted_from)
     _count(changes, ReminderRecipient.objects.filter(pk__in=entries).delete())
     _count(changes, ReminderRecipientTie.objects.filter(pk__in=ties).delete())
-    if revised := ReminderSchedule.objects.filter(
-        pk__in={*entries.values(), *ties.values()}
-    ).update(revision=F("revision") + 1):
-        changes["notifications.ReminderSchedule"] += revised
+    revised = ReminderSchedule.objects.filter(pk__in=deleted_from - hidden).update(
+        revision=F("revision") + 1
+    )
+    if changed := len(hidden) + revised:
+        changes["notifications.ReminderSchedule"] += changed
     delivered = _locked(
         _delivered(account_id, addresses).filter(delivery__schedule__region__in=regions)
     )
@@ -424,8 +431,12 @@ def _erase(account_id: int) -> Erasure:
     ):
         raise LastPlatformAdministratorError(account_id)
     addresses, left_out = _addresses(account)
+    memberships = list(
+        Membership.objects.filter(user_id=account_id).values_list("tenant_id", flat=True)
+    )
     regions = Region.objects.filter(
-        Q(reminderschedule__recipient_rows__in=_entries(account_id, addresses))
+        Q(tenant_id__in=memberships)
+        | Q(reminderschedule__recipient_rows__in=_entries(account_id, addresses))
         | Q(reminderschedule__recipient_rows__ties__in=_ties(account_id))
         | Q(
             reminderschedule__notificationdelivery__recipient_rows__in=_delivered(
@@ -449,7 +460,7 @@ def _erase(account_id: int) -> Erasure:
         Region.objects.filter(pk__in=regions, tenant_id__in=list(workspaces)), no_key=True
     )
     changes: Counter[str] = Counter()
-    _forget_recipients(account_id, addresses, list(locked_regions), changes)
+    _forget_recipients(account_id, addresses, list(locked_regions), memberships, changes)
     _forget_mail(account_id, addresses, changes)
     _forget_sessions(account, addresses, changes)
     _forget_identity(account_id, changes)

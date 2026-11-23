@@ -320,6 +320,7 @@ def test_upgrade_keeps_every_row_and_builds_the_fresh_catalog(
     assert after["incidents_plantincident"]
     assert all(row.pop("idempotency_key") is None for row in after["incidents_plantincident"])
     assert after.pop("notifications_outboundmail") == []
+    assert after.pop("notifications_remindermemberrole") == []
     assert [after.pop(table) for table in RECIPIENT_TABLES] == [[], [], []]
     revisions = after.pop("metering_epiasconnectionrevision")
     assert [

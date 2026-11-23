@@ -21,12 +21,18 @@ from django.db import transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from django.urls import reverse
 
+from pyracast.accounts.addresses import plain_address
 from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.inputs import PasswordInput
 from pyracast.accounts.processes import StartingView, lock_account
 
 
 class CompanySignupInput(PasswordInput, SignupInput):
+    def clean_email(self) -> str:
+        plain_address(self.cleaned_data["email"])
+        email: str = super().clean_email()
+        return email
+
     def clean(self) -> dict[str, Any]:
         data = cast(dict[str, Any], super().clean())
         password, email = self.cleaned_data.get("password"), self.cleaned_data.get("email")

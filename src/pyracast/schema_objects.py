@@ -212,6 +212,25 @@ _SNAPSHOT_GUARD_WITH_WEATHER = """
             END;
             """
 
+# A choice belongs to a member of the schedule's workspace; DELETE stays unguarded for the purge.
+_MEMBER_ROLE_GUARD = """
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM notifications_reminderschedule AS schedule
+                    JOIN regions_region AS region ON region.id = schedule.region_id
+                    JOIN accounts_membership AS membership
+                      ON membership.tenant_id = region.tenant_id
+                    WHERE schedule.id = NEW.schedule_id
+                      AND membership.id = NEW.membership_id
+                ) THEN
+                    RAISE EXCEPTION 'A reminder member role names a member of its workspace'
+                        USING ERRCODE = '23514';
+                END IF;
+                RETURN NEW;
+            END;
+            """
+
 
 def _immutable(table: str, rows: str, migration: MigrationKey) -> RowTrigger:
     short = table.split("_", 1)[1]
@@ -473,6 +492,14 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "guard_productionobservation_revision",
         _OBSERVATION_GUARD,
         ("plants", "0003_lease_check_and_observation_trigger"),
+    ),
+    RowTrigger(
+        "remindermemberrole_workspace_guard",
+        "notifications_remindermemberrole",
+        "BEFORE INSERT OR UPDATE",
+        "guard_remindermemberrole_workspace",
+        _MEMBER_ROLE_GUARD,
+        ("notifications", "0011_recipient_roles"),
     ),
 )
 

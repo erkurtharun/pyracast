@@ -10,6 +10,7 @@ from django.core.validators import validate_email
 from django.db import connection
 from django.db.models import Q, QuerySet
 
+from pyracast.accounts.addresses import plain_address
 from pyracast.accounts.processes import lock_account
 
 INVALID_ADDRESS = "Enter a valid email address."
@@ -18,7 +19,7 @@ SHARED_ADDRESS = "The address belongs to more than one account. Resolve that fir
 OPERATOR_LOCK = 0x50594F50
 
 
-def operator_address(value: str) -> str:
+def lookup_address(value: str) -> str:
     address = value.strip().lower()
     try:
         validate_email(address)
@@ -27,6 +28,13 @@ def operator_address(value: str) -> str:
     if len(address) > 254:
         raise CommandError(INVALID_ADDRESS)
     return address
+
+
+def acquired_address(value: str) -> str:
+    try:
+        return plain_address(value.strip().lower())
+    except ValidationError:
+        raise CommandError(INVALID_ADDRESS) from None
 
 
 class OperatorCommand(BaseCommand):

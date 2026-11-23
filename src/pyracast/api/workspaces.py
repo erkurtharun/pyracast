@@ -8,6 +8,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from pyracast.accounts.addresses import plain_address
 from pyracast.accounts.invitations import (
     InvitationPreview,
     accept_workspace_invitation,
@@ -25,6 +26,9 @@ from pyracast.notifications.overview import plants_at_recipient_limit
 
 class InvitationInput(InputSerializer):
     email = serializers.EmailField(max_length=254)
+
+    def validate_email(self, value: str) -> str:
+        return plain_address(value)
 
 
 class InvitationTokenInput(InputSerializer):

@@ -692,6 +692,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tenants/{tenant_id}/regions/{region_id}/reminders/preview/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["tenants_regions_reminders_preview_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tenants/{tenant_id}/regions/{region_id}/restore/": {
         parameters: {
             query?: never;
@@ -781,6 +797,35 @@ export interface components {
             actor_id: number | null;
             /** Format: date-time */
             readonly created_at: string;
+        };
+        AddedAddressOutput: {
+            /** Format: email */
+            address: string;
+            role:
+                | (
+                      | components["schemas"]["RecipientRoleEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+            placement: components["schemas"]["RecipientRoleEnum"];
+            eligible: boolean;
+            memberships: number[];
+        };
+        AddressRoleInput: {
+            /** Format: email */
+            address: string;
+            role:
+                | (
+                      | components["schemas"]["RecipientRoleEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+            memberships: number[];
+        };
+        AddressRoleOutput: {
+            /** Format: email */
+            address: string;
+            role: components["schemas"]["RecipientRoleEnum"];
         };
         AffectedDayOutput: {
             status: components["schemas"]["OutageScenarioStatusEnum"];
@@ -1588,6 +1633,7 @@ export interface components {
          *     * `duplicate_recipients` - Duplicate Recipients
          *     * `recipient_limit_exceeded` - Recipient Limit Exceeded
          *     * `reminder_schedule_changed` - Reminder Schedule Changed
+         *     * `reminder_disclosure_changed` - Reminder Disclosure Changed
          *     * `plant_not_approved` - Plant Not Approved
          *     * `provider_account_unavailable` - Provider Account Unavailable
          *     * `configuration_changed` - Configuration Changed
@@ -1674,6 +1720,7 @@ export interface components {
             | "duplicate_recipients"
             | "recipient_limit_exceeded"
             | "reminder_schedule_changed"
+            | "reminder_disclosure_changed"
             | "plant_not_approved"
             | "provider_account_unavailable"
             | "configuration_changed"
@@ -2146,6 +2193,30 @@ export interface components {
          * @enum {string}
          */
         MeasurementBasisEnum: "net_export" | "ac_generation";
+        MemberAddressOutput: {
+            memberships: number[];
+            /** Format: email */
+            address: string;
+            kind: components["schemas"]["ReminderMemberKindEnum"];
+            role:
+                | (
+                      | components["schemas"]["RecipientRoleEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+            placement: components["schemas"]["RecipientRoleEnum"];
+        };
+        MemberRoleInput: {
+            memberships: number[];
+            /** Format: email */
+            address: string;
+            role:
+                | (
+                      | components["schemas"]["RecipientRoleEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+        };
         /**
          * @description * `daylight_intervals` - daylight_intervals
          *     * `full_day` - full_day
@@ -2975,6 +3046,13 @@ export interface components {
             source_kind: string;
         };
         /**
+         * @description * `to` - To
+         *     * `cc` - Cc
+         *     * `bcc` - Bcc
+         * @enum {string}
+         */
+        RecipientRoleEnum: "to" | "cc" | "bcc";
+        /**
          * @description * `active_calibration` - active_calibration
          *     * `uncalibrated_reference` - uncalibrated_reference
          * @enum {string}
@@ -3009,6 +3087,8 @@ export interface components {
         ReminderAddressesOutput: {
             recipients: string[];
             workspace_recipients: string[];
+            members: components["schemas"]["MemberAddressOutput"][];
+            added: components["schemas"]["AddedAddressOutput"][];
         };
         ReminderDeliveryOutput: {
             id: number;
@@ -3035,6 +3115,8 @@ export interface components {
             sent_at: string | null;
             recipient_count: number;
             recipients: string[] | null;
+            recipient_roles:
+                components["schemas"]["AddressRoleOutput"][] | null;
         };
         ReminderInput: {
             enabled: boolean;
@@ -3043,7 +3125,17 @@ export interface components {
             recipients: string[];
             times: string[];
             expected_revision: number;
+            hide_recipients?: boolean;
+            address_roles?: components["schemas"]["AddressRoleInput"][];
+            member_roles?: components["schemas"]["MemberRoleInput"][];
+            disclosure?: string;
         };
+        /**
+         * @description * `administrator` - administrator
+         *     * `member` - member
+         * @enum {string}
+         */
+        ReminderMemberKindEnum: "administrator" | "member";
         ReminderOutcomeOutput: {
             /** Format: date-time */
             scheduled_for: string;
@@ -3057,6 +3149,8 @@ export interface components {
             state: components["schemas"]["ReminderStateEnum"];
             revision: number;
             include_workspace_members: boolean;
+            hide_recipients: boolean;
+            hidden_by_departure: boolean | null;
             language: components["schemas"]["LanguageEnum"];
             times: string[];
             recipient_limit: number;
@@ -3066,6 +3160,24 @@ export interface components {
             daily_reminder_limit: number | null;
             addresses: components["schemas"]["ReminderAddressesOutput"] | null;
             deliveries: components["schemas"]["ReminderDeliveryOutput"][];
+        };
+        ReminderPreviewOutput: {
+            enabled: boolean;
+            state: components["schemas"]["ReminderStateEnum"];
+            revision: number;
+            include_workspace_members: boolean;
+            hide_recipients: boolean;
+            hidden_by_departure: boolean | null;
+            language: components["schemas"]["LanguageEnum"];
+            times: string[];
+            recipient_limit: number;
+            recipient_count: number;
+            workspace_member_count: number;
+            recipient_limit_exceeded: boolean;
+            daily_reminder_limit: number | null;
+            addresses: components["schemas"]["ReminderAddressesOutput"] | null;
+            deliveries: components["schemas"]["ReminderDeliveryOutput"][];
+            disclosure: string;
         };
         /**
          * @description * `sending` - Sending
@@ -6987,6 +7099,102 @@ export interface operations {
             };
             /** @description The addressed item or page does not exist. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Send the request as JSON. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    tenants_regions_reminders_preview_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReminderInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReminderPreviewOutput"];
+                };
+            };
+            /** @description The request input was refused. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Sign-in is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Access was refused. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The addressed item or page does not exist. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

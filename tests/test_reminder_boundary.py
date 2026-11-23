@@ -110,9 +110,37 @@ def test_the_administrator_reads_the_addresses() -> None:
 
     body = client_for(system.member).get(url(system)).json()
 
+    memberships = dict(
+        Membership.objects.filter(tenant=system.tenant).values_list("user__email", "pk")
+    )
     assert body["addresses"] == {
         "recipients": ["ops@example.com"],
         "workspace_recipients": ["admin@example.com", "viewer@example.com"],
+        "members": [
+            {
+                "memberships": [memberships["admin@example.com"]],
+                "address": "admin@example.com",
+                "kind": "administrator",
+                "role": None,
+                "placement": "bcc",
+            },
+            {
+                "memberships": [memberships["viewer@example.com"]],
+                "address": "viewer@example.com",
+                "kind": "member",
+                "role": None,
+                "placement": "bcc",
+            },
+        ],
+        "added": [
+            {
+                "address": "ops@example.com",
+                "role": None,
+                "placement": "bcc",
+                "eligible": True,
+                "memberships": [],
+            }
+        ],
     }
     assert body["state"] == "sending"
     (delivery,) = body["deliveries"]

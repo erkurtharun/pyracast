@@ -67,6 +67,7 @@ POLICIES: dict[str, dict[str, tuple[str, str | None]]] = {
     REGION + "location-change-requests/<int:request_id>/withdraw/": {"POST": (ADMIN, None)},
     REGION + "plants/": {"GET": (MEMBER, None), "POST": (ADMIN, None)},
     REGION + "reminders/": {"GET": (MEMBER, None), "PUT": (ADMIN, None)},
+    REGION + "reminders/preview/": {"POST": (ADMIN, None)},
     REGION + "restore/": {"POST": (ADMIN, SUBMISSION)},
     REGION + "resubmit/": {"POST": (ADMIN, SUBMISSION)},
     PLANT: {"PUT": (ADMIN, None)},
@@ -134,6 +135,7 @@ ANSWERS: dict[str, dict[str, tuple[int, str | None]]] = {
     REGION + "location-change-requests/<int:request_id>/withdraw/": {"POST": NOT_FOUND},
     REGION + "plants/": {"GET": OK, "POST": INVALID},
     REGION + "reminders/": {"GET": OK, "PUT": INVALID},
+    REGION + "reminders/preview/": {"POST": INVALID},
     REGION + "restore/": {"POST": OK},
     REGION + "resubmit/": {"POST": INVALID},
     PLANT: {"PUT": INVALID},
@@ -307,6 +309,12 @@ def test_operations_document_the_refusals_their_policy_allows() -> None:
         for name in ("IncidentConflict", "PlantConflict")
     ]
     outage_create = "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/"
+    reminders = "/api/tenants/{tenant_id}/regions/{region_id}/reminders/"
+    plain_conflicts = {
+        (outage_create, "post"),
+        (reminders, "put"),
+        (f"{reminders}preview/", "post"),
+    }
     location = {"application/json": {"schema": {"$ref": "#/components/schemas/LocationRefusal"}}}
     located = {
         ("/api/tenants/{tenant_id}/sites/", "post"),
@@ -337,6 +345,8 @@ def test_operations_document_the_refusals_their_policy_allows() -> None:
         "415",
         "429",
     ]
+    for operation in ((reminders, "put"), (f"{reminders}preview/", "post")):
+        assert documented[operation] == ["400", "401", "403", "404", "409", "415"]
     forecast = schema["paths"]["/api/tenants/{tenant_id}/regions/{region_id}/forecast/"]["get"]
     refusals = ("400", "401", "403", "404", "429")
     assert sorted(forecast["responses"]) == ["200", *refusals, "default"]
@@ -353,7 +363,7 @@ def test_operations_document_the_refusals_their_policy_allows() -> None:
                 assert "415" in responses
             for status, response in responses.items():
                 if status.startswith(("4", "5")) or status == "default":
-                    if status == "409" and (route, method) == (outage_create, "post"):
+                    if status == "409" and (route, method) in plain_conflicts:
                         assert response["content"] == error
                     elif status == "409":
                         assert response["content"] in conflicts

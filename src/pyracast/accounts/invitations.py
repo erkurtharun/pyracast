@@ -9,7 +9,6 @@ from allauth.account.models import EmailAddress
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser, User
 from django.core.mail import EmailMultiAlternatives
-from django.core.validators import validate_email
 from django.db import connection, transaction
 from django.db.models import BooleanField, Exists, OuterRef, Q, QuerySet, Value
 from django.template.loader import render_to_string
@@ -17,6 +16,7 @@ from django.utils import timezone, translation
 from django.utils.translation import gettext as _
 from django.views.decorators.debug import sensitive_variables
 
+from pyracast.accounts.addresses import plain_address
 from pyracast.accounts.audit import SecurityEvent, record_security_event, refusal_throttle
 from pyracast.accounts.authorization import authorize_workspace_admin
 from pyracast.accounts.language import user_language
@@ -211,8 +211,7 @@ def invite_workspace_member(
     authorize_workspace_admin(actor, tenant_id, platform=platform)
     if admin_role and has_workspace_admin(tenant_id):
         raise ConflictError(ErrorCode.WORKSPACE_ADMIN_CHANGED)
-    email = email.strip().lower()
-    validate_email(email)
+    email = plain_address(email.strip().lower())
     if Membership.objects.filter(tenant_id=tenant_id, user__email__iexact=email).exists():
         raise DomainError(ErrorCode.INVITATION_MEMBER_EXISTS)
     now = timezone.now()

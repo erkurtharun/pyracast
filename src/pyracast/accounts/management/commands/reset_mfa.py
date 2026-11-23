@@ -10,7 +10,7 @@ from django.db import transaction
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.authorization import requires_admin_mfa
-from pyracast.accounts.management.operator import OperatorCommand, operator_address
+from pyracast.accounts.management.operator import OperatorCommand, lookup_address
 from pyracast.accounts.sessions import end_sessions
 
 UNKNOWN = "No account uses this address."
@@ -36,7 +36,7 @@ class Command(OperatorCommand):
         parser.add_argument("--dry-run", action="store_true")
 
     def handle(self, *args: Any, **options: Any) -> None:
-        address = operator_address(options["email"])
+        address = lookup_address(options["email"])
         account = self.with_factors(address)
         if options["dry_run"]:
             factors = Authenticator.objects.filter(user=account).count()

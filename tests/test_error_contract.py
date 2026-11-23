@@ -703,6 +703,12 @@ CASES: dict[str, Case] = {
         "E-posta hat\u0131rlat\u0131c\u0131lar\u0131 değişti. Kaydetmeden önce yeniden yükleyin.",
         domain("ConflictError", "reminder_schedule_changed"),
     ),
+    "reminder_disclosure_changed": Case(
+        409,
+        "The visible recipients changed. Review them again before saving.",
+        "Görünür al\u0131c\u0131lar değişti. Kaydetmeden önce yeniden gözden geçirin.",
+        domain("ConflictError", "reminder_disclosure_changed"),
+    ),
     "plant_not_approved": Case(
         400,
         "Reminders can be turned on once the plant is approved.",
