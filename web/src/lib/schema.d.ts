@@ -1772,6 +1772,24 @@ export interface components {
             message: string;
             current: components["schemas"]["IncidentListOutput"];
         };
+        IncidentCreate: {
+            kind: components["schemas"]["IncidentKindEnum"];
+            title: string;
+            /** @default  */
+            notes: string;
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at?: string | null;
+            /** Format: double */
+            available_dc_mw?: number | null;
+            /** Format: double */
+            available_inverter_mw?: number | null;
+            /** Format: double */
+            available_export_mw?: number | null;
+            /** Format: uuid */
+            idempotency_key?: string;
+        };
         IncidentInput: {
             kind: components["schemas"]["IncidentKindEnum"];
             title: string;
@@ -6006,7 +6024,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["IncidentInput"];
+                "application/json": components["schemas"]["IncidentCreate"];
             };
         };
         responses: {
@@ -6047,6 +6065,14 @@ export interface operations {
             };
             /** @description The addressed item or page does not exist. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

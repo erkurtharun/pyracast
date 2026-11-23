@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test, expect } from "@playwright/test";
 import { productionServer } from "./support/server";
 
@@ -66,9 +68,87 @@ test("pages send the same-origin referrer policy", async ({ request }) => {
     }
 });
 
+const appFiles = [
+    ["/app/manifest.webmanifest", "application/manifest+json"],
+    ["/app/icons/any-192.png", "image/png"],
+    ["/app/icons/any-512.png", "image/png"],
+    ["/app/icons/maskable-192.png", "image/png"],
+    ["/app/icons/maskable-512.png", "image/png"],
+    ["/app/icons/apple-touch-icon.png", "image/png"],
+] as const;
+
+test("the app manifest and icons are served as files with their own type and revalidation", async ({
+    request,
+}) => {
+    for (const [file, type] of appFiles) {
+        const response = await request.get(file);
+        expect(response.status(), file).toBe(200);
+        const headers = response.headers();
+        expect(headers["content-type"]?.split(";")[0], file).toBe(type);
+        expect(headers["cache-control"], file).toBe("no-cache");
+        expect(headers["content-security-policy"], file).toBeUndefined();
+        expect(headers["x-robots-tag"], file).toBeUndefined();
+    }
+});
+
+test("an app file address with a trailing slash redirects to the file", async ({
+    request,
+}) => {
+    for (const file of [...appFiles.map(([file]) => file), "/app/sw.js"]) {
+        const response = await request.get(`${file}/`, { maxRedirects: 0 });
+        expect(response.status(), file).toBe(308);
+        expect(response.headers()["location"], file).toBe(file);
+    }
+});
+
+test("pages and unknown files under /app/ keep the page headers", async ({
+    request,
+}) => {
+    for (const [address, status] of [
+        ["/app/", 200],
+        ["/app/account/", 200],
+        ["/app/w/1/plants/2/forecast/", 200],
+        ["/app/icon-1024.png", 404],
+        ["/app/icons/any-1024.png", 404],
+        ["/app/icons/apple-touch-icon-precomposed.png", 404],
+        ["/app/manifest.json", 404],
+        ["/app/manifest.webmanifest/child/", 404],
+        ["/app/icons/any-192.png/child/", 404],
+        ["/app/sw.js/child/", 404],
+        ["/app/icons/missing.png/", 404],
+        ["/app/w/1.2/", 200],
+    ] as const) {
+        const response = await request.get(address, { maxRedirects: 0 });
+        expect(response.status(), address).toBe(status);
+        const headers = response.headers();
+        expect(headers["content-security-policy"], address).toMatch(
+            /script-src 'self' 'nonce-[^']+' 'strict-dynamic'/,
+        );
+        expect(headers["cache-control"], address).toContain("no-store");
+        expect(headers["x-robots-tag"], address).toBe("noindex, nofollow");
+    }
+});
+
 test("a spoofed language header on /app/ is ignored", async ({ request }) => {
     const response = await request.get("/app/", {
         headers: { "x-pyracast-public-language": "tr" },
     });
     expect(await response.text()).toMatch(/<html lang="en"/);
+});
+
+test("the app worker address serves its script uncached under its own policy", async ({
+    request,
+}) => {
+    const response = await request.get("/app/sw.js");
+    expect(response.status()).toBe(200);
+    const headers = response.headers();
+    expect(headers["content-type"]?.split(";")[0]).toBe("text/javascript");
+    expect(headers["cache-control"]).toBe("no-store");
+    expect(headers["content-security-policy"]).toBe(
+        "default-src 'none'; connect-src 'self'",
+    );
+    expect(headers["service-worker-allowed"]).toBeUndefined();
+    expect(await response.text()).toBe(
+        readFileSync(path.resolve(__dirname, "../public/app/sw.js"), "utf8"),
+    );
 });

@@ -317,6 +317,8 @@ def test_upgrade_keeps_every_row_and_builds_the_fresh_catalog(
     assert all(row["available_at"] is None for row in after["plants_calibrationrun"])
     for row in after["plants_calibrationrun"]:
         del row["available_at"]
+    assert after["incidents_plantincident"]
+    assert all(row.pop("idempotency_key") is None for row in after["incidents_plantincident"])
     assert after.pop("notifications_outboundmail") == []
     assert after.pop("notifications_remindermemberrole") == []
     assert [after.pop(table) for table in RECIPIENT_TABLES] == [[], [], []]
