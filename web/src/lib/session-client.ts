@@ -121,9 +121,11 @@ function stale() {
 
 // A stale stamp, also one from before the clock was set back, yields to any fresh answer.
 function confirm(sentAt: number) {
-    if (staleSince(sentAt) || (!stale() && sentAt < confirmation.sentAt))
-        return false;
-    confirmation = { sentAt, covered: false };
+    if (staleSince(sentAt)) return false;
+    confirmation = {
+        sentAt: stale() ? sentAt : Math.max(sentAt, confirmation.sentAt),
+        covered: false,
+    };
     return true;
 }
 

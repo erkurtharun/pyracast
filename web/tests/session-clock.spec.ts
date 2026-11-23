@@ -211,6 +211,34 @@ test("a failed Retry after the clock was moved back keeps the cover until an ans
     await expect(page.getByLabel(capacity)).toHaveValue("6.25");
 });
 
+test("a Retry sent before the stored confirmation and answered after it, with the clock one second back, lifts the cover", async ({
+    page,
+}) => {
+    await signedInOnClock(page);
+    await openWorkspace(page);
+    const confirmedAt = start.getTime() + 60_000;
+    await page.clock.setSystemTime(confirmedAt);
+    const confirmed = page.waitForResponse("**/api/session/");
+    await focusWindow(page);
+    expect((await confirmed).ok()).toBe(true);
+    await page.clock.setSystemTime(confirmedAt - 1_000);
+    await failSessionReads(page);
+    await expect(cover(page)).toBeVisible();
+    await page.unroute("**/api/**", abort);
+    const retry = await holdNext(page, "/api/session/");
+    await page.clock.setSystemTime(confirmedAt - 500);
+    await page.getByRole("button", { name: "Try again" }).click();
+    await retry.reached;
+    await page.clock.setSystemTime(confirmedAt + 500);
+    const answered = page.waitForResponse("**/api/session/");
+    retry.release();
+    expect((await answered).ok()).toBe(true);
+    await expect(cover(page)).toHaveCount(0);
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
+});
+
 test("a workspace-list answer after the clock was moved back lifts the cover", async ({
     page,
 }) => {
