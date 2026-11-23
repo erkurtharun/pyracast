@@ -310,7 +310,7 @@ if (!workerWithdrawn)
             );
             await page.getByRole("link", { name: "Try again" }).click();
             expect((await returned).status()).toBe(200);
-            await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
+            await expect(page).toHaveTitle("Pyracast");
         });
 
         test("an invitation opened without a connection asks to open the link again and returns without its token", async ({
