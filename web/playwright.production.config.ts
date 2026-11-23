@@ -4,7 +4,7 @@ const serverPort = 3110;
 const frontPort = 3111;
 
 export default defineConfig({
-    testDir: "./production",
+    testDir: "./production-tests",
     outputDir: "production-results",
     workers: 1,
     forbidOnly: !!process.env.CI,
