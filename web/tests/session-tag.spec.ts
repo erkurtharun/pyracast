@@ -142,17 +142,23 @@ test("U1: a save in flight while another session takes over is neither repeated 
     ]);
 
     calls = [];
+    startDocument();
+    adoptSession(session("b", 2));
     const { gate, release } = held();
+    const { arrived, arrive } = arrival();
     answer(async () => {
+        arrive();
         await gate;
         return json({ id: 7 }, 201);
     });
     const saving = api.post("/api/tenants/{tenant_id}/sites/", site);
+    await arrived;
     adoptSession(session("c", 3));
     release();
     const late = await saving.catch((failure) => failure);
     expect(late).toBeInstanceOf(ApiError);
     expect(late).toMatchObject({ code: "session_changed" });
+    expect(sent()).toEqual(["POST /api/tenants/1/sites/ b"]);
 });
 
 test("U2: the same account signed in again owns none of the earlier session's cached data", () => {
