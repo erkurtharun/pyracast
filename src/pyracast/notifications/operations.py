@@ -385,7 +385,7 @@ def configure_reminders(
         addresses = effective(include_workspace_members, planned, members)
         _check_recipient_limit(len(addresses), current, limit, unchanged_pause)
         stored_typed = typed_choices(schedule)
-        stored_roles = [choice for _, choice in stored_typed]
+        stored_roles = [choice for _, choice, _ in stored_typed]
         roles = _typed_choices(planned, choices(stored_typed, {}), address_roles or ())
         store_recipients(schedule, explicit, planned, roles=roles, stored_roles=stored_roles)
         chosen = store_member_choices(schedule, decided)

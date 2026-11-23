@@ -1348,3 +1348,70 @@ def test_get_put_and_preview_answer_the_placements_the_next_send_records() -> No
         alice.email: "cc",
         bob.email: "bcc",
     }
+
+
+def hidden_through_a_typed_row(system: System, alice: User) -> None:
+    response = put(
+        system,
+        recipients=[alice.email],
+        hide_recipients=False,
+        address_roles=[{"address": alice.email, "role": "bcc", "memberships": [membership(alice)]}],
+    )
+    assert response.status_code == 200, response.content
+
+
+def test_a_member_tied_to_a_hidden_typed_row_stays_hidden_at_a_new_address() -> None:
+    system, alice, bob = workspace()
+    hidden_through_a_typed_row(system, alice)
+    moved(alice, "alice.new@example.com")
+
+    to, cc, bcc = sent_headers(0)
+
+    assert (to, cc, "alice.new@example.com" in bcc) == ([ADMIN], [bob.email], True)
+    User.objects.filter(pk=alice.pk).update(is_active=False)
+    assert "alice.new@example.com" not in {
+        address for header in sent_headers(1) for address in header
+    }
+    User.objects.filter(pk=alice.pk).update(is_active=True)
+    assert "alice.new@example.com" in sent_headers(2)[2]
+
+    body = {"recipients": ["alice@example.com"], "hide_recipients": False}
+    answers = [preview(system, **body).json(), put(system, **body).json()]
+    for answer in answers:
+        (row,) = [
+            row
+            for row in answer["addresses"]["members"]
+            if row["address"] == "alice.new@example.com"
+        ]
+        assert (row["role"], row["placement"]) == (None, "bcc")
+    assert "alice.new@example.com" in sent_headers(3)[2]
+
+
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+def test_an_address_change_inside_the_marker_leaves_a_tied_hidden_member_hidden(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, alice, _ = workspace()
+    hidden_through_a_typed_row(system, alice)
+    confirm = pending_address_change(alice, "alice.new@example.com")
+    hook = StatementHook("accounts_membership", lambda: committed_elsewhere(confirm), armed=False)
+    opening = OpeningBackend.open
+
+    def arm(backend: OpeningBackend) -> bool:
+        hook.armed = True
+        return opening(backend)
+
+    monkeypatch.setattr(OpeningBackend, "open", arm)
+
+    with after_statement(hook):
+        first = sent_headers(0)
+
+    assert hook.fired
+    assert User.objects.get(pk=alice.pk).email == "alice.new@example.com"
+    assert (first[0], "alice@example.com" in first[2]) == ([ADMIN], True)
+    to, cc, bcc = sent_headers(1)
+    assert (to, "alice.new@example.com" in cc, "alice.new@example.com" in bcc) == (
+        [ADMIN],
+        False,
+        True,
+    )

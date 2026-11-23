@@ -253,6 +253,7 @@ HIDDEN = TypedChoice(RecipientRole.BCC)
 class Choices:
     _typed: Mapping[str, TypedChoice]
     _chosen: Mapping[int, RecipientRole]
+    _hidden_ties: frozenset[int] = frozenset()
 
     def typed(self, address: str) -> TypedChoice | None:
         return self._typed.get(mailbox_key(address))
@@ -260,25 +261,46 @@ class Choices:
     def of(self, member: Member) -> RecipientRole | None:
         return members_choice(self._chosen[pk] for pk in member.memberships if pk in self._chosen)
 
+    def hides(self, member: Member) -> bool:
+        """Whether one of the members is tied to a typed row whose choice is Hidden."""
+        return not self._hidden_ties.isdisjoint(member.memberships)
 
-def choices(
-    typed: Iterable[tuple[str, TypedChoice]], chosen: Mapping[int, RecipientRole]
-) -> Choices:
+
+TypedRow = tuple[str, TypedChoice, frozenset[int]]
+
+
+def choices(typed: Iterable[TypedRow], chosen: Mapping[int, RecipientRole]) -> Choices:
     found: dict[str, set[TypedChoice]] = defaultdict(set)
-    for address, choice in typed:
-        found[mailbox_key(address)].add(choice)
+    tied: dict[str, set[int]] = defaultdict(set)
+    for address, choice, ties in typed:
+        found[key := mailbox_key(address)].add(choice)
+        tied[key] |= ties
     # Rows stored before two spellings of one mailbox were refused: Hidden unless they agree.
     combined = {key: next(iter(same)) if len(same) == 1 else HIDDEN for key, same in found.items()}
-    return Choices({key: choice for key, choice in combined.items() if choice.role}, chosen)
+    return Choices(
+        {key: choice for key, choice in combined.items() if choice.role},
+        chosen,
+        frozenset(
+            pk
+            for key, choice in combined.items()
+            if choice.role == RecipientRole.BCC
+            for pk in tied[key]
+        ),
+    )
 
 
-def typed_choices(schedule: ReminderSchedule) -> list[tuple[str, TypedChoice]]:
-    return [
-        (address, TypedChoice(role, frozenset(members)))
-        for address, role, members in ReminderRecipient.objects.filter(schedule_id=schedule.pk)
+def typed_choices(schedule: ReminderSchedule) -> list[TypedRow]:
+    """Each typed row's address, choice and ties, in one statement."""
+    found: dict[int, tuple[str, TypedChoice, set[int]]] = {}
+    for pk, address, role, members, tie in (
+        ReminderRecipient.objects.filter(schedule_id=schedule.pk)
         .order_by("pk")
-        .values_list("address", "role", "role_members")
-    ]
+        .values_list("pk", "address", "role", "role_members", "ties__membership_id")
+    ):
+        row = found.setdefault(pk, (address, TypedChoice(role, frozenset(members)), set()))
+        if tie is not None:
+            row[2].add(tie)
+    return [(address, choice, frozenset(ties)) for address, choice, ties in found.values()]
 
 
 def stored_choices(schedule: ReminderSchedule) -> Choices:
@@ -301,6 +323,7 @@ def candidates(addresses: Sequence[str], members: Workspace, choices: Choices) -
                 chosen=choices.of(member) if member else None,
                 typed=RecipientRole(typed.role) if typed else None,
                 counts=typed is None or members.are_members(address, typed.members),
+                tied_hidden=member is not None and choices.hides(member),
             )
         )
     return found

@@ -28,11 +28,12 @@ class Candidate:
     chosen: RecipientRole | None = None
     typed: RecipientRole | None = None
     counts: bool = True
+    tied_hidden: bool = False
 
 
 def explicit_role(candidate: Candidate) -> RecipientRole | None:
     typed = candidate.typed if candidate.counts else None
-    if RecipientRole.BCC in (candidate.chosen, candidate.typed):
+    if candidate.tied_hidden or RecipientRole.BCC in (candidate.chosen, candidate.typed):
         return RecipientRole.BCC
     return candidate.chosen or typed
 
