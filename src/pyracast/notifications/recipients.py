@@ -496,12 +496,17 @@ def delivery_roles(delivery: NotificationDelivery) -> list[tuple[str, RecipientR
     return [(row.address, RecipientRole(row.role)) for row in _envelope(delivery)]
 
 
-def hide_visible_schedules(tenant_ids: Collection[int]) -> set[int]:
-    """Hides every visible schedule of the workspaces until an administrator saves again."""
-    visible = ReminderSchedule.objects.filter(
-        region__tenant_id__in=tenant_ids, hide_recipients=False
+def hide_visible_schedules(
+    tenant_ids: Collection[int], schedule_ids: Collection[int] = ()
+) -> set[int]:
+    """Hides every visible schedule of the workspaces and of the ids until an administrator
+    saves again; the schedules it changed."""
+    hidden = set(
+        ReminderSchedule.objects.select_for_update(of=("self",))
+        .filter(Q(region__tenant_id__in=tenant_ids) | Q(pk__in=schedule_ids), hide_recipients=False)
+        .order_by("pk")
+        .values_list("pk", flat=True)
     )
-    hidden = set(visible.values_list("pk", flat=True))
     ReminderSchedule.objects.filter(pk__in=hidden).update(
         hide_recipients=True, hidden_by_departure=True, revision=F("revision") + 1
     )

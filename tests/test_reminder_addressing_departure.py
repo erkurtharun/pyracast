@@ -1,7 +1,7 @@
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import timedelta
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from allauth.account.models import EmailAddress
@@ -10,7 +10,7 @@ from django.db import IntegrityError, connection
 from django.test import Client
 from django.utils import timezone
 
-from pyracast import erasure
+from pyracast import erasure, trash
 from pyracast.accounts.models import Membership
 from pyracast.accounts.operations import remove_workspace_member
 from pyracast.erasure import erase_account
@@ -20,7 +20,8 @@ from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.models import RecipientRole, ReminderSchedule
 from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.scheduler import enqueue_due
-from pyracast.regions.models import AuditEvent
+from pyracast.regions.models import AuditEvent, Region
+from pyracast.trash import RETENTION, purge_expired, trash_region
 from tests.support.concurrency import committed_elsewhere, paused_in
 from tests.support.domain import NOW, System, make_system
 from tests.support.notification_groups import member
@@ -305,6 +306,150 @@ def test_an_erasure_advances_and_counts_a_schedule_once(hidden_before: bool, row
     assert (after.hide_recipients, after.revision) == (True, before.revision + 1)
     assert erased.changes["notifications.ReminderSchedule"] == 1
     assert erased.changes.get("notifications.ReminderRecipient") == (1 if row else None)
+
+
+FORMER = "bob.former@example.com"
+
+
+def an_outsider_holding_a_hidden_typed_row_of(
+    system: System, bob: User, *, hide_recipients: bool
+) -> User:
+    moved(bob, FORMER)
+    save(
+        system,
+        recipients=[FORMER],
+        address_roles=[{"address": FORMER, "role": "bcc", "memberships": [membership(bob)]}],
+        hide_recipients=hide_recipients,
+    )
+    moved(bob, "bob.new@example.com")
+    outsider = User.objects.create(username="outsider", email=FORMER)
+    EmailAddress.objects.create(user=outsider, email=FORMER, verified=True, primary=True)
+    return outsider
+
+
+def test_an_erasure_hides_a_schedule_of_another_workspace_whose_hidden_row_it_deletes() -> None:
+    system, _, bob = workspace()
+    outsider = an_outsider_holding_a_hidden_typed_row_of(system, bob, hide_recipients=False)
+    (queued,) = enqueue_due(SLOT)
+    before = schedule_of(system)
+
+    erased = erase_account(outsider.pk, execute=True)
+
+    everyone = sorted([ADMIN, "alice@example.com", "bob.new@example.com"])
+    assert [headers_of(queued, SLOT), next_send(1)] == [([], [], everyone)] * 2
+    after = schedule_of(system)
+    assert (after.hide_recipients, after.hidden_by_departure, after.revision) == (
+        True,
+        True,
+        before.revision + 1,
+    )
+    assert erased.changes["notifications.ReminderSchedule"] == 1
+    assert erased.changes["notifications.ReminderRecipient"] == 1
+    assert answer(system, system.member)["hidden_by_departure"] is True
+
+
+def test_an_erasure_advances_a_hidden_schedule_of_another_workspace_once() -> None:
+    system, _, bob = workspace()
+    outsider = an_outsider_holding_a_hidden_typed_row_of(system, bob, hide_recipients=True)
+    before = schedule_of(system)
+
+    erased = erase_account(outsider.pk, execute=True)
+
+    after = schedule_of(system)
+    assert (after.hide_recipients, after.hidden_by_departure, after.revision) == (
+        True,
+        False,
+        before.revision + 1,
+    )
+    assert erased.changes["notifications.ReminderSchedule"] == 1
+    assert erased.changes["notifications.ReminderRecipient"] == 1
+
+
+class Purge:
+    blocked: ClassVar[list[str]] = []
+
+    @staticmethod
+    def at_schedules() -> None:
+        Purge.blocked.extend(waiting_on_this_transaction())
+
+
+def waiting_on_this_transaction() -> list[str]:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT relation::regclass::text FROM pg_locks WHERE locktype = 'tuple'"
+            " AND pg_backend_pid() = ANY(pg_blocking_pids(pid))"
+        )
+        return sorted(row[0] for row in cursor.fetchall())
+
+
+def a_trashed_region_whose_visible_schedule_holds_only_a_choice_of(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[System, User, int]:
+    system, alice, _ = workspace()
+    save(system)
+    chosen(schedule_of(system), alice, RecipientRole.BCC)
+    schedule_id = schedule_of(system).pk
+    trash_region(system.member, system.tenant.pk, system.region.pk)
+    deleting = trash._delete
+
+    def delete(rows: Any, budget: Any) -> None:
+        if rows.model is ReminderSchedule:
+            Purge.at_schedules()
+        deleting(rows, budget)
+
+    monkeypatch.setattr(trash, "_delete", delete)
+    monkeypatch.setattr(Purge, "blocked", [])
+    return system, alice, schedule_id
+
+
+def test_an_erasure_waits_for_a_purge_of_a_trashed_region_of_its_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, alice, schedule_id = a_trashed_region_whose_visible_schedule_holds_only_a_choice_of(
+        monkeypatch
+    )
+
+    purged, erased = paused_in(
+        monkeypatch,
+        Purge,
+        "at_schedules",
+        lambda: purge_expired(NOW + RETENTION),
+        lambda: erase_account(alice.pk, execute=True),
+    )
+
+    assert Purge.blocked == [Region._meta.db_table]
+    assert purged["regions"] == 1
+    assert "notifications.ReminderSchedule" not in erased.changes
+    assert not ReminderSchedule.objects.filter(pk=schedule_id).exists()
+    assert not Membership.objects.filter(user=alice).exists()
+
+
+def test_a_purge_of_a_trashed_region_of_the_workspace_waits_for_an_erasure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, alice, schedule_id = a_trashed_region_whose_visible_schedule_holds_only_a_choice_of(
+        monkeypatch
+    )
+    forgetting = erasure._forget_recipients
+
+    def observed(*args: Any) -> None:
+        Purge.blocked.extend(waiting_on_this_transaction())
+        forgetting(*args)
+
+    monkeypatch.setattr(erasure, "_forget_recipients", observed)
+
+    erased, purged = paused_in(
+        monkeypatch,
+        erasure,
+        "_forget_recipients",
+        lambda: erase_account(alice.pk, execute=True),
+        lambda: purge_expired(NOW + RETENTION),
+    )
+
+    assert Purge.blocked == [Region._meta.db_table]
+    assert erased.changes["notifications.ReminderSchedule"] == 1
+    assert purged["regions"] == 1
+    assert not ReminderSchedule.objects.filter(pk=schedule_id).exists()
 
 
 def test_the_database_refuses_a_departure_mark_on_a_visible_schedule() -> None:
