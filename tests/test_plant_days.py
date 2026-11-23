@@ -975,6 +975,36 @@ def test_one_days_read_at_a_time_and_the_next_after_it_ended_or_failed(
     assert viewer.get(path).status_code == 200
 
 
+def status_in(client: Client, path: str) -> int:
+    try:
+        return client.get(path).status_code
+    finally:
+        connection.close()
+
+
+def test_a_second_read_of_the_same_session_waits_for_it_and_is_refused_as_busy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    path = plant_path(system, plant)
+    first_tab = client_for(system.member)
+    second_tab = Client()
+    second_tab.cookies = first_tab.cookies
+    entered, release = held_read(monkeypatch, None)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        first = executor.submit(status_in, first_tab, path)
+        try:
+            assert entered.wait(30)
+            meanwhile = second_tab.get(path)
+        finally:
+            release.set()
+        assert first.result(timeout=60) == 200
+    assert meanwhile.status_code == 429
+    assert meanwhile.json()["code"] == "session_busy"
+    assert meanwhile["Retry-After"] == "1"
+    assert second_tab.get(path).status_code == 200
+
+
 def test_the_days_scope_admits_120_reads_an_hour() -> None:
     rates = cast(dict[str, str], settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"])
     assert rates["days"] == "120/hour"
