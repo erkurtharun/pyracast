@@ -8,18 +8,25 @@ if (path.dirname(outputDir) !== webDir)
     throw new Error("Invalid coverage directory");
 rmSync(outputDir, { recursive: true, force: true });
 
-const result = spawnSync(
-    process.execPath,
-    ["node_modules/@playwright/test/cli.js", "test", ...process.argv.slice(2)],
-    {
+const env = {
+    ...process.env,
+    PLAYWRIGHT_COVERAGE: "1",
+    NEXT_DIST_DIR: ".next-coverage",
+};
+function run(script, args) {
+    const result = spawnSync(process.execPath, [script, ...args], {
         cwd: webDir,
         stdio: "inherit",
-        env: {
-            ...process.env,
-            PLAYWRIGHT_COVERAGE: "1",
-            NEXT_DIST_DIR: ".next-coverage",
-        },
-    },
-);
-if (result.error) throw result.error;
-process.exitCode = result.status ?? 1;
+        env,
+    });
+    if (result.error) throw result.error;
+    return result.status ?? 1;
+}
+
+const built = run("node_modules/next/dist/bin/next", ["build"]);
+process.exitCode = built
+    ? built
+    : run("node_modules/@playwright/test/cli.js", [
+          "test",
+          ...process.argv.slice(2),
+      ]);

@@ -4,7 +4,8 @@
         "playwright.config.ts",
         "tests/**/*.spec.ts",
         "integration/**/*.spec.ts",
-        "testing/coverage-reporter.ts"
+        "testing/coverage-reporter.ts",
+        "testing/server-coverage.ts"
     ],
     "project": [
         "src/**/*.{ts,tsx}",

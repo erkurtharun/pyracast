@@ -6,30 +6,49 @@ import type {
 } from "monocart-coverage-reports";
 import ts from "typescript";
 
+function startsWithDirectory(filePath: string, directory: string): boolean {
+    const root = `${directory.replaceAll("\\", "/")}/`;
+    return process.platform === "win32"
+        ? filePath.toLowerCase().startsWith(root.toLowerCase())
+        : filePath.startsWith(root);
+}
+
+function filePathOf(url: string): string | undefined {
+    try {
+        return fileURLToPath(url).replaceAll("\\", "/");
+    } catch {
+        return undefined;
+    }
+}
+
 export function sourcePath(filePath: string): string {
     let normalized = filePath.replaceAll("\\", "/");
     if (normalized.startsWith("file:")) {
-        try {
-            normalized = fileURLToPath(normalized).replaceAll("\\", "/");
-        } catch {
-            return normalized;
-        }
+        const resolved = filePathOf(normalized);
+        if (!resolved) return normalized;
+        normalized = resolved;
     }
-    const root = `${path.resolve("src").replaceAll("\\", "/")}/`;
-    const prefixes = [
-        root,
+    const root = path.resolve("src");
+    if (startsWithDirectory(normalized, root))
+        return `web/src/${normalized.slice(root.length + 1)}`;
+    const prefix = [
         "src/",
         "web/src/",
         "[project]/src/",
         "turbopack:///[project]/src/",
         "turbopack/[project]/src/",
-    ];
-    const prefix = prefixes.find((value) =>
-        process.platform === "win32" && value === root
-            ? normalized.toLowerCase().startsWith(value.toLowerCase())
-            : normalized.startsWith(value),
-    );
+    ].find((value) => normalized.startsWith(value));
     return prefix ? `web/src/${normalized.slice(prefix.length)}` : normalized;
+}
+
+export function serverOutput(): string {
+    return path.resolve(process.env.NEXT_DIST_DIR ?? ".next", "server");
+}
+
+export function measuredEntry(url: string): boolean {
+    if (url.includes("/_next/static/")) return true;
+    const filePath = url.startsWith("file:") ? filePathOf(url) : undefined;
+    return !!filePath && startsWithDirectory(filePath, serverOutput());
 }
 
 export function authoredSource(filePath: string): boolean {
@@ -58,7 +77,7 @@ export const coverageOptions: CoverageReportOptions = {
     clean: false,
     reports: ["v8", "lcovonly", "console-details"],
     v8Ignore: false,
-    entryFilter: (entry) => entry.url.includes("/_next/static/"),
+    entryFilter: (entry) => measuredEntry(entry.url),
     sourceFilter: authoredSource,
     outputFilter: (entry) => authoredSource(entry.sourcePath),
     sourcePath,
