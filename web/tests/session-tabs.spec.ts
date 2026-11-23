@@ -1,12 +1,7 @@
 import { expect, test } from "./support/test";
 import { errorBody } from "./support/errors";
 import { sessionAnswer, serveSession } from "./support/session";
-import {
-    firstAccount,
-    mockApi,
-    user,
-    type AccountState,
-} from "./support/workspace";
+import { firstAccount, mockApi, type AccountState } from "./support/workspace";
 
 test("a sign-out in another tab hides this tab's workspace without waiting for its focus", async ({
     context,
@@ -104,7 +99,7 @@ test("a failed read after another tab's change is not shown again while a read a
     const held = new Promise<void>((resolve) => {
         release = resolve;
     });
-    await mockApi(page);
+    const account = await mockApi(page);
     await page.route("**/api/session/", async (route) => {
         if (holding) await held;
         return unavailable
@@ -115,15 +110,7 @@ test("a failed read after another tab's change is not shown again while a read a
                       "The session could not be read.",
                   ),
               })
-            : route.fulfill({
-                  json: {
-                      user,
-                      csrf_token: "signed-token",
-                      language: "en",
-                      expires_at: null,
-                      session_tag: "tag-a",
-                  },
-              });
+            : route.fulfill({ json: sessionAnswer(account.current, null) });
     });
     // Another document of the origin that only writes the observed tag, as a tab's read does.
     const other = await context.newPage();
@@ -175,7 +162,7 @@ test("a failed read before the observed tag returned is never rendered while a r
     const held = new Promise<void>((resolve) => {
         release = resolve;
     });
-    await mockApi(page);
+    const account = await mockApi(page);
     await page.route("**/api/session/", async (route) => {
         if (holding) await held;
         return unavailable
@@ -186,15 +173,7 @@ test("a failed read before the observed tag returned is never rendered while a r
                       "The session could not be read.",
                   ),
               })
-            : route.fulfill({
-                  json: {
-                      user,
-                      csrf_token: "signed-token",
-                      language: "en",
-                      expires_at: null,
-                      session_tag: "tag-a",
-                  },
-              });
+            : route.fulfill({ json: sessionAnswer(account.current, null) });
     });
     const other = await context.newPage();
     await other.route("**/blank", (route) =>

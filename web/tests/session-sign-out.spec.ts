@@ -18,7 +18,7 @@ import {
     pendingInvitation,
     resentNotice,
     restoreFromCache,
-    secondUser,
+    secondAccount,
     serveSession,
     sessionAnswer,
 } from "./support/session";
@@ -390,7 +390,7 @@ test("a tab restored after another user signed in drops its pending invitation a
 }) => {
     const account = await invitedTab(page);
     await markDocument(page);
-    account.current = { user: secondUser, tag: "tag-b" };
+    account.current = secondAccount;
     await restoreFromCache(page);
     await expect(page.getByText(changedNotice)).toBeVisible();
     expect(await isMarked(page)).toBe(false);

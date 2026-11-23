@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test, expect, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
-import { mockApi, user } from "./support/workspace";
+import { accountWith, mockApi, sessionIdentity } from "./support/workspace";
 
 const manifest = JSON.parse(
     readFileSync(
@@ -108,14 +108,12 @@ type Language = keyof typeof copy;
 const languages = Object.keys(copy) as Language[];
 
 async function openWorkspace(page: Page, language: Language = "en") {
-    await mockApi(page);
+    const account = await mockApi(page, {
+        account: { current: accountWith({ language_preference: language }) },
+    });
     await page.route("**/api/session/", (route) =>
         route.fulfill({
-            json: {
-                user: { ...user, language_preference: language },
-                csrf_token: "signed-token",
-                language,
-            },
+            json: { ...sessionIdentity(account.current), language },
         }),
     );
     await page.goto("/app/");

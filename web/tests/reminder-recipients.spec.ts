@@ -1,13 +1,20 @@
 import { expect, test } from "./support/test";
 import type { Page } from "@playwright/test";
-import { mockApi, paged, user, tenantRow } from "./support/workspace";
+import {
+    accountWith,
+    mockApi,
+    paged,
+    sessionIdentity,
+    user,
+    tenantRow,
+} from "./support/workspace";
 import { errorBody } from "./support/errors";
 
 test("shared reminder recipients and email language survive administrator transfer", async ({
     page,
 }, testInfo) => {
     let role = "admin";
-    await reminderApi(
+    const account = await reminderApi(
         page,
         [user.email],
         5,
@@ -19,15 +26,10 @@ test("shared reminder recipients and email language survive administrator transf
         () => role === "viewer",
     );
     await page.setViewportSize({ width: 320, height: 900 });
-    let currentUser = user;
     let saves = 0;
     await page.route("**/api/session/", (route) =>
         route.fulfill({
-            json: {
-                user: currentUser,
-                language: "en",
-                csrf_token: "signed-token",
-            },
+            json: { ...sessionIdentity(account.current), language: "en" },
         }),
     );
     await page.route("**/api/tenants/", (route) =>
@@ -55,7 +57,7 @@ test("shared reminder recipients and email language survive administrator transf
     await expect(
         page.getByLabel("Email language", { exact: true }),
     ).toHaveValue("tr");
-    currentUser = { ...user, id: 2, email: "next-admin@example.test" };
+    account.current = accountWith({ id: 2, email: "next-admin@example.test" });
     await openReminders(page);
     await expect(
         page.getByLabel("Email address 1", { exact: true }),
@@ -184,7 +186,7 @@ async function reminderApi(
     includeMembers = false,
     viewer: () => boolean = () => false,
 ) {
-    await mockApi(page);
+    const account = await mockApi(page);
     let revision = 0;
     let saved: Saved = {
         enabled,
@@ -280,6 +282,7 @@ async function reminderApi(
             },
         });
     });
+    return account;
 }
 
 type Saved = {
@@ -534,10 +537,10 @@ test("turning on a new oversized automatic group shows the limit and the server 
 test("Turkish automatic recipient labels preserve readable characters", async ({
     page,
 }) => {
-    await reminderApi(page);
+    const account = await reminderApi(page);
     await page.route("**/api/session/", (route) =>
         route.fulfill({
-            json: { user, language: "tr", csrf_token: "signed-token" },
+            json: { ...sessionIdentity(account.current), language: "tr" },
         }),
     );
     await page.goto("/app/");

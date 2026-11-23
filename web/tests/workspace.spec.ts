@@ -11,6 +11,7 @@ import {
     user,
     paged,
     mockApi,
+    sessionIdentity,
     tenantRow,
 } from "./support/workspace";
 import { errorBody } from "./support/errors";
@@ -53,7 +54,9 @@ test("initial session has one CSRF handshake during Strict Mode and focus events
         requests++;
         started();
         await barrier;
-        await route.fulfill({ json: { user: null, csrf_token: "one-token" } });
+        await route.fulfill({
+            json: { ...sessionIdentity(null), csrf_token: "one-token" },
+        });
     });
     await page.goto("/app/", { waitUntil: "domcontentloaded" });
     await observed;

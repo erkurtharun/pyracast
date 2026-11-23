@@ -1,5 +1,11 @@
 import { expect, type Page } from "@playwright/test";
-import { answer, user, type Account, type AccountState } from "./workspace";
+import {
+    answer,
+    sessionIdentity,
+    user,
+    type Account,
+    type AccountState,
+} from "./workspace";
 
 export const secondUser = {
     ...user,
@@ -7,6 +13,7 @@ export const secondUser = {
     username: "second.user",
     email: "second@example.test",
 };
+export const secondAccount = { user: secondUser, tag: "tag-b" };
 
 export const expiredNotice = "Your session has expired. Please sign in again.";
 export const changedNotice =
@@ -14,8 +21,7 @@ export const changedNotice =
 
 export function sessionAnswer(account: Account, expiresAt: string | null) {
     return {
-        user: account?.user ?? null,
-        csrf_token: account ? "signed-token" : "anonymous-token",
+        ...sessionIdentity(account),
         language: "en",
         expires_at: account ? expiresAt : null,
         session_tag: account?.tag ?? null,

@@ -1,6 +1,11 @@
 import { test, expect, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
-import { firstAccount, mockApi } from "./support/workspace";
+import {
+    accountWith,
+    adminUser,
+    firstAccount,
+    mockApi,
+} from "./support/workspace";
 import { allauthErrorBody, errorBody } from "./support/errors";
 
 test("signup entry opens registration with public information links", async ({
@@ -936,7 +941,7 @@ test("a console deep link survives sign in and the second factor", async ({
     await page.route(
         "**/api/auth/browser/v1/auth/2fa/authenticate",
         (route) => {
-            account.current = firstAccount;
+            account.current = accountWith(adminUser);
             return route.fulfill({
                 json: { status: 200, meta: { is_authenticated: true } },
             });

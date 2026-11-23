@@ -1,7 +1,7 @@
 import type { Route } from "@playwright/test";
 import { expect, test, type Page } from "./support/test";
 import { errorBody } from "./support/errors";
-import { firstAccount, mockApi, type AccountState } from "./support/workspace";
+import { accountWith, mockApi, type AccountState } from "./support/workspace";
 import {
     announceResentInvitation,
     expiredNotice,
@@ -272,16 +272,12 @@ test("a workspace-list answer after the clock was moved back lifts the cover", a
     await read;
 });
 
-async function serveLanguageChoice(page: Page) {
+async function serveLanguageChoice(page: Page, account: AccountState) {
     await page.route("**/api/session/language/", (route) => {
         const language = route.request().postDataJSON().language as string;
-        const session = sessionAnswer(firstAccount, null);
+        account.current = accountWith({ language_preference: language });
         return route.fulfill({
-            json: {
-                ...session,
-                user: { ...session.user, language_preference: language },
-                language,
-            },
+            json: { ...sessionAnswer(account.current, null), language },
         });
     });
 }
@@ -296,7 +292,7 @@ test("a list cached in another language before the clock was moved back leaves a
     page,
 }) => {
     const server = await signedInOnClock(page);
-    await serveLanguageChoice(page);
+    await serveLanguageChoice(page, server.account);
     const noon = new Date("2026-11-20T12:00:00Z");
     await page.clock.setSystemTime(noon);
     await openSettingsForm(page);

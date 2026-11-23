@@ -92,9 +92,25 @@ export const paged = <T>(results: T[]) => ({
     next: null,
     previous: null,
 });
-export type Account = { user: typeof user; tag: string } | null;
+export type AccountUser = Mock<Schemas["SessionUserOutput"]> &
+    Pick<
+        Schemas["SessionUserOutput"],
+        "id" | "username" | "email" | "has_usable_password"
+    >;
+export type Account = { user: AccountUser; tag: string } | null;
 export type AccountState = { current: Account };
-export const firstAccount = { user, tag: "tag-a" } as const;
+export const firstAccount: NonNullable<Account> = { user, tag: "tag-a" };
+export const adminUser = { ...user, can_admin: true, mfa_required: true };
+export const accountWith = (
+    fields: Partial<AccountUser>,
+): NonNullable<Account> => ({ ...firstAccount, user: { ...user, ...fields } });
+
+export function sessionIdentity(account: Account) {
+    return {
+        user: account?.user ?? null,
+        csrf_token: account ? "signed-token" : "anonymous-token",
+    };
+}
 
 // django-allauth's session view answers from request.user: 200 with the user, or 401 with flows.
 function allauthSession(account: Account) {
@@ -128,7 +144,13 @@ export async function mockApi(
         empty = false,
         failed = false,
         admin = false,
-        account = { current: anonymous ? null : firstAccount },
+        account = {
+            current: anonymous
+                ? null
+                : admin
+                  ? accountWith(adminUser)
+                  : firstAccount,
+        },
     }: {
         anonymous?: boolean;
         empty?: boolean;
@@ -150,7 +172,7 @@ export async function mockApi(
             expect(route.request().headers()["x-csrftoken"]).toBe(
                 "anonymous-token",
             );
-            account.current ??= firstAccount;
+            account.current ??= admin ? accountWith(adminUser) : firstAccount;
             data = { status: 200, meta: { is_authenticated: true } };
         } else if (
             path === "/api/auth/browser/v1/auth/session" &&
@@ -175,18 +197,7 @@ export async function mockApi(
         } else if (path === "/api/auth/browser/v1/auth/sessions") {
             data = { status: 200, data: [signedInSession] };
         } else if (path === "/api/session/") {
-            data = answer("SessionOutput", {
-                user: account.current
-                    ? {
-                          ...account.current.user,
-                          can_admin: admin,
-                          mfa_required: admin,
-                      }
-                    : null,
-                csrf_token: account.current
-                    ? "signed-token"
-                    : "anonymous-token",
-            });
+            data = answer("SessionOutput", sessionIdentity(account.current));
         } else if (path === "/api/tenants/")
             data = answer(
                 "PaginatedTenantOutputList",

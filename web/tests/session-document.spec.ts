@@ -18,7 +18,7 @@ import {
     outstandingAnswers,
     refuseReload,
     restoreFromCache,
-    secondUser,
+    secondAccount,
     serveSession,
     tagObserver,
 } from "./support/session";
@@ -99,7 +99,7 @@ test("a sign-out in another window ends in a fresh document", async ({
 });
 
 for (const [change, next] of [
-    ["another user's session", { user: secondUser, tag: "tag-b" }],
+    ["another user's session", secondAccount],
     [
         "a new session of the same user",
         { user: firstAccount.user, tag: "tag-a2" },
@@ -446,7 +446,7 @@ test("an action still running when another user's session arrives sends nothing 
     await page.getByRole("button", { name: "Reset to baseline" }).click();
     await page.getByRole("button", { name: "Reset to baseline" }).click();
     await Promise.all([list.reached, automation.reached]);
-    account.current = { user: secondUser, tag: "tag-b" };
+    account.current = secondAccount;
     await observe("tag-b");
     await reload.reached;
     const automationOnly = outstanding(1);

@@ -1,7 +1,15 @@
 import { expect, test } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
-import { mockApi, user } from "./support/workspace";
+import {
+    accountWith,
+    firstAccount,
+    mockApi,
+    sessionIdentity,
+    user,
+} from "./support/workspace";
 import { allauthErrorBody } from "./support/errors";
+
+const socialOnly = accountWith({ has_usable_password: false });
 
 test("enabled providers submit a CSRF protected native redirect form on mobile", async ({
     page,
@@ -148,7 +156,7 @@ test("a provider return whose sign-in screen has gone asks for no sign-in state"
     context,
     page,
 }) => {
-    await mockApi(page, { anonymous: true });
+    const account = await mockApi(page, { anonymous: true });
     const reached = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
     await page.route(
@@ -181,13 +189,13 @@ test("a provider return whose sign-in screen has gone asks for no sign-in state"
     await reached.promise;
     // Another tab observes a signed-in session: this tab hides the sign-in screen until its read,
     // queued behind the completion, adopts that session.
+    account.current = { ...firstAccount, tag: "tag-b" };
     await page.route("**/api/session/", (route) =>
         route.fulfill({
             json: {
-                user,
-                csrf_token: "signed-token",
+                ...sessionIdentity(account.current),
                 language: "en",
-                session_tag: "tag-b",
+                session_tag: account.current?.tag,
             },
         }),
     );
@@ -223,15 +231,7 @@ test("a provider return whose sign-in screen has gone asks for no sign-in state"
 test("social-only accounts confirm email before disconnecting the selected provider", async ({
     page,
 }) => {
-    await mockApi(page);
-    await page.route("**/api/session/", (route) =>
-        route.fulfill({
-            json: {
-                user: { ...user, has_usable_password: false },
-                csrf_token: "signed-token",
-            },
-        }),
-    );
+    await mockApi(page, { account: { current: socialOnly } });
     let verified = false;
     let disconnected = false;
     await page.route(
@@ -324,15 +324,11 @@ for (const hasPassword of [true, false]) {
     test(`accounts with an authenticator ${hasPassword ? "and" : "but no"} password confirm a connection with the authenticator`, async ({
         page,
     }) => {
-        await mockApi(page);
-        await page.route("**/api/session/", (route) =>
-            route.fulfill({
-                json: {
-                    user: { ...user, has_usable_password: hasPassword },
-                    csrf_token: "signed-token",
-                },
-            }),
-        );
+        await mockApi(page, {
+            account: {
+                current: accountWith({ has_usable_password: hasPassword }),
+            },
+        });
         await page.route("**/api/auth/browser/v1/config", (route) =>
             route.fulfill({
                 json: {
@@ -398,25 +394,14 @@ test("provider errors explain how to link an existing email safely", async ({
 test("a social-only user can set the first password and follows the required sign-in", async ({
     page,
 }) => {
-    const account = await mockApi(page);
-    await page.route("**/api/session/", (route) =>
-        route.fulfill({
-            json: {
-                user: account.current
-                    ? { ...user, has_usable_password: false }
-                    : null,
-                csrf_token: account.current
-                    ? "signed-token"
-                    : "anonymous-token",
-            },
-        }),
-    );
+    const account = await mockApi(page, { account: { current: socialOnly } });
     await page.route(
         "**/api/auth/browser/v1/account/password/change",
         (route) => {
             expect(route.request().postDataJSON()).toEqual({
                 new_password: "Test-only-cobalt-79!",
             });
+            expect(account.current?.user.has_usable_password).toBe(false);
             account.current = null;
             return route.fulfill({
                 status: 401,
@@ -452,15 +437,7 @@ test("a social-only user can set the first password and follows the required sig
 test("social-only MFA setup requests email confirmation rather than an unavailable password", async ({
     page,
 }) => {
-    await mockApi(page);
-    await page.route("**/api/session/", (route) =>
-        route.fulfill({
-            json: {
-                user: { ...user, has_usable_password: false },
-                csrf_token: "signed-token",
-            },
-        }),
-    );
+    await mockApi(page, { account: { current: socialOnly } });
     await page.route(
         "**/api/auth/browser/v1/account/authenticators/totp",
         (route) =>
@@ -489,20 +466,11 @@ test("social-only MFA setup requests email confirmation rather than an unavailab
 test("expired initial-password sessions never report that the password was saved", async ({
     page,
 }) => {
-    const account = await mockApi(page);
-    await page.route("**/api/session/", (route) =>
-        route.fulfill({
-            json: {
-                user: account.current
-                    ? { ...user, has_usable_password: false }
-                    : null,
-                csrf_token: "token",
-            },
-        }),
-    );
+    const account = await mockApi(page, { account: { current: socialOnly } });
     await page.route(
         "**/api/auth/browser/v1/account/password/change",
         (route) => {
+            expect(account.current?.user.has_usable_password).toBe(false);
             account.current = null;
             return route.fulfill({
                 status: 401,
@@ -544,10 +512,10 @@ test("Turkish provider buttons fit a 320px screen", async ({
             url: baseURL!,
         },
     ]);
-    await mockApi(page, { anonymous: true });
+    const account = await mockApi(page, { anonymous: true });
     await page.route("**/api/session/", (route) =>
         route.fulfill({
-            json: { user: null, csrf_token: "token", language: "tr" },
+            json: { ...sessionIdentity(account.current), language: "tr" },
         }),
     );
     await page.route("**/api/auth/browser/v1/config", (route) =>
@@ -675,30 +643,22 @@ test("connecting returns to account settings and consumes an expired-confirmatio
 test("a provider sign-in completes on return and opens the workspace", async ({
     page,
 }) => {
-    await mockApi(page, { anonymous: true });
-    let completed = false;
+    const account = await mockApi(page, { anonymous: true });
     await page.route(
         "**/api/auth/browser/v1/auth/provider/complete",
         (route) => {
             expect(route.request().method()).toBe("POST");
-            completed = true;
+            account.current = firstAccount;
             return route.fulfill({
                 json: { status: 200, meta: { is_authenticated: true } },
             });
         },
     );
-    await page.route("**/api/session/", (route) =>
-        route.fulfill({
-            json: {
-                user: completed ? user : null,
-                csrf_token: completed ? "signed-token" : "anonymous-token",
-            },
-        }),
-    );
     await page.goto("/app/?social_callback=1");
     await expect(
         page.getByRole("heading", { name: "Plants", exact: true }),
     ).toBeVisible();
+    expect(account.current?.user).toBe(user);
     await expect(page).not.toHaveURL(/social_callback/);
 });
 

@@ -3,12 +3,12 @@ import { errorBody } from "./support/errors";
 import { isMarked, markDocument } from "./support/session";
 import { expect, test, type Page } from "./support/test";
 import {
-    firstAccount,
+    accountWith,
     mockApi,
     paged,
     plant,
     region,
-    user,
+    sessionIdentity,
     type AccountState,
 } from "./support/workspace";
 
@@ -89,14 +89,10 @@ async function guestSession(page: Page, cookie?: string, baseURL?: string) {
             .addCookies([
                 { name: "pyracast_language", value: cookie, url: baseURL! },
             ]);
-    await mockApi(page, { anonymous: true });
+    const account = await mockApi(page, { anonymous: true });
     let language = "en";
     let writes = 0;
-    const session = () => ({
-        user: null,
-        csrf_token: "anonymous-token",
-        language,
-    });
+    const session = () => ({ ...sessionIdentity(account.current), language });
     await page.route("**/api/session/", (route) =>
         route.fulfill({ json: session() }),
     );
@@ -249,14 +245,11 @@ test("a link into an on-demand section opens it on the first load", async ({
     await expect(tab(page, "Outages")).toHaveAttribute("aria-current", "page");
 });
 
-async function routeTurkishSession(page: Page) {
+async function routeTurkishSession(page: Page, account: AccountState) {
+    account.current = accountWith({ language_preference: "tr" });
     await page.route("**/api/session/", (route) =>
         route.fulfill({
-            json: {
-                user: { ...user, language_preference: "tr" },
-                csrf_token: "signed-token",
-                language: "tr",
-            },
+            json: { ...sessionIdentity(account.current), language: "tr" },
         }),
     );
 }
@@ -272,8 +265,8 @@ test("a Turkish visit loads only the Turkish catalogue", async ({
             url: baseURL!,
         },
     ]);
-    await mockApi(page);
-    await routeTurkishSession(page);
+    const account = await mockApi(page);
+    await routeTurkishSession(page, account);
     const scripts: Promise<string>[] = [];
     page.on("response", (response) => {
         if (response.request().resourceType() === "script")
@@ -295,10 +288,10 @@ test("a Turkish visit loads only the Turkish catalogue", async ({
 test("a language changed in another tab replaces the whole screen once its catalogue arrives", async ({
     page,
 }) => {
-    await mockApi(page);
+    const account = await mockApi(page);
     await page.goto("/app/w/1/plants/11/forecast/");
     await expect(page.getByLabel("Forecast date")).toBeVisible();
-    await routeTurkishSession(page);
+    await routeTurkishSession(page, account);
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect(page.getByLabel("Tahmin tarihi")).toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("lang", "tr");
@@ -429,8 +422,8 @@ for (const visit of [
                     url: baseURL!,
                 },
             ]);
-        await mockApi(page);
-        if (visit.turkish) await routeTurkishSession(page);
+        const account = await mockApi(page);
+        if (visit.turkish) await routeTurkishSession(page, account);
         await page.goto("/app/");
         await expect(
             page.getByRole("heading", {
@@ -528,16 +521,9 @@ test("a language chosen before signing in whose catalogue arrives afterwards is 
     const account = await mockApi(page, { anonymous: true });
     let language = "en";
     const written: string[] = [];
-    const session = () =>
-        account.current
-            ? {
-                  user: { ...user, language_preference: language },
-                  csrf_token: "signed-token",
-                  language,
-              }
-            : { user: null, csrf_token: "anonymous-token", language };
+    const session = () => ({ ...sessionIdentity(account.current), language });
     await page.route("**/api/auth/browser/v1/auth/login", (route) => {
-        account.current = firstAccount;
+        account.current = accountWith({ language_preference: language });
         return route.fulfill({
             json: { status: 200, meta: { is_authenticated: true } },
         });
@@ -547,6 +533,8 @@ test("a language chosen before signing in whose catalogue arrives afterwards is 
     );
     await page.route("**/api/session/language/", (route) => {
         language = route.request().postDataJSON().language as string;
+        if (account.current)
+            account.current = accountWith({ language_preference: language });
         written.push(`${account.current ? "account" : "guest"}:${language}`);
         return route.fulfill({ json: session() });
     });
@@ -583,11 +571,11 @@ test("a language chosen before signing in whose catalogue arrives afterwards is 
 test("a language another tab saved clears this tab's failed save of it for good", async ({
     page,
 }) => {
-    await mockApi(page, { anonymous: true });
+    const account = await mockApi(page, { anonymous: true });
     let language = "en";
     await page.route("**/api/session/", (route) =>
         route.fulfill({
-            json: { user: null, csrf_token: "anonymous-token", language },
+            json: { ...sessionIdentity(account.current), language },
         }),
     );
     await page.route("**/api/session/language/", (route) =>
@@ -632,11 +620,11 @@ test("a language another tab saved clears this tab's failed save of it for good"
 test("a language changed in another tab whose catalogue cannot be loaded is reported with a reload", async ({
     page,
 }) => {
-    await mockApi(page);
+    const account = await mockApi(page);
     const turkish = await interceptScript(page, turkishCatalogue, "aborted");
     await page.goto("/app/w/1/plants/11/forecast/");
     await expect(page.getByLabel("Forecast date")).toBeVisible();
-    await routeTurkishSession(page);
+    await routeTurkishSession(page, account);
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect(
         page
@@ -709,19 +697,11 @@ test("a language save refused after the session ended reports nothing on the scr
     const account = await mockApi(page);
     await page.route("**/api/session/", (route) =>
         route.fulfill({
-            json: !account.current
-                ? {
-                      user: null,
-                      csrf_token: "anonymous-token",
-                      language: "en",
-                      session_tag: "tag-b",
-                  }
-                : {
-                      user,
-                      csrf_token: "signed-token",
-                      language: "en",
-                      session_tag: "tag-a",
-                  },
+            json: {
+                ...sessionIdentity(account.current),
+                language: "en",
+                session_tag: account.current?.tag ?? "tag-b",
+            },
         }),
     );
     // Another document of the origin that only writes the observed tag, as a tab's read does.
