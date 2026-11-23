@@ -92,6 +92,7 @@ export type Loaded<T> = {
     updatedAt: number;
     retry: () => void;
     reload: () => Promise<T>;
+    replace(value: T): void;
 };
 
 type Polling = { poll?: number | false };
@@ -191,6 +192,8 @@ function useLoaded<T>(
         updatedAt: query.dataUpdatedAt,
         retry: () => void query.refetch({ cancelRefetch: false }),
         reload: () => reload<T>(client, queryKey),
+        replace: (value) =>
+            client.setQueryData<Fetched<T>>(queryKey, { value, requests: 1 }),
     };
 }
 
