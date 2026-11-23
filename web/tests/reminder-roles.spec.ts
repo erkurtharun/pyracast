@@ -2243,6 +2243,25 @@ test("the mock refuses every address the server cannot carry with the server's s
     }
 });
 
+test("the mock hides every placement while a member holds an address without a wire form", async ({
+    page,
+}) => {
+    await reminderApi(page, {
+        recipients: [OUTSIDE],
+        members: [ADMIN, MEMBER, { membership: 3, primary: "ops@a�b.de" }],
+        includeMembers: true,
+        hidden: false,
+        typed: { [OUTSIDE]: "cc" },
+    });
+    await page.goto("/app/");
+    const { addresses } = (await caller(page)("GET")).json;
+    expect(
+        [...addresses.members, ...addresses.added].map(
+            (row: { placement: string }) => row.placement,
+        ),
+    ).toEqual(["bcc", "bcc", "bcc", "bcc"]);
+});
+
 for (const [hidden, mode] of [
     [true, "Recipients cannot see each other's addresses."],
     [
