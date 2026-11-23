@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from math import isfinite
 from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo
 
@@ -164,7 +165,10 @@ def _figure(value: object) -> float | None:
         return None
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise TypeError(type(value).__name__)
-    return float(value)
+    figure = float(value)
+    if not isfinite(figure):
+        raise ValueError(figure)
+    return figure
 
 
 def _instant(stamp: str) -> datetime:

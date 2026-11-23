@@ -12,11 +12,12 @@ from typing import Any, cast
 import pytest
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.db import connection
+from django.db import connection, transaction
 from django.http import HttpResponseBase
 from django.test import Client, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
+from psycopg import sql
 
 from pyracast.accounts.audit import logger as security_logger
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
@@ -609,6 +610,78 @@ def test_an_archived_field_the_days_read_cannot_project_refuses_only_its_day(
     assert read["result"]["provenance"]["snapshot_id"] == old_id
     with caplog.at_level(logging.WARNING, logger=FAULTS):
         after = days_of(system, plant)
+    only_the_reference_day_refused(before, after, caplog.records, fault)
+
+
+def stored_as_json_text(issuance: ForecastIssuance, path: list[str], number: str) -> None:
+    table = sql.Identifier(ForecastIssuance._meta.db_table)
+    with transaction.atomic(), connection.cursor() as cursor:
+        cursor.execute(
+            sql.SQL(
+                "CREATE TEMPORARY TABLE damaged ON COMMIT DROP AS SELECT * FROM {} WHERE id = %s"
+            ).format(table),
+            [issuance.pk],
+        )
+        cursor.execute(
+            "UPDATE damaged SET payloads = jsonb_set(payloads, %s, %s::jsonb)", [path, number]
+        )
+        cursor.execute(sql.SQL("DELETE FROM {} WHERE id = %s").format(table), [issuance.pk])
+        cursor.execute(sql.SQL("INSERT INTO {} SELECT * FROM damaged").format(table))
+
+
+def stored_number(issuance: ForecastIssuance, path: list[str]) -> tuple[str, str]:
+    table = sql.Identifier(ForecastIssuance._meta.db_table)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            sql.SQL(
+                "SELECT jsonb_typeof(payloads #> %s), payloads #>> %s FROM {} WHERE id = %s"
+            ).format(table),
+            [path, path, issuance.pk],
+        )
+        return cast(tuple[str, str], cursor.fetchone())
+
+
+@pytest.mark.parametrize(
+    ("path", "number", "fraction", "fault"),
+    [
+        (["60", "intervals", "3", "energy_mwh"], f"1{'0' * 400}.1", True, "ValueError"),
+        (["60", "daylight", "energy_mwh"], f"-1{'0' * 400}.1", True, "ValueError"),
+        (["60", "intervals", "3", "energy_mwh"], "1e400", False, "OverflowError"),
+    ],
+    ids=[
+        "interval-energy-decimal-beyond-a-float",
+        "day-energy-negative-decimal-beyond-a-float",
+        "interval-energy-exponent-beyond-a-float",
+    ],
+)
+def test_a_stored_number_without_a_finite_float_refuses_only_its_day(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    path: list[str],
+    number: str,
+    fraction: bool,
+    fault: str,
+) -> None:
+    system, plant, old_id = reference_transition(monkeypatch)
+    publish_snapshot(
+        snapshot_for(system, REFERENCE_DAY + timedelta(days=1), collected_at=timezone.now())
+    )
+    before = days_of(system, plant)
+    read = forecast_read(client_for(system.member), system, plant, REFERENCE_DAY)
+    assert read["result"]["provenance"]["snapshot_id"] == old_id
+    issuance = ForecastIssuance.objects.get(snapshot_id=old_id)
+    stored_as_json_text(issuance, path, number)
+    kind, text = stored_number(issuance, path)
+    assert kind == "number"
+    assert text.endswith(".1") is fraction
+    with caplog.at_level(logging.WARNING, logger=FAULTS):
+        after = days_of(system, plant)
+    only_the_reference_day_refused(before, after, caplog.records, fault)
+
+
+def only_the_reference_day_refused(
+    before: dict[str, Any], after: dict[str, Any], records: list[logging.LogRecord], fault: str
+) -> None:
     refused = by_date(after["forecast"])[REFERENCE_DAY]
     assert refused == {
         "date": REFERENCE_DAY.isoformat(),
@@ -628,7 +701,7 @@ def test_an_archived_field_the_days_read_cannot_project_refuses_only_its_day(
     ]
     assert by_date(after["forecast"])[REFERENCE_DAY + timedelta(days=1)]["rows"]
     assert after["production"] == before["production"]
-    [warning] = [record for record in caplog.records if record.name == FAULTS]
+    [warning] = [record for record in records if record.name == FAULTS]
     assert REFERENCE_DAY.isoformat() in warning.getMessage()
     assert f"error={fault}" in warning.getMessage()
 
