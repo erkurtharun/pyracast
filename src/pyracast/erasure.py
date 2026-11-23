@@ -202,28 +202,17 @@ def _ties(account_id: int) -> models.QuerySet[ReminderRecipientTie]:
 
 def _entries(account_id: int, addresses: Collection[str]) -> models.QuerySet[ReminderRecipient]:
     """Reminder entries of the addresses no other account holds verified, and the entries tied
-    only to the account's memberships, whatever address they hold, unless their schedule
-    includes the members and another member of its workspace holds the key verified. An entry
-    keeps the address as an administrator typed it, so it is matched and checked for a holder
-    by its key: it stays while another account holds verified any address with that key, also
-    one spelled differently."""
+    only to the account's memberships, whatever address they hold. An entry keeps the address
+    as an administrator typed it, so it is matched and checked for a holder by its key: it stays
+    while another account holds verified any address with that key, also one spelled
+    differently."""
     ties = ReminderRecipientTie.objects.filter(recipient=OuterRef("pk"))
     ours = _memberships(account_id)
-    member = _holders(account_id).annotate(address=_keyed("email"))
     return ReminderRecipient.objects.filter(
         Q(key__in={recipient_key(address) for address in addresses})
         & _unheld(account_id, "key", _keyed)
         | Q(Exists(ties.filter(membership_id__in=ours)))
         & ~Exists(ties.exclude(membership_id__in=ours))
-        & ~Q(
-            Q(schedule__include_workspace_members=True)
-            & Exists(
-                member.filter(
-                    address=OuterRef("key"),
-                    user__membership__tenant_id=OuterRef("schedule__region__tenant_id"),
-                )
-            )
-        )
     )
 
 
