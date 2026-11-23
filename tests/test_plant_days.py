@@ -24,6 +24,7 @@ from pyracast.errors import DomainError, ErrorCode
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.history import automatic_outlook
 from pyracast.plants.models import (
+    CalibrationRun,
     ForecastIssuance,
     Plant,
     PlantConfiguration,
@@ -1067,21 +1068,38 @@ def test_the_queries_do_not_grow_with_production_days_resolution_or_history(
     assert len(set(counts.values())) == 1, counts
 
 
+def provider_backed_calibration(system: System, plant: Plant) -> CalibrationRun:
+    configuration = plant.current_configuration
+    assert configuration is not None
+    run = activated_calibration(
+        system, configuration, 0.9, date(2026, 10, 20), NOW - timedelta(days=12)
+    )
+    evidence = acquisition((configuration, provider(system, plant)))
+    CalibrationRun.objects.filter(pk=run.pk).update(production_snapshot_ids=[evidence.pk])
+    return run
+
+
 @pytest.mark.parametrize(
-    ("calibrated", "per_forecast_day"),
-    [(False, 10), (True, 14)],
-    ids=["without-calibration", "one-usable-calibration"],
+    ("calibration", "per_forecast_day"),
+    [(None, 9), ("usable", 14), ("provider-backed", 16)],
+    ids=["without-calibration", "one-usable-calibration", "provider-backed-calibration"],
 )
 def test_the_queries_stay_within_the_bound_per_forecast_day(
-    monkeypatch: pytest.MonkeyPatch, calibrated: bool, per_forecast_day: int
+    monkeypatch: pytest.MonkeyPatch, calibration: str | None, per_forecast_day: int
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    if calibrated:
+    if calibration == "usable":
         usable_calibration(system, plant)
     forecast_window(system)
     for offset in range(1, 31):
         metered(system, plant, TODAY - timedelta(days=offset))
     client = client_for(system.member)
+    if calibration == "provider-backed":
+        run = provider_backed_calibration(system, plant)
+        assert {
+            forecast_read(client, system, plant, day)["calibration_id"]
+            for day in (TODAY - timedelta(days=1), TODAY, TODAY + timedelta(days=14))
+        } == {run.pk}
     client.get(plant_path(system, plant))
     forecast_days = 22
     count = queries_of(client, system, plant)
@@ -1099,13 +1117,33 @@ def best_of_five_alternately(*reads: Callable[[], HttpResponseBase]) -> list[flo
     return [min(measured) for measured in durations]
 
 
+def history_behind_every_day_but_today(system: System, copies: range) -> None:
+    for copy in copies:
+        for offset in range(-7, 0):
+            day = TODAY + timedelta(days=offset)
+            _, end = local_day_bounds(day, system.binding.timezone)
+            later = end + timedelta(hours=2, minutes=copy)
+            estimated_actuals(system, day, 0.3 + copy / 100, later, hours=(0, 10))
+        for offset in range(1, 15):
+            publish_snapshot(
+                snapshot_for(
+                    system,
+                    TODAY + timedelta(days=offset),
+                    power_kw=0.4 + copy / 100,
+                    collected_at=NOW - timedelta(hours=2, minutes=copy),
+                )
+            )
+
+
+@pytest.mark.parametrize("copies", [range(0), range(1, 10)], ids=["ordinary", "tenfold-history"])
 def test_the_days_read_takes_at_most_25_single_day_forecast_reads(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, copies: range
 ) -> None:
     system, plant = make_plant(monkeypatch)
     usable_calibration(system, plant)
     forecast_window(system)
     older_sources(system, plant, range(1))
+    history_behind_every_day_but_today(system, copies)
     for offset in range(1, 31):
         metered(system, plant, TODAY - timedelta(days=offset))
     client = client_for(system.member)
