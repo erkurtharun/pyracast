@@ -209,8 +209,20 @@ def effective_recipients(schedule: ReminderSchedule) -> list[str]:
 
 
 @dataclass(frozen=True)
+class TypedChoice:
+    """A typed row's choice, `""` for none, and the members of its address when its To or Cc
+    was chosen."""
+
+    role: str
+    members: frozenset[int] = frozenset()
+
+
+NO_CHOICE = TypedChoice("")
+
+
+@dataclass(frozen=True)
 class Choices:
-    typed: dict[str, RecipientRole]
+    typed: dict[str, TypedChoice]
     chosen: dict[int, RecipientRole]
 
     def of(self, member: Member) -> RecipientRole | None:
@@ -222,31 +234,28 @@ def stored_choices(schedule: ReminderSchedule) -> Choices:
     typed = ReminderRecipient.objects.filter(schedule_id=schedule.pk).exclude(role="")
     chosen = ReminderMemberRole.objects.filter(schedule_id=schedule.pk)
     return Choices(
-        {key: RecipientRole(role) for key, role in typed.values_list("key", "role")},
+        {
+            key: TypedChoice(role, frozenset(members))
+            for key, role, members in typed.values_list("key", "role", "role_members")
+        },
         {pk: RecipientRole(role) for pk, role in chosen.values_list("membership_id", "role")},
     )
 
 
-def candidates(
-    addresses: Sequence[str], explicit: Sequence[Explicit], members: Workspace, choices: Choices
-) -> list[Candidate]:
-    """A typed row is settled while untied or while an active member it is tied to holds its
-    address; the choice of an unsettled row counts only when it hides."""
-    rows = {recipient_key(row.address): row for row in explicit}
+def candidates(addresses: Sequence[str], members: Workspace, choices: Choices) -> list[Candidate]:
+    """A typed To or Cc counts while the address's members are those it was chosen for."""
     found = []
     for address in addresses:
         key = recipient_key(address)
-        row, member = rows.get(key), members.by_key.get(key)
+        member, typed = members.by_key.get(key), choices.typed.get(key)
         found.append(
             Candidate(
                 address,
                 member=member is not None,
                 administrator=member is not None and member.administrator,
                 chosen=choices.of(member) if member else None,
-                typed=choices.typed.get(key) if row else None,
-                settled=row is None
-                or not row.ties
-                or bool(row.ties & members.active & members.holders.get(key, frozenset())),
+                typed=RecipientRole(typed.role) if typed else None,
+                counts=typed is None or typed.members == members.memberships(address),
             )
         )
     return found
@@ -260,12 +269,7 @@ def placements(
     found = (
         [Candidate(address) for address in addresses]
         if hidden
-        else candidates(
-            addresses,
-            resolved.explicit,
-            resolved.members,
-            stored_choices(schedule),
-        )
+        else candidates(addresses, resolved.members, stored_choices(schedule))
     )
     return roles(
         found,
@@ -290,13 +294,14 @@ def planned_recipients(
     ]
 
 
-def recipient_roles(schedule: ReminderSchedule) -> dict[str, str]:
-    """The choice of each typed row by key, `""` for none."""
-    return dict(
-        ReminderRecipient.objects.filter(schedule=schedule)
+def recipient_roles(schedule: ReminderSchedule) -> dict[str, TypedChoice]:
+    """The choice of each typed row by key."""
+    return {
+        key: TypedChoice(role, frozenset(members))
+        for key, role, members in ReminderRecipient.objects.filter(schedule=schedule)
         .order_by("pk")
-        .values_list("key", "role")
-    )
+        .values_list("key", "role", "role_members")
+    }
 
 
 def store_recipients(
@@ -304,8 +309,8 @@ def store_recipients(
     stored: Sequence[Explicit],
     planned: Sequence[Explicit],
     *,
-    roles: Mapping[str, str],
-    stored_roles: Mapping[str, str],
+    roles: Mapping[str, TypedChoice],
+    stored_roles: Mapping[str, TypedChoice],
 ) -> None:
     """`roles` holds the choice of each planned row by key; it is carried into the rebuilt rows."""
     if list(stored) == list(planned) and roles == stored_roles:
@@ -316,7 +321,8 @@ def store_recipients(
             schedule=schedule,
             address=row.address,
             key=(key := recipient_key(row.address)),
-            role=roles.get(key, ""),
+            role=(choice := roles.get(key, NO_CHOICE)).role,
+            role_members=sorted(choice.members),
         )
         for row in planned
     )

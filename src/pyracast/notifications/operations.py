@@ -24,9 +24,11 @@ from pyracast.notifications.models import (
     ReminderSchedule,
 )
 from pyracast.notifications.recipients import (
+    NO_CHOICE,
     NO_MEMBERS,
     Explicit,
     Resolved,
+    TypedChoice,
     Workspace,
     effective,
     explicit_recipients,
@@ -169,6 +171,15 @@ def set_recipient_limit(actor: User, value: int, *, expected: int) -> RecipientL
 
 
 @dataclass(frozen=True)
+class AddressChoice:
+    """`memberships` are the members of the address the form showed."""
+
+    address: str
+    role: RecipientRole
+    memberships: frozenset[int]
+
+
+@dataclass(frozen=True)
 class MemberChoice:
     """`address` is the member's address the form showed; `None` deletes the choice."""
 
@@ -261,19 +272,29 @@ def _member_choices(
     return decided
 
 
-def _typed_roles(
+def _typed_choices(
     planned: Sequence[Explicit],
-    stored: Mapping[str, str],
-    address_roles: Mapping[str, RecipientRole] | None,
-) -> dict[str, str]:
-    """A typed address without an entry has no choice; without `address_roles` an address that
-    stays keeps its stored choice."""
-    chosen = (
-        {recipient_key(address): role for address, role in address_roles.items()}
-        if address_roles is not None
-        else stored
-    )
-    return {key: chosen.get(key, "") for key in (recipient_key(row.address) for row in planned)}
+    stored: Mapping[str, TypedChoice],
+    address_roles: Sequence[AddressChoice] | None,
+    members: Workspace,
+) -> dict[str, TypedChoice]:
+    """Without `address_roles` an address that stays keeps its stored choice. Otherwise a To or
+    Cc is kept only while the members the form saw are the address's members, so a choice made
+    for other members is dropped rather than bound to new ones; Hidden is always kept."""
+    keys = [recipient_key(row.address) for row in planned]
+    if address_roles is None:
+        return {key: stored.get(key, NO_CHOICE) for key in keys}
+    entries = {recipient_key(entry.address): entry for entry in address_roles}
+    chosen = {}
+    for key in keys:
+        entry = entries.get(key)
+        if entry is not None and entry.role == RecipientRole.BCC:
+            chosen[key] = TypedChoice(RecipientRole.BCC)
+        elif entry is not None and entry.memberships == members.memberships(entry.address):
+            chosen[key] = TypedChoice(entry.role, entry.memberships)
+        else:
+            chosen[key] = NO_CHOICE
+    return chosen
 
 
 def _audit_details(schedule: ReminderSchedule, resolved: Resolved) -> dict[str, int]:
@@ -307,7 +328,7 @@ def configure_reminders(
     now: datetime,
     expected_revision: int | None = None,
     hide_recipients: bool = True,
-    address_roles: Mapping[str, RecipientRole] | None = None,
+    address_roles: Sequence[AddressChoice] | None = None,
     member_roles: Sequence[MemberChoice] | None = None,
 ) -> ReminderSchedule:
     """`expected_revision` is the revision the administrator's form was read at; a schedule
@@ -358,7 +379,7 @@ def configure_reminders(
         addresses = effective(include_workspace_members, planned, members)
         _check_recipient_limit(len(addresses), current, limit, unchanged_pause)
         stored_roles = recipient_roles(schedule)
-        roles = _typed_roles(planned, stored_roles, address_roles)
+        roles = _typed_choices(planned, stored_roles, address_roles, members)
         store_recipients(schedule, explicit, planned, roles=roles, stored_roles=stored_roles)
         chosen = store_member_choices(schedule, decided)
         mode = schedule.hide_recipients != hide_recipients

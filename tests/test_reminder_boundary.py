@@ -131,7 +131,7 @@ def test_the_administrator_reads_the_addresses() -> None:
             },
         ],
         "added": [
-            {"address": "ops@example.com", "role": None, "eligible": True, "membership": None}
+            {"address": "ops@example.com", "role": None, "eligible": True, "memberships": []}
         ],
     }
     assert body["state"] == "sending"

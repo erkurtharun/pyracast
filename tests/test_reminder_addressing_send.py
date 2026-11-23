@@ -9,9 +9,11 @@ from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.core.mail import EmailMessage
 from django.test import override_settings
+from django.utils import timezone
 
-from pyracast.accounts.models import Membership
-from pyracast.accounts.operations import reassign_workspace_admin
+from pyracast.accounts.invitations import accept_workspace_invitation, invitation_digest
+from pyracast.accounts.models import Membership, WorkspaceInvitation
+from pyracast.accounts.operations import reassign_workspace_admin, remove_workspace_member
 from pyracast.mail import smtp
 from pyracast.mail.errors import NotSentError
 from pyracast.mail.gmail import SEND_SCOPE, TOKEN_URL
@@ -38,6 +40,7 @@ from tests.support.notifications import (
     StatementHook,
     after_statement,
     chosen,
+    moved,
     parsed,
     pending_address_change,
     smtp_wire,
@@ -105,12 +108,6 @@ def bound(schedule: ReminderSchedule, address: str, role: RecipientRole, *member
             for found in members
         ),
     )
-
-
-def moved(account: User, address: str) -> None:
-    account.email = address
-    account.save(update_fields=["email"])
-    EmailAddress.objects.filter(user=account).update(email=address)
 
 
 def delivered_roles(delivery_id: int) -> list[tuple[str, str]]:
@@ -312,85 +309,133 @@ def test_a_members_hidden_choice_holds_across_an_address_change_and_lost_verific
     assert "alice.new@example.com" in headers(sent_on(2))[2]
 
 
-def test_a_members_hidden_choice_wins_over_a_typed_to_of_the_same_address() -> None:
-    system, (alice,) = workspace_with_members("alice@example.com")
-    schedule = visible(
+def member_typed(system: System, *, include: bool = True) -> ReminderSchedule:
+    return visible(
         configure_reminders(
             system.member,
             system.tenant.pk,
             system.region.pk,
             enabled=True,
             recipients=["alice@example.com"],
-            include_workspace_members=True,
+            include_workspace_members=include,
             times=["10:00"],
             language="en",
             now=NOW,
-        ),
-        {"alice@example.com": TO},
+        )
     )
+
+
+def placed(schedule: ReminderSchedule) -> list[tuple[str, RecipientRole]]:
+    resolved = resolve(schedule)
+    return sorted(
+        zip(resolved.addresses, placements(schedule, resolved, resolved.addresses), strict=True)
+    )
+
+
+def test_a_members_hidden_choice_wins_over_a_typed_to_of_the_same_address() -> None:
+    system, (alice,) = workspace_with_members("alice@example.com")
+    schedule = member_typed(system)
+    bound(schedule, "alice@example.com", TO, alice)
     chosen(schedule, alice, BCC)
 
     assert headers(sent_on()) == ([ADMIN], [], ["alice@example.com"])
 
 
-def test_a_typed_to_shows_a_hidden_member_only_while_the_members_address_is_unverified() -> None:
+def test_a_hidden_member_and_a_typed_to_of_the_address_stay_hidden_through_lost_verification() -> (
+    None
+):
     system, (alice,) = workspace_with_members("alice@example.com")
-    schedule = visible(
-        configure_reminders(
-            system.member,
-            system.tenant.pk,
-            system.region.pk,
-            enabled=True,
-            recipients=["alice@example.com"],
-            include_workspace_members=True,
-            times=["10:00"],
-            language="en",
-            now=NOW,
-        ),
-        {"alice@example.com": TO},
-    )
+    schedule = member_typed(system)
+    bound(schedule, "alice@example.com", TO, alice)
     chosen(schedule, alice, BCC)
 
-    def placed() -> list[tuple[str, RecipientRole]]:
-        resolved = resolve(schedule)
-        return list(
-            zip(resolved.addresses, placements(schedule, resolved, resolved.addresses), strict=True)
-        )
-
-    assert sorted(placed()) == [(ADMIN, TO), ("alice@example.com", BCC)]
+    assert placed(schedule) == [(ADMIN, TO), ("alice@example.com", BCC)]
     assert headers(sent_on(0)) == ([ADMIN], [], ["alice@example.com"])
 
     EmailAddress.objects.filter(user=alice).update(verified=False)
-    assert sorted(placed()) == [(ADMIN, TO), ("alice@example.com", TO)]
-    message = sent_on(1)
-    assert sorted(message.to) == [ADMIN, "alice@example.com"]
-    assert (message.cc, message.bcc) == ([], [])
+    assert placed(schedule) == [(ADMIN, TO), ("alice@example.com", BCC)]
+    assert headers(sent_on(1)) == ([ADMIN], [], ["alice@example.com"])
 
     EmailAddress.objects.filter(user=alice).update(verified=True)
-    assert sorted(placed()) == [(ADMIN, TO), ("alice@example.com", BCC)]
+    assert placed(schedule) == [(ADMIN, TO), ("alice@example.com", BCC)]
     assert headers(sent_on(2)) == ([ADMIN], [], ["alice@example.com"])
     assert ReminderRecipient.objects.get(schedule=schedule).role == TO
+
+
+def test_a_typed_to_chosen_for_a_verified_member_rests_while_unverified_and_counts_again() -> None:
+    system, (alice,) = workspace_with_members("alice@example.com")
+    schedule = member_typed(system, include=False)
+    bound(schedule, "alice@example.com", TO, alice)
+
+    assert headers(sent_on(0)) == (["alice@example.com"], [], [])
+
+    EmailAddress.objects.filter(user=alice).update(verified=False)
+    assert headers(sent_on(1)) == ([], [], ["alice@example.com"])
+
+    EmailAddress.objects.filter(user=alice).update(verified=True)
+    assert headers(sent_on(2)) == (["alice@example.com"], [], [])
+
+
+def test_a_to_chosen_while_the_address_was_unverified_counts_until_its_member_verifies_it() -> None:
+    system, (alice,) = workspace_with_members("alice@example.com")
+    EmailAddress.objects.filter(user=alice).update(verified=False)
+    schedule = member_typed(system)
+    bound(schedule, "alice@example.com", TO)
+
+    assert headers(sent_on(0)) == (["alice@example.com", ADMIN], [], [])
+
+    EmailAddress.objects.filter(user=alice).update(verified=True)
+    assert headers(sent_on(1)) == ([ADMIN], ["alice@example.com"], [])
 
 
 def test_a_member_who_left_and_joined_again_follows_the_default() -> None:
     system, schedule = visible_group()
     alice = user("alice@example.com")
     chosen(schedule, alice, BCC)
-    Membership.objects.filter(user=alice).delete()
-    Membership.objects.create(tenant=system.tenant, user=alice)
+    assert remove_workspace_member(system.member, system.tenant.pk, alice.pk)
+    WorkspaceInvitation.objects.create(
+        tenant=system.tenant,
+        email=alice.email,
+        token_hash=invitation_digest("again"),
+        created_by=system.member,
+        expires_at=timezone.now() + timedelta(days=7),
+    )
+    accept_workspace_invitation(alice, "again")
 
     assert "alice@example.com" in headers(sent_on())[1]
 
 
 def test_a_typed_to_whose_tied_member_gave_the_address_up_is_sent_hidden() -> None:
     system, (alice,) = workspace_with_members("alice@example.com")
-    schedule = visible(typed_schedule(system, ["alice@example.com"]), {"alice@example.com": TO})
-    alice.email = "alice.new@example.com"
-    alice.save(update_fields=["email"])
-    EmailAddress.objects.filter(user=alice).update(email=alice.email)
+    schedule = visible(typed_schedule(system, ["alice@example.com"]))
+    bound(schedule, "alice@example.com", TO, alice)
+    moved(alice, "alice.new@example.com")
 
     assert headers(sent_on()) == ([], [], ["alice@example.com"])
     assert ReminderRecipient.objects.get(schedule=schedule).role == TO
+
+
+def test_when_the_only_to_is_narrowed_away_at_the_marker_the_default_members_move_to_to() -> None:
+    _, schedule = visible_group()
+    EmailAddress.objects.filter(email=ADMIN).update(verified=False)
+    assert headers(sent_on(0)) == (
+        ["boss@example.com"],
+        ["alice@example.com", "bob@example.com"],
+        ["outside@example.com"],
+    )
+
+    message = sent_on(
+        1,
+        at_marker=lambda: ReminderRecipient.objects.filter(
+            schedule=schedule, key="boss@example.com"
+        ).delete(),
+    )
+
+    assert headers(message) == (
+        ["alice@example.com", "bob@example.com"],
+        [],
+        ["outside@example.com"],
+    )
 
 
 def test_a_reassigned_administrator_and_a_joined_member_change_the_next_send() -> None:

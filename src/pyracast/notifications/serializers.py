@@ -16,6 +16,7 @@ from pyracast.notifications.models import (
 from pyracast.notifications.operations import (
     MAX_RECIPIENT_LIMIT,
     RECIPIENT_MAX_LENGTH,
+    AddressChoice,
     MemberChoice,
 )
 from pyracast.notifications.overview import (
@@ -35,6 +36,9 @@ from pyracast.notifications.recipients import recipient_key
 class AddressRoleInput(InputSerializer):
     address = serializers.EmailField(max_length=RECIPIENT_MAX_LENGTH)
     role = serializers.ChoiceField(choices=RecipientRole.choices)
+    memberships = serializers.ListField(
+        child=serializers.IntegerField(min_value=1), max_length=MAX_RECIPIENT_LIMIT
+    )
 
 
 class MemberRoleInput(InputSerializer):
@@ -87,9 +91,12 @@ class ReminderInput(InputSerializer):
             raise serializers.ValidationError(
                 {"address_roles": gettext("Choose a role once for each address of the recipients.")}
             )
-        attrs["address_roles"] = {
-            entry["address"]: RecipientRole(entry["role"]) for entry in entries
-        }
+        attrs["address_roles"] = [
+            AddressChoice(
+                entry["address"], RecipientRole(entry["role"]), frozenset(entry["memberships"])
+            )
+            for entry in entries
+        ]
         return attrs
 
 
@@ -128,7 +135,7 @@ class AddedAddressOutput(serializers.Serializer[AddedAddress]):
     address = serializers.EmailField()
     role = serializers.ChoiceField(choices=RecipientRole.choices, allow_null=True)
     eligible = serializers.BooleanField()
-    membership = serializers.IntegerField(allow_null=True)
+    memberships = serializers.ListField(child=serializers.IntegerField())
 
 
 class ReminderAddressesOutput(serializers.Serializer[ReminderAddresses]):

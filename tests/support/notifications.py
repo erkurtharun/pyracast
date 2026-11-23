@@ -9,6 +9,7 @@ from io import BytesIO
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.core.mail import EmailMessage
 from django.db import connection
@@ -76,6 +77,12 @@ def store(
         )
         for membership_id in (tied or {}).get(row.key, []):
             ReminderRecipientTie.objects.create(recipient=row, membership_id=membership_id)
+
+
+def moved(account: User, address: str) -> None:
+    account.email = address
+    account.save(update_fields=["email"])
+    EmailAddress.objects.filter(user=account).update(email=address)
 
 
 def chosen(schedule: ReminderSchedule, user: User, role: RecipientRole) -> ReminderMemberRole:

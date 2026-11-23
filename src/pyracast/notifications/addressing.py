@@ -24,18 +24,18 @@ def members_choice(choices: Iterable[RecipientRole]) -> RecipientRole | None:
 class Candidate:
     """One address of a reminder's list. `member` and `administrator` describe the active members
     whose verified primary address it is; `chosen` is their combined choice and `typed` the
-    choice of the typed row that holds the address, which counts only while `settled`."""
+    choice of the typed row that holds the address, whose To or Cc counts only while `counts`."""
 
     address: str
     member: bool = False
     administrator: bool = False
     chosen: RecipientRole | None = None
     typed: RecipientRole | None = None
-    settled: bool = True
+    counts: bool = True
 
 
 def explicit_role(candidate: Candidate) -> RecipientRole | None:
-    typed = candidate.typed if candidate.settled else None
+    typed = candidate.typed if candidate.counts else None
     if RecipientRole.BCC in (candidate.chosen, candidate.typed):
         return RecipientRole.BCC
     return candidate.chosen or typed

@@ -24,14 +24,14 @@ def placed(
         (Candidate("a@example.com", chosen=CC, typed=TO), CC),
         (Candidate("a@example.com", chosen=TO, typed=CC), TO),
         (Candidate("a@example.com", typed=CC), CC),
-        (Candidate("a@example.com", typed=TO, settled=False), None),
-        (Candidate("a@example.com", typed=BCC, settled=False), BCC),
-        (Candidate("a@example.com", chosen=CC, typed=TO, settled=False), CC),
-        (Candidate("a@example.com", chosen=TO, typed=BCC, settled=False), BCC),
+        (Candidate("a@example.com", typed=TO, counts=False), None),
+        (Candidate("a@example.com", typed=BCC, counts=False), BCC),
+        (Candidate("a@example.com", chosen=CC, typed=TO, counts=False), CC),
+        (Candidate("a@example.com", chosen=TO, typed=BCC, counts=False), BCC),
         (Candidate("a@example.com", member=True), None),
     ],
 )
-def test_hidden_wins_then_the_member_choice_then_a_settled_typed_choice(
+def test_hidden_wins_then_the_member_choice_then_a_typed_choice_that_counts(
     candidate: Candidate, role: RecipientRole | None
 ) -> None:
     assert explicit_role(candidate) == role
@@ -84,9 +84,9 @@ def test_without_inclusion_a_member_address_follows_only_choices() -> None:
     ]
 
 
-def test_an_unsettled_typed_to_falls_back_to_the_default() -> None:
-    gave_up = Candidate("left@example.com", typed=TO, settled=False)
-    taken_over = Candidate("left@example.com", member=True, typed=TO, settled=False)
+def test_a_resting_typed_to_falls_back_to_the_default() -> None:
+    gave_up = Candidate("left@example.com", typed=TO, counts=False)
+    taken_over = Candidate("left@example.com", member=True, typed=TO, counts=False)
     assert placed(gave_up, ADMIN) == [BCC, TO]
     assert placed(taken_over, ADMIN) == [CC, TO]
 
@@ -107,7 +107,7 @@ def test_a_typed_to_of_a_hidden_member_shows_only_while_the_address_is_not_the_m
 
 def test_an_address_no_step_attributes_is_hidden() -> None:
     assert placed(OUTSIDE) == [BCC]
-    assert placed(Candidate("outside@example.com", typed=TO, settled=False)) == [BCC]
+    assert placed(Candidate("outside@example.com", typed=TO, counts=False)) == [BCC]
 
 
 def test_an_empty_list_places_nobody() -> None:

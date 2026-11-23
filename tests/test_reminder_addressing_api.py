@@ -38,6 +38,7 @@ from tests.support.notifications import (
     StatementHook,
     after_statement,
     chosen,
+    moved,
     pending_address_change,
     ties,
 )
@@ -117,16 +118,22 @@ def events(system: System) -> list[dict[str, int]]:
     )
 
 
+def to_for(address: str, *members: User) -> list[dict[str, Any]]:
+    return [{"address": address, "role": "to", "memberships": [membership(m) for m in members]}]
+
+
 def visible_save(system: System, alice: User, bob: User, **changes: Any) -> Any:
     return put(
         system,
-        hide_recipients=False,
-        address_roles=[{"address": "boss@example.com", "role": "to"}],
-        member_roles=[
-            {"membership": membership(alice), "address": alice.email, "role": "bcc"},
-            {"membership": membership(bob), "address": bob.email, "role": "cc"},
-        ],
-        **changes,
+        **{
+            "hide_recipients": False,
+            "address_roles": [{"address": "boss@example.com", "role": "to", "memberships": []}],
+            "member_roles": [
+                {"membership": membership(alice), "address": alice.email, "role": "bcc"},
+                {"membership": membership(bob), "address": bob.email, "role": "cc"},
+            ],
+        }
+        | changes,
     )
 
 
@@ -162,8 +169,8 @@ def test_a_save_with_roles_stores_them_and_answers_them_to_the_administrator() -
         {"membership": membership(bob), "address": bob.email, "kind": "member", "role": "cc"},
     ]
     assert body["addresses"]["added"] == [
-        {"address": "boss@example.com", "role": "to", "eligible": True, "membership": None},
-        {"address": "outside@example.com", "role": None, "eligible": True, "membership": None},
+        {"address": "boss@example.com", "role": "to", "eligible": True, "memberships": []},
+        {"address": "outside@example.com", "role": None, "eligible": True, "memberships": []},
     ]
     assert stored_roles(system) == (
         {"boss@example.com": "to", "outside@example.com": ""},
@@ -200,7 +207,7 @@ def test_a_save_replaces_typed_choices_and_the_named_members_and_preserves_the_o
     response = put(
         system,
         hide_recipients=False,
-        address_roles=[{"address": "OUTSIDE@example.com", "role": "cc"}],
+        address_roles=[{"address": "OUTSIDE@example.com", "role": "cc", "memberships": []}],
         member_roles=[{"membership": membership(alice), "address": alice.email, "role": None}],
     )
 
@@ -225,17 +232,27 @@ def test_an_unchanged_save_writes_nothing() -> None:
 @pytest.mark.parametrize(
     ("change", "field"),
     [
-        ({"address_roles": [{"address": "nobody@example.com", "role": "to"}]}, "address_roles"),
+        (
+            {"address_roles": [{"address": "nobody@example.com", "role": "to", "memberships": []}]},
+            "address_roles",
+        ),
         (
             {
                 "address_roles": [
-                    {"address": "boss@example.com", "role": "to"},
-                    {"address": "Boss@example.com", "role": "cc"},
+                    {"address": "boss@example.com", "role": "to", "memberships": []},
+                    {"address": "Boss@example.com", "role": "cc", "memberships": []},
                 ]
             },
             "address_roles",
         ),
-        ({"address_roles": [{"address": "boss@example.com", "role": "all"}]}, "address_roles"),
+        (
+            {"address_roles": [{"address": "boss@example.com", "role": "all", "memberships": []}]},
+            "address_roles",
+        ),
+        (
+            {"address_roles": [{"address": "boss@example.com", "role": "to", "memberships": [0]}]},
+            "address_roles",
+        ),
         (
             {"member_roles": [{"membership": 1, "address": ADMIN, "role": "to", "extra": 1}]},
             "member_roles",
@@ -272,7 +289,16 @@ def other_workspace_membership() -> int:
     return Membership.objects.create(tenant=other, user=outsider).pk
 
 
-@pytest.mark.parametrize("case", ["outdated address", "removed member", "other workspace"])
+@pytest.mark.parametrize(
+    "case",
+    [
+        "outdated address",
+        "inactive member",
+        "unverified primary",
+        "removed member",
+        "other workspace",
+    ],
+)
 def test_a_member_entry_that_no_longer_matches_refuses_the_whole_save(case: str) -> None:
     system, alice, bob = workspace()
     visible_save(system, alice, bob)
@@ -280,6 +306,10 @@ def test_a_member_entry_that_no_longer_matches_refuses_the_whole_save(case: str)
     if case == "outdated address":
         EmailAddress.objects.filter(user=bob).update(email="bob.new@example.com")
         User.objects.filter(pk=bob.pk).update(email="bob.new@example.com")
+    elif case == "inactive member":
+        User.objects.filter(pk=bob.pk).update(is_active=False)
+    elif case == "unverified primary":
+        EmailAddress.objects.filter(user=bob).update(verified=False)
     elif case == "removed member":
         remove_workspace_member(system.member, system.tenant.pk, bob.pk)
     else:
@@ -371,15 +401,14 @@ def test_a_typed_to_whose_tied_member_gave_the_address_up_is_answered_without_a_
         include_workspace_members=False,
         recipients=[alice.email],
         hide_recipients=False,
-        address_roles=[{"address": alice.email, "role": "to"}],
+        address_roles=to_for(alice.email, alice),
     )
-    User.objects.filter(pk=alice.pk).update(email="alice.new@example.com")
-    EmailAddress.objects.filter(user=alice).update(email="alice.new@example.com")
+    moved(alice, "alice.new@example.com")
 
     body = client_for(system.member).get(url(system)).json()
 
     assert body["addresses"]["added"] == [
-        {"address": "alice@example.com", "role": None, "eligible": True, "membership": None}
+        {"address": "alice@example.com", "role": None, "eligible": True, "memberships": []}
     ]
 
 
@@ -667,3 +696,121 @@ def test_two_entries_for_one_folded_address_are_refused() -> None:
     assert response.status_code == 400
     assert list(response.json()["fields"]) == ["member_roles"]
     assert not ReminderSchedule.objects.exists()
+
+
+def sent_headers(day: int) -> tuple[list[str], list[str], list[str]]:
+    slot = SLOT + timedelta(days=day)
+    with replying(lambda message: None) as sent:
+        delivery_id = enqueue_due(slot)[-1]
+        assert process_notification(delivery_id, slot)
+    (message,) = sent
+    return list(message.to), list(message.cc), list(message.bcc)
+
+
+def test_a_typed_to_whose_address_another_member_took_is_hidden_until_chosen_for_them() -> None:
+    system, alice, bob = workspace()
+    address = alice.email
+    body = {"include_workspace_members": False, "recipients": [address], "hide_recipients": False}
+    assert put(system, **body, address_roles=to_for(address, alice)).status_code == 200
+    assert sent_headers(0) == ([address], [], [])
+    moved(alice, "alice.new@example.com")
+    moved(bob, address)
+    unchanged = (revision(system), len(events(system)))
+
+    assert sent_headers(1) == ([], [], [address])
+
+    assert put(system, **body).status_code == 200
+    assert (revision(system), len(events(system))) == unchanged
+    assert sent_headers(2) == ([], [], [address])
+
+    repeated = put(system, **body, address_roles=to_for(address, alice))
+    assert repeated.json()["addresses"]["added"] == [
+        {"address": address, "role": None, "eligible": True, "memberships": [membership(bob)]}
+    ]
+    assert sent_headers(3) == ([], [], [address])
+    dropped = (revision(system), len(events(system)))
+
+    chosen_again = put(system, **body, address_roles=to_for(address, bob))
+    assert chosen_again.json()["addresses"]["added"] == [
+        {"address": address, "role": "to", "eligible": True, "memberships": [membership(bob)]}
+    ]
+    assert (revision(system), len(events(system))) == (dropped[0] + 1, dropped[1] + 1)
+    assert events(system)[-1]["visible_recipients"] == 1
+    assert sent_headers(4) == ([address], [], [])
+
+
+def test_a_typed_to_chosen_for_the_new_holder_alone_is_a_change() -> None:
+    system, alice, bob = workspace()
+    address = alice.email
+    body = {"include_workspace_members": False, "recipients": [address], "hide_recipients": False}
+    put(system, **body, address_roles=to_for(address, alice))
+    moved(alice, "alice.new@example.com")
+    moved(bob, address)
+    before = (revision(system), len(events(system)))
+
+    put(system, **body, address_roles=to_for(address, bob))
+
+    assert (revision(system), len(events(system))) == (before[0] + 1, before[1] + 1)
+    assert list(ReminderRecipient.objects.values_list("role", "role_members")) == [
+        ("to", [membership(bob)])
+    ]
+
+
+def test_a_to_chosen_again_for_an_address_nobody_holds_is_sent_to() -> None:
+    system, alice, _ = workspace()
+    address = alice.email
+    body = {"include_workspace_members": False, "recipients": [address], "hide_recipients": False}
+    put(system, **body, address_roles=to_for(address, alice))
+    moved(alice, "alice.new@example.com")
+    assert sent_headers(0) == ([], [], [address])
+
+    put(system, **body, address_roles=to_for(address))
+
+    assert sent_headers(1) == ([address], [], [])
+
+
+def test_an_outside_to_that_a_member_makes_primary_rests_until_chosen_again() -> None:
+    system, _, bob = workspace()
+    outside = "outside@example.com"
+    put(system, recipients=[outside], hide_recipients=False, address_roles=to_for(outside))
+    assert sent_headers(0) == ([outside, ADMIN], ["alice@example.com", "bob@example.com"], [])
+
+    moved(bob, outside)
+
+    assert sent_headers(1) == ([ADMIN], [outside, "alice@example.com"], [])
+
+
+def test_a_typed_to_whose_tied_members_are_all_inactive_is_not_sent_and_has_no_role() -> None:
+    system, alice, _ = workspace()
+    put(
+        system,
+        include_workspace_members=False,
+        recipients=[alice.email, "boss@example.com"],
+        hide_recipients=False,
+        address_roles=to_for(alice.email, alice),
+    )
+    User.objects.filter(pk=alice.pk).update(is_active=False)
+
+    assert sent_headers(0) == ([], [], ["boss@example.com"])
+    added = client_for(system.member).get(url(system)).json()["addresses"]["added"]
+    assert added[0] == {
+        "address": "alice@example.com",
+        "role": None,
+        "eligible": False,
+        "memberships": [],
+    }
+
+
+def test_a_changed_role_alone_advances_the_revision_and_writes_the_event() -> None:
+    system, alice, bob = workspace()
+    visible_save(system, alice, bob)
+    before = (revision(system), len(events(system)))
+
+    visible_save(
+        system,
+        alice,
+        bob,
+        address_roles=[{"address": "boss@example.com", "role": "cc", "memberships": []}],
+    )
+
+    assert (revision(system), len(events(system))) == (before[0] + 1, before[1] + 1)

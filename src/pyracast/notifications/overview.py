@@ -21,7 +21,6 @@ from pyracast.notifications.recipients import (
     delivery_roles,
     effective,
     explicit_recipients,
-    recipient_key,
     stored_choices,
     workspace,
 )
@@ -50,13 +49,13 @@ class MemberAddress:
 
 @dataclass(frozen=True)
 class AddedAddress:
-    """`role` is the explicit choice the rule applies to the address, `membership` the active
-    member whose verified primary address it is."""
+    """`role` is the explicit choice the rule applies to the address, `memberships` the active
+    members whose verified primary address it is."""
 
     address: str
     role: RecipientRole | None
     eligible: bool
-    membership: int | None
+    memberships: list[int]
 
 
 @dataclass(frozen=True)
@@ -204,8 +203,7 @@ def _addresses(
 ) -> ReminderAddresses:
     explicit = assessment.explicit
     choices = stored_choices(schedule)
-    typed = candidates([row.address for row in explicit], explicit, members, choices)
-    holding = {recipient_key(member.address): member.membership for member in members.members}
+    typed = candidates([row.address for row in explicit], members, choices)
     return ReminderAddresses(
         [row.address for row in explicit],
         list(members.addresses),
@@ -223,7 +221,7 @@ def _addresses(
                 row.address,
                 explicit_role(candidate),
                 not row.ties or bool(members.active & row.ties),
-                holding.get(recipient_key(row.address)),
+                sorted(members.memberships(row.address)),
             )
             for row, candidate in zip(explicit, typed, strict=True)
         ],

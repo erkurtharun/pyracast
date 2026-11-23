@@ -224,6 +224,7 @@ CUSTOMER_FIELDS = {
     "member_roles",
     "members",
     "membership",
+    "memberships",
     "message",
     "metric_scope",
     "metrics",

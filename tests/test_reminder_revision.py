@@ -7,7 +7,7 @@ from django.test import Client
 from pyracast.accounts.operations import remove_workspace_member
 from pyracast.errors import DomainError
 from pyracast.notifications.models import RecipientRole
-from pyracast.notifications.operations import configure_reminders
+from pyracast.notifications.operations import AddressChoice, configure_reminders
 from pyracast.regions.models import AuditEvent
 from pyracast.trash import restore_region, trash_region
 from tests.support.domain import NOW, System, make_system
@@ -139,7 +139,7 @@ def test_a_visible_save_audits_how_many_addresses_it_shows_and_how_many_are_outs
         system,
         recipients=["ops@example.com", "plant@example.com"],
         hide_recipients=False,
-        address_roles={"ops@example.com": RecipientRole.TO},
+        address_roles=[AddressChoice("ops@example.com", RecipientRole.TO, frozenset())],
     )
 
     assert [details for *_, details in reminder_events(system)] == [
