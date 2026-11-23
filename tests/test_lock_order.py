@@ -419,7 +419,7 @@ STEPS: dict[str, Callable[[User, User, Tenant], object]] = {
         .order_by("user_id")
         .select_for_update(of=("tenant", "user"))
     ),
-    "lock bob with a comment inside the locking clause":lambda alice, bob, tenant: raw(
+    "lock bob with a comment inside the locking clause": lambda alice, bob, tenant: raw(
         "SELECT id FROM auth_user WHERE id = %s FOR /* row lock */ UPDATE", bob.pk
     ),
     "write bob with alice's id in a text placeholder": lambda alice, bob, tenant: (
@@ -516,7 +516,7 @@ STEPS: dict[str, Callable[[User, User, Tenant], object]] = {
     "lock bob while active": lambda alice, bob, tenant: list(
         User.objects.select_for_update().filter(pk=bob.pk, is_active=True)
     ),
-    "write alice":lambda alice, bob, tenant: User.objects.filter(pk=alice.pk).update(
+    "write alice": lambda alice, bob, tenant: User.objects.filter(pk=alice.pk).update(
         first_name="Renamed"
     ),
     "write bob": lambda alice, bob, tenant: User.objects.filter(pk=bob.pk).update(
@@ -663,7 +663,10 @@ def test_a_person_write_after_a_workspace_write_in_autocommit_is_not_late() -> N
 
 @pytest.mark.parametrize(
     "step",
-    ["lock workspace and bob in one execution", "lock memberships with their workspace and persons"],
+    [
+        "lock workspace and bob in one execution",
+        "lock memberships with their workspace and persons",
+    ],
 )
 def test_one_execution_acquiring_workspace_and_person_rows_is_late(step: str) -> None:
     assert late_statements("lock alice by key", step) == 1
