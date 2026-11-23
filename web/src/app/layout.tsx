@@ -6,7 +6,6 @@ import "./globals.css";
 
 const appName = "Pyracast";
 
-// Every page, not only those under /app/, links the application's manifest, touch icon and name.
 // Declaring `icons` drops the favicon of `icon.svg`, so it is named here.
 export const metadata: Metadata = {
     metadataBase: new URL("https://pyracast.app"),
