@@ -208,4 +208,7 @@ def test_the_web_scan_adds_defect_inspections_to_the_recommended_profile_not_sty
         "category:JavaScript and TypeScript/Probable bugs",
         "category:RegExp",
     } <= groups
+    assert {"inspection": "RegExpAnonymousGroup", "enabled": False} in configuration["profile"][
+        "inspections"
+    ]
     assert {"name": "Eslint"} in configuration["include"]

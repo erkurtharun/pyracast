@@ -46,6 +46,9 @@ profile:
     # A failed response thrown into its handler's catch shares the failure path by design.
     - inspection: ExceptionCaughtLocallyJS
       enabled: false
+    # A naming preference that is off by default; the RegExp group would switch it on.
+    - inspection: RegExpAnonymousGroup
+      enabled: false
 
 include:
   - name: Eslint
