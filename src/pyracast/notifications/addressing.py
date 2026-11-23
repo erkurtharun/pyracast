@@ -3,6 +3,13 @@ from dataclasses import dataclass
 
 from pyracast.notifications.models import RecipientRole
 
+VISIBLE_MODE_RELEASED = False
+
+
+def sent_hidden(hide_recipients: bool) -> bool:
+    """Whether a schedule stored with this mode is sent hidden, under the gate as it is now."""
+    return hide_recipients or not VISIBLE_MODE_RELEASED
+
 
 @dataclass(frozen=True)
 class Candidate:

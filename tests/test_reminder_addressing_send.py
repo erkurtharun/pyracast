@@ -2,9 +2,6 @@ import base64
 import json
 from collections.abc import Callable, Iterator, Mapping
 from datetime import timedelta
-from email import policy
-from email.message import EmailMessage as ParsedMessage
-from email.parser import BytesParser
 
 import httpx
 import pytest
@@ -29,16 +26,15 @@ from pyracast.notifications.models import (
 from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.recipients import placements, resolve
 from pyracast.notifications.scheduler import enqueue_due
-from tests.smtp_server import Script, loopback_smtp
+from tests.smtp_server import Script
 from tests.support.domain import NOW, System, make_system
 from tests.support.notification_groups import group, member
 from tests.support.notification_transmission import OpeningBackend, replying
-from tests.support.notifications import SLOT, chosen
+from tests.support.notifications import SENDER, SLOT, chosen, parsed, smtp_wire
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
 TO, CC, BCC = RecipientRole.TO, RecipientRole.CC, RecipientRole.BCC
-SENDER = "Pyracast <reminders@example.com>"
 ADMIN = "admin@example.com"
 EVERYONE = [
     "boss@example.com",
@@ -102,12 +98,6 @@ def headers(message: EmailMessage) -> tuple[list[str], list[str], list[str]]:
     return list(message.to), list(message.cc), list(message.bcc)
 
 
-def parsed(raw: bytes) -> ParsedMessage:
-    message = BytesParser(policy=policy.default).parsebytes(raw)
-    assert isinstance(message, ParsedMessage)
-    return message
-
-
 def send_on(day: int = 0) -> int:
     slot = SLOT + timedelta(days=day)
     delivery_id = enqueue_due(slot)[-1]
@@ -126,21 +116,9 @@ def sent_on(day: int = 0, *, at_marker: Callable[[], object] | None = None) -> E
         OpeningBackend.action = None
 
 
-@pytest.fixture
-def smtp_wire() -> Iterator[Script]:
-    script = Script()
-    with (
-        loopback_smtp(script) as port,
-        override_settings(
-            DEFAULT_FROM_EMAIL=SENDER,
-            MAILERS={
-                "default": {
-                    "BACKEND": "pyracast.mail.smtp.EmailBackend",
-                    "OPTIONS": {"host": "127.0.0.1", "port": port, "use_tls": False, "timeout": 5},
-                }
-            },
-        ),
-    ):
+@pytest.fixture(name="smtp_wire")
+def smtp_transactions() -> Iterator[Script]:
+    with smtp_wire() as script:
         yield script
 
 

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
 
-from pyracast.notifications.addressing import explicit_role
+from pyracast.notifications.addressing import explicit_role, sent_hidden
 from pyracast.notifications.eligibility import notifiable_regions
 from pyracast.notifications.models import (
     NotificationDelivery,
@@ -250,7 +250,7 @@ def reminder_overview(
         state=assessment.state,
         revision=schedule.revision,
         include_workspace_members=schedule.include_workspace_members,
-        hide_recipients=schedule.hide_recipients and schedule.pk is not None,
+        hide_recipients=sent_hidden(schedule.hide_recipients) and schedule.pk is not None,
         language=schedule.language,
         times=list(schedule.times),
         recipient_limit=limit,

@@ -6,7 +6,7 @@ from allauth.account.models import EmailAddress
 from django.db.models import Case, F, Q, Value, When
 
 from pyracast.accounts.models import Membership, WorkspaceRole
-from pyracast.notifications.addressing import Candidate, roles
+from pyracast.notifications.addressing import Candidate, roles, sent_hidden
 from pyracast.notifications.models import (
     DeliveryRecipient,
     NotificationDelivery,
@@ -157,7 +157,7 @@ def resolve(schedule: ReminderSchedule) -> Resolved:
     include = schedule.include_workspace_members
     members = (
         workspace(schedule.region.tenant_id)
-        if needs_members(include, explicit) or not schedule.hide_recipients
+        if needs_members(include, explicit) or not sent_hidden(schedule.hide_recipients)
         else NO_MEMBERS
     )
     return Resolved(explicit, members, effective(include, explicit, members))
@@ -218,10 +218,11 @@ def candidates(
 def placements(
     schedule: ReminderSchedule, resolved: Resolved, addresses: Sequence[str]
 ) -> list[RecipientRole]:
-    """The header of each address of the list; a hidden schedule reads no choice."""
+    """The header of each address of the list; a schedule sent hidden reads no choice."""
+    hidden = sent_hidden(schedule.hide_recipients)
     found = (
         [Candidate(address) for address in addresses]
-        if schedule.hide_recipients
+        if hidden
         else candidates(
             addresses,
             resolved.explicit,
@@ -231,7 +232,7 @@ def placements(
     )
     return roles(
         found,
-        hide_recipients=schedule.hide_recipients,
+        hide_recipients=hidden,
         include_workspace_members=schedule.include_workspace_members,
     )
 

@@ -31,8 +31,6 @@ from pyracast.notifications.overview import (
 )
 from pyracast.notifications.recipients import recipient_key
 
-VISIBLE_MODE_RELEASED = False
-
 
 class AddressRoleInput(InputSerializer):
     address = serializers.EmailField(max_length=RECIPIENT_MAX_LENGTH)
@@ -65,13 +63,6 @@ class ReminderInput(InputSerializer):
     member_roles: serializers.ListSerializer[dict[str, Any]] = serializers.ListSerializer(
         child=MemberRoleInput(), required=False, max_length=MAX_RECIPIENT_LIMIT
     )
-
-    def validate_hide_recipients(self, value: bool) -> bool:
-        if not value and not VISIBLE_MODE_RELEASED:
-            raise serializers.ValidationError(
-                gettext("Recipients cannot be shown to each other yet.")
-            )
-        return value
 
     def validate_member_roles(self, value: list[dict[str, Any]]) -> list[MemberChoice]:
         if len({entry["membership"] for entry in value}) != len(value):

@@ -16,6 +16,7 @@ from pyracast.accounts.models import Language, WorkspaceRole
 from pyracast.connections.models import MAX_DAILY_QUOTA
 from pyracast.errors import ConflictError, DomainError, ErrorCode
 from pyracast.local_time import CLOCK_PATTERN
+from pyracast.notifications.addressing import sent_hidden
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.models import (
     NotificationSettings,
@@ -308,6 +309,10 @@ def configure_reminders(
         raise ValidationError("An aware timestamp is required.")
     if language not in Language.values:
         raise ValidationError(gettext("A supported reminder language is required."))
+    if not hide_recipients and sent_hidden(hide_recipients):
+        raise ValidationError(
+            {"hide_recipients": gettext("Recipients cannot be shown to each other yet.")}
+        )
     submitted = ReminderSettings(
         enabled,
         tuple(address.strip() for address in recipients),

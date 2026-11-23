@@ -245,7 +245,7 @@ def fresh_throttle_counters() -> None:
 @pytest.fixture(autouse=True)
 def visible_reminder_mode_released(monkeypatch: pytest.MonkeyPatch) -> None:
     # Release 2 removes the gate; `tests/test_reminder_release_gate.py` closes it again.
-    monkeypatch.setattr("pyracast.notifications.serializers.VISIBLE_MODE_RELEASED", True)
+    monkeypatch.setattr("pyracast.notifications.addressing.VISIBLE_MODE_RELEASED", True)
 
 
 @pytest.fixture

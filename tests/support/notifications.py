@@ -1,10 +1,16 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta
+from email import policy
+from email.message import EmailMessage as ParsedMessage
+from email.parser import BytesParser
 from io import BytesIO
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
 from django.core.mail import EmailMessage
+from django.test import override_settings
 from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -31,9 +37,11 @@ from pyracast.notifications.overview import reminder_overview
 from pyracast.notifications.recipients import recipient_key
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.notifications.serializers import ReminderOutput
+from tests.smtp_server import Script, loopback_smtp
 from tests.support.domain import NOW, System, make_system
 
 SLOT = NOW + timedelta(days=1) - timedelta(hours=6)
+SENDER = "Pyracast <reminders@example.com>"
 
 
 def schedule_addresses(schedule: ReminderSchedule) -> list[str]:
@@ -192,3 +200,27 @@ def reminder_schedule_payload(
     schedule: ReminderSchedule, now: datetime, *, administrator: bool = True
 ) -> dict[str, Any]:
     return dict(ReminderOutput(reminder_overview(schedule, now, administrator=administrator)).data)
+
+
+@contextmanager
+def smtp_wire() -> Iterator[Script]:
+    script = Script()
+    with (
+        loopback_smtp(script) as port,
+        override_settings(
+            DEFAULT_FROM_EMAIL=SENDER,
+            MAILERS={
+                "default": {
+                    "BACKEND": "pyracast.mail.smtp.EmailBackend",
+                    "OPTIONS": {"host": "127.0.0.1", "port": port, "use_tls": False, "timeout": 5},
+                }
+            },
+        ),
+    ):
+        yield script
+
+
+def parsed(raw: bytes) -> ParsedMessage:
+    message = BytesParser(policy=policy.default).parsebytes(raw)
+    assert isinstance(message, ParsedMessage)
+    return message
