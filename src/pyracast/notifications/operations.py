@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 
@@ -268,34 +268,33 @@ def _check_recipient_limit(count: int, current: int, limit: int, unchanged_pause
         )
 
 
-def _member_choices(
-    choices: Sequence[MemberChoice], members: Workspace
-) -> dict[int, RecipientRole | None]:
+def _check_entries(entries: Iterable[AddressChoice | MemberChoice], members: Workspace) -> None:
+    """Every entry names exactly the members of its address in this read of people."""
+    if not all(members.are_members(entry.address, entry.memberships) for entry in entries):
+        raise ConflictError(ErrorCode.REMINDER_SCHEDULE_CHANGED)
+
+
+def _member_choices(choices: Sequence[MemberChoice]) -> dict[int, RecipientRole | None]:
     decided: dict[int, RecipientRole | None] = {}
     for choice in choices:
-        if not members.are_members(choice.address, choice.memberships):
-            raise ConflictError(ErrorCode.REMINDER_SCHEDULE_CHANGED)
         decided.update(dict.fromkeys(choice.memberships, choice.role))
     return decided
 
 
-def _typed_choice(entry: AddressChoice, members: Workspace) -> TypedChoice:
+def _typed_choice(entry: AddressChoice) -> TypedChoice:
+    if entry.role is None:
+        return NO_CHOICE
     if entry.role == RecipientRole.BCC:
         return HIDDEN
-    if entry.role is not None and members.are_members(entry.address, entry.memberships):
-        return TypedChoice(entry.role, entry.memberships)
-    return NO_CHOICE
+    return TypedChoice(entry.role, entry.memberships)
 
 
 def _typed_choices(
-    planned: Sequence[Explicit],
-    stored: Choices,
-    changes: Sequence[AddressChoice],
-    members: Workspace,
+    planned: Sequence[Explicit], stored: Choices, changes: Sequence[AddressChoice]
 ) -> list[TypedChoice]:
     named = {mailbox_key(entry.address): entry for entry in changes}
     return [
-        _typed_choice(entry, members)
+        _typed_choice(entry)
         if (entry := named.get(mailbox_key(row.address)))
         else stored.typed(row.address) or NO_CHOICE
         for row in planned
@@ -374,7 +373,8 @@ def configure_reminders(
         if enabled and (created or not stored.enabled):
             _check_enabling(region)
         members = workspace(tenant_id)
-        decided = _member_choices(member_roles or (), members)
+        _check_entries([*(address_roles or ()), *(member_roles or ())], members)
+        decided = _member_choices(member_roles or ())
         current = len(effective(stored.include_workspace_members, explicit, members))
         planned = planned_recipients(members, explicit, submitted.recipients)
         schedule.include_workspace_members = include_workspace_members
@@ -383,7 +383,7 @@ def configure_reminders(
         _check_recipient_limit(len(addresses), current, limit, unchanged_pause)
         stored_typed = typed_choices(schedule)
         stored_roles = [choice for _, choice in stored_typed]
-        roles = _typed_choices(planned, choices(stored_typed, {}), address_roles or (), members)
+        roles = _typed_choices(planned, choices(stored_typed, {}), address_roles or ())
         store_recipients(schedule, explicit, planned, roles=roles, stored_roles=stored_roles)
         chosen = store_member_choices(schedule, decided)
         mode = schedule.hide_recipients != hide_recipients

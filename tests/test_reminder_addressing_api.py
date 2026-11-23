@@ -94,8 +94,8 @@ def revision(system: System) -> int:
     )
 
 
-def put(system: System, **changes: Any) -> Any:
-    body = {
+def put_body(system: System, changes: dict[str, Any]) -> dict[str, Any]:
+    return {
         "enabled": True,
         "include_workspace_members": True,
         "language": "en",
@@ -103,7 +103,12 @@ def put(system: System, **changes: Any) -> Any:
         "times": ["10:00"],
         "expected_revision": revision(system),
     } | changes
-    return client_for(system.member).put(url(system), body, content_type="application/json")
+
+
+def put(system: System, **changes: Any) -> Any:
+    return client_for(system.member).put(
+        url(system), put_body(system, changes), content_type="application/json"
+    )
 
 
 def stored_roles(system: System) -> tuple[dict[str, str], dict[str, str]]:
@@ -760,9 +765,8 @@ def test_a_typed_to_whose_address_another_member_took_is_hidden_until_chosen_for
     assert sent_headers(2) == ([], [], [address])
 
     repeated = put(system, **body, address_roles=to_for(address, alice))
-    assert repeated.json()["addresses"]["added"] == [
-        {"address": address, "role": None, "eligible": True, "memberships": [membership(bob)]}
-    ]
+    assert (repeated.status_code, repeated.json().get("code")) == (409, "reminder_schedule_changed")
+    assert (revision(system), len(events(system))) == unchanged
     assert sent_headers(3) == ([], [], [address])
     dropped = (revision(system), len(events(system)))
 
@@ -974,7 +978,7 @@ def test_a_delivery_row_the_retention_sweep_passes_keeps_its_visible_role() -> N
     assert (status, [(entry["address"], entry["role"]) for entry in roles]) == ("sent", rows)
 
 
-def test_a_hidden_typed_choice_is_stored_whatever_members_the_form_saw() -> None:
+def test_a_hidden_typed_entry_naming_other_members_than_the_addresses_refuses_the_save() -> None:
     system, alice, bob = workspace()
 
     response = put(
@@ -985,9 +989,59 @@ def test_a_hidden_typed_choice_is_stored_whatever_members_the_form_saw() -> None
         address_roles=[{"address": alice.email, "role": "bcc", "memberships": [membership(bob)]}],
     )
 
-    assert response.status_code == 200, response.content
-    assert list(ReminderRecipient.objects.values_list("role", "role_members")) == [("bcc", [])]
-    assert sent_headers(0) == ([], [], [alice.email])
+    assert (response.status_code, response.json().get("code")) == (409, "reminder_schedule_changed")
+    assert not ReminderSchedule.objects.exists()
+
+
+def stored_state(system: System) -> Any:
+    return (
+        sorted(ReminderRecipient.objects.values_list("address", "role", "role_members")),
+        stored_roles(system)[1],
+        revision(system),
+        len(events(system)),
+    )
+
+
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+@pytest.mark.parametrize("role", ["to", None, "bcc"])
+def test_a_typed_entry_naming_the_earlier_members_of_its_address_refuses_the_save(
+    role: str | None,
+) -> None:
+    system, alice, bob = workspace()
+    shared = "shared@example.com"
+    confirm = pending_address_change(bob, shared)
+    body = {"recipients": [shared], "hide_recipients": False}
+    saved = put(
+        system, **body, address_roles=[{"address": shared, "role": "bcc", "memberships": []}]
+    )
+    assert saved.status_code == 200, saved.content
+    (shown,) = saved.json()["addresses"]["added"]
+    assert shown["memberships"] == []
+    confirm()
+    assert User.objects.get(pk=bob.pk).email == shared
+    before = stored_state(system)
+    stale = body | {
+        "expected_revision": revision(system),
+        "address_roles": [{"address": shared, "role": role, "memberships": shown["memberships"]}],
+    }
+
+    client = client_for(system.member)
+    answers = [
+        send(path, put_body(system, stale), content_type="application/json")
+        for send, path in ((client.post, url(system) + "preview/"), (client.put, url(system)))
+    ]
+
+    assert (
+        [(answer.status_code, answer.json().get("code")) for answer in answers],
+        stored_state(system) == before,
+        sent_headers(0),
+    ) == ([(409, "reminder_schedule_changed")] * 2, True, ([ADMIN], [alice.email], [shared]))
+    honoured = put(
+        system,
+        **body,
+        address_roles=[{"address": shared, "role": role, "memberships": [membership(bob)]}],
+    )
+    assert honoured.status_code == 200, honoured.content
 
 
 UNICODE_MAILBOX, ACE_MAILBOX = "ops@b\u00fccher.de", "ops@xn--bcher-kva.de"
