@@ -27,6 +27,7 @@ from pyracast.notifications.models import (
     ReminderSchedule,
 )
 from pyracast.notifications.operations import configure_reminders
+from pyracast.notifications.recipients import placements, resolve
 from pyracast.notifications.scheduler import enqueue_due
 from tests.smtp_server import Script, loopback_smtp
 from tests.support.domain import NOW, System, make_system
@@ -325,6 +326,45 @@ def test_a_members_hidden_choice_wins_over_a_typed_to_of_the_same_address() -> N
     chosen(schedule, alice, BCC)
 
     assert headers(sent_on()) == ([ADMIN], [], ["alice@example.com"])
+
+
+def test_a_typed_to_shows_a_hidden_member_only_while_the_members_address_is_unverified() -> None:
+    system, (alice,) = workspace_with_members("alice@example.com")
+    schedule = visible(
+        configure_reminders(
+            system.member,
+            system.tenant.pk,
+            system.region.pk,
+            enabled=True,
+            recipients=["alice@example.com"],
+            include_workspace_members=True,
+            times=["10:00"],
+            language="en",
+            now=NOW,
+        ),
+        {"alice@example.com": TO},
+    )
+    chosen(schedule, alice, BCC)
+
+    def placed() -> list[tuple[str, RecipientRole]]:
+        resolved = resolve(schedule)
+        return list(
+            zip(resolved.addresses, placements(schedule, resolved, resolved.addresses), strict=True)
+        )
+
+    assert sorted(placed()) == [(ADMIN, TO), ("alice@example.com", BCC)]
+    assert headers(sent_on(0)) == ([ADMIN], [], ["alice@example.com"])
+
+    EmailAddress.objects.filter(user=alice).update(verified=False)
+    assert sorted(placed()) == [(ADMIN, TO), ("alice@example.com", TO)]
+    message = sent_on(1)
+    assert sorted(message.to) == [ADMIN, "alice@example.com"]
+    assert (message.cc, message.bcc) == ([], [])
+
+    EmailAddress.objects.filter(user=alice).update(verified=True)
+    assert sorted(placed()) == [(ADMIN, TO), ("alice@example.com", BCC)]
+    assert headers(sent_on(2)) == ([ADMIN], [], ["alice@example.com"])
+    assert ReminderRecipient.objects.get(schedule=schedule).role == TO
 
 
 def test_a_member_who_left_and_joined_again_follows_the_default() -> None:

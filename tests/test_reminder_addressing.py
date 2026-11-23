@@ -98,6 +98,13 @@ def test_a_member_hidden_by_choice_stays_hidden_under_a_typed_to() -> None:
     ]
 
 
+def test_a_typed_to_of_a_hidden_member_shows_only_while_the_address_is_not_the_members() -> None:
+    unverified = Candidate("alice@example.com", typed=TO)
+    verified = Candidate("alice@example.com", member=True, chosen=BCC, typed=TO)
+    assert placed(unverified, ADMIN) == [TO, TO]
+    assert placed(verified, ADMIN) == [BCC, TO]
+
+
 def test_an_address_no_step_attributes_is_hidden() -> None:
     assert placed(OUTSIDE) == [BCC]
     assert placed(Candidate("outside@example.com", typed=TO, settled=False)) == [BCC]
