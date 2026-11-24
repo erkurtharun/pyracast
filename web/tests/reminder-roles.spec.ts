@@ -16,6 +16,7 @@ const ADMIN = user.email;
 const MEMBER = "member@example.test";
 const OUTSIDE = "outside@example.test";
 const THIRD = "third@example.test";
+const JOINER = "joiner@example.test";
 const TEAM = [ADMIN, MEMBER];
 const TITLE = "Show these addresses to every recipient?";
 const SENTENCE =
@@ -50,6 +51,8 @@ const DROPPED = (role: string, address: string) =>
     `Your choice “${role}” for ${address} was removed: the saved recipients or the people in this workspace changed.`;
 const COUNT_ONLY = (count: number) =>
     `${count} recipient${count === 1 ? "" : "s"} of at most 5. In this app only the workspace administrator sees the addresses.`;
+const COUNT_ONLY_TR = (count: number) =>
+    `En fazla 5 alıcıdan ${count} alıcı. Adresleri bu uygulamada yalnızca çalışma alanı yöneticisi görür.`;
 
 const group = (page: Page, address: string) =>
     page.getByRole("group", {
@@ -135,6 +138,23 @@ const nextRequest = (
 
 const answerTo = (page: Page, request: Request) =>
     page.waitForResponse((response) => response.request() === request);
+
+async function readAnsweredOnRelease(page: Page) {
+    let release!: () => void;
+    let capture!: (request: Request) => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    const request = new Promise<Request>((resolve) => (capture = resolve));
+    let armed = true;
+    await page.route("**/reminders/", async (route) => {
+        if (armed && isRead(route.request().method(), route.request().url())) {
+            armed = false;
+            capture(route.request());
+            await released;
+        }
+        await route.fallback();
+    });
+    return { request, release };
+}
 
 async function review(page: Page) {
     const request = nextRequest(page, isPreview);
@@ -1503,9 +1523,14 @@ for (const cached of [true, false])
         page,
     }) => {
         let role: "admin" | "viewer" = cached ? "admin" : "viewer";
-        await reminderApi(page, {
+        const addresses = [OUTSIDE, THIRD, MEMBER, JOINER];
+        const { persons } = await reminderApi(page, {
             recipients: [OUTSIDE],
-            members: TEAM,
+            members: [
+                ADMIN,
+                { membership: 2, primary: MEMBER, active: !cached },
+                { membership: 3, primary: JOINER, active: false },
+            ],
             includeMembers: true,
             hidden: false,
         });
@@ -1517,22 +1542,62 @@ for (const cached of [true, false])
             if (isRead(request.method(), request.url())) reads.push(request);
         });
         let opened = 0;
+        let seen: () => Promise<string[]>;
         if (cached) {
             await openReminders(page);
             await expect(typedFields(page)).toHaveValue(OUTSIDE);
+            const located = nextRequest(
+                page,
+                (method, url) =>
+                    method === "GET" &&
+                    url.endsWith("/location-change-requests/"),
+            );
             await page
                 .getByRole("button", { name: "Location", exact: true })
                 .click();
+            await located;
+            seen = await watchFor(page, [
+                ...addresses,
+                COUNT_ONLY(4),
+                COUNT_ONLY_TR(4),
+            ]);
             role = "viewer";
             await tenantsAgain(page);
+            await expect(
+                line(page, "Member · changes require approval"),
+            ).toBeVisible();
+            await saveElsewhere(page, {
+                ...SAVED,
+                recipients: [OUTSIDE, THIRD],
+            });
             opened = reads.length;
-            await page
-                .getByRole("button", { name: "Email reminders", exact: true })
-                .click();
-        } else await openReminders(page);
-        await expect.poll(() => reads.length - opened).toBe(2);
-        await reads.at(-1)!.response();
+            const stale = await readAnsweredOnRelease(page);
+            try {
+                await page
+                    .getByRole("button", {
+                        name: "Email reminders",
+                        exact: true,
+                    })
+                    .click();
+                const held = await stale.request;
+                await expect.poll(() => reads.length - opened).toBe(2);
+                await reads.at(-1)!.response();
+                await expect(line(page, COUNT_ONLY(3))).toBeVisible();
+                persons[1]!.active = true;
+                const late = answerTo(page, held);
+                stale.release();
+                await late;
+            } finally {
+                stale.release();
+            }
+        } else {
+            await openReminders(page);
+            seen = await watchFor(page, addresses);
+            await expect.poll(() => reads.length).toBe(2);
+            await reads.at(-1)!.response();
+        }
         await expect(line(page, COUNT_ONLY(3))).toBeVisible();
+        persons[2]!.active = true;
         const switched = nextRequest(
             page,
             (method, url) =>
@@ -1542,14 +1607,10 @@ for (const cached of [true, false])
         await speak(page, "tr");
         const post = await switched;
         await (await read).response();
-        await expect(
-            page.getByText(
-                "En fazla 5 alıcıdan 3 alıcı. Adresleri bu uygulamada yalnızca çalışma alanı yöneticisi görür.",
-                { exact: true },
-            ),
-        ).toBeVisible();
+        await expect(line(page, COUNT_ONLY_TR(cached ? 5 : 4))).toBeVisible();
         expect(after(post, isRead)).toEqual([await read]);
         expect(reads.length - opened).toBe(3);
+        expect(await seen()).toEqual([]);
     });
 
 for (const cause of [
