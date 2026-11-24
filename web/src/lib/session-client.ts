@@ -12,7 +12,7 @@ import {
 import { ApiError, NotSentError } from "./api/errors";
 import { authRequest, authUrl, type AuthResult } from "./auth-api";
 import { browserErrors } from "@/i18n/browser";
-import type { CopyState } from "./saved/store";
+import type { CopyState, Removal } from "./saved/store";
 
 export type Session = components["schemas"]["SessionOutput"];
 export type SessionUser = components["schemas"]["SessionUserOutput"];
@@ -50,7 +50,7 @@ type ShownOwner = {
 type PreviousEnd = { notice?: "ended" | "changed"; clearInvitation: boolean };
 // The store of saved figures loads only where this flag is set or cannot be read.
 const savedFlagKey = "pyracast.saved";
-// A sign-out removal that did not finish in time; the next document carries it out.
+// An outstanding removal's identity: nothing renews the copy before it, and only that removal acknowledges it.
 const savedRemovalKey = "pyracast.savedRemoval";
 const savedSignOutLimitMs = 2_000;
 type SavedStore = typeof import("./saved/store");
@@ -261,6 +261,25 @@ function forgetSavedCopy() {
     writeStored(savedRemovalKey, null);
 }
 
+function outstandingRemoval() {
+    const removal = readStored(savedRemovalKey);
+    return typeof removal === "string" ? removal : null;
+}
+
+function newRemoval() {
+    return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+        byte.toString(16).padStart(2, "0"),
+    ).join("");
+}
+
+const savedRemoval: Removal = {
+    outstanding: outstandingRemoval,
+    acknowledge: (removal) => {
+        if (outstandingRemoval() === removal)
+            writeStored(savedRemovalKey, null);
+    },
+};
+
 // The copy's operations run one after another, in the order this document asked for them.
 function withSavedStore<T>(
     work: (store: SavedStore) => Promise<T>,
@@ -277,47 +296,76 @@ function withSavedStore<T>(
 }
 
 export function startSavedCopy() {
-    const marked = typeof readStored(savedRemovalKey) === "string";
-    if (!marked && !savedCopyFlagged()) return;
+    if (!savedCopyFlagged()) {
+        if (outstandingRemoval() !== null) writeStored(savedRemovalKey, null);
+        return;
+    }
     void withSavedStore(async (store) => {
-        const outcome = await store.start(marked);
-        if (outcome === "deleted") forgetSavedCopy();
-        if (outcome === "removed") writeStored(savedRemovalKey, null);
+        if ((await store.start(savedRemoval)) === "deleted") forgetSavedCopy();
     });
 }
 
-function adoptSavedCopy({ user, language, session_tag }: Session) {
-    if (!user || !savedCopyFlagged()) return;
-    void withSavedStore(async (store) => {
-        const outcome = await store.adopt(user.id, session_tag ?? "", language);
-        if (outcome === "deleted") forgetSavedCopy();
-    });
+function handOffNeeded(session: Session) {
+    return Boolean(session.user) && savedCopyFlagged();
+}
+
+// False when a later observation superseded this one: its session must then not be adopted.
+async function handOff(
+    { user, language, session_tag }: Session,
+    present: () => boolean,
+    adoptedAt: number,
+) {
+    if (!user) return true;
+    const handoff = await withSavedStore((store) =>
+        store.adopt(
+            {
+                user: user.id,
+                session: session_tag ?? "",
+                language,
+                adoptedAt,
+                present,
+            },
+            savedRemoval,
+        ),
+    );
+    if (handoff === "superseded") return false;
+    if (handoff === "cleared")
+        void withSavedStore((store) => store.deleteCopy()).then((deleted) => {
+            if (deleted) forgetSavedCopy();
+        });
+    else if (handoff !== "verified") writeStored(savedRemovalKey, newRemoval());
+    return true;
 }
 
 async function removeSavedFigures() {
     if (!savedCopyFlagged()) return;
-    const removal = withSavedStore((store) => store.removeFigures());
+    const removal = newRemoval();
+    const removed = withSavedStore((store) =>
+        store.removeFigures(() => savedRemoval.acknowledge(removal)),
+    );
     let timer = 0;
     const limit = new Promise<false>((resolve) => {
         timer = window.setTimeout(() => resolve(false), savedSignOutLimitMs);
     });
-    const removed = await Promise.race([removal, limit]);
+    const done = await Promise.race([removed, limit]);
     window.clearTimeout(timer);
-    if (removed) return;
-    writeStored(savedRemovalKey, "1");
-    void removal.then((late) => {
-        if (late) writeStored(savedRemovalKey, null);
-    });
+    if (!done) writeStored(savedRemovalKey, removal);
 }
 
 export async function savedCopyState(): Promise<CopyState> {
     if (!savedCopyFlagged()) return "off";
-    return (
-        (await withSavedStore((store) => store.copyState())) ?? "unavailable"
-    );
+    const copy =
+        (await withSavedStore((store) => store.copyState())) ?? "unavailable";
+    return copy === "on" && outstandingRemoval() !== null ? "paused" : copy;
 }
 
 export function adoptSession(session: Session, sentAt?: number) {
+    if (handOffNeeded(session))
+        void handOff(session, () => state.session === session, Date.now());
+    applySession(session, sentAt);
+}
+
+function applySession(session: Session, sentAt?: number) {
     const owner = sessionOwner(session) ?? null;
     if (documentOwner === undefined) {
         documentOwner = owner;
@@ -340,7 +388,6 @@ export function adoptSession(session: Session, sentAt?: number) {
     if (sentAt !== undefined) confirm(sentAt);
     setCsrfToken(session.csrf_token);
     observe(session.session_tag ?? "");
-    adoptSavedCopy(session);
     generation += 1;
     adopted = { mark: mark(), session };
     notify();
@@ -385,9 +432,16 @@ function startRead(): Flight {
     const sentAt = Date.now();
     const current: Flight = {
         ...started,
-        promise: confirmedRead().then((session) => {
-            if (unchangedSince(started)) {
-                adoptSession(session, sentAt);
+        promise: confirmedRead().then(async (session) => {
+            const handed =
+                !handOffNeeded(session) ||
+                (await handOff(
+                    session,
+                    () => unchangedSince(started),
+                    Date.now(),
+                ));
+            if (handed && unchangedSince(started)) {
+                applySession(session, sentAt);
                 return session;
             }
             if (flight === current) flight = undefined;

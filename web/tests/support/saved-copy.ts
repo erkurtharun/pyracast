@@ -91,7 +91,7 @@ export type Copy = {
     days?: unknown[];
     version?: number;
     flagged?: boolean;
-    marked?: boolean;
+    mark?: string;
 };
 
 export async function onBlankPage(page: Page) {
@@ -101,7 +101,6 @@ export async function onBlankPage(page: Page) {
     await page.goto(blank);
 }
 
-// Writes a copy in format 1 from a blank page of the application's origin.
 export async function seedCopy(
     page: Page,
     {
@@ -110,16 +109,16 @@ export async function seedCopy(
         days = heldDays,
         version = 1,
         flagged = true,
-        marked = false,
+        mark,
     }: Copy = {},
 ) {
     await onBlankPage(page);
     await page.evaluate(
-        ({ holder, plants, days, version, flagged, marked }) =>
+        ({ holder, plants, days, version, flagged, mark }) =>
             new Promise<void>((resolve, reject) => {
                 if (flagged) window.localStorage.setItem("pyracast.saved", "1");
-                if (marked)
-                    window.localStorage.setItem("pyracast.savedRemoval", "1");
+                if (mark)
+                    window.localStorage.setItem("pyracast.savedRemoval", mark);
                 const request = indexedDB.open("pyracast-saved", version);
                 request.onupgradeneeded = () => {
                     const database = request.result;
@@ -154,7 +153,7 @@ export async function seedCopy(
                         );
                 };
             }),
-        { holder, plants, days, version, flagged, marked },
+        { holder, plants, days, version, flagged, mark },
     );
 }
 
@@ -167,19 +166,30 @@ export type ReadCopy = {
     mark: string | null;
 };
 
-// Reads without creating: a database that is gone stays gone.
+// Reads without creating: a database that is gone stays gone, and one that exists must open.
 export function readCopy(page: Page): Promise<ReadCopy> {
     return page.evaluate(async () => {
         const flag = window.localStorage.getItem("pyracast.saved");
         const mark = window.localStorage.getItem("pyracast.savedRemoval");
-        const listed = (await indexedDB.databases()).find(
-            (database) => database.name === "pyracast-saved",
-        );
-        if (!listed) return { plants: 0, days: 0, flag, mark };
+        const listed = async () =>
+            (await indexedDB.databases()).some(
+                (database) => database.name === "pyracast-saved",
+            );
+        const absent = { plants: 0, days: 0, flag, mark };
+        if (!(await listed())) return absent;
         return new Promise<ReadCopy>((resolve, reject) => {
             const request = indexedDB.open("pyracast-saved");
             request.onupgradeneeded = () => request.transaction?.abort();
-            request.onerror = () => resolve({ plants: 0, days: 0, flag, mark });
+            request.onerror = () =>
+                void listed().then((exists) =>
+                    exists
+                        ? reject(
+                              new Error(
+                                  "The copy exists but cannot be opened.",
+                              ),
+                          )
+                        : resolve(absent),
+                );
             request.onsuccess = () => {
                 const database = request.result;
                 database.onversionchange = () => database.close();
@@ -208,7 +218,7 @@ export function readCopy(page: Page): Promise<ReadCopy> {
     });
 }
 
-// Holds a write transaction over the copy's plants in another page until `release`.
+// Holds a write transaction over the copy's plants in another page until `release`, which closes it.
 export async function holdCopy(page: Page) {
     const other = await page.context().newPage();
     await onBlankPage(other);
@@ -218,11 +228,15 @@ export async function holdCopy(page: Page) {
                 const request = indexedDB.open("pyracast-saved");
                 request.onsuccess = () => {
                     const database = request.result;
+                    database.onversionchange = () => database.close();
                     const store = database
                         .transaction(["plants"], "readwrite")
                         .objectStore("plants");
                     const keep = () => {
-                        if ("copyReleased" in window) return;
+                        if ("copyReleased" in window) {
+                            database.close();
+                            return;
+                        }
                         store.count().onsuccess = keep;
                     };
                     keep();
@@ -232,6 +246,64 @@ export async function holdCopy(page: Page) {
     );
     return () =>
         other.evaluate(() => Object.assign(window, { copyReleased: true }));
+}
+
+// Keeps a connection to the copy open in another page that ignores a request to delete it.
+export async function blockDeletion(page: Page) {
+    const other = await page.context().newPage();
+    await onBlankPage(other);
+    await other.evaluate(
+        () =>
+            new Promise<void>((resolve) => {
+                const request = indexedDB.open("pyracast-saved");
+                request.onsuccess = () => {
+                    request.result.onversionchange = () =>
+                        Object.assign(window, { deletionAsked: true });
+                    resolve();
+                };
+            }),
+    );
+    return () => other.evaluate(() => "deletionAsked" in window);
+}
+
+// Every clear of an object store throws in this page's documents while the storage key is set.
+export async function refuseClears(page: Page) {
+    await page.addInitScript(() => {
+        const clear = Object.getOwnPropertyDescriptor(
+            IDBObjectStore.prototype,
+            "clear",
+        )!.value as (this: IDBObjectStore) => IDBRequest<undefined>;
+        IDBObjectStore.prototype.clear = function (this: IDBObjectStore) {
+            if (window.localStorage.getItem("refuseClears") !== null)
+                throw new DOMException("Clear refused.", "UnknownError");
+            return clear.call(this);
+        };
+    });
+    await page.evaluate(() => window.localStorage.setItem("refuseClears", "1"));
+    return () =>
+        page.evaluate(() => window.localStorage.removeItem("refuseClears"));
+}
+
+// The store chunk is the only script that names the database; holding it holds the document's copy work.
+export async function watchStoreChunk(page: Page, held = false) {
+    let requested = false;
+    let reach!: () => void;
+    const reached = new Promise<void>((resolve) => (reach = resolve));
+    let release = () => {};
+    const released = held
+        ? new Promise<void>((resolve) => (release = resolve))
+        : Promise.resolve();
+    await page.route("**/_next/static/chunks/**", async (route) => {
+        const response = await route.fetch();
+        const body = await response.text();
+        if (body.includes("pyracast-saved")) {
+            requested = true;
+            reach();
+            await released;
+        }
+        await route.fulfill({ response, body });
+    });
+    return { requested: () => requested, reached, release: () => release() };
 }
 
 const constant = "const SAVED_FIGURES = true;";
@@ -255,4 +327,22 @@ export async function loadStore(page: Page, savedFigures: boolean) {
     await page.evaluate(
         `(() => { const exports = {}; ${outputText}\nwindow.savedStore = exports; })()`,
     );
+}
+
+type LoadedStore = Record<
+    "start" | "copyState",
+    (removal?: unknown) => Promise<string>
+>;
+
+// Calls an operation of the loaded store and keeps its answer in the page until `answer` reads it.
+export async function callStore(page: Page, operation: keyof LoadedStore) {
+    await page.evaluate((name) => {
+        const store = Reflect.get(window, "savedStore") as LoadedStore;
+        const none = { outstanding: () => null, acknowledge: () => {} };
+        Object.assign(window, { storeAnswer: store[name](none) });
+    }, operation);
+    return () =>
+        page.evaluate(
+            () => Reflect.get(window, "storeAnswer") as Promise<string>,
+        );
 }
