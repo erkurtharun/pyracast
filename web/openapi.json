@@ -5938,7 +5938,7 @@
                             "type": "integer",
                             "minimum": 1
                         },
-                        "maxItems": 32767
+                        "maxItems": 100
                     }
                 },
                 "required": ["address", "memberships", "role"]
@@ -8884,7 +8884,7 @@
                             "type": "integer",
                             "minimum": 1
                         },
-                        "maxItems": 32767
+                        "maxItems": 100
                     },
                     "address": {
                         "type": "string",
@@ -11271,7 +11271,7 @@
                             "format": "email",
                             "maxLength": 254
                         },
-                        "maxItems": 32767
+                        "maxItems": 100
                     },
                     "times": {
                         "type": "array",
@@ -11293,14 +11293,14 @@
                         "items": {
                             "$ref": "#/components/schemas/AddressRoleInput"
                         },
-                        "maxItems": 32767
+                        "maxItems": 100
                     },
                     "member_roles": {
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/MemberRoleInput"
                         },
-                        "maxItems": 32767
+                        "maxItems": 100
                     },
                     "disclosure": {
                         "type": "string",

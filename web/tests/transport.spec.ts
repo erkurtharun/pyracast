@@ -122,9 +122,9 @@ test("the retry waits for the announced Retry-After", async () => {
         () => json(errorBody("session_busy", "Busy.", { retry_after: 1 }), 429),
         () => json({ results: [], count: 0, next: null, previous: null }),
     );
-    const started = Date.now();
+    const started = performance.now();
     await api.get("/api/tenants/");
-    expect(Date.now() - started).toBeGreaterThanOrEqual(900);
+    expect(performance.now() - started).toBeGreaterThanOrEqual(900);
     expect(calls).toHaveLength(2);
 });
 

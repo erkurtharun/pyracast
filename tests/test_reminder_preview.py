@@ -299,13 +299,29 @@ def test_a_hidden_save_needs_no_disclosure(given: dict[str, str]) -> None:
     assert ReminderSchedule.objects.get(region=system.region).revision == 1
 
 
-def test_a_malformed_disclosure_is_refused_at_its_field() -> None:
+@pytest.mark.parametrize("hide", [False, True], ids=["visible", "hidden"])
+@pytest.mark.parametrize(
+    "given",
+    [
+        pytest.param(lambda digest: digest.upper(), id="upper case"),
+        pytest.param(lambda digest: f" {digest}\n", id="surrounded by whitespace"),
+        pytest.param(lambda digest: f"{digest}\n", id="followed by a newline"),
+        pytest.param(lambda digest: int("1" * 64), id="a number of 64 digits"),
+    ],
+)
+def test_a_disclosure_that_is_not_exactly_a_digest_text_is_refused_at_its_field(
+    hide: bool, given: Any
+) -> None:
     system, _, _ = workspace()
+    payload = members_only(system, hide_recipients=hide)
+    digest = disclosure(system, payload)
+    before = stored()
 
-    refused = put_as(system.member, system, members_only(system, disclosure="A" * 64))
+    refused = put_as(system.member, system, payload | {"disclosure": given(digest)})
 
     assert refused.status_code == 400, refused.content
     assert list(refused.json()["fields"]) == ["disclosure"]
+    assert stored() == before
 
 
 def test_the_disclosure_follows_the_visible_lists_and_their_order() -> None:

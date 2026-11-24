@@ -7,6 +7,11 @@ import type { components } from "../src/lib/schema";
 
 type Schemas = components["schemas"];
 
+// Whether a run can be requested again depends on its window ending before the plant's today.
+test.beforeEach(async ({ page }) => {
+    await page.clock.install({ time: new Date("2026-01-12T12:00:00Z") });
+});
+
 const run = (id: number, fields: Mock<Schemas["CalibrationOutput"]> = {}) =>
     answer("CalibrationOutput", {
         id,

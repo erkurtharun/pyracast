@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 from django.contrib.admin.models import LogEntry
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.db import DatabaseError
 from django.test import Client
 from django.urls import reverse
@@ -254,6 +255,21 @@ def test_settings_are_validated_audited_and_stale_safe() -> None:
     assert LogEntry.objects.count() == 1
     assert NotificationSettings.objects.get().max_recipients == 8
     assert client.put(url, {}).status_code == 405
+
+
+def test_the_recipient_limit_offers_and_takes_at_most_the_recipients_of_one_message() -> None:
+    client, operator = verified_admin()
+    url = reverse("admin:workspace_settings")
+    field = client.get(url).context["settings_form"]["max_recipients"]
+    above = {"max_recipients": 101, "expected_max_recipients": 5}
+
+    assert 'max="100"' in str(field)
+    assert client.post(url, above).status_code == 400
+    with pytest.raises(ValidationError):
+        set_recipient_limit(operator, 101, expected=5)
+    assert not NotificationSettings.objects.exclude(max_recipients=5).exists()
+    assert client.post(url, above | {"max_recipients": 100}).status_code == 302
+    assert NotificationSettings.objects.get().max_recipients == 100
 
 
 def test_settings_audit_failure_rolls_back_value(monkeypatch: pytest.MonkeyPatch) -> None:

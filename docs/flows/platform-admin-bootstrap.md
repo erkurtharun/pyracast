@@ -64,7 +64,7 @@ sequenceDiagram
 | Condition | Result |
 |---|---|
 | `--email` missing (either command) or `--reason` missing or not one of the two (reset) | argparse error, exit 2 |
-| Address invalid or over 254 characters | `CommandError` "Enter a valid email address." |
+| `bootstrap_admin`: the stripped, lower-cased address it stores is not plain (`operator.acquired_address`, `accounts.addresses.plain_address`, which also bounds it to 254 characters); `reset_mfa`: the address fails `validate_email` or is over 254 characters (`operator.lookup_address`, a look-up that never refuses on plain form) | `CommandError` "Enter a valid email address.", before anything is asked |
 | Address held by more than one account | `CommandError` "...more than one account. Resolve that first." |
 | Inactive account | `CommandError` "...is inactive. Nothing was changed." |
 | Account neither staff nor superuser | `CommandError` naming a customer account; use an address of its own |
@@ -90,6 +90,7 @@ sequenceDiagram
 ## Tests
 
 - `tests/test_admin_mfa_bootstrap.py`: creation from the terminal (QR, key, link, encrypted secret, recovery row, audit line), re-enrolment, dry run, ineligible accounts, invalid address, wrong answers and policy refusals storing nothing, changes meanwhile, the sign-in usability refusal, the longest sign-in password, ended pending steps, ASCII-console fallback, passwords not echoed, password alone cannot sign in, customer TOTP endpoint 403 for administrators.
+- `tests/test_plain_addresses.py` (bootstrap refuses an address that is not plain and stores the lower-cased one; a factor reset still finds an account whose address is not plain), `tests/test_address_boundaries.py` (the look-up's 254-character bound).
 - `tests/test_mfa_reset.py`: factors, sessions and notice removed together, dispatcher publishes the notice in the account language, rollback after a stored notice, re-enrolment after a reset, ended pending steps, dry run, refusals and confirmation mismatches.
 - `tests/test_session_serialization.py` `test_a_bootstrapped_administrator_needs_the_authenticator_after_the_email_code`: bootstrap, emailed code, TOTP, then `/admin/` 200.
 - `tests/test_mfa_secrets.py` (adapter encryption, `test_administrators_cannot_remove_their_required_factor`), `tests/test_admin_recovery_security.py` (customer-only factor removal).

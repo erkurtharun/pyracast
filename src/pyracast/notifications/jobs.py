@@ -128,6 +128,18 @@ def _skip(delivery: NotificationDelivery, reason: str) -> bool:
     return False
 
 
+def _stopped(delivery: NotificationDelivery, now: datetime, reason: str = "") -> bool:
+    if expired(delivery, now):
+        _recover_interrupted(delivery, now)
+        return True
+    if not reason and now - delivery.scheduled_for > MAX_LATENESS:
+        reason = NotificationDeliveryError.DELIVERY_DEADLINE_EXCEEDED
+    if not reason:
+        return False
+    _skip(delivery, reason)
+    return True
+
+
 def _mark_transmit(
     delivery_id: int, token: uuid.UUID, now: datetime, message: EmailMultiAlternatives
 ) -> bool:
@@ -139,17 +151,15 @@ def _mark_transmit(
         if delivery is None or not carries(delivery, token, NotificationDeliveryStatus.SENDING):
             return False
         resolved, reason = _authorize(delivery, limit)
-        now = clock.now()
-        if expired(delivery, now):
-            _recover_interrupted(delivery, now)
+        if _stopped(delivery, clock.now(), reason) or resolved is None:
             return False
-        if resolved is None or now - delivery.scheduled_for > MAX_LATENESS:
-            return _skip(delivery, reason or NotificationDeliveryError.DELIVERY_DEADLINE_EXCEEDED)
         addresses = resolved.addresses
         placed = placements(delivery.schedule, resolved.members, addresses)
         message.to, message.cc, message.bcc = sent = headers(addresses, placed)
         if not carries_exactly(message, sent):
             return _skip(delivery, NotificationDeliveryError.INVALID_RECIPIENT)
+        if _stopped(delivery, now := clock.now()):
+            return False
         delivery.transmit_started_at = now
         delivery.save(update_fields=("transmit_started_at",))
         record_roles(delivery, addresses, placed)

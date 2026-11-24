@@ -16,6 +16,7 @@ const ADMIN = user.email;
 const MEMBER = "member@example.test";
 const OUTSIDE = "outside@example.test";
 const THIRD = "third@example.test";
+const JOINER = "joiner@example.test";
 const TEAM = [ADMIN, MEMBER];
 const TITLE = "Show these addresses to every recipient?";
 const SENTENCE =
@@ -50,6 +51,8 @@ const DROPPED = (role: string, address: string) =>
     `Your choice “${role}” for ${address} was removed: the saved recipients or the people in this workspace changed.`;
 const COUNT_ONLY = (count: number) =>
     `${count} recipient${count === 1 ? "" : "s"} of at most 5. In this app only the workspace administrator sees the addresses.`;
+const COUNT_ONLY_TR = (count: number) =>
+    `En fazla 5 alıcıdan ${count} alıcı. Adresleri bu uygulamada yalnızca çalışma alanı yöneticisi görür.`;
 
 const group = (page: Page, address: string) =>
     page.getByRole("group", {
@@ -135,6 +138,23 @@ const nextRequest = (
 
 const answerTo = (page: Page, request: Request) =>
     page.waitForResponse((response) => response.request() === request);
+
+async function readAnsweredOnRelease(page: Page) {
+    let release!: () => void;
+    let capture!: (request: Request) => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    const request = new Promise<Request>((resolve) => (capture = resolve));
+    let armed = true;
+    await page.route("**/reminders/", async (route) => {
+        if (armed && isRead(route.request().method(), route.request().url())) {
+            armed = false;
+            capture(route.request());
+            await released;
+        }
+        await route.fallback();
+    });
+    return { request, release };
+}
 
 async function review(page: Page) {
     const request = nextRequest(page, isPreview);
@@ -298,7 +318,6 @@ test("address data stays hidden after administration moves, through two language
 }) => {
     let role: "admin" | "viewer" = "admin";
     let answersViewer = false;
-    await page.clock.install();
     const { answerLater } = await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -365,7 +384,6 @@ test("losing administration while the review is open closes it, sends nothing an
     page,
 }) => {
     let role: "admin" | "viewer" = "admin";
-    await page.clock.install();
     await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -401,7 +419,6 @@ test("a save the server refuses because administration moved, after the review, 
     page,
 }) => {
     let transferred = false;
-    await page.clock.install();
     const { answerLater } = await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -509,7 +526,6 @@ test("an administrator answer read before administration moved never returns aft
     page,
 }) => {
     let role: "admin" | "viewer" = "admin";
-    await page.clock.install();
     const { answerLater, failNext } = await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -749,7 +765,6 @@ for (const touched of [false, true]) {
     test(`a visible save from another tab shows its Copy in the saved view and nothing says everyone is hidden${touched ? ", with an edited time kept" : ""}`, async ({
         page,
     }) => {
-        await page.clock.install();
         await reminderApi(page, {
             recipients: [OUTSIDE],
             members: TEAM,
@@ -786,7 +801,6 @@ for (const touched of [false, true]) {
 test("a newer read stays in the saved view through a language switch whose read is held and fails, and the draft stays", async ({
     page,
 }) => {
-    await page.clock.install();
     const { answerLater, failNext } = await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -1076,7 +1090,6 @@ test("a new typed address offers its role only once it is saved", async ({
 test("a choice for a member who leaves is removed with a line naming the choice and the address, and the rest of the draft stays", async ({
     page,
 }) => {
-    await page.clock.install();
     const { persons } = await reminderApi(page, {
         recipients: [],
         members: [ADMIN, MEMBER, THIRD],
@@ -1103,7 +1116,6 @@ test("a choice for a member who leaves is removed with a line naming the choice 
 test("a choice on a typed address whose row went elsewhere is dropped and named, never moved to the member who now holds the address", async ({
     page,
 }) => {
-    await page.clock.install();
     const { persons } = await reminderApi(page, {
         recipients: [OUTSIDE],
         members: [
@@ -1167,7 +1179,6 @@ test("an active member keeps their own role control beside a typed row of their 
     page,
 }) => {
     const SHARED = "shared@example.test";
-    await page.clock.install();
     const { persons } = await reminderApi(page, {
         recipients: [SHARED],
         members: [
@@ -1241,7 +1252,6 @@ for (const cause of ["a departure hides everyone", "the address becomes typed"])
     test(`when ${cause}, focus on a removed member control moves to the panel heading`, async ({
         page,
     }) => {
-        await page.clock.install();
         const { depart } = await reminderApi(page, {
             recipients: [],
             members: [ADMIN, MEMBER, THIRD],
@@ -1270,7 +1280,6 @@ for (const reviewing of [false, true])
         page,
     }) => {
         let revoked = false;
-        await page.clock.install();
         const { answerLater } = await reminderApi(page, {
             recipients: [OUTSIDE],
             members: TEAM,
@@ -1322,7 +1331,6 @@ async function reviewThenDrop(
     page: Page,
     viewer?: (method: string) => boolean,
 ) {
-    await page.clock.install();
     const api = await reminderApi(page, {
         recipients: [],
         members: [ADMIN, MEMBER, THIRD],
@@ -1464,7 +1472,6 @@ test("an administrator answer cached before administration moved is discarded wh
 }) => {
     let role: "admin" | "viewer" = "admin";
     let unavailable = false;
-    await page.clock.install();
     const { answerLater } = await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -1516,10 +1523,14 @@ for (const cached of [true, false])
         page,
     }) => {
         let role: "admin" | "viewer" = cached ? "admin" : "viewer";
-        await page.clock.install();
-        await reminderApi(page, {
+        const addresses = [OUTSIDE, THIRD, MEMBER, JOINER];
+        const { persons } = await reminderApi(page, {
             recipients: [OUTSIDE],
-            members: TEAM,
+            members: [
+                ADMIN,
+                { membership: 2, primary: MEMBER, active: !cached },
+                { membership: 3, primary: JOINER, active: false },
+            ],
             includeMembers: true,
             hidden: false,
         });
@@ -1531,22 +1542,62 @@ for (const cached of [true, false])
             if (isRead(request.method(), request.url())) reads.push(request);
         });
         let opened = 0;
+        let seen: () => Promise<string[]>;
         if (cached) {
             await openReminders(page);
             await expect(typedFields(page)).toHaveValue(OUTSIDE);
+            const located = nextRequest(
+                page,
+                (method, url) =>
+                    method === "GET" &&
+                    url.endsWith("/location-change-requests/"),
+            );
             await page
                 .getByRole("button", { name: "Location", exact: true })
                 .click();
+            await located;
+            seen = await watchFor(page, [
+                ...addresses,
+                COUNT_ONLY(4),
+                COUNT_ONLY_TR(4),
+            ]);
             role = "viewer";
             await tenantsAgain(page);
+            await expect(
+                line(page, "Member · changes require approval"),
+            ).toBeVisible();
+            await saveElsewhere(page, {
+                ...SAVED,
+                recipients: [OUTSIDE, THIRD],
+            });
             opened = reads.length;
-            await page
-                .getByRole("button", { name: "Email reminders", exact: true })
-                .click();
-        } else await openReminders(page);
-        await expect.poll(() => reads.length - opened).toBe(2);
-        await reads.at(-1)!.response();
+            const stale = await readAnsweredOnRelease(page);
+            try {
+                await page
+                    .getByRole("button", {
+                        name: "Email reminders",
+                        exact: true,
+                    })
+                    .click();
+                const held = await stale.request;
+                await expect.poll(() => reads.length - opened).toBe(2);
+                await reads.at(-1)!.response();
+                await expect(line(page, COUNT_ONLY(3))).toBeVisible();
+                persons[1]!.active = true;
+                const late = answerTo(page, held);
+                stale.release();
+                await late;
+            } finally {
+                stale.release();
+            }
+        } else {
+            await openReminders(page);
+            seen = await watchFor(page, addresses);
+            await expect.poll(() => reads.length).toBe(2);
+            await reads.at(-1)!.response();
+        }
         await expect(line(page, COUNT_ONLY(3))).toBeVisible();
+        persons[2]!.active = true;
         const switched = nextRequest(
             page,
             (method, url) =>
@@ -1556,14 +1607,10 @@ for (const cached of [true, false])
         await speak(page, "tr");
         const post = await switched;
         await (await read).response();
-        await expect(
-            page.getByText(
-                "En fazla 5 alıcıdan 3 alıcı. Adresleri bu uygulamada yalnızca çalışma alanı yöneticisi görür.",
-                { exact: true },
-            ),
-        ).toBeVisible();
+        await expect(line(page, COUNT_ONLY_TR(cached ? 5 : 4))).toBeVisible();
         expect(after(post, isRead)).toEqual([await read]);
         expect(reads.length - opened).toBe(3);
+        expect(await seen()).toEqual([]);
     });
 
 for (const cause of [
@@ -1576,7 +1623,6 @@ for (const cause of [
     }) => {
         let role: "admin" | "viewer" = "admin";
         let counting = false;
-        await page.clock.install();
         const { persons, failNext } = await reminderApi(page, {
             recipients: [],
             members: [ADMIN, MEMBER, THIRD],
@@ -1624,7 +1670,6 @@ for (const cause of [
 test("a member's choice whose address another save gives to a typed row is dropped and named, and the typed row's stored role applies", async ({
     page,
 }) => {
-    await page.clock.install();
     await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -1658,7 +1703,6 @@ test("a member's choice whose address another save gives to a typed row is dropp
 test("a member beside a typed row of their address removed in the form has no role control, and their dropped choice does not come back", async ({
     page,
 }) => {
-    await page.clock.install();
     await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -1843,7 +1887,6 @@ test("a save whose outcome is unknown and whose following read carries no addres
 test("a draft is saved against the read it was started on, so a save over a later change elsewhere is refused until the read that follows the refusal", async ({
     page,
 }) => {
-    await page.clock.install();
     const { answerLater } = await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -1909,7 +1952,6 @@ test("a draft is saved against the read it was started on, so a save over a late
 test("an explicit Default kept over a newer stored choice is refused with the revision conflict", async ({
     page,
 }) => {
-    await page.clock.install();
     await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -1945,7 +1987,6 @@ test("an explicit Default kept over a newer stored choice is refused with the re
 test("a newer administrator read with another placement during a held save, then a failed read and Try again, ends on the stored placement", async ({
     page,
 }) => {
-    await page.clock.install();
     const { persons, answerLater, failNext } = await reminderApi(page, {
         recipients: [OUTSIDE],
         members: [
@@ -1992,7 +2033,6 @@ test("focus on Recent deliveries goes to the panel heading when a loss discards 
     page,
 }) => {
     let revoked = false;
-    await page.clock.install();
     await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -2092,7 +2132,6 @@ test("a visible review in which every recipient is hidden says that no address w
 test("the review, the outside mark, a dropped choice, a review without To or Copy and every outcome read in Turkish", async ({
     page,
 }) => {
-    await page.clock.install();
     const { account, persons, failNext } = await reminderApi(page, {
         recipients: [OUTSIDE],
         members: [ADMIN, MEMBER, THIRD],

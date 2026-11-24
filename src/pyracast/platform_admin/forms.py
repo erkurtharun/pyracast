@@ -22,7 +22,7 @@ from pyracast.connections.models import (
 )
 from pyracast.connections.setup import BindingSpec, ExistingAccount, NewAccount
 from pyracast.errors import DomainError, ErrorCode
-from pyracast.notifications.operations import MAX_RECIPIENT_LIMIT
+from pyracast.notifications.models import MAX_RECIPIENT_LIMIT
 from pyracast.plants.approval import ReviewSnapshot
 from pyracast.regions.models import Region, RegionStatus
 from pyracast.regions.operations import SITE_ID_REFUSED

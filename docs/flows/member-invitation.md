@@ -72,7 +72,7 @@ sequenceDiagram
 | Missing or wrong CSRF token (`POST`, `DELETE`) | 403 `csrf_failed` |
 | Foreign tenant, any method | 403 `membership_required` |
 | Viewer, any method | 403 `workspace_admin_required` |
-| Unknown JSON field such as `role`, invalid email | 400 `invalid_request` with "Unknown fields are not accepted." or a field error |
+| Unknown JSON field such as `role`, an address that is not plain (`InvitationInput.validate_email`, `accounts.addresses.plain_address`) | 400 `invalid_request` with "Unknown fields are not accepted." or the field error "Enter a valid email address."; nothing is created. `invite_workspace_member` refuses it too, on the stripped, lower-cased value it stores, so the console's invitation and workspace-creation forms show it as a form error |
 | Email already a member (case-insensitive, inactive users included) | 400 `invitation_member_exists` |
 | A budget is used up (see Rules) | 429 `invitation_rate_limited`, `Retry-After` equal to the wait of the largest violated budget |
 | Row lock not acquired within 5 s; same-session request still running after 5 s | 503 `busy` / 429 `session_busy`, both `Retry-After: 1` |
@@ -92,5 +92,6 @@ sequenceDiagram
 ## Tests
 
 - `tests/test_invitation_lifecycle.py` (state, cancel, supersede, send again), `tests/test_invitation_limits.py` (each budget, wait values), `tests/test_workspace_http_failures.py` (every failure above), `tests/test_outbound_mail.py` (answer before send, token only in the message, retries).
+- `tests/test_plain_addresses.py` (the API and the console refuse an address that is not plain and create nothing; the stored address is lower-cased).
 - `web/tests/workspace-roles.spec.ts` (invite, send again, cancel against a mocked API).
 - Gaps: no real-backend Playwright run; no Playwright test shows the recipient-limit warning (mocks return 0).

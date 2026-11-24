@@ -65,7 +65,7 @@ sequenceDiagram
 | --- | --- |
 | Missing CSRF token / already signed in / body not a JSON object | 403 `csrf_failed` / 409 / 400 `bad_request` |
 | Sixth signup attempt in an hour from one IP, or session lock held over 5 s | 429, or 429 `session_busy` with `retry_after` |
-| Bad email, or password under 15 characters, common, over 1024 or similar to the address | 400 `email` or `password` |
+| Address that is not plain (`CompanySignupInput.clean_email`, `accounts.addresses.plain_address`: "Enter a valid email address."), or password under 15 characters, common, over 1024 or similar to the address | 400 `email` or `password`, nothing created |
 | Workspace name blank, over 200, or holding control characters or web or email address text | 400 `company_name`, nothing committed; a name may repeat |
 | Invitation token unknown, expired, used or for another email | 400 non-field "The invitation is invalid or expired." |
 | Email already registered | 401 `verify_email`, identical to success; the mail is `account_already_exists` |
@@ -81,10 +81,11 @@ sequenceDiagram
 - `starting` opens the request's one transaction before the input is validated; user, address, tenant, membership and language commit together, the code intent is stored in it and the session holding the code is saved before the commit, so a failed save queues no mail. A failure after the user insert rolls everything back.
 - Every `POST auth/signup` not refused by a rate limit answers no sooner than `PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS` (1 s) after it reaches the middleware `SignupMinimumAnswerTime`. The wait runs after the commit; a 429 and other methods answer at once. An address with an account hashes the password like a new account.
 - Code verification logs the user in when the pending stage belongs to the same user; the pending code and the sign-in step rest on the new account's credential state (`accounts/processes.py`). The process lasts 10 minutes from signup and is not extended by a resend; 3 wrong attempts in total; 3 resends, each replacing the code.
+- An account holds only plain addresses (the form is stated in flow `reminder-configuration`): the check runs on the value the email field cleaned, which is the value stored; `AccountSignupForm` (`ACCOUNT_SIGNUP_FORM_CLASS`) takes no address of its own.
 - A race can leave two unverified accounts for one mailbox; the first to prove the mailbox by password reset owns it. An active signup that never signed in and proved no address is removed with its own empty workspace seven days after `date_joined` by the dispatcher's retention phase (`accounts.retention.reclaim_abandoned_signups`).
 
 ## Tests
 
 - `tests/test_company_registration.py`: end to end signup, verification and tenant access, duplicate email, rollback, attempt limit, minimum answer time.
-- `tests/test_session_serialization.py` (resend throttle and cap), `tests/test_stale_account_processes.py` (address verified meanwhile), `tests/test_account_retention.py` (abandoned signups).
+- `tests/test_plain_addresses.py` (an address that is not plain creates nothing), `tests/test_session_serialization.py` (resend throttle and cap), `tests/test_stale_account_processes.py` (address verified meanwhile), `tests/test_account_retention.py` (abandoned signups).
 - `web/tests/auth-registration.spec.ts` and `web/tests/workspace-roles.spec.ts` mock the API; no browser test reaches Django. Untested: the password endpoint's 5/h/ip limit through the real middleware and the `email_taken` answer.
