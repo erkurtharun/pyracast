@@ -1,6 +1,16 @@
 import type { Locator } from "@playwright/test";
 import { expect, test, type Page } from "./support/test";
-import { mockApi, paged, plant, region } from "./support/workspace";
+import { errorBody } from "./support/errors";
+import {
+    accountWith,
+    mockApi,
+    openReminders,
+    paged,
+    plant,
+    region,
+    reminderApi,
+    sessionIdentity,
+} from "./support/workspace";
 import {
     activeOutage,
     answers,
@@ -9,6 +19,7 @@ import {
     openPlant,
     reviewRequest,
     serveDirectProduction,
+    serveHalfHourCorrection,
     serveImport,
     serveOutageProposals,
     serveOutageWrites,
@@ -378,7 +389,7 @@ for (const language of ["en", "tr"] as const) {
     test(`a review decision lost before and after it was applied is told with the advice until the detail shows it decided (${language})`, async ({
         page,
     }) => {
-        const { decisions, detail, approve } = await reviewRequest(
+        const { decisions, applied, detail, approve } = await reviewRequest(
             page,
             answers("drop", "cut"),
             language,
@@ -396,6 +407,7 @@ for (const language of ["en", "tr"] as const) {
             { review_fingerprint: "context-1" },
             { review_fingerprint: "context-1" },
         ]);
+        expect(applied()).toBe(1);
     });
 
     test(`an outage report lost before and after it was applied is told with the advice and saved again with its key makes one outage (${language})`, async ({
@@ -497,7 +509,7 @@ for (const language of ["en", "tr"] as const) {
             const release = await holdReads(page, productionReads);
             await send.click();
             await expectUnconfirmed(draft, true, language);
-            server.status = status;
+            server.decide(status);
             await send.click();
             await expect(
                 page.getByText(receipt, { exact: true }),
@@ -530,7 +542,7 @@ for (const language of ["en", "tr"] as const) {
             });
             await send.click();
             await expectUnconfirmed(card, true, language);
-            server.status = status;
+            server.decide(status);
             await send.click();
             release();
             await expect(
@@ -942,12 +954,19 @@ test("a Refresh details started before a refused approval does not release the h
     const released = new Promise<void>((resolve) => {
         release = resolve;
     });
+    let took = () => {};
+    const taken = new Promise<void>((resolve) => {
+        took = resolve;
+    });
+    const earlier = "Verified meter reading, as read before the refusal";
     await page.route(/change-requests\/1\/$/, async (route) => {
-        const answered = { ...request };
+        const answered = { ...request, reason: earlier };
+        took();
         await released;
         return route.fulfill({ json: answered });
     });
     await refresh.click();
+    await taken;
     request.review_fingerprint = "context-2";
     await approve.click();
     await expect(detail).toContainText(
@@ -955,6 +974,7 @@ test("a Refresh details started before a refused approval does not release the h
     );
     await expect(approve).toBeDisabled();
     release();
+    await expect(detail).toContainText(earlier);
     await expect(detail).toContainText(
         "The current data changed. Refresh and review it again before approving.",
     );
@@ -965,7 +985,7 @@ test("a Refresh details started before a refused approval does not release the h
 const unreachable =
     "Could not reach the server. Check your connection and try again.";
 
-test("a CSV preview whose answer was lost says the preview failed and previewing again shows it", async ({
+test("a CSV preview whose answer was lost says the preview failed and Try again shows it", async ({
     page,
 }) => {
     await page.clock.setFixedTime(now);
@@ -978,10 +998,11 @@ test("a CSV preview whose answer was lost says the preview failed and previewing
     );
     await openPlant(page, "Production");
     const { importer, confirm } = await prepareImport(page);
-    await expect(importer.getByRole("alert")).toHaveText(unreachable);
+    const failure = importer.getByRole("alert");
+    await expect(failure).toContainText(unreachable);
     await expect(importer).not.toContainText(texts.en.title);
-    await page
-        .getByRole("button", { name: "Preview import", exact: true })
+    await failure
+        .getByRole("button", { name: "Try again", exact: true })
         .click();
     await expect(importer.getByRole("alert")).toHaveCount(0);
     await expect(confirm).toBeVisible();
@@ -1007,4 +1028,520 @@ test("an invitation preview whose answer was lost says it could not be read and 
     await expect(invitation).toContainText("Sunfield Energy");
     await expect(failure).toHaveCount(0);
     expect(previews).toBe(2);
+});
+
+async function proposeOutage(page: Page) {
+    await page
+        .getByRole("button", { name: "Submit outage", exact: true })
+        .click();
+    const form = page.getByRole("region", { name: "Report outage" });
+    await form.getByLabel("Incident title").fill("Grid fault");
+    const reason = form.getByLabel("Reason (optional)");
+    await reason.fill("Meter checked");
+    return {
+        form,
+        reason,
+        send: form.getByRole("button", {
+            name: "Send for approval",
+            exact: true,
+        }),
+    };
+}
+
+test("a member's lost outage proposal is told without the advice once a promotion and a demotion emptied its reason, and sent with that reason again stores one proposal", async ({
+    page,
+}) => {
+    await page.clock.install({ time: now });
+    const session = await signIn(page, { role: "viewer" });
+    let direct = false;
+    const server = await serveOutageProposals(
+        page,
+        answers("abort"),
+        () => direct,
+    );
+    await openPlant(page, "Outages");
+    const { form, reason, send } = await proposeOutage(page);
+    await send.click();
+    await expectUnconfirmed(form, true);
+    session.changeRole("admin");
+    direct = true;
+    await readAgainOnFocus(page);
+    await expect(
+        form.getByRole("button", { name: "Save outage", exact: true }),
+    ).toBeVisible();
+    session.changeRole("viewer");
+    direct = false;
+    await readAgainOnFocus(page);
+    await expect(send).toBeVisible();
+    await expect(reason).toHaveValue("");
+    await expectUnconfirmed(form, false);
+    await reason.fill("Meter checked");
+    await expectUnconfirmed(form, true);
+    await send.click();
+    await expect(page.getByText(labels.en.sent)).toBeVisible();
+    expect(server.requests).toHaveLength(2);
+    expect(server.requests[1]).toEqual(server.requests[0]);
+    expect(server.created()).toBe(1);
+});
+
+test("a lost outage proposal whose reason only gained outer spaces is sent again with its key and stores one proposal", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page, { role: "viewer" });
+    const server = await serveOutageProposals(page, answers("abort"));
+    await openPlant(page, "Outages");
+    const { form, reason, send } = await proposeOutage(page);
+    await send.click();
+    await expectUnconfirmed(form, true);
+    await reason.fill(" Meter checked  ");
+    await expectUnconfirmed(form, true);
+    await send.click();
+    await expect(page.getByText(labels.en.sent)).toBeVisible();
+    expect(server.requests).toHaveLength(2);
+    expect(server.requests[1]).toEqual(server.requests[0]);
+    expect(server.requests[0]?.reason).toBe("Meter checked");
+    expect(server.created()).toBe(1);
+});
+
+test("a lost outage proposal is told without the advice once the plant's configuration changed, and Send stores a new proposal under it", async ({
+    page,
+}) => {
+    await page.clock.install({ time: now });
+    await signIn(page, { role: "viewer" });
+    let configuration = plant.current_configuration;
+    await page.route("**/api/tenants/1/sites/", (route) =>
+        route.request().method() === "GET"
+            ? route.fulfill({
+                  json: paged([
+                      {
+                          ...region,
+                          plant: {
+                              ...plant,
+                              current_configuration: configuration,
+                          },
+                          reminder: null,
+                      },
+                  ]),
+              })
+            : route.fallback(),
+    );
+    const server = await serveOutageProposals(
+        page,
+        answers("abort"),
+        () => false,
+        () => configuration.id,
+    );
+    await openPlant(page, "Outages");
+    const { form, send } = await proposeOutage(page);
+    await send.click();
+    await expectUnconfirmed(form, true);
+    configuration = { ...configuration, id: 32, revision: 2 };
+    await readAgainOnFocus(page);
+    await expectUnconfirmed(form, false);
+    await send.click();
+    await expect(page.getByText(labels.en.sent)).toBeVisible();
+    const [first, second] = server.requests;
+    expect(second?.idempotency_key).not.toBe(first?.idempotency_key);
+    expect(server.stored().map((request) => request.configuration)).toEqual([
+        31, 32,
+    ]);
+});
+
+test("an outage edit lost after it was applied, another edit refused as stale and the first edit restored ends as saved without another revision", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    const server = await serveOutageWrites(page, answers("abort"), [
+        activeOutage,
+    ]);
+    await openPlant(page, "Outages");
+    const { form, save } = await editOutage(page);
+    await save.click();
+    await expectUnconfirmed(form, true);
+    const title = page.getByLabel("Incident title");
+    await title.fill("Inverter replaced");
+    await save.click();
+    await expect(
+        page.getByText("Someone changed this outage after you opened it."),
+    ).toBeVisible();
+    await title.fill("Inverter tripped");
+    await save.click();
+    await expect(save).toHaveCount(0);
+    expect(server.writes.map((write) => write.body.expected_revision)).toEqual([
+        1, 1, 1,
+    ]);
+    expect(server.applied()).toBe(1);
+    expect(server.outages()[0]).toMatchObject({
+        revision: 2,
+        title: "Inverter tripped",
+    });
+});
+
+test("unchecking the confirmation of a lost cancellation removes the advice without sending, and checking it brings the advice back", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    const server = await serveOutageWrites(page, answers("drop"), [
+        activeOutage,
+    ]);
+    await openPlant(page, "Outages");
+    const { card, save } = await cancelOutage(page);
+    await save.click();
+    await expectUnconfirmed(card, true);
+    const confirmation = card.getByRole("checkbox", {
+        name: labels.en.confirmCancel,
+    });
+    await confirmation.uncheck();
+    await expectUnconfirmed(card, false);
+    await confirmation.check();
+    await expectUnconfirmed(card, true);
+    expect(server.writes).toHaveLength(1);
+    await save.click();
+    await expect(save).toHaveCount(0);
+    expect(server.writes).toHaveLength(2);
+    expect(server.writes[1]).toEqual(server.writes[0]);
+    expect(server.applied()).toBe(1);
+});
+
+test("unchecking the capacity confirmation of a lost import removes the advice without sending, and the import confirmed again applies once", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    await serveProduction(page, [{ can_edit: true }]);
+    const server = await serveImport(page, answers("abort"), importHeads, [
+        {
+            code: "energy_exceeds_capacity",
+            starts_at: "2026-11-09T08:30:00+03:00",
+            ends_at: "2026-11-09T09:00:00+03:00",
+        },
+    ]);
+    await openPlant(page, "Production");
+    const { importer, confirm } = await prepareImport(page);
+    const confirmation = importer.getByRole("checkbox", {
+        name: "I checked these values and want to save them.",
+    });
+    await confirmation.check();
+    await confirm.click();
+    await expectUnconfirmed(importer, true);
+    await confirmation.uncheck();
+    await expectUnconfirmed(importer, false);
+    await confirmation.check();
+    await expectUnconfirmed(importer, true);
+    expect(server.requests).toHaveLength(1);
+    await confirm.click();
+    await expect(importer.getByText(labels.en.imported)).toBeVisible();
+    expect(server.requests).toHaveLength(2);
+    expect(server.requests[1]).toEqual(server.requests[0]);
+    expect(server.requests[0]).toMatchObject({ confirm_implausible: true });
+    expect(server.applied()).toBe(2);
+});
+
+test("a direct change lost after it took its interval out of the default view keeps the editor and its advice in view", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    const server = await serveDirectProduction(page, answers("cut"), [
+        { can_edit: true },
+        { can_edit: true },
+    ]);
+    await openPlant(page, "Production");
+    await page.getByRole("button", { name: /^Edit 08:00/ }).click();
+    const editor = page.locator(".production-row-editor");
+    const energy = editor.getByRole("textbox").first();
+    await energy.fill("0");
+    const save = editor.getByRole("button", { name: "Save", exact: true });
+    const reread = page.waitForResponse(
+        (response) =>
+            productionReads.test(response.url()) && server.requests.length > 0,
+    );
+    await save.click();
+    await reread;
+    await expectUnconfirmed(editor, true);
+    await expect(energy).toHaveValue("0");
+    await save.click();
+    await expect(editor).toHaveCount(0);
+    expect(server.requests).toHaveLength(2);
+    expect(server.requests[1]).toEqual(server.requests[0]);
+    expect(server.applied()).toBe(1);
+    expect(server.energy()).toBe(0);
+});
+
+test("a revert lost after it merged its half hour into an hourly gap keeps its unknown outcome and is sent again once", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    const server = await serveHalfHourCorrection(page, answers("abort"));
+    await openPlant(page, "Production");
+    await page.getByRole("button", { name: /^Edit 08:00/ }).click();
+    await page
+        .getByRole("button", { name: /^Remove correction for 08:00/ })
+        .click();
+    const orphan = page.locator(".production-row-editor");
+    await expect(orphan).toContainText(
+        "This interval changed and is no longer available.",
+    );
+    await expectUnconfirmed(orphan, true);
+    await orphan
+        .getByRole("button", { name: "Remove correction", exact: true })
+        .click();
+    await expect(orphan).toHaveCount(0);
+    await expect(
+        page.getByText(
+            "Correction removed. The available provider value is used.",
+        ),
+    ).toBeVisible();
+    expect(server.requests).toHaveLength(2);
+    expect(server.requests[1]).toEqual(server.requests[0]);
+    expect(server.applied()).toBe(1);
+});
+
+test("Reload current values after a lost direct change keeps its notice and sends it against the revision it was sent with", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    const server = await serveDirectProduction(page, answers("drop"));
+    await openPlant(page, "Production");
+    const { editor, save } = await editEight(page);
+    await save.click();
+    await expectUnconfirmed(editor, true);
+    server.changeByOperator(0.9);
+    const reread = page.waitForResponse((response) =>
+        productionReads.test(response.url()),
+    );
+    await editor
+        .getByRole("button", { name: "Reload current values", exact: true })
+        .click();
+    await reread;
+    await expectUnconfirmed(editor, true);
+    await save.click();
+    await expect(editor.getByRole("alert")).toContainText(
+        "Production changed. Reload the current values and review them.",
+    );
+    expect(server.requests).toHaveLength(2);
+    expect(server.requests[1]).toEqual(server.requests[0]);
+    expect(server.applied()).toBe(0);
+    expect(server.energy()).toBe(0.9);
+});
+
+test("a lost direct change whose repeat is throttled keeps Save enabled and applies once", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    const server = await serveDirectProduction(
+        page,
+        answers("abort", "throttled"),
+    );
+    await openPlant(page, "Production");
+    const { editor, save } = await editEight(page);
+    await save.click();
+    await expectUnconfirmed(editor, true);
+    await save.click();
+    await expect(editor.getByRole("alert")).toContainText("Too many requests.");
+    await expect(save).toBeEnabled();
+    await save.click();
+    await expect(editor).toHaveCount(0);
+    expect(server.requests).toHaveLength(3);
+    for (const request of server.requests)
+        expect(request).toEqual(server.requests[0]);
+    expect(server.applied()).toBe(1);
+});
+
+test("a direct change lost after it was applied is read again by a read started after it, not by one already running", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    const server = await serveDirectProduction(page, answers("abort"));
+    await openPlant(page, "Production");
+    const reading = page.locator(".production-value").first();
+    await expect(reading).toContainText("1");
+    let release = () => {};
+    const released = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let held = false;
+    let readsAfterWrite = 0;
+    await page.route(productionReads, async (route) => {
+        if (server.requests.length) {
+            readsAfterWrite++;
+            return route.fallback();
+        }
+        if (held) return route.fallback();
+        held = true;
+        const before = server.day(
+            new URL(route.request().url()).searchParams.get("start_date")!,
+        );
+        await released;
+        return route.fulfill({ json: before });
+    });
+    const refreshing = page.waitForRequest(productionReads);
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await refreshing;
+    const { editor, save } = await editEight(page);
+    await save.click();
+    await expectUnconfirmed(editor, true);
+    await expect(reading).toContainText("0.5");
+    expect(readsAfterWrite).toBeGreaterThan(0);
+    release();
+});
+
+test("a decision lost after it was applied is read again by a read started after it, not by a Refresh details already running", async ({
+    page,
+}) => {
+    const { request, applied, detail, approve, refresh } = await reviewRequest(
+        page,
+        answers("abort"),
+    );
+    let release = () => {};
+    const released = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let took = () => {};
+    const taken = new Promise<void>((resolve) => {
+        took = resolve;
+    });
+    let held = false;
+    let readsAfterDecision = 0;
+    await page.route(/change-requests\/1\/$/, async (route) => {
+        if (held) {
+            if (request.status !== "pending") readsAfterDecision++;
+            return route.fallback();
+        }
+        held = true;
+        const answered = { ...request };
+        took();
+        await released;
+        return route.fulfill({ json: answered });
+    });
+    await refresh.click();
+    await taken;
+    await approve.click();
+    await expect(approve).toHaveCount(0);
+    await expectUnconfirmed(detail, false);
+    expect(readsAfterDecision).toBeGreaterThan(0);
+    expect(applied()).toBe(1);
+    release();
+});
+
+test("Refresh details keeps the notice of a lost approval when the detail is unchanged and when its read fails", async ({
+    page,
+}) => {
+    const { applied, detail, approve, refresh } = await reviewRequest(
+        page,
+        answers("drop"),
+    );
+    await approve.click();
+    await expectUnconfirmed(detail, true);
+    const read = page.waitForResponse((response) =>
+        response.url().endsWith("/change-requests/1/"),
+    );
+    await refresh.click();
+    await read;
+    await expectUnconfirmed(detail, true);
+    await expect(approve).toBeEnabled();
+    await page.route(/change-requests\/1\/$/, (route) =>
+        route.fulfill({
+            status: 500,
+            json: errorBody("server_error", "The server failed."),
+        }),
+    );
+    await refresh.click();
+    await expect(detail).toContainText("The server failed.");
+    await expectUnconfirmed(detail, false);
+    expect(applied()).toBe(0);
+});
+
+test("a lost rejection is told once by its form, follows its reason, and is told by the detail once the request was decided", async ({
+    page,
+}) => {
+    const { request, applied, detail, refresh } = await reviewRequest(
+        page,
+        answers("drop"),
+    );
+    const reason = detail.getByLabel("Reason for rejection");
+    const reject = detail.getByRole("button", { name: "Reject", exact: true });
+    await reason.fill("The meter reading is wrong");
+    await reject.click();
+    await expectUnconfirmed(detail, true);
+    await reason.fill("The meter reading is wrong.");
+    await expectUnconfirmed(detail, false);
+    await reason.fill("The meter reading is wrong");
+    await expectUnconfirmed(detail, true);
+    Object.assign(request, { status: "approved", can_review: false });
+    await refresh.click();
+    await expect(reject).toHaveCount(0);
+    await expectUnconfirmed(detail, false);
+    expect(applied()).toBe(0);
+});
+
+for (const language of ["en", "tr"] as const)
+    test(`a plant whose creation answer was lost is told as not confirmed, also after the language changed (${language})`, async ({
+        page,
+    }) => {
+        const account = await mockApi(page, { empty: true });
+        await page.route("**/api/session/language/", (route) => {
+            const chosen = route.request().postDataJSON().language as string;
+            account.current = accountWith({ language_preference: chosen });
+            return route.fulfill({
+                json: { ...sessionIdentity(account.current), language: chosen },
+            });
+        });
+        await page.route("**/sites/", (route) =>
+            route.request().method() === "POST"
+                ? route.abort("failed")
+                : route.fallback(),
+        );
+        await page.goto("/app/");
+        await page.getByRole("button", { name: "Add a plant" }).click();
+        await page.getByLabel("Plant name", { exact: true }).fill("West plant");
+        await page.getByLabel("Latitude").fill("37");
+        await page.getByLabel("Longitude").fill("31");
+        await page
+            .getByRole("button", { name: "Continue", exact: true })
+            .click();
+        await page.getByLabel("DC nameplate capacity (MW)").fill("5");
+        await page
+            .getByRole("button", { name: "Continue", exact: true })
+            .click();
+        await page
+            .getByRole("button", { name: "Submit plant for approval" })
+            .click();
+        const main = page.locator("main");
+        await expectUnconfirmed(main, false);
+        if (language === "tr") {
+            await page
+                .getByLabel("Language", { exact: true })
+                .selectOption("tr");
+            await expect(page.locator("html")).toHaveAttribute("lang", "tr");
+            await expectUnconfirmed(main, false, "tr");
+        }
+    });
+
+test("a reminder preview whose answer was lost says the request failed, not that a change may have been saved", async ({
+    page,
+}) => {
+    await reminderApi(page, { enabled: true });
+    let previews = 0;
+    await page.route("**/reminders/preview/", (route) => {
+        previews++;
+        return route.abort("failed");
+    });
+    await openReminders(page);
+    await page
+        .getByLabel("Hide recipients from each other", { exact: true })
+        .uncheck();
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    const main = page.locator("main");
+    await expect(main.getByText(unreachable)).toBeVisible();
+    await expect(main).not.toContainText(texts.en.title);
+    await expect(main).not.toContainText(texts.en.general);
+    expect(previews).toBe(1);
 });

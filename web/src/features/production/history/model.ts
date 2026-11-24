@@ -5,9 +5,11 @@ import type { Quality } from "@/lib/production";
 export type History = components["schemas"]["ProductionHistoryOutput"];
 export type Interval = components["schemas"]["ProductionIntervalOutput"];
 
+// `payload` names the write apart from the revision it is sent against; `change` is the row it sends.
 export type Write = {
     payload: string;
     action: "set" | "revert";
+    change: components["schemas"]["ProductionChangeRow"];
     confirmImplausible: boolean;
 };
 
@@ -19,7 +21,8 @@ export type Draft = {
     attempt?: Write;
 };
 
-type EditorIssue = "invalid_energy" | { error: unknown; implausible: boolean };
+type WriteIssue = { error: unknown; implausible: boolean };
+type EditorIssue = "invalid_energy" | WriteIssue;
 
 // Why an editor can no longer act: its interval went away, holds the member's own request, or its day is not shown.
 type OrphanCause = "unavailable" | "held" | "day_left";
@@ -29,13 +32,15 @@ export type Editor =
     // An editor its reload returned to editing says so until it is changed.
     | ({ status: "editing"; reloaded?: true } & Draft)
     | ({ status: "saving"; write: Write } & Draft)
-    | ({ status: "reloading" } & Draft)
+    // A reload keeps the notice of a write whose answer was lost.
+    | ({ status: "reloading"; lost?: WriteIssue } & Draft)
     | ({ status: "failed"; issue: EditorIssue } & Draft)
     // A write still running when its interval became unavailable keeps the controls locked until it ends.
     | ({
           status: "orphaned";
           cause: OrphanCause;
           pendingWrite: boolean;
+          write?: Write;
           error?: unknown;
       } & Draft);
 

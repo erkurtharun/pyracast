@@ -172,6 +172,75 @@ test("a failed connection reports an unconfirmed change once", async () => {
     expect(calls).toHaveLength(1);
 });
 
+for (const [name, preview] of [
+    [
+        "reminder",
+        () =>
+            api.post(
+                "/api/tenants/{tenant_id}/regions/{region_id}/reminders/preview/",
+                {
+                    path: { tenant_id: 1, region_id: 11 },
+                    body: {
+                        enabled: true,
+                        include_workspace_members: true,
+                        language: "en",
+                        recipients: [],
+                        times: ["06:00"],
+                        expected_revision: 1,
+                    },
+                },
+            ),
+    ],
+    [
+        "CSV",
+        () =>
+            api.post(
+                "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/preview/",
+                {
+                    path: { tenant_id: 1, region_id: 11, plant_id: 21 },
+                    body: {
+                        configuration_id: 31,
+                        unit: "MWh",
+                        observations: [],
+                    },
+                },
+            ),
+    ],
+    [
+        "invitation",
+        () =>
+            api.post("/api/invitations/preview/", {
+                body: { token: "invite-secret" },
+            }),
+    ],
+] as const)
+    test(`a ${name} preview whose answer was lost failed as a read`, async () => {
+        const cut = () =>
+            new Response("{", {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            });
+        answer(
+            () => {
+                throw new TypeError("Failed to fetch");
+            },
+            cut,
+            () => new Response("Bad Gateway", { status: 502 }),
+        );
+        const failures = [];
+        for (let sent = 0; sent < 3; sent++)
+            failures.push(await preview().catch((failure: unknown) => failure));
+        for (const failure of failures) {
+            expect(failure).toBeInstanceOf(ApiError);
+            expect(failure).not.toBeInstanceOf(UnconfirmedError);
+        }
+        expect(failures.map((failure) => (failure as Error).message)).toEqual([
+            "Could not reach the server. Check your connection and try again.",
+            "The server returned an invalid response. Please try again.",
+            "Request failed (502). Please try again.",
+        ]);
+    });
+
 test("a change whose successful answer cannot be read is unconfirmed, a read with it is invalid", async () => {
     const cut = () =>
         new Response("{", {

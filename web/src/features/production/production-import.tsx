@@ -4,11 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import type { components } from "@/lib/schema";
-import {
-    displayMessage,
-    readFailure,
-    UnconfirmedError,
-} from "@/lib/api/errors";
+import { displayMessage, UnconfirmedError } from "@/lib/api/errors";
 import { useFormat } from "@/lib/format/use-format";
 import { useAttempt } from "@/lib/idempotency";
 import { parseProduction, type ProductionFile } from "@/lib/production";
@@ -73,6 +69,7 @@ export function ProductionImport({
     onChanged: () => void;
 }) {
     const t = useTranslations("ProductionImport");
+    const common = useTranslations("Common");
     const csvTexts = useTranslations("ProductionCsv");
     const format = useFormat();
     const errorMessage = useErrorMessage();
@@ -82,7 +79,8 @@ export function ProductionImport({
     const [result, setResult] = useState<ImportResult>();
     const [confirming, setConfirming] = useState(false);
     const [previewRequest, setPreviewRequest] = useState<
-        { status: "idle" | "pending" } | { status: "failed"; error: string }
+        | { status: "idle" | "pending" }
+        | { status: "failed"; error: string; retry: boolean }
     >({ status: "idle" });
     const previewError = useRef<HTMLDivElement>(null);
     useEffect(() => {
@@ -173,6 +171,7 @@ export function ProductionImport({
                                 error: t(
                                     "choose_and_validate_a_csv_before_importing",
                                 ),
+                                retry: false,
                             });
                             return;
                         }
@@ -202,7 +201,8 @@ export function ProductionImport({
                             if (current === sequence.current)
                                 setPreviewRequest({
                                     status: "failed",
-                                    error: errorMessage(readFailure(error)),
+                                    error: errorMessage(error),
+                                    retry: true,
                                 });
                         }
                     })()
@@ -219,6 +219,14 @@ export function ProductionImport({
                             ref={previewError}
                         >
                             {previewRequest.error}
+                            {previewRequest.retry && (
+                                <button
+                                    className="button secondary"
+                                    type="submit"
+                                >
+                                    {common("retry")}
+                                </button>
+                            )}
                         </div>
                     )}
                     <div className="form-grid">
@@ -321,22 +329,22 @@ export function ProductionImport({
                             submit={t("confirm_import", {
                                 count: selection.preview.changes.length,
                             })}
-                            repeatable={() =>
+                            repeatable={(data) =>
                                 attempt.repeats(
                                     importBody(
                                         selection,
                                         configuration,
-                                        implausible,
+                                        data.has("confirm_implausible"),
                                     ),
                                 )
                             }
-                            onSubmit={async () => {
+                            onSubmit={async (data) => {
                                 if (confirming) return;
                                 const current = ++sequence.current;
                                 const body = importBody(
                                     selection,
                                     configuration,
-                                    implausible,
+                                    data.has("confirm_implausible"),
                                 );
                                 const sending = attempt.next(body);
                                 setConfirming(true);

@@ -63,6 +63,7 @@ export type ScreenEvent =
           action: "set" | "revert";
           confirmImplausible?: boolean;
       }
+    | { type: "repeat" }
     | { type: "saved" }
     | { type: "saveFailed"; error: unknown; implausible: boolean }
     | { type: "reload" }
@@ -101,10 +102,10 @@ export function canAct(access: Access, row: Interval) {
 }
 
 // A write still running keeps its editor until the write ends.
-function runningWrite(editor: Editor) {
-    return editor.status === "saving" ||
-        (editor.status === "orphaned" && editor.pendingWrite)
-        ? editor
+function runningWrite(editor: Editor): Write | null {
+    if (editor.status === "saving") return editor.write;
+    return editor.status === "orphaned" && editor.pendingWrite
+        ? (editor.write ?? null)
         : null;
 }
 
@@ -140,26 +141,75 @@ function values(editor: Exclude<Editor, { status: "closed" }>): Draft {
     return withAttempt(editor, editor.attempt);
 }
 
-function writeOf(editor: Draft, action: "set" | "revert") {
+function contentOf(editor: Draft, action: "set" | "revert") {
     const energy = energyValue(editor.energy);
     if (action === "set" && energy === null) return null;
     return JSON.stringify(
-        action === "set"
-            ? [action, editor.expectedRevision, energy, editor.quality]
-            : [action, editor.expectedRevision],
+        action === "set" ? [action, energy, editor.quality] : [action],
     );
+}
+
+function writeFor(
+    row: Interval,
+    editor: Draft,
+    action: "set" | "revert",
+    payload: string,
+    confirmImplausible: boolean,
+): Write {
+    const energy = energyValue(editor.energy);
+    const bounds = {
+        starts_at: row.starts_at,
+        ends_at: row.ends_at,
+        expected_revision_id: editor.expectedRevision,
+        action,
+    };
+    return {
+        payload,
+        action,
+        confirmImplausible,
+        // An edit on this screen is the operator's value; a revert ignores quality and source.
+        change:
+            action === "set" && energy !== null
+                ? {
+                      ...bounds,
+                      energy,
+                      quality: editor.quality,
+                      source: "operator",
+                  }
+                : { ...bounds, quality: "valid", source: "operator" },
+    };
 }
 
 export function repeatsAttempt(editor: Draft) {
     const { attempt } = editor;
-    return !!attempt && writeOf(editor, attempt.action) === attempt.payload;
+    return !!attempt && contentOf(editor, attempt.action) === attempt.payload;
 }
 
-export function unconfirmed(editor: Editor) {
+function unconfirmed(editor: Editor) {
     return (
         editor.status === "failed" &&
         editor.issue !== "invalid_energy" &&
         editor.issue.error instanceof UnconfirmedError
+    );
+}
+
+// The failure of the write that is still outstanding, which a reload or an orphaned editor keeps.
+function outstandingIssue(editor: Editor) {
+    return editor.status === "failed" &&
+        editor.issue !== "invalid_energy" &&
+        editor.attempt
+        ? editor.issue
+        : undefined;
+}
+
+// An orphaned editor can send its outstanding write again while the viewer still writes directly.
+export function repeatsOrphan(screen: Screen) {
+    const { editor } = screen;
+    return (
+        screen.access === "direct" &&
+        editor.status === "orphaned" &&
+        !editor.pendingWrite &&
+        !!editor.attempt
     );
 }
 
@@ -188,8 +238,15 @@ function editingOn(editor: Editor, row: Interval) {
 // An editor whose day or access ends closes, unless its write still runs.
 function release(editor: Editor, cause: "day_left" | "unavailable"): Editor {
     if (editor.status === "closed") return editor;
-    return writing(editor)
-        ? { ...values(editor), status: "orphaned", cause, pendingWrite: true }
+    const write = runningWrite(editor);
+    return write
+        ? {
+              ...values(editor),
+              status: "orphaned",
+              cause,
+              pendingWrite: true,
+              write,
+          }
         : CLOSED;
 }
 
@@ -221,7 +278,8 @@ export function reconcileEditor(
     const row = history.intervals.find(
         (row) => intervalKey(row) === editor.key,
     );
-    if (!row || !canAct(access, row))
+    if (!row || !canAct(access, row)) {
+        const issue = outstandingIssue(editor);
         return {
             ...values(editor),
             status: "orphaned",
@@ -230,15 +288,15 @@ export function reconcileEditor(
                     ? "held"
                     : "unavailable",
             pendingWrite: editor.status === "saving",
+            ...(editor.status === "saving" && { write: editor.write }),
+            ...(issue && { error: issue.error }),
         };
-    return editor.status === "reloading"
-        ? {
-              ...values(editor),
-              status: "editing",
-              expectedRevision: row.revision_id,
-              reloaded: true,
-          }
-        : editor;
+    }
+    if (editor.status !== "reloading") return editor;
+    const current = { ...values(editor), expectedRevision: row.revision_id };
+    return editor.lost
+        ? { ...current, status: "failed", issue: editor.lost }
+        : { ...current, status: "editing", reloaded: true };
 }
 
 // Whether an access change dropped what the person had prepared: the draft, or an open editor with its values.
@@ -397,7 +455,7 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
         case "save": {
             const open = editingOn(editor, event.row);
             if (screen.access !== "direct" || !open) return screen;
-            const payload = writeOf(open, event.action);
+            const payload = contentOf(open, event.action);
             const repeat =
                 open.attempt?.payload === payload ? open.attempt : undefined;
             if (event.action === "revert" && !event.row.can_revert && !repeat)
@@ -411,28 +469,50 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
                         issue: "invalid_energy",
                     },
                 };
-            const write = repeat ?? {
-                payload,
-                action: event.action,
-                confirmImplausible: event.confirmImplausible ?? false,
-            };
+            const write =
+                repeat ??
+                writeFor(
+                    event.row,
+                    open,
+                    event.action,
+                    payload,
+                    event.confirmImplausible ?? false,
+                );
             return {
                 ...screen,
                 editor: { ...values(open), status: "saving", write },
             };
         }
+        case "repeat":
+            if (editor.status !== "orphaned" || !repeatsOrphan(screen))
+                return screen;
+            return {
+                ...screen,
+                editor: {
+                    ...editor,
+                    pendingWrite: true,
+                    write: editor.attempt,
+                },
+            };
         // A running write locks its editor, so its answer always belongs to the editor that runs it.
         case "saved":
             if (!runningWrite(editor)) return screen;
             return { ...screen, editor: CLOSED };
         case "saveFailed": {
             const write = runningWrite(editor);
-            if (!write) return screen;
-            if (write.status === "orphaned")
+            if (!write || editor.status === "closed") return screen;
+            const attempt = outstandingAfter(
+                editor.attempt ?? null,
+                write,
+                event.error,
+            );
+            if (editor.status === "orphaned")
                 return {
                     ...screen,
                     editor: {
-                        ...write,
+                        ...withAttempt(editor, attempt),
+                        status: "orphaned",
+                        cause: editor.cause,
                         pendingWrite: false,
                         error: event.error,
                     },
@@ -440,14 +520,7 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
             return {
                 ...screen,
                 editor: {
-                    ...withAttempt(
-                        write,
-                        outstandingAfter(
-                            write.attempt ?? null,
-                            write.write,
-                            event.error,
-                        ),
-                    ),
+                    ...withAttempt(editor, attempt),
                     status: "failed",
                     issue: {
                         error: event.error,
@@ -456,13 +529,19 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
                 },
             };
         }
-        case "reload":
+        case "reload": {
             if (editor.status !== "editing" && editor.status !== "failed")
                 return screen;
+            const lost = outstandingIssue(editor);
             return {
                 ...screen,
-                editor: { ...values(editor), status: "reloading" },
+                editor: {
+                    ...values(editor),
+                    status: "reloading",
+                    ...(lost && { lost }),
+                },
             };
+        }
         case "reloadFailed":
             if (editor.status !== "reloading" || editor.key !== event.key)
                 return screen;

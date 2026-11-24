@@ -426,7 +426,8 @@ function RequestDetail({
             onChanged(action);
         } catch (error) {
             attempt.settle(sending, error);
-            if (error instanceof UnconfirmedError) resource.retry();
+            if (error instanceof UnconfirmedError)
+                void resource.reload().catch(() => undefined);
             else if (
                 body &&
                 "review_fingerprint" in body &&
@@ -449,6 +450,7 @@ function RequestDetail({
         !item?.conflict &&
         !reviewBlocked &&
         !resource.error;
+    const rejectable = !!item?.can_review && item.status === "pending";
     return (
         <section
             id={`request-${id}`}
@@ -460,22 +462,32 @@ function RequestDetail({
             </h3>
             {resource.loading && <p role="status">{t("loading")}</p>}
             {resource.error && <Notice error>{resource.error}</Notice>}
-            {state.status === "error" && state.action !== "reject" && (
-                <WriteFailure
-                    error={state.error}
-                    repeatable={
-                        state.action === "approve" &&
-                        approvable &&
-                        attempt.repeats({ action: "approve", body: approval })
-                    }
-                />
-            )}
+            {state.status === "error" &&
+                (state.action !== "reject" || !rejectable) && (
+                    <WriteFailure
+                        error={state.error}
+                        repeatable={
+                            state.action === "approve" &&
+                            approvable &&
+                            attempt.repeats({
+                                action: "approve",
+                                body: approval,
+                            })
+                        }
+                    />
+                )}
             <button
                 className="button secondary"
                 disabled={pending}
                 onClick={() => {
                     const seen = refusedFingerprint;
-                    setState({ status: "idle" });
+                    // Only an answer to a decision ends the notice that its outcome is unknown.
+                    setState((current) =>
+                        current.status === "error" &&
+                        current.error instanceof UnconfirmedError
+                            ? current
+                            : { status: "idle" },
+                    );
                     void resource.reload().then(
                         () =>
                             setRefusedFingerprint((held) =>
@@ -529,7 +541,7 @@ function RequestDetail({
                             })}
                         </p>
                     )}
-                    {item.can_review && item.status === "pending" && (
+                    {rejectable && (
                         <div className="inbox-decisions">
                             <button
                                 className="button"

@@ -7,7 +7,7 @@ import { ControlField, WriteFailure } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import { useLabel } from "@/ui/vocabulary";
 import type { Draft, Editor, Interval } from "./model";
-import { repeatsAttempt, unconfirmed } from "./screen";
+import { repeatsAttempt } from "./screen";
 
 export type DraftChange = Partial<Pick<Draft, "energy" | "quality">>;
 
@@ -39,9 +39,9 @@ export function IntervalEditor({
     const label = useLabel();
     const energyRef = useRef<HTMLInputElement>(null);
     useEffect(() => energyRef.current?.focus(), []);
-    const lost = unconfirmed(editor);
+    // A failure ends the editor's writes until an edit or a reload, unless a write is still outstanding.
     const blocked =
-        saving || (canManage && editor.status === "failed" && !lost);
+        saving || (canManage && editor.status === "failed" && !editor.attempt);
     const format = useFormat();
     const provider = row.provider_originals.length
         ? row.provider_originals.reduce(

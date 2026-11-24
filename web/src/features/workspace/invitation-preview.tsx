@@ -2,7 +2,7 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api/client";
-import { ApiError, readFailure } from "@/lib/api/errors";
+import { ApiError } from "@/lib/api/errors";
 import { useFormat } from "@/lib/format/use-format";
 import type { components } from "@/lib/schema";
 import { useErrorMessage } from "@/ui/form";
@@ -46,7 +46,7 @@ export function useInvitationPreview(
                             ? { status: "unavailable" }
                             : {
                                   status: "failed",
-                                  error: readFailure(failure),
+                                  error: failure,
                                   retry: () => setAttempt((count) => count + 1),
                               },
                 });

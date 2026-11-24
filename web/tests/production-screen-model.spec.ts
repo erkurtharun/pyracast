@@ -1007,6 +1007,15 @@ test("rows of a day reconcile the editor by the viewer's access", () => {
                 write: {
                     payload: "",
                     action: "set",
+                    change: {
+                        starts_at: row(DAY, 8).starts_at,
+                        ends_at: row(DAY, 8).ends_at,
+                        expected_revision_id: null,
+                        action: "set",
+                        energy: 1,
+                        quality: "valid",
+                        source: "operator",
+                    },
                     confirmImplausible: false,
                 },
             },
@@ -1165,4 +1174,95 @@ test("a revert whose answer was lost can be sent again after the rows show it ap
         { type: "save", row: reverted[1]!, action: "revert" },
     );
     expect(fresh.screen.editor.status).toBe("editing");
+});
+
+const lostSet = (revision: number) => {
+    const rows = adminRows(DAY).map((row) => ({
+        ...row,
+        revision_id: revision,
+    }));
+    return apply(
+        { screen: initialScreen(DAY, "direct"), rows },
+        { type: "open", row: rows[1]! },
+        { type: "change", energy: "0,5" },
+        { type: "save", row: rows[1]!, action: "set" },
+        { type: "saveFailed", error: lostAnswer(), implausible: false },
+    );
+};
+
+test("a reload keeps a write whose answer was lost with its revision and its notice, and an edit is sent against the reloaded revision", () => {
+    const lost = lostSet(3);
+    const rows = adminRows(DAY).map((row) => ({ ...row, revision_id: 5 }));
+    const reloaded = apply(lost, { type: "reload" });
+    const read: Step = {
+        rows,
+        screen: reduceScreen(reloaded.screen, {
+            type: "rowsLoaded",
+            day: DAY,
+            history: history(rows),
+        }),
+    };
+    expect(read.screen.editor).toMatchObject({
+        status: "failed",
+        expectedRevision: 5,
+        issue: { error: expect.any(UnconfirmedError) },
+        attempt: { change: { expected_revision_id: 3, energy: 0.5 } },
+    });
+    const again = apply(read, { type: "save", row: rows[1]!, action: "set" });
+    expect(again.screen.editor).toMatchObject({
+        status: "saving",
+        write: { change: { expected_revision_id: 3, energy: 0.5 } },
+    });
+    const edited = apply(
+        read,
+        { type: "change", energy: "0,6" },
+        { type: "save", row: rows[1]!, action: "set" },
+    );
+    expect(edited.screen.editor).toMatchObject({
+        status: "saving",
+        write: { change: { expected_revision_id: 5, energy: 0.6 } },
+    });
+});
+
+test("a write whose answer was lost keeps its outcome and its request once its interval is gone, and is sent again as it was", () => {
+    const lost = lostSet(3);
+    const hourly = [row(DAY, 8, { can_edit: true, revision_id: null })];
+    const gone = reduceScreen(lost.screen, {
+        type: "rowsLoaded",
+        day: DAY,
+        history: history(hourly),
+    });
+    const attempt =
+        lost.screen.editor.status === "failed"
+            ? lost.screen.editor.attempt
+            : undefined;
+    expect(gone.editor).toMatchObject({
+        status: "orphaned",
+        cause: "unavailable",
+        pendingWrite: false,
+        error: expect.any(UnconfirmedError),
+        attempt,
+    });
+    const repeating = reduceScreen(gone, { type: "repeat" });
+    expect(repeating.editor).toMatchObject({
+        status: "orphaned",
+        pendingWrite: true,
+        write: attempt,
+    });
+    expect(reduceScreen(repeating, { type: "repeat" })).toBe(repeating);
+    const throttled = reduceScreen(repeating, {
+        type: "saveFailed",
+        error: new ApiError("Too many requests.", { status: 429 }),
+        implausible: false,
+    });
+    expect(throttled.editor).toMatchObject({
+        status: "orphaned",
+        pendingWrite: false,
+        attempt,
+    });
+    expect(reduceScreen(repeating, { type: "saved" }).editor).toEqual({
+        status: "closed",
+    });
+    const member = { ...gone, access: "propose" as const };
+    expect(reduceScreen(member, { type: "repeat" })).toBe(member);
 });

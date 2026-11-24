@@ -254,30 +254,37 @@ function replays(
     );
 }
 
-// The 08:00 interval of an administrator; a repeat of an applied change answers as its first application did.
-export async function serveDirectProduction(page: Page, next: () => Answering) {
+// The 08:00 interval of an administrator before `others`; a repeat of an applied change answers as its first application did.
+export async function serveDirectProduction(
+    page: Page,
+    next: () => Answering,
+    others: Row[] = [],
+) {
     const revisions: Revision[] = [];
     const requests: unknown[] = [];
     const head = () => revisions.at(-1);
-    await page.route("**/api/**/production/?*", (route) => {
-        const date = new URL(route.request().url()).searchParams.get(
-            "start_date",
-        )!;
+    const day = (date: string) => {
         const current = head();
-        return route.fulfill({
-            json: productionDay(date, [
-                {
-                    can_edit: true,
-                    can_revert: !!current && !current.reverted,
-                    revision_id: current?.id ?? null,
-                    effective:
-                        current && !current.reverted
-                            ? { ...reading, energy_mwh: current.energy }
-                            : reading,
-                },
-            ]),
-        });
-    });
+        return productionDay(date, [
+            {
+                can_edit: true,
+                can_revert: !!current && !current.reverted,
+                revision_id: current?.id ?? null,
+                effective:
+                    current && !current.reverted
+                        ? { ...reading, energy_mwh: current.energy }
+                        : reading,
+            },
+            ...others,
+        ]);
+    };
+    await page.route("**/api/**/production/?*", (route) =>
+        route.fulfill({
+            json: day(
+                new URL(route.request().url()).searchParams.get("start_date")!,
+            ),
+        }),
+    );
     await page.route("**/production/changes/", (route) => {
         const body = route.request().postDataJSON() as { changes: ChangeRow[] };
         requests.push(body);
@@ -309,6 +316,7 @@ export async function serveDirectProduction(page: Page, next: () => Answering) {
     });
     return {
         requests,
+        day,
         applied: () => revisions.filter((row) => row.by === "person").length,
         energy: () => head()?.energy,
         changeByOperator(energy: number) {
@@ -325,6 +333,87 @@ export async function serveDirectProduction(page: Page, next: () => Answering) {
     };
 }
 
+// A half-hour correction at 08:00 without a provider value: once removed, the day reads as one hourly gap.
+export async function serveHalfHourCorrection(
+    page: Page,
+    next: () => Answering,
+) {
+    const correction: Revision = {
+        id: 1,
+        supersedes: null,
+        energy: 0.4,
+        quality: "valid",
+        source: "operator",
+        reverted: false,
+        by: "operator",
+    };
+    const revisions: Revision[] = [correction];
+    const requests: unknown[] = [];
+    const head = () => revisions.at(-1)!;
+    await page.route("**/api/**/production/?*", (route) => {
+        const date = new URL(route.request().url()).searchParams.get(
+            "start_date",
+        )!;
+        const corrected = !head().reverted;
+        return route.fulfill({
+            json: nativeProductionHistory(date, "Europe/Istanbul", [
+                corrected
+                    ? {
+                          starts_at: `${date}T08:00:00+03:00`,
+                          ends_at: `${date}T08:30:00+03:00`,
+                          effective: { ...reading, energy_mwh: 0.4 },
+                          revision_id: head().id,
+                          can_revert: true,
+                      }
+                    : {
+                          starts_at: `${date}T08:00:00+03:00`,
+                          ends_at: `${date}T09:00:00+03:00`,
+                          revision_id: head().id,
+                      },
+                ...(corrected
+                    ? [
+                          {
+                              starts_at: `${date}T08:30:00+03:00`,
+                              ends_at: `${date}T09:00:00+03:00`,
+                          },
+                      ]
+                    : []),
+            ]),
+        });
+    });
+    await page.route("**/production/changes/", (route) => {
+        const body = route.request().postDataJSON() as { changes: ChangeRow[] };
+        requests.push(body);
+        const answering = next();
+        const early = refusedEarly(route, answering);
+        if (early) return early;
+        const [change] = body.changes;
+        if (change?.action !== "revert")
+            throw new Error("This interval only takes its revert.");
+        const current = head();
+        if (current.id === change.expected_revision_id && !current.reverted)
+            revisions.push({
+                ...current,
+                id: current.id + 1,
+                supersedes: current.id,
+                reverted: true,
+                by: "person",
+            });
+        else if (!replays(change, current, current.energy))
+            return route.fulfill({ status: 409, json: conflict() });
+        return fulfil(route, answering, {
+            created: 1,
+            existing: 0,
+            count: 1,
+            ids: [head().id],
+        });
+    });
+    return {
+        requests,
+        applied: () => revisions.filter((row) => row.by === "person").length,
+    };
+}
+
 type Observation = {
     starts_at: string;
     ends_at: string;
@@ -332,19 +421,33 @@ type Observation = {
     quality?: ChangeRow["quality"];
     source?: string;
 };
-type Head = { id: number; supersedes: number | null; energy: number };
+type Head = {
+    id: number;
+    supersedes: number | null;
+    energy: number;
+    quality: string;
+    source: string;
+};
+type Warning = Schemas["ProductionPreviewWarningOutput"];
 
 // Heads in the file's unit; a confirmed batch applies whole, is replayed whole or is refused whole.
 export async function serveImport(
     page: Page,
     next: () => Answering,
     heads: Record<string, number>,
+    warnings: Warning[] = [],
 ) {
     let ids = 0;
     const current = new Map<string, Head>(
         Object.entries(heads).map(([start, energy]) => [
             start,
-            { id: ++ids, supersedes: null, energy },
+            {
+                id: ++ids,
+                supersedes: null,
+                energy,
+                quality: "valid",
+                source: "meter",
+            },
         ]),
     );
     const requests: unknown[] = [];
@@ -355,7 +458,7 @@ export async function serveImport(
         };
         return route.fulfill({
             json: answer("ProductionPreviewOutput", {
-                warnings: [],
+                warnings,
                 changes: body.observations.map((row) => ({
                     ...row,
                     action: "set",
@@ -386,16 +489,19 @@ export async function serveImport(
         const rows = body.changes.map((change) => {
             const head = current.get(change.starts_at);
             const expected = (head?.id ?? null) === change.expected_revision_id;
-            const replayed =
-                !expected &&
-                head?.supersedes === change.expected_revision_id &&
-                head.energy === change.energy;
+            const same =
+                head?.energy === change.energy &&
+                head.quality === (change.quality ?? "valid") &&
+                head.source === (change.source ?? "operator");
             return {
                 change,
                 head,
                 expected,
-                replayed,
-                unchanged: expected && head?.energy === change.energy,
+                replayed:
+                    !expected &&
+                    head?.supersedes === change.expected_revision_id &&
+                    same,
+                unchanged: expected && same,
             };
         });
         if (
@@ -410,6 +516,8 @@ export async function serveImport(
                     id: ++ids,
                     supersedes: row.head?.id ?? null,
                     energy: row.change.energy,
+                    quality: row.change.quality ?? "valid",
+                    source: row.change.source ?? "operator",
                 });
                 applied++;
             }
@@ -427,20 +535,33 @@ export async function serveImport(
 type Status = Schemas["ChangeRequestStatusEnum"];
 type Payload = Record<string, unknown>;
 
+type Stored = {
+    id: number;
+    payload: Payload;
+    status: Status;
+    configuration: number;
+};
+
 // A repeat under a key answers with its first request as it now is; other content under the key is refused.
-function proposalStore() {
+function proposalStore(
+    kind: Schemas["ChangeRequestKindEnum"],
+    configuration: () => number,
+) {
     const requests: Payload[] = [];
-    const stored = new Map<string, { id: number; payload: Payload }>();
+    const stored = new Map<string, Stored>();
     const store = {
-        status: "pending" as Status,
         requests,
         created: () => stored.size,
+        stored: () => [...stored.values()],
+        // Someone decides every request stored so far.
+        decide(status: Status) {
+            for (const request of stored.values()) request.status = status;
+        },
         pendingFor: (match: (payload: Payload) => boolean) =>
-            store.status === "pending"
-                ? ([...stored.values()].find((request) =>
-                      match(request.payload),
-                  )?.id ?? null)
-                : null,
+            [...stored.values()].find(
+                (request) =>
+                    request.status === "pending" && match(request.payload),
+            )?.id ?? null,
         async answer(route: Route, next: () => Answering) {
             const body = route.request().postDataJSON() as Payload;
             requests.push(body);
@@ -465,12 +586,17 @@ function proposalStore() {
                         "Use a new request key for changed input.",
                     ),
                 });
-            const request = earlier ?? { id: stored.size + 1, payload };
+            const request = earlier ?? {
+                id: stored.size + 1,
+                payload,
+                status: "pending",
+                configuration: configuration(),
+            };
             stored.set(key, request);
             return fulfil(route, answering, {
                 id: request.id,
-                kind: "production",
-                status: store.status,
+                kind,
+                status: request.status,
             });
         },
     };
@@ -479,7 +605,7 @@ function proposalStore() {
 
 // The 08:00 interval of a member; it shows the member's pending request once one exists.
 export async function serveProposals(page: Page, next: () => Answering) {
-    const proposals = proposalStore();
+    const proposals = proposalStore("production", () => 31);
     await page.route("**/api/**/production/?*", (route) => {
         const date = new URL(route.request().url()).searchParams.get(
             "start_date",
@@ -626,8 +752,9 @@ export async function serveOutageProposals(
     page: Page,
     next: () => Answering,
     direct: () => boolean = () => false,
+    configuration: () => number = () => 31,
 ) {
-    const proposals = proposalStore();
+    const proposals = proposalStore("incident", configuration);
     const writes: { url: string; body: unknown }[] = [];
     await page.route("**/plants/21/outages/**", (route) => {
         const request = route.request();
@@ -720,6 +847,7 @@ export async function reviewRequest(
         decision_reason: "",
     };
     const decisions: unknown[] = [];
+    let applied = 0;
     await page.route("**/change-requests/?*", (route) =>
         route.fulfill({
             json: paged(request.status === "pending" ? [request] : []),
@@ -757,6 +885,7 @@ export async function reviewRequest(
                 can_review: false,
                 decision_reason: body.reason ?? "",
             });
+            applied++;
         } else if (request.status !== outcome)
             return route.fulfill({
                 status: 409,
@@ -776,6 +905,7 @@ export async function reviewRequest(
     return {
         request,
         decisions,
+        applied: () => applied,
         detail,
         approve: detail.getByRole("button", { name: labels.approve }),
         refresh: detail.getByRole("button", { name: labels.refresh }),

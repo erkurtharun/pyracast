@@ -5,7 +5,6 @@ import type { PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { UnconfirmedError } from "@/lib/api/errors";
 import { cadence, useApiQuery } from "@/lib/api/query";
-import type { components } from "@/lib/schema";
 import { productionExport } from "@/lib/exports";
 import { plantDay } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
@@ -19,12 +18,12 @@ import { ProductionDayNav } from "./history/day-nav";
 import { IntervalEditor } from "./history/interval-editor";
 import {
     daylightRows,
-    energyValue,
     intervalKey,
     mostFrequentReason,
     saveFailure,
     type History,
     type Interval,
+    type Write,
 } from "./history/model";
 import { ProposalDraft } from "./history/proposal-draft";
 import { ProductionTable } from "./history/production-table";
@@ -35,13 +34,13 @@ import {
     initialScreen,
     locked,
     reduceScreen,
+    repeatsOrphan,
     type Access,
     type ScreenEvent,
 } from "./history/screen";
 import { ProductionSourceDetails } from "./history/source-details";
 import { ProductionImport } from "./production-import";
 
-type ChangeRow = components["schemas"]["ProductionChangeRow"];
 type Bounds = Pick<Interval, "starts_at" | "ends_at">;
 
 export function ProductionHistory({
@@ -147,7 +146,18 @@ export function ProductionHistory({
     const rows = history?.intervals ?? [];
     const day = history?.days.find((day) => day.date === date);
     const daylight = daylightRows(rows, day?.daylight_windows ?? []);
-    const visibleRows = screen.fullDay || !daylight.length ? rows : daylight;
+    const editing =
+        editor.status !== "closed" && editor.status !== "orphaned"
+            ? editor.key
+            : undefined;
+    // The open editor's row stays in view while it exists, also once a read moved it out of daylight.
+    const visibleRows =
+        screen.fullDay || !daylight.length
+            ? rows
+            : rows.filter(
+                  (row) =>
+                      daylight.includes(row) || intervalKey(row) === editing,
+              );
     const hasValues = rows.some((row) => row.effective != null);
     const timeFormatter = format.intervals(
         history?.timezone ?? timezone,
@@ -167,6 +177,7 @@ export function ProductionHistory({
         draft && !derived.away ? draft.items.map((item) => item.key) : [],
     );
     const saving = locked(editor);
+    const orphanRepeats = repeatsOrphan(screen);
 
     // Applies an event decided on the shown state; null when the screen refuses it.
     function request(event: ScreenEvent) {
@@ -233,33 +244,29 @@ export function ProductionHistory({
             apply({ type: "reloadFailed", key, error });
         }
     }
-    async function save(
+    function save(
         row: Interval,
         action: "set" | "revert",
         confirmImplausible = false,
     ) {
-        if (!configuration) return;
         const sending = request({
             type: "save",
             row,
             action,
             confirmImplausible,
         })?.editor;
-        if (sending?.status !== "saving") return;
-        const { write } = sending;
-        const energy = energyValue(sending.energy);
+        if (sending?.status === "saving")
+            void deliver(sending.write, sending.key);
+    }
+    function repeatOrphan() {
+        const sending = request({ type: "repeat" })?.editor;
+        if (sending?.status === "orphaned" && sending.write)
+            void deliver(sending.write, sending.key);
+    }
+    async function deliver(write: Write, key: string) {
+        if (!configuration) return;
         setMessage("");
         try {
-            const change: ChangeRow = {
-                starts_at: row.starts_at,
-                ends_at: row.ends_at,
-                expected_revision_id: sending.expectedRevision,
-                action: write.action,
-                // An edit on this screen is the operator's value; a revert ignores quality and source.
-                ...(write.action === "set" && energy !== null
-                    ? { energy, quality: sending.quality, source: "operator" }
-                    : { quality: "valid", source: "operator" }),
-            };
             await api.post(
                 "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/changes/",
                 {
@@ -267,12 +274,12 @@ export function ProductionHistory({
                     body: {
                         configuration_id: configuration,
                         unit: "MWh",
-                        changes: [change],
+                        changes: [write.change],
                         confirm_implausible: write.confirmImplausible,
                     },
                 },
             );
-            pendingFocus.current = sending.key;
+            pendingFocus.current = key;
             apply({ type: "saved" });
             setMessage(write.action === "revert" ? t("reverted") : t("saved"));
             await reloadAfterSave();
@@ -282,7 +289,8 @@ export function ProductionHistory({
                 error,
                 implausible: saveFailure(error).implausible,
             });
-            if (error instanceof UnconfirmedError) reading.retry();
+            if (error instanceof UnconfirmedError)
+                void reading.reload().catch(() => undefined);
         }
     }
     const unavailable = (row: Interval | undefined) => {
@@ -356,6 +364,7 @@ export function ProductionHistory({
                         <WriteFailure
                             error={editor.error}
                             lead={orphanNotice(editor)}
+                            repeatable={orphanRepeats}
                         />
                     )}
                     <ControlField
@@ -365,15 +374,34 @@ export function ProductionHistory({
                     >
                         <input value={editor.energy} readOnly />
                     </ControlField>
-                    <button
-                        ref={orphanCancel}
-                        className="button secondary"
-                        type="button"
-                        disabled={saving}
-                        onClick={() => cancel(editor.key)}
-                    >
-                        {t("cancel")}
-                    </button>
+                    <div className="button-group">
+                        {editor.attempt &&
+                            (orphanRepeats ||
+                                (editor.pendingWrite &&
+                                    editor.error !== undefined)) && (
+                                <button
+                                    className="button"
+                                    type="button"
+                                    disabled={saving}
+                                    onClick={repeatOrphan}
+                                >
+                                    {saving
+                                        ? t("saving")
+                                        : editor.attempt.action === "revert"
+                                          ? t("remove_correction")
+                                          : t("save")}
+                                </button>
+                            )}
+                        <button
+                            ref={orphanCancel}
+                            className="button secondary"
+                            type="button"
+                            disabled={saving}
+                            onClick={() => cancel(editor.key)}
+                        >
+                            {t("cancel")}
+                        </button>
+                    </div>
                 </div>
             )}
             {reading.loading ? (
@@ -433,12 +461,7 @@ export function ProductionHistory({
                             canAct={(row) => canAct(access, row)}
                             hasConfiguration={Boolean(configuration)}
                             actionsDisabled={!derived.rowActions}
-                            editingKey={
-                                editor.status !== "closed" &&
-                                editor.status !== "orphaned"
-                                    ? editor.key
-                                    : undefined
-                            }
+                            editingKey={editing}
                             editButtons={editButtons}
                             unavailable={unavailable}
                             onOpen={(row) => request({ type: "open", row })}

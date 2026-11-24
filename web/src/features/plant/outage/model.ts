@@ -35,7 +35,8 @@ export type Hold = "held" | "pending_request_limit" | Ending;
 
 export type Ending = "cancelled" | "resolved" | "removed";
 
-type Attempt = { payload: string; key: string };
+// `payload` names the request apart from the revision it is sent against; `change` is what it sends.
+type Attempt = { payload: string; key: string; change: OutageChange };
 
 type Phase =
     | { status: "idle" }
@@ -72,7 +73,7 @@ export type OutageEvent =
     | { type: "open"; target: Target; live: Live }
     | { type: "close" }
     | { type: "discard" }
-    | { type: "send"; payload: string; key: string }
+    | { type: "send"; payload: string; key: string; change: OutageChange }
     // The answer and the reload that follows it have both finished.
     | { type: "sent"; receipt: Status | null }
     | SendFailed
@@ -205,10 +206,11 @@ export function reduceOutages(
             };
         case "send": {
             if (workflow?.phase.status !== "idle") return screen;
+            const { payload, key, change } = event;
             const sent =
-                workflow.attempt?.payload === event.payload
+                workflow.attempt?.payload === payload
                     ? workflow.attempt
-                    : { payload: event.payload, key: event.key };
+                    : { payload, key, change };
             return {
                 receipt: null,
                 workflow: { ...workflow, phase: { status: "sending", sent } },
@@ -284,18 +286,14 @@ export function reduceOutages(
     }
 }
 
-function proposalBody(change: OutageChange) {
-    const target =
-        change.action === "create"
-            ? {}
-            : {
-                  incident_id: change.outage.id,
-                  expected_revision: change.outage.revision,
-              };
+// The server strips the reason before it compares a proposal with an earlier one.
+function contentOf(change: OutageChange) {
     return {
         action: change.action,
-        reason: change.reason,
-        ...target,
+        reason: change.reason.trim(),
+        ...(change.action === "create"
+            ? {}
+            : { incident_id: change.outage.id }),
         ...(change.action === "create" || change.action === "update"
             ? { values: change.values }
             : {}),
@@ -303,8 +301,28 @@ function proposalBody(change: OutageChange) {
     };
 }
 
-export function attemptPayload(change: OutageChange, direct: boolean) {
-    return JSON.stringify(direct ? change : proposalBody(change));
+function proposalBody(change: OutageChange) {
+    return {
+        ...contentOf(change),
+        ...(change.action === "create"
+            ? {}
+            : { expected_revision: change.outage.revision }),
+    };
+}
+
+// The request the input asks for under the viewer's access and the plant's configuration, whatever revision it meets.
+export function attemptPayload(
+    change: OutageChange,
+    direct: boolean,
+    configuration: number | null,
+) {
+    const { reason, ...content } = contentOf(change);
+    return JSON.stringify({
+        direct,
+        configuration,
+        ...content,
+        ...(direct ? {} : { reason }),
+    });
 }
 
 const VALUE_FIELDS = [

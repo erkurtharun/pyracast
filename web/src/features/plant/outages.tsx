@@ -112,19 +112,22 @@ export function Outages({
             setReloads((count) => count - 1);
         }
     }
-    async function submit(change: OutageChange) {
+    const configured = configuration?.id ?? null;
+    async function submit(entered: OutageChange) {
         const next = reduceOutages(screen, {
             type: "send",
-            payload: attemptPayload(change, direct),
+            payload: attemptPayload(entered, direct, configured),
             key: crypto.randomUUID(),
+            change: entered,
         });
         const phase = next.workflow?.phase;
         if (next === screen || phase?.status !== "sending") return;
         setScreen(next);
+        const { change, key } = phase.sent;
         let proposal: Awaited<ReturnType<typeof submitOutageChange>>;
         try {
             proposal = await submitOutageChange(scope, change, {
-                key: phase.sent.key,
+                key,
                 direct,
             });
         } catch (error) {
@@ -160,7 +163,8 @@ export function Outages({
         }
     }
     const repeats = (change: OutageChange) =>
-        workflow?.attempt?.payload === attemptPayload(change, direct);
+        workflow?.attempt?.payload ===
+        attemptPayload(change, direct, configured);
     const ceilings = (outage?: Outage): Ceilings | undefined =>
         configuration &&
         (!outage ||

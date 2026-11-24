@@ -5,6 +5,7 @@ import {
     useContext,
     useEffect,
     useId,
+    useLayoutEffect,
     useRef,
     useState,
     type ChangeEventHandler,
@@ -48,19 +49,32 @@ export function useErrorMessage() {
 }
 
 // `repeatable` only while the next send is the identical request of a write the server applies once, and can be sent.
-function useWriteErrorMessage() {
-    const errorMessage = useErrorMessage();
+export function useWriteErrorMessage() {
+    const common = useTranslations("Common");
     const t = useTranslations("Errors");
-    return (error: unknown, repeatable = false) =>
+    return (
+        error: unknown,
+        {
+            repeatable = false,
+            fallback = common("unexpected"),
+        }: { repeatable?: boolean; fallback?: string } = {},
+    ) =>
         error instanceof UnconfirmedError
             ? t(repeatable ? "unconfirmedRepeatable" : "unconfirmed")
-            : errorMessage(error);
+            : displayMessage(error, fallback);
 }
 
 function useErrorTitle() {
     const t = useTranslations("Errors");
     return (error: unknown, title: string) =>
         error instanceof UnconfirmedError ? t("unconfirmedTitle") : title;
+}
+
+export function UnconfirmedTitle({ error }: { error: unknown }) {
+    const t = useTranslations("Errors");
+    return error instanceof UnconfirmedError ? (
+        <strong>{t("unconfirmedTitle")}</strong>
+    ) : null;
 }
 
 export function WriteFailure({
@@ -74,13 +88,10 @@ export function WriteFailure({
     lead?: string;
     children?: ReactNode;
 }) {
-    const t = useTranslations("Errors");
-    const message = useWriteErrorMessage()(error, repeatable);
+    const message = useWriteErrorMessage()(error, { repeatable });
     return (
         <Notice error>
-            {error instanceof UnconfirmedError && (
-                <strong>{t("unconfirmedTitle")}</strong>
-            )}
+            <UnconfirmedTitle error={error} />
             <p>
                 {lead && `${lead} `}
                 {message}
@@ -420,8 +431,8 @@ export function ActionForm({
     const canManage = useCanManageWorkspace();
     const canSubmit = permitted ?? canManage;
     const [state, setState] = useState<FormState>({ status: "idle" });
-    // What the form held at its last submission or change; disabled controls are missing from a form's data.
-    const [entered, setEntered] = useState<FormData | null>(null);
+    // Whether the form as it now stands, valid, would send what `repeatable` names.
+    const [sendsRepeat, setSendsRepeat] = useState(false);
     const busy = pending ?? state.status === "pending";
     const running = useRef(false);
     const errorRef = useRef<HTMLDivElement>(null);
@@ -429,21 +440,31 @@ export function ActionForm({
     useEffect(() => {
         if (state.status === "error") errorRef.current?.focus();
     }, [state]);
+    // Read after every commit, since a field mounted or removed by its owner fires no change.
+    const measure = () => {
+        const form = formRef.current;
+        setSendsRepeat(
+            !!form &&
+                !!repeatable &&
+                form.checkValidity() &&
+                repeatable(new FormData(form)),
+        );
+    };
+    useLayoutEffect(measure);
     const repeats =
         state.status === "error" &&
         state.error instanceof UnconfirmedError &&
         canSubmit &&
         !busy &&
-        !!entered &&
-        !!repeatable?.(entered);
+        sendsRepeat;
     return (
         <form
             ref={formRef}
             className={canSubmit ? undefined : "readonly-form"}
-            onChange={(event) => {
+            onChange={() => {
                 onEdit?.();
                 if (state.status === "success") setState({ status: "idle" });
-                if (repeatable) setEntered(new FormData(event.currentTarget));
+                measure();
             }}
             onSubmit={(event) =>
                 void (async () => {
@@ -451,7 +472,6 @@ export function ActionForm({
                     if (!canSubmit || busy || running.current) return;
                     running.current = true;
                     const data = new FormData(event.currentTarget);
-                    setEntered(data);
                     setState({ status: "pending" });
                     try {
                         await onSubmit(data);
@@ -478,7 +498,9 @@ export function ActionForm({
                         state.error,
                         errorTitle ?? t("saveFailed"),
                     )}
-                    message={writeErrorMessage(state.error, repeats)}
+                    message={writeErrorMessage(state.error, {
+                        repeatable: repeats,
+                    })}
                     entries={state.entries}
                     onSelect={(name) => {
                         const field = formRef.current?.elements.namedItem(name);
