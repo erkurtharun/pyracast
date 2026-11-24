@@ -343,12 +343,12 @@ async function removeSavedFigures() {
     const removed = withSavedStore((store) =>
         store.removeFigures(() => savedRemoval.acknowledge(removal)),
     );
-    let timer = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const limit = new Promise<false>((resolve) => {
-        timer = window.setTimeout(() => resolve(false), savedSignOutLimitMs);
+        timer = setTimeout(() => resolve(false), savedSignOutLimitMs);
     });
     const done = await Promise.race([removed, limit]);
-    window.clearTimeout(timer);
+    clearTimeout(timer);
     if (!done) writeStored(savedRemovalKey, removal);
 }
 

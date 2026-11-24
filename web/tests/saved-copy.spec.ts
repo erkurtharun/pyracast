@@ -264,9 +264,9 @@ test("a sign-out whose removal does not finish within two seconds sends its requ
     expect(new URL((await sent).url()).pathname).toBe(
         "/api/auth/browser/v1/auth/session",
     );
-    expect(await removalMark(page)).toMatch(removalPattern);
     await page.clock.resume();
     await expect(welcome(page)).toBeVisible();
+    expect(await removalMark(page)).toMatch(removalPattern);
     expect(deletes).toHaveLength(1);
     await release();
     await expect.poll(() => removalMark(page)).toBeNull();
