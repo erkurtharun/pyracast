@@ -139,6 +139,11 @@ export default defineConfig([
         rules: { "pyracast/brand-source": "error" },
     },
     {
+        files: ["tests/**/*.ts"],
+        plugins: { pyracast },
+        rules: { "pyracast/browser-clock": "error" },
+    },
+    {
         files: ["src/styles/tokens.{ts,css}"],
         rules: { "pyracast/design-tokens": "off" },
     },

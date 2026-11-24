@@ -354,7 +354,6 @@ test("a link into an on-demand section keeps the plant header, tabs and back but
 test("a refresh that brings an on-demand section replaces only the section slot", async ({
     page,
 }) => {
-    await page.clock.install();
     await mockPlant(page);
     let configured = false;
     await page.route("**/api/tenants/1/sites/", (route) =>

@@ -190,14 +190,19 @@ export function markedTenantRequests(page: Page) {
     );
 }
 
+// The installed clock replaces performance, whose entry lists are then empty; an observer still sees the navigation.
 export function navigationType(page: Page) {
     return page.evaluate(
         () =>
-            (
-                performance.getEntriesByType(
-                    "navigation",
-                )[0] as PerformanceNavigationTiming
-            ).type,
+            new Promise<string>((resolve) =>
+                new PerformanceObserver((entries, observer) => {
+                    observer.disconnect();
+                    resolve(
+                        (entries.getEntries()[0] as PerformanceNavigationTiming)
+                            .type,
+                    );
+                }).observe({ type: "navigation", buffered: true }),
+            ),
     );
 }
 

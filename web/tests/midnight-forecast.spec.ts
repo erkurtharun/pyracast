@@ -2,11 +2,16 @@ import { expect, test } from "./support/test";
 import { mockApi, region } from "./support/workspace";
 import type { Page } from "@playwright/test";
 
+// The page's own navigation to the date also requests a .../forecast/?date= address.
+function forecastRead(page: Page) {
+    return page.waitForResponse((response) =>
+        response.url().includes("/plants/21/forecast/?date=2026-11-14"),
+    );
+}
+
 // Advances exactly one poll period and waits for the answer of that single poll.
 async function pollOnce(page: Page) {
-    const polled = page.waitForResponse((response) =>
-        response.url().includes("/forecast/?date=2026-11-14"),
-    );
+    const polled = forecastRead(page);
     await page.clock.runFor(30_000);
     await polled;
 }
@@ -59,9 +64,7 @@ test("automatic forecast survives midnight until historical estimates arrive", a
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    const requested = page.waitForResponse((response) =>
-        response.url().includes("/forecast/?date=2026-11-14"),
-    );
+    const requested = forecastRead(page);
     await page.getByLabel("Forecast date").fill("2026-11-14");
     await requested;
     const generation = page.locator(".stat", { hasText: "Estimated energy" });

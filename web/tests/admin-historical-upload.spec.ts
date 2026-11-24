@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./support/test";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";

@@ -1,5 +1,5 @@
 import type { Request } from "@playwright/test";
-import { test, expect, type Page } from "./support/test";
+import { instant, test, expect, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
 import { parseProduction } from "../src/lib/production";
 import { csvTexts } from "./support/production-csv";
@@ -15,6 +15,12 @@ import {
     tenantRow,
 } from "./support/workspace";
 import { errorBody } from "./support/errors";
+
+function productionCsv(energy: number | string, source = "meter") {
+    const start = instant.getTime() - 86_400_000;
+    const stamp = (at: number) => new Date(at).toISOString();
+    return `starts_at,ends_at,energy_kwh,quality,source\n${stamp(start)},${stamp(start + 1_800_000)},${energy},valid,${source}`;
+}
 
 test("mock contract: signs in with CSRF, selects region, and signs out", async ({
     page,
@@ -183,9 +189,7 @@ test("plant configuration saves fixed angles and clears them when tracking", asy
     await page.getByLabel("Production CSV").setInputFiles({
         name: "production.csv",
         mimeType: "text/csv",
-        buffer: Buffer.from(
-            "starts_at,ends_at,energy_kwh,quality,source\n2026-01-01T09:00:00+03:00,2026-01-01T09:30:00+03:00,250,valid,meter\n",
-        ),
+        buffer: Buffer.from(productionCsv(250)),
     });
     await expect(page.getByText(/1 valid observations ready/)).toBeVisible();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -264,9 +268,7 @@ test("mock contract: imports validated production with explicit energy units", a
     await page.getByLabel("Production CSV").setInputFiles({
         name: "production.csv",
         mimeType: "text/csv",
-        buffer: Buffer.from(
-            "starts_at,ends_at,energy_kwh,quality,source\n2026-01-01T09:00:00+03:00,2026-01-01T09:30:00+03:00,250,valid,meter",
-        ),
+        buffer: Buffer.from(productionCsv(250)),
     });
     await expect(page.getByText(/1 valid observations ready/)).toBeVisible();
     await page.getByRole("button", { name: "Preview import" }).click();
@@ -293,9 +295,7 @@ test("CSV selection replaces validated rows and recovers after an invalid file",
         input.setInputFiles({
             name,
             mimeType: "text/csv",
-            buffer: Buffer.from(
-                `starts_at,ends_at,energy_kwh,quality,source\n2026-01-01T09:00:00+03:00,2026-01-01T09:30:00+03:00,${energy},valid,meter`,
-            ),
+            buffer: Buffer.from(productionCsv(energy)),
         });
     await select("first.csv", "250");
     await expect(
@@ -370,9 +370,7 @@ for (const staleRead of ["resolve", "reject"] as const) {
                 .click();
             await page.getByRole("button", { name: "Import CSV" }).click();
             const csv = (energy: number, source: string) =>
-                Buffer.from(
-                    `starts_at,ends_at,energy_kwh,quality,source\n2026-01-01T09:00:00+03:00,2026-01-01T09:30:00+03:00,${energy},valid,${source}`,
-                );
+                Buffer.from(productionCsv(energy, source));
             const input = page.getByLabel("Production CSV");
             await input.setInputFiles({
                 name: "old.csv",
@@ -431,7 +429,6 @@ for (const staleRead of ["resolve", "reject"] as const) {
 test("open regional and plant forecasts refresh after new data arrives", async ({
     page,
 }) => {
-    await page.clock.install();
     await mockApi(page);
     let reason = "forecast_unavailable";
     await page.route("**/api/**/forecast/**", async (route) => {
@@ -823,7 +820,6 @@ test("the outgoing production view's disclosures stay closed while the compariso
 test("region collection schedule validates and saves distinct local times", async ({
     page,
 }) => {
-    await page.clock.install();
     await mockApi(page);
     let saves = 0;
     let reads = 0;
@@ -2016,7 +2012,6 @@ test("recycle bin ignores a prior workspace response and restores only in the se
 test("a session that ends while the tab is open returns to sign in with a notice", async ({
     page,
 }) => {
-    await page.clock.install();
     const account = await mockApi(page);
     await page.route("**/api/tenants/", (route) =>
         account.current
@@ -2041,7 +2036,6 @@ test("a session that ends while the tab is open returns to sign in with a notice
 test("a failed portfolio refresh keeps the plant cards until access is denied", async ({
     page,
 }) => {
-    await page.clock.install();
     await mockApi(page);
     let outcome: "ok" | "busy" | "denied" = "ok";
     await page.route("**/api/tenants/1/sites/", (route) =>

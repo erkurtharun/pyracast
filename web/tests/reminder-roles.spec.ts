@@ -318,7 +318,6 @@ test("address data stays hidden after administration moves, through two language
 }) => {
     let role: "admin" | "viewer" = "admin";
     let answersViewer = false;
-    await page.clock.install();
     const { answerLater } = await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -385,7 +384,6 @@ test("losing administration while the review is open closes it, sends nothing an
     page,
 }) => {
     let role: "admin" | "viewer" = "admin";
-    await page.clock.install();
     await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -421,7 +419,6 @@ test("a save the server refuses because administration moved, after the review, 
     page,
 }) => {
     let transferred = false;
-    await page.clock.install();
     const { answerLater } = await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -529,7 +526,6 @@ test("an administrator answer read before administration moved never returns aft
     page,
 }) => {
     let role: "admin" | "viewer" = "admin";
-    await page.clock.install();
     const { answerLater, failNext } = await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -769,7 +765,6 @@ for (const touched of [false, true]) {
     test(`a visible save from another tab shows its Copy in the saved view and nothing says everyone is hidden${touched ? ", with an edited time kept" : ""}`, async ({
         page,
     }) => {
-        await page.clock.install();
         await reminderApi(page, {
             recipients: [OUTSIDE],
             members: TEAM,
@@ -806,7 +801,6 @@ for (const touched of [false, true]) {
 test("a newer read stays in the saved view through a language switch whose read is held and fails, and the draft stays", async ({
     page,
 }) => {
-    await page.clock.install();
     const { answerLater, failNext } = await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -1096,7 +1090,6 @@ test("a new typed address offers its role only once it is saved", async ({
 test("a choice for a member who leaves is removed with a line naming the choice and the address, and the rest of the draft stays", async ({
     page,
 }) => {
-    await page.clock.install();
     const { persons } = await reminderApi(page, {
         recipients: [],
         members: [ADMIN, MEMBER, THIRD],
@@ -1123,7 +1116,6 @@ test("a choice for a member who leaves is removed with a line naming the choice 
 test("a choice on a typed address whose row went elsewhere is dropped and named, never moved to the member who now holds the address", async ({
     page,
 }) => {
-    await page.clock.install();
     const { persons } = await reminderApi(page, {
         recipients: [OUTSIDE],
         members: [
@@ -1187,7 +1179,6 @@ test("an active member keeps their own role control beside a typed row of their 
     page,
 }) => {
     const SHARED = "shared@example.test";
-    await page.clock.install();
     const { persons } = await reminderApi(page, {
         recipients: [SHARED],
         members: [
@@ -1261,7 +1252,6 @@ for (const cause of ["a departure hides everyone", "the address becomes typed"])
     test(`when ${cause}, focus on a removed member control moves to the panel heading`, async ({
         page,
     }) => {
-        await page.clock.install();
         const { depart } = await reminderApi(page, {
             recipients: [],
             members: [ADMIN, MEMBER, THIRD],
@@ -1290,7 +1280,6 @@ for (const reviewing of [false, true])
         page,
     }) => {
         let revoked = false;
-        await page.clock.install();
         const { answerLater } = await reminderApi(page, {
             recipients: [OUTSIDE],
             members: TEAM,
@@ -1342,7 +1331,6 @@ async function reviewThenDrop(
     page: Page,
     viewer?: (method: string) => boolean,
 ) {
-    await page.clock.install();
     const api = await reminderApi(page, {
         recipients: [],
         members: [ADMIN, MEMBER, THIRD],
@@ -1484,7 +1472,6 @@ test("an administrator answer cached before administration moved is discarded wh
 }) => {
     let role: "admin" | "viewer" = "admin";
     let unavailable = false;
-    await page.clock.install();
     const { answerLater } = await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -1537,7 +1524,6 @@ for (const cached of [true, false])
     }) => {
         let role: "admin" | "viewer" = cached ? "admin" : "viewer";
         const addresses = [OUTSIDE, THIRD, MEMBER, JOINER];
-        await page.clock.install();
         const { persons } = await reminderApi(page, {
             recipients: [OUTSIDE],
             members: [
@@ -1637,7 +1623,6 @@ for (const cause of [
     }) => {
         let role: "admin" | "viewer" = "admin";
         let counting = false;
-        await page.clock.install();
         const { persons, failNext } = await reminderApi(page, {
             recipients: [],
             members: [ADMIN, MEMBER, THIRD],
@@ -1685,7 +1670,6 @@ for (const cause of [
 test("a member's choice whose address another save gives to a typed row is dropped and named, and the typed row's stored role applies", async ({
     page,
 }) => {
-    await page.clock.install();
     await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -1719,7 +1703,6 @@ test("a member's choice whose address another save gives to a typed row is dropp
 test("a member beside a typed row of their address removed in the form has no role control, and their dropped choice does not come back", async ({
     page,
 }) => {
-    await page.clock.install();
     await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -1904,7 +1887,6 @@ test("a save whose outcome is unknown and whose following read carries no addres
 test("a draft is saved against the read it was started on, so a save over a later change elsewhere is refused until the read that follows the refusal", async ({
     page,
 }) => {
-    await page.clock.install();
     const { answerLater } = await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -1970,7 +1952,6 @@ test("a draft is saved against the read it was started on, so a save over a late
 test("an explicit Default kept over a newer stored choice is refused with the revision conflict", async ({
     page,
 }) => {
-    await page.clock.install();
     await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -2006,7 +1987,6 @@ test("an explicit Default kept over a newer stored choice is refused with the re
 test("a newer administrator read with another placement during a held save, then a failed read and Try again, ends on the stored placement", async ({
     page,
 }) => {
-    await page.clock.install();
     const { persons, answerLater, failNext } = await reminderApi(page, {
         recipients: [OUTSIDE],
         members: [
@@ -2053,7 +2033,6 @@ test("focus on Recent deliveries goes to the panel heading when a loss discards 
     page,
 }) => {
     let revoked = false;
-    await page.clock.install();
     await reminderApi(page, {
         recipients: [OUTSIDE],
         members: TEAM,
@@ -2153,7 +2132,6 @@ test("a visible review in which every recipient is hidden says that no address w
 test("the review, the outside mark, a dropped choice, a review without To or Copy and every outcome read in Turkish", async ({
     page,
 }) => {
-    await page.clock.install();
     const { account, persons, failNext } = await reminderApi(page, {
         recipients: [OUTSIDE],
         members: [ADMIN, MEMBER, THIRD],

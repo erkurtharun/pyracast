@@ -1,3 +1,5 @@
+import { browserClock } from "./browser-clock.mjs";
+
 // Colours and spacing come only from src/styles/tokens.{css,ts}; the config switches this rule off there.
 const HEX = /(?:^|[\s(,:])#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})(?![\w-])/i;
 const COLOUR_FUNCTION =
@@ -130,5 +132,9 @@ const brandSource = {
 
 export default {
     meta: { name: "pyracast" },
-    rules: { "design-tokens": designTokens, "brand-source": brandSource },
+    rules: {
+        "design-tokens": designTokens,
+        "brand-source": brandSource,
+        "browser-clock": browserClock,
+    },
 };

@@ -191,7 +191,6 @@ test("a server time-zone refusal reopens the location step with focus on the zon
 test("an open wizard keeps its input while a site refresh fails", async ({
     page,
 }) => {
-    await page.clock.install();
     await mockApi(page, { empty: true });
     let fail = false;
     await page.route("**/api/tenants/1/sites/", (route) =>
