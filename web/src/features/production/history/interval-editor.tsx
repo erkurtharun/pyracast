@@ -3,10 +3,11 @@ import { useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useFormat } from "@/lib/format/use-format";
 import { QUALITIES, qualityOf } from "@/lib/production";
-import { ControlField } from "@/ui/form";
+import { ControlField, WriteFailure } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import { useLabel } from "@/ui/vocabulary";
 import type { Draft, Editor, Interval } from "./model";
+import { repeatsAttempt, unconfirmed } from "./screen";
 
 export type DraftChange = Partial<Pick<Draft, "energy" | "quality">>;
 
@@ -38,7 +39,9 @@ export function IntervalEditor({
     const label = useLabel();
     const energyRef = useRef<HTMLInputElement>(null);
     useEffect(() => energyRef.current?.focus(), []);
-    const blocked = saving || (canManage && editor.status === "failed");
+    const lost = unconfirmed(editor);
+    const blocked =
+        saving || (canManage && editor.status === "failed" && !lost);
     const format = useFormat();
     const provider = row.provider_originals.length
         ? row.provider_originals.reduce(
@@ -99,7 +102,9 @@ export function IntervalEditor({
                     {t("cancel")}
                 </button>
             </div>
-            {(canManage ? row.can_revert : row.can_propose_revert) && (
+            {(canManage
+                ? row.can_revert || editor.attempt?.action === "revert"
+                : row.can_propose_revert) && (
                 <button
                     className="button secondary"
                     type="button"
@@ -124,11 +129,16 @@ export function IntervalEditor({
             )}
             {editor.status === "failed" && (
                 <>
-                    <Notice error>
-                        {editor.issue === "invalid_energy"
-                            ? t("invalid_energy")
-                            : editor.issue.message}
-                    </Notice>
+                    {editor.issue === "invalid_energy" ? (
+                        <Notice error>{t("invalid_energy")}</Notice>
+                    ) : (
+                        <WriteFailure
+                            error={editor.issue.error}
+                            repeatable={
+                                canManage && !saving && repeatsAttempt(editor)
+                            }
+                        />
+                    )}
                     {editor.issue !== "invalid_energy" &&
                         editor.issue.implausible && (
                             <button

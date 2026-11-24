@@ -1,16 +1,31 @@
-import { useRef } from "react";
+import { useState } from "react";
+import { ApiError, UnconfirmedError } from "./api/errors";
 
-export function useProposalKey() {
-    const attempt = useRef<{ payload: string; key: string } | null>(null);
+export type Attempt = { payload: string; key: string };
+
+export function outstandingAfter<A extends { payload: string }>(
+    outstanding: A | null,
+    sent: A,
+    error?: unknown,
+): A | null {
+    if (error instanceof UnconfirmedError) return sent;
+    if (error instanceof ApiError && error.status === 429) return outstanding;
+    return outstanding?.payload === sent.payload ? null : outstanding;
+}
+
+export function useAttempt() {
+    const [outstanding, setOutstanding] = useState<Attempt | null>(null);
     return {
-        forPayload(payload: unknown) {
+        repeats: (payload: unknown) =>
+            outstanding?.payload === JSON.stringify(payload),
+        next(payload: unknown): Attempt {
             const value = JSON.stringify(payload);
-            if (attempt.current?.payload !== value)
-                attempt.current = { payload: value, key: crypto.randomUUID() };
-            return attempt.current.key;
+            return outstanding?.payload === value
+                ? outstanding
+                : { payload: value, key: crypto.randomUUID() };
         },
-        reset() {
-            attempt.current = null;
+        settle(sent: Attempt, error?: unknown) {
+            setOutstanding((current) => outstandingAfter(current, sent, error));
         },
     };
 }

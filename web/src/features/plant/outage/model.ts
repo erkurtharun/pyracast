@@ -1,6 +1,7 @@
 import type { PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/errors";
+import { outstandingAfter } from "@/lib/idempotency";
 import type { components } from "@/lib/schema";
 
 export type Outage = components["schemas"]["IncidentOutput"];
@@ -34,9 +35,11 @@ export type Hold = "held" | "pending_request_limit" | Ending;
 
 export type Ending = "cancelled" | "resolved" | "removed";
 
+type Attempt = { payload: string; key: string };
+
 type Phase =
     | { status: "idle" }
-    | { status: "sending" }
+    | { status: "sending"; sent: Attempt }
     | { status: "saved" }
     | { status: "held"; hold: Hold };
 
@@ -47,17 +50,22 @@ type Target =
 // `outage` is the version the workflow sends against; `form` counts restarts of its form after a discarded stale change.
 export type Workflow = Target & {
     phase: Phase;
-    attempt: { payload: string; key: string; unanswered: boolean } | null;
+    attempt: Attempt | null;
     stale: Stale | null;
     form: number;
 };
 
-// The one state of the outage screen: at most one open workflow, and whether a proposal was just sent.
-export type OutageScreen = { workflow: Workflow | null; submitted: boolean };
+type Status = components["schemas"]["ChangeRequestStatusEnum"];
+
+// The one state of the outage screen: at most one open workflow, and the status a proposal was just answered with.
+export type OutageScreen = {
+    workflow: Workflow | null;
+    receipt: Status | null;
+};
 
 export const INITIAL_OUTAGES: OutageScreen = {
     workflow: null,
-    submitted: false,
+    receipt: null,
 };
 
 export type OutageEvent =
@@ -66,7 +74,7 @@ export type OutageEvent =
     | { type: "discard" }
     | { type: "send"; payload: string; key: string }
     // The answer and the reload that follows it have both finished.
-    | { type: "sent"; proposed: boolean }
+    | { type: "sent"; receipt: Status | null }
     | SendFailed
     | { type: "rowsLoaded"; live: Live };
 
@@ -74,7 +82,7 @@ type SendFailed = {
     type: "sendFailed";
     change: OutageChange;
     current: OutageRow | null;
-    answered: boolean;
+    error: unknown;
     direct: boolean;
 };
 
@@ -173,7 +181,7 @@ export function reduceOutages(
             if (!derived.acts || !allowed || isOpen(workflow, target))
                 return screen;
             return {
-                submitted: false,
+                receipt: null,
                 workflow: {
                     ...target,
                     phase: { status: "idle" },
@@ -197,38 +205,35 @@ export function reduceOutages(
             };
         case "send": {
             if (workflow?.phase.status !== "idle") return screen;
-            const attempt =
+            const sent =
                 workflow.attempt?.payload === event.payload
                     ? workflow.attempt
-                    : {
-                          payload: event.payload,
-                          key: event.key,
-                          unanswered: false,
-                      };
+                    : { payload: event.payload, key: event.key };
             return {
-                submitted: false,
-                workflow: {
-                    ...workflow,
-                    phase: { status: "sending" },
-                    attempt,
-                },
+                receipt: null,
+                workflow: { ...workflow, phase: { status: "sending", sent } },
             };
         }
         case "sent":
             if (!sending(workflow)) return screen;
-            return { workflow: null, submitted: event.proposed };
+            return { workflow: null, receipt: event.receipt };
         case "sendFailed": {
             if (workflow?.phase.status !== "sending") return screen;
-            if (lostAnswerApplied(workflow, event))
+            const { sent } = workflow.phase;
+            if (
+                workflow.attempt?.payload === sent.payload &&
+                lostAnswerApplied(event)
+            )
                 return {
                     ...screen,
                     workflow: { ...workflow, phase: { status: "saved" } },
                 };
             const { current } = event;
-            const attempt = workflow.attempt && {
-                ...workflow.attempt,
-                unanswered: !event.answered,
-            };
+            const attempt = outstandingAfter(
+                workflow.attempt,
+                sent,
+                event.error,
+            );
             // Only a conflict about the outage the workflow sends against moves it to that outage's current version.
             if (
                 workflow.kind === "create" ||
@@ -318,13 +323,9 @@ const comparable = (field: string, value: unknown) =>
         ? Date.parse(value)
         : value;
 
-function lostAnswerApplied(
-    workflow: Workflow,
-    { change, current, direct }: SendFailed,
-): boolean {
+function lostAnswerApplied({ change, current, direct }: SendFailed): boolean {
     if (
         !direct ||
-        !workflow.attempt?.unanswered ||
         change.action !== "update" ||
         current?.id !== change.outage.id
     )
@@ -348,22 +349,20 @@ export async function submitOutageChange(
     change: OutageChange,
     { key, direct }: { key: string; direct: boolean },
 ) {
-    if (!direct) {
-        await api.post(
+    if (!direct)
+        return api.post(
             "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/change-requests/incidents/",
             {
                 path: scope,
                 body: { ...proposalBody(change), idempotency_key: key },
             },
         );
-        return;
-    }
     if (change.action === "create") {
         await api.post(
             "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/",
             { path: scope, body: { ...change.values, idempotency_key: key } },
         );
-        return;
+        return null;
     }
     const path = { ...scope, incident_id: change.outage.id };
     const expected_revision = change.outage.revision;
@@ -391,6 +390,7 @@ export async function submitOutageChange(
                 body: { expected_revision },
             },
         );
+    return null;
 }
 
 function isOutage(value: unknown): value is OutageRow {

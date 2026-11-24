@@ -171,7 +171,7 @@ test("the correction reason is named by its label and described by the approval 
     );
 });
 
-test("member submits a native production correction with a stable retry key and no live write", async ({
+test("member submits a native production correction, sent again after a refusal under its own key, and no live write", async ({
     page,
 }, testInfo) => {
     await member(page);
@@ -262,9 +262,13 @@ test("member submits a native production correction with a stable retry key and 
     expect(submissions).toHaveLength(2);
     expect(submissions[0]?.idempotency_key).toEqual(expect.any(String));
     expect(submissions[1]?.idempotency_key).toEqual(expect.any(String));
-    expect(submissions[0]?.idempotency_key).toBe(
+    expect(submissions[0]?.idempotency_key).not.toBe(
         submissions[1]?.idempotency_key,
     );
+    expect({ ...submissions[1], idempotency_key: null }).toEqual({
+        ...submissions[0],
+        idempotency_key: null,
+    });
     expect(submissions[1]).toMatchObject({
         reason: "Checked meter",
         unit: "MWh",

@@ -3,6 +3,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import type { PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
+import { UnconfirmedError } from "@/lib/api/errors";
 import { cadence, useApiQuery } from "@/lib/api/query";
 import type { components } from "@/lib/schema";
 import { productionExport } from "@/lib/exports";
@@ -10,9 +11,9 @@ import { plantDay } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
 import { CsvDownload } from "@/ui/csv-download";
 import { useExportPlant } from "@/ui/export-plant";
-import { CheckboxField, ControlField, useErrorMessage } from "@/ui/form";
+import { CheckboxField, ControlField, WriteFailure } from "@/ui/form";
 import { Notice, ReadFailed } from "@/ui/ui";
-import { useCodeLabel } from "@/ui/vocabulary";
+import { useCodeLabel, useReceipt } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import { ProductionDayNav } from "./history/day-nav";
 import { IntervalEditor } from "./history/interval-editor";
@@ -62,7 +63,7 @@ export function ProductionHistory({
 }) {
     const t = useTranslations("ProductionHistory");
     const format = useFormat();
-    const errorMessage = useErrorMessage();
+    const receipt = useReceipt();
     const reason = useCodeLabel("ProductionHistory.reasons");
     const canManage = useCanManageWorkspace();
     const proposals = useTranslations("ChangeRequests");
@@ -229,7 +230,7 @@ export function ProductionHistory({
             const updated = await reading.reload();
             apply({ type: "rowsLoaded", day: date, history: updated });
         } catch (error) {
-            apply({ type: "reloadFailed", key, message: errorMessage(error) });
+            apply({ type: "reloadFailed", key, error });
         }
     }
     async function save(
@@ -238,19 +239,25 @@ export function ProductionHistory({
         confirmImplausible = false,
     ) {
         if (!configuration) return;
-        const attempt = request({ type: "save", row, action })?.editor;
-        if (attempt?.status !== "saving") return;
-        const energy = energyValue(attempt.energy);
+        const sending = request({
+            type: "save",
+            row,
+            action,
+            confirmImplausible,
+        })?.editor;
+        if (sending?.status !== "saving") return;
+        const { write } = sending;
+        const energy = energyValue(sending.energy);
         setMessage("");
         try {
             const change: ChangeRow = {
                 starts_at: row.starts_at,
                 ends_at: row.ends_at,
-                expected_revision_id: attempt.expectedRevision,
-                action,
+                expected_revision_id: sending.expectedRevision,
+                action: write.action,
                 // An edit on this screen is the operator's value; a revert ignores quality and source.
-                ...(action === "set" && energy !== null
-                    ? { energy, quality: attempt.quality, source: "operator" }
+                ...(write.action === "set" && energy !== null
+                    ? { energy, quality: sending.quality, source: "operator" }
                     : { quality: "valid", source: "operator" }),
             };
             await api.post(
@@ -261,20 +268,21 @@ export function ProductionHistory({
                         configuration_id: configuration,
                         unit: "MWh",
                         changes: [change],
-                        confirm_implausible: confirmImplausible,
+                        confirm_implausible: write.confirmImplausible,
                     },
                 },
             );
-            pendingFocus.current = attempt.key;
+            pendingFocus.current = sending.key;
             apply({ type: "saved" });
-            setMessage(action === "revert" ? t("reverted") : t("saved"));
+            setMessage(write.action === "revert" ? t("reverted") : t("saved"));
             await reloadAfterSave();
         } catch (error) {
             apply({
                 type: "saveFailed",
-                message: errorMessage(error),
+                error,
                 implausible: saveFailure(error).implausible,
             });
+            if (error instanceof UnconfirmedError) reading.retry();
         }
     }
     const unavailable = (row: Interval | undefined) => {
@@ -290,12 +298,13 @@ export function ProductionHistory({
     };
     // The day_left text speaks of the write still running; once it failed, the editor says it was not saved and why.
     const orphanNotice = (
-        cause: keyof typeof orphaned,
-        pendingWrite: boolean,
+        orphan: Extract<typeof editor, { status: "orphaned" }>,
     ) =>
-        cause === "day_left" && !pendingWrite
-            ? t("interval_day_left_unsaved")
-            : orphaned[cause];
+        orphan.cause !== "day_left" || orphan.pendingWrite
+            ? orphaned[orphan.cause]
+            : orphan.error instanceof UnconfirmedError
+              ? ""
+              : t("interval_day_left_unsaved");
     const refreshButton = (
         <button
             className="button secondary production-refresh"
@@ -341,10 +350,14 @@ export function ProductionHistory({
             )}
             {editor.status === "orphaned" && (
                 <div className="production-row-editor">
-                    <Notice error>
-                        {orphanNotice(editor.cause, editor.pendingWrite)}
-                        {editor.error && ` ${editor.error}`}
-                    </Notice>
+                    {editor.error === undefined ? (
+                        <Notice error>{orphanNotice(editor)}</Notice>
+                    ) : (
+                        <WriteFailure
+                            error={editor.error}
+                            lead={orphanNotice(editor)}
+                        />
+                    )}
                     <ControlField
                         label={t("attempted_energy", {
                             interval: editor.key.split("/").map(time).join("–"),
@@ -491,9 +504,9 @@ export function ProductionHistory({
                             finish(proposals("discarded"));
                     }}
                     onReload={reading.reload}
-                    onSent={() => {
+                    onSent={(status) => {
                         apply({ type: "sent" });
-                        finish(proposals("submitted"));
+                        finish(receipt(status));
                         void reloadAfterSave();
                     }}
                 />
@@ -508,7 +521,7 @@ export function ProductionHistory({
                         scope={scope}
                         configuration={configuration}
                         timezone={timezone}
-                        onSaved={() => void reloadAfterSave()}
+                        onChanged={() => void reloadAfterSave()}
                     />
                 </details>
             )}

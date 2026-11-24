@@ -2,14 +2,14 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import type { Plant, PlantScope } from "@/lib/api";
-import { answerLost, DisplayError } from "@/lib/api/errors";
+import { DisplayError, UnconfirmedError } from "@/lib/api/errors";
 import { useApiList } from "@/lib/api/query";
 import { outagesExport } from "@/lib/exports";
 import { CsvDownload } from "@/ui/csv-download";
 import { useExportPlant } from "@/ui/export-plant";
 import { Resource } from "@/ui/resource";
 import { Notice } from "@/ui/ui";
-import { useCodeLabel, useLabel } from "@/ui/vocabulary";
+import { useCodeLabel, useLabel, useReceipt } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import {
     attemptPayload,
@@ -25,6 +25,7 @@ import {
     type OutageChange,
     type OutageEvent,
     type OutageRow,
+    type OutageScreen,
     type Workflow,
 } from "./outage/model";
 import { OutageCard } from "./outage/outage-card";
@@ -66,6 +67,7 @@ export function Outages({
     const reason = useCodeLabel("Outages.proposalReasons");
     const label = useLabel();
     const proposals = useTranslations("ChangeRequests");
+    const receipt = useReceipt();
     const direct = useCanManageWorkspace();
     const plant = useExportPlant();
     const [screen, setScreen] = useState(INITIAL_OUTAGES);
@@ -116,12 +118,13 @@ export function Outages({
             payload: attemptPayload(change, direct),
             key: crypto.randomUUID(),
         });
-        const attempt = next.workflow?.attempt;
-        if (next === screen || !attempt) return;
+        const phase = next.workflow?.phase;
+        if (next === screen || phase?.status !== "sending") return;
         setScreen(next);
+        let proposal: Awaited<ReturnType<typeof submitOutageChange>>;
         try {
-            await submitOutageChange(scope, change, {
-                key: attempt.key,
+            proposal = await submitOutageChange(scope, change, {
+                key: phase.sent.key,
                 direct,
             });
         } catch (error) {
@@ -133,25 +136,31 @@ export function Outages({
                 type: "sendFailed",
                 change,
                 current,
-                answered: !answerLost(error),
+                error,
                 direct,
             });
             setScreen(failed);
-            if (failed.workflow?.phase.status === "saved") return finishSent();
-            if (!current) throw error;
+            if (failed.workflow?.phase.status === "saved")
+                return finishSent(null);
+            if (!current) {
+                if (error instanceof UnconfirmedError) void reload();
+                throw error;
+            }
             // The list shows the version the change lost to while the form keeps what was typed.
             void reload();
             throw new DisplayError(t("staleEdit"));
         }
-        return finishSent();
+        return finishSent(proposal?.status ?? null);
     }
-    async function finishSent() {
+    async function finishSent(receipt: OutageScreen["receipt"]) {
         try {
             await reload();
         } finally {
-            apply({ type: "sent", proposed: !direct });
+            apply({ type: "sent", receipt });
         }
     }
+    const repeats = (change: OutageChange) =>
+        workflow?.attempt?.payload === attemptPayload(change, direct);
     const ceilings = (outage?: Outage): Ceilings | undefined =>
         configuration &&
         (!outage ||
@@ -207,6 +216,7 @@ export function Outages({
             onClose={() => apply({ type: "close" })}
             onDiscard={() => apply({ type: "discard" })}
             onSubmit={submit}
+            repeats={repeats}
         />
     );
     return (
@@ -236,7 +246,7 @@ export function Outages({
                 )}
             </div>
             <div data-screen-status tabIndex={-1}>
-                {screen.submitted && <Notice>{proposals("submitted")}</Notice>}
+                {screen.receipt && <Notice>{receipt(screen.receipt)}</Notice>}
                 {/* The open workflow says the same itself, and the page says it once. */}
                 {unavailable && unavailable !== hold && (
                     <Notice>{unavailable}</Notice>
@@ -263,6 +273,7 @@ export function Outages({
                     controls={derived}
                     hold={hold}
                     onSubmit={submit}
+                    repeats={repeats}
                     onClose={() => apply({ type: "close" })}
                 />
             )}

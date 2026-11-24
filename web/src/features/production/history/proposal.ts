@@ -25,7 +25,7 @@ export type ProposalSend =
     | { status: "sending" }
     | {
           status: "failed";
-          error: string;
+          error: unknown;
           refusals: Refusal[];
           fields: FieldRefusals;
       };

@@ -4,8 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import type { PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import type { components } from "@/lib/schema";
-import { displayMessage } from "@/lib/api/errors";
+import {
+    displayMessage,
+    readFailure,
+    UnconfirmedError,
+} from "@/lib/api/errors";
 import { useFormat } from "@/lib/format/use-format";
+import { useAttempt } from "@/lib/idempotency";
 import { parseProduction, type ProductionFile } from "@/lib/production";
 import {
     ActionForm,
@@ -28,6 +33,23 @@ type Selection =
           preview: Preview;
       } & ProductionFile);
 type ImportResult = components["schemas"]["ObservationImportOutput"];
+type Previewed = Extract<Selection, { status: "preview" }>;
+
+function importBody(
+    selection: Previewed,
+    configuration: number,
+    implausible: boolean,
+) {
+    return {
+        configuration_id: configuration,
+        unit: selection.unit,
+        changes: selection.preview.changes,
+        origin: "csv_import" as const,
+        file_name: selection.fileName.slice(0, 255),
+        file_sha256: selection.sha256,
+        confirm_implausible: implausible,
+    };
+}
 
 async function fileSha256(file: File) {
     const digest = await crypto.subtle.digest(
@@ -43,17 +65,18 @@ export function ProductionImport({
     scope,
     configuration,
     timezone,
-    onSaved,
+    onChanged,
 }: {
     scope: PlantScope;
     configuration: number;
     timezone: string;
-    onSaved: () => void;
+    onChanged: () => void;
 }) {
     const t = useTranslations("ProductionImport");
     const csvTexts = useTranslations("ProductionCsv");
     const format = useFormat();
     const errorMessage = useErrorMessage();
+    const attempt = useAttempt();
     const sequence = useRef(0);
     const [selection, setSelection] = useState<Selection>({ status: "empty" });
     const [result, setResult] = useState<ImportResult>();
@@ -179,7 +202,7 @@ export function ProductionImport({
                             if (current === sequence.current)
                                 setPreviewRequest({
                                     status: "failed",
-                                    error: errorMessage(error),
+                                    error: errorMessage(readFailure(error)),
                                 });
                         }
                     })()
@@ -298,32 +321,41 @@ export function ProductionImport({
                             submit={t("confirm_import", {
                                 count: selection.preview.changes.length,
                             })}
+                            repeatable={() =>
+                                attempt.repeats(
+                                    importBody(
+                                        selection,
+                                        configuration,
+                                        implausible,
+                                    ),
+                                )
+                            }
                             onSubmit={async () => {
                                 if (confirming) return;
                                 const current = ++sequence.current;
+                                const body = importBody(
+                                    selection,
+                                    configuration,
+                                    implausible,
+                                );
+                                const sending = attempt.next(body);
                                 setConfirming(true);
                                 try {
-                                    const response = await api.post(
-                                        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/changes/",
-                                        {
-                                            path: scope,
-                                            body: {
-                                                configuration_id: configuration,
-                                                unit: selection.unit,
-                                                changes:
-                                                    selection.preview.changes,
-                                                origin: "csv_import",
-                                                file_name:
-                                                    selection.fileName.slice(
-                                                        0,
-                                                        255,
-                                                    ),
-                                                file_sha256: selection.sha256,
-                                                confirm_implausible:
-                                                    implausible,
-                                            },
-                                        },
-                                    );
+                                    const response = await api
+                                        .post(
+                                            "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/changes/",
+                                            { path: scope, body },
+                                        )
+                                        .catch((error: unknown) => {
+                                            attempt.settle(sending, error);
+                                            if (
+                                                error instanceof
+                                                UnconfirmedError
+                                            )
+                                                onChanged();
+                                            throw error;
+                                        });
+                                    attempt.settle(sending);
                                     if (current === sequence.current) {
                                         setResult(response);
                                         setSelection({
@@ -334,7 +366,7 @@ export function ProductionImport({
                                             observations:
                                                 selection.observations,
                                         });
-                                        onSaved();
+                                        onChanged();
                                     }
                                 } finally {
                                     setConfirming(false);

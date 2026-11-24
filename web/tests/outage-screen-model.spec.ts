@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { ApiError, UnconfirmedError } from "../src/lib/api/errors";
 import {
     attemptPayload,
     INITIAL_OUTAGES,
@@ -140,12 +141,21 @@ function sentChange({ screen }: Step): OutageChange {
     return { action: "cancel", outage: target, reason: "" };
 }
 
-const failed = (step: Step, current: OutageRow | null, answered = true) =>
+const refused = () => new ApiError("Refused.", { status: 409 });
+const lostAnswer = () => new UnconfirmedError("Not confirmed.");
+const throttled = () =>
+    new ApiError("Too many requests.", { status: 429, code: "throttled" });
+
+const failed = (
+    step: Step,
+    current: OutageRow | null,
+    error: unknown = refused(),
+) =>
     run(step, {
         type: "sendFailed",
         change: sentChange(step),
         current,
-        answered,
+        error,
         direct: step.live.direct,
     });
 
@@ -160,9 +170,12 @@ const events = {
     send: (step: Step) =>
         run(step, { type: "send", payload: "first", key: "key-1" }),
     sent: (step: Step) =>
-        run(step, { type: "sent", proposed: !step.live.direct }),
+        run(step, {
+            type: "sent",
+            receipt: step.live.direct ? null : "pending",
+        }),
     fail: (step: Step) => failed(step, null),
-    lost: (step: Step) => failed(step, null, false),
+    lost: (step: Step) => failed(step, null, lostAnswer()),
     // A conflict answer carries the outage as it now stands, with the member's own pending request when there is one.
     conflict: (step: Step) =>
         failed(step, outage(4, { revision: 3, title: "Changed" })),
@@ -229,8 +242,8 @@ function phase({ screen, live }: Step) {
         live.direct ? "direct:" : "",
         status,
         workflow?.stale ? "+stale" : "",
-        workflow?.attempt?.unanswered ? "+lost" : "",
-        screen.submitted ? "+sent" : "",
+        workflow?.attempt ? "+lost" : "",
+        screen.receipt ? "+sent" : "",
         shown.length ? `|${shown.join(",")}` : "",
     ].join("");
 }
@@ -857,35 +870,39 @@ test("a cancelled outage offers no proposal, and an administrator is offered eve
     expect(outageControls(INITIAL_OUTAGES, unread).create).toBe(false);
 });
 
-test("the idempotency key belongs to the open workflow's attempt", () => {
-    const key = (step: Step) => step.screen.workflow?.attempt?.key;
-    const sending = states["update4/sending"];
-    expect(key(sending)).toBe("key-1");
-    const again = run(events.fail(sending), {
-        type: "send",
-        payload: "first",
-        key: "key-2",
-    });
-    expect(key(again)).toBe("key-1");
-    const changed = run(events.fail(again), {
-        type: "send",
-        payload: "second",
-        key: "key-3",
-    });
-    expect(key(changed)).toBe("key-3");
-    for (const event of [
-        events.openCreate,
-        events.openOther,
-        events.close,
-        events.send,
-    ])
-        expect(key(event(changed))).toBe("key-3");
-    const reopened = events.openUpdate(events.close(events.fail(changed)));
+const sentKey = ({ screen }: Step) =>
+    screen.workflow?.phase.status === "sending"
+        ? screen.workflow.phase.sent.key
+        : undefined;
+const sendAs = (payload: string, key: string) => (step: Step) =>
+    run(step, { type: "send", payload, key });
+
+test("a send repeats the workflow's write whose answer was lost with its key, and any other send is a new request", () => {
+    const first = sendAs("first", "key-1")(states["update4/idle"]);
+    expect(sentKey(first)).toBe("key-1");
+    const afterRefusal = sendAs("first", "key-2")(events.fail(first));
+    expect(sentKey(afterRefusal)).toBe("key-2");
+    const lost = events.lost(afterRefusal);
+    expect(lost.screen.workflow?.attempt?.key).toBe("key-2");
+    expect(sentKey(sendAs("first", "key-3")(lost))).toBe("key-2");
+    const other = sendAs("second", "key-4")(lost);
+    expect(sentKey(other)).toBe("key-4");
+    const otherRefused = events.fail(other);
+    expect(sentKey(sendAs("first", "key-5")(otherRefused))).toBe("key-2");
+    const busy = failed(sendAs("first", "key-6")(lost), null, throttled());
+    expect(sentKey(sendAs("first", "key-7")(busy))).toBe("key-2");
+    const repeatRefused = events.fail(sendAs("first", "key-8")(lost));
+    expect(repeatRefused.screen.workflow?.attempt).toBeNull();
+    expect(sentKey(sendAs("first", "key-9")(repeatRefused))).toBe("key-9");
+    const otherLost = events.lost(other);
+    expect(otherLost.screen.workflow?.attempt?.key).toBe("key-4");
+    expect(sentKey(sendAs("first", "key-10")(otherLost))).toBe("key-10");
+    const reopened = events.openUpdate(events.close(otherRefused));
     expect(reopened.screen.workflow?.attempt).toBeNull();
-    expect(key(events.send(reopened))).toBe("key-1");
+    expect(sentKey(sendAs("first", "key-11")(reopened))).toBe("key-11");
 });
 
-test("a direct creation keeps its key while the values sent stay the same, also after an unconfirmed send, and an edit gets a new key", () => {
+test("a direct creation whose answer was lost keeps its key while the values sent stay the same, and an edit gets a new key", () => {
     const creation = (title: string): OutageChange => ({
         action: "create",
         values: {
@@ -906,24 +923,23 @@ test("a direct creation keeps its key while the values sent stay the same, also 
             payload: attemptPayload(change, true),
             key,
         });
-    const key = (step: Step) => step.screen.workflow?.attempt?.key;
     const first = send(
         events.openCreate(directStart),
         creation("Inverter offline"),
         "key-1",
     );
     const again = send(
-        events.fail(first),
+        events.lost(first),
         creation("Inverter offline"),
         "key-2",
     );
-    expect(key(again)).toBe("key-1");
+    expect(sentKey(again)).toBe("key-1");
     const edited = send(
-        events.fail(again),
+        events.lost(again),
         creation("Inverter tripped"),
         "key-3",
     );
-    expect(key(edited)).toBe("key-3");
+    expect(sentKey(edited)).toBe("key-3");
 });
 
 test("a direct edit refused as stale ends as saved only when an unanswered try of the same change left exactly that write", () => {
@@ -958,17 +974,17 @@ test("a direct edit refused as stale ends as saved only when an unanswered try o
         step: Step,
         change: OutageChange,
         current: OutageRow | null,
-        answered = true,
+        error: unknown = refused(),
     ) =>
         run(step, {
             type: "sendFailed",
             change,
             current,
-            answered,
+            error,
             direct: step.live.direct,
         });
     const lostOnce = (opened: Step, change = edit()) =>
-        send(refuse(send(opened, change), change, null, false), change);
+        send(refuse(send(opened, change), change, null, lostAnswer()), change);
     const ending = (step: Step) => step.screen.workflow?.phase;
     const opened = events.openUpdate(directStart);
 
@@ -982,8 +998,23 @@ test("a direct edit refused as stale ends as saved only when an unanswered try o
     expect(ending(saved)).toEqual({ status: "saved" });
     expect(events.sent(saved).screen).toEqual({
         workflow: null,
-        submitted: false,
+        receipt: null,
     });
+
+    const throttledRepeat = refuse(lostOnce(opened), edit(), null, throttled());
+    expect(
+        ending(refuse(send(throttledRepeat, edit()), edit(), written)),
+    ).toEqual({ status: "saved" });
+    for (const status of [200, 502, 503]) {
+        const lost = new UnconfirmedError("Not confirmed.", { status });
+        const repeated = send(
+            refuse(send(opened, edit()), edit(), null, lost),
+            edit(),
+        );
+        expect(ending(refuse(repeated, edit(), written))).toEqual({
+            status: "saved",
+        });
+    }
 
     const cancelled = refuse(lostOnce(opened), edit(), {
         ...written,
@@ -1009,10 +1040,12 @@ test("a direct edit refused as stale ends as saved only when an unanswered try o
         ending(refuse(lostOnce(opened), edit(), { ...written, revision: 4 })),
     ).toEqual({ status: "idle" });
 
-    const refused = refuse(send(opened, edit()), edit(), null);
-    expect(ending(refuse(send(refused, edit()), edit(), written))).toEqual({
-        status: "idle",
-    });
+    const refusedFirst = refuse(send(opened, edit()), edit(), null);
+    expect(ending(refuse(send(refusedFirst, edit()), edit(), written))).toEqual(
+        {
+            status: "idle",
+        },
+    );
 
     const answeredAfterLoss = refuse(lostOnce(opened), edit(), null);
     expect(
@@ -1020,7 +1053,7 @@ test("a direct edit refused as stale ends as saved only when an unanswered try o
     ).toEqual({ status: "idle" });
 
     const changed = edit({ title: "Grid tripped" });
-    const afterLoss = refuse(send(opened, edit()), edit(), null, false);
+    const afterLoss = refuse(send(opened, edit()), edit(), null, lostAnswer());
     expect(
         ending(
             refuse(send(afterLoss, changed), changed, {

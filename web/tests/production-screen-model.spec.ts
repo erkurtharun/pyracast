@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { ApiError, UnconfirmedError } from "../src/lib/api/errors";
 import {
     intervalKey,
+    type Draft,
     type Editor,
     type History,
     type Interval,
@@ -12,6 +14,7 @@ import {
     locked,
     reconcileEditor,
     reduceScreen,
+    repeatsAttempt,
     type Screen,
     type ScreenEvent,
 } from "../src/features/production/history/screen";
@@ -134,14 +137,14 @@ const events = {
     failItem: (step: Step) =>
         apply(step, {
             type: "sendFailed",
-            error: "The request is invalid.",
+            error: new ApiError("The request is invalid."),
             refusals: [{ key: EIGHT, message: "Too large." }],
             fields: { general: [] },
         }),
     failRequest: (step: Step) =>
         apply(step, {
             type: "sendFailed",
-            error: "Too many pending requests.",
+            error: new ApiError("Too many pending requests."),
             refusals: [],
             fields: { general: [] },
         }),
@@ -153,7 +156,7 @@ const events = {
     saveFailed: (step: Step) =>
         apply(step, {
             type: "saveFailed",
-            message: "Production changed.",
+            error: new ApiError("Production changed."),
             implausible: false,
         }),
     reload: (step: Step) => apply(step, { type: "reload" }),
@@ -161,14 +164,14 @@ const events = {
         apply(step, {
             type: "reloadFailed",
             key: editorKey(step),
-            message: "Offline.",
+            error: new ApiError("Offline."),
         }),
     // The answer of a reload started for another interval, before its editor closed.
     staleReloadFailed: (step: Step) =>
         apply(step, {
             type: "reloadFailed",
             key: intervalKey(row(DAY, 23)),
-            message: "Offline.",
+            error: new ApiError("Offline."),
         }),
     // The day control acts only while it is enabled.
     pickDay: (step: Step) =>
@@ -745,7 +748,7 @@ test("an orphaned editor whose write fails keeps the failure's message and no lo
         status: "orphaned",
         cause: "day_left",
         pendingWrite: false,
-        error: "Production changed.",
+        error: expect.objectContaining({ message: "Production changed." }),
     });
 });
 
@@ -788,7 +791,7 @@ test("a refusal names its item by key and leaves with that item's next edit or r
         { type: "send", rows: dayRows(DAY) },
         {
             type: "sendFailed",
-            error: "The request is invalid.",
+            error: new ApiError("The request is invalid."),
             refusals: [
                 { key: EIGHT, message: "Too large." },
                 { key: intervalKey(dayRows(DAY)[1]!), message: "Unknown." },
@@ -814,9 +817,10 @@ test("a refusal names its item by key and leaves with that item's next edit or r
 });
 
 test("a general refusal that repeats the error is kept once", () => {
+    const error = new ApiError("Submit 1 to 100 production intervals.");
     const failed = apply(sendingStep, {
         type: "sendFailed",
-        error: "Submit 1 to 100 production intervals.",
+        error,
         refusals: [],
         fields: {
             reason: "This field may not be blank.",
@@ -825,7 +829,7 @@ test("a general refusal that repeats the error is kept once", () => {
     });
     expect(failed.screen.draft?.send).toEqual({
         status: "failed",
-        error: "Submit 1 to 100 production intervals.",
+        error,
         refusals: [],
         fields: {
             reason: "This field may not be blank.",
@@ -899,18 +903,21 @@ test("an administrator's write ends its editor, also once it was orphaned", () =
     expect(
         apply(saving, {
             type: "saveFailed",
-            message: "Above capacity.",
+            error: new ApiError("Above capacity."),
             implausible: true,
         }).screen.editor,
     ).toMatchObject({
         status: "failed",
-        issue: { message: "Above capacity.", implausible: true },
+        issue: {
+            error: expect.objectContaining({ message: "Above capacity." }),
+            implausible: true,
+        },
     });
     const left = events.back(saving);
     expect(controls(left.screen, left.rows).refresh).toBe(false);
     const ended = apply(left, {
         type: "saveFailed",
-        message: "Offline.",
+        error: new ApiError("Offline."),
         implausible: false,
     });
     expect(ended.screen.editor).toMatchObject({
@@ -926,7 +933,7 @@ test("an editor's reload follows the current revision or fails with its message"
         states["direct:none/saving"],
         {
             type: "saveFailed",
-            message: "Changed.",
+            error: new ApiError("Changed."),
             implausible: false,
         },
         { type: "reload" },
@@ -945,11 +952,14 @@ test("an editor's reload follows the current revision or fails with its message"
         reduceScreen(failed.screen, {
             type: "reloadFailed",
             key: intervalKey(rows[1]!),
-            message: "Offline.",
+            error: new ApiError("Offline."),
         }).editor,
     ).toMatchObject({
         status: "failed",
-        issue: { message: "Offline.", implausible: false },
+        issue: {
+            error: expect.objectContaining({ message: "Offline." }),
+            implausible: false,
+        },
     });
     expect(
         reduceScreen(failed.screen, {
@@ -990,7 +1000,19 @@ test("rows of a day reconcile the editor by the viewer's access", () => {
         ),
     ).toMatchObject({ status: "orphaned", cause: "held" });
     expect(
-        reconcileEditor({ ...editor, status: "saving" }, history([]), "direct"),
+        reconcileEditor(
+            {
+                ...editor,
+                status: "saving",
+                write: {
+                    payload: "",
+                    action: "set",
+                    confirmImplausible: false,
+                },
+            },
+            history([]),
+            "direct",
+        ),
     ).toMatchObject({ status: "orphaned", pendingWrite: true });
 });
 
@@ -1004,4 +1026,143 @@ test("a promotion drops the member's draft and an access change closes an idle e
         access: "propose",
     });
     expect(still.screen).toBe(states["idle/closed"].screen);
+});
+
+const lostAnswer = () => new UnconfirmedError("Not confirmed.");
+
+test("a direct write whose answer was lost is sent again as it was while the editor would send the same, and an edit makes a new write", () => {
+    const lost = apply(adminSaving, {
+        type: "saveFailed",
+        error: lostAnswer(),
+        implausible: false,
+    });
+    const editor = lost.screen.editor;
+    expect(editor).toMatchObject({
+        status: "failed",
+        attempt: { action: "set", confirmImplausible: false },
+    });
+    const attempt = editor.status === "failed" ? editor.attempt : undefined;
+    const applied = adminRows(DAY).map((row, index) =>
+        index === 1 ? { ...row, revision_id: 7 } : row,
+    );
+    const reread: Step = {
+        rows: applied,
+        screen: reduceScreen(lost.screen, {
+            type: "rowsLoaded",
+            day: DAY,
+            history: history(applied),
+        }),
+    };
+    const again = apply(reread, {
+        type: "save",
+        row: applied[1]!,
+        action: "set",
+    });
+    expect(again.screen.editor).toMatchObject({
+        status: "saving",
+        expectedRevision: null,
+        write: attempt,
+    });
+    const edited = apply(reread, { type: "change", energy: "0,7" });
+    expect(edited.screen.editor).toMatchObject({
+        status: "failed",
+        energy: "0,7",
+        attempt,
+    });
+    expect(repeatsAttempt(edited.screen.editor as Draft)).toBe(false);
+    const changedWrite = apply(edited, {
+        type: "save",
+        row: applied[1]!,
+        action: "set",
+    }).screen.editor;
+    expect(changedWrite).toMatchObject({
+        status: "saving",
+        expectedRevision: null,
+    });
+    expect(changedWrite.status === "saving" && changedWrite.write).not.toEqual(
+        attempt,
+    );
+    const undone = apply(edited, { type: "change", energy: "1" });
+    expect(repeatsAttempt(undone.screen.editor as Draft)).toBe(true);
+});
+
+test("an answer to a repeat decides the write whose answer was lost unless it is throttled", () => {
+    const lost = apply(adminSaving, {
+        type: "saveFailed",
+        error: lostAnswer(),
+        implausible: false,
+    });
+    const repeat = apply(lost, {
+        type: "save",
+        row: adminRows(DAY)[1]!,
+        action: "set",
+    });
+    const attemptOf = (step: Step) =>
+        step.screen.editor.status === "failed"
+            ? step.screen.editor.attempt
+            : "none";
+    const throttled = apply(repeat, {
+        type: "saveFailed",
+        error: new ApiError("Too many requests.", { status: 429 }),
+        implausible: false,
+    });
+    expect(attemptOf(throttled)).toEqual(attemptOf(lost));
+    const refused = apply(repeat, {
+        type: "saveFailed",
+        error: new ApiError("Production changed.", { status: 409 }),
+        implausible: false,
+    });
+    expect(attemptOf(refused)).toBeUndefined();
+    const other = apply(
+        lost,
+        { type: "change", energy: "0,7" },
+        { type: "save", row: adminRows(DAY)[1]!, action: "set" },
+        {
+            type: "saveFailed",
+            error: new ApiError("Production changed.", { status: 409 }),
+            implausible: false,
+        },
+    );
+    expect(attemptOf(other)).toEqual(attemptOf(lost));
+});
+
+test("a revert whose answer was lost can be sent again after the rows show it applied", () => {
+    const rows = adminRows(DAY).map((row) => ({
+        ...row,
+        revision_id: 3,
+        can_revert: true,
+    }));
+    const opened = apply(
+        { screen: initialScreen(DAY, "direct"), rows },
+        { type: "open", row: rows[1]! },
+        { type: "save", row: rows[1]!, action: "revert" },
+        { type: "saveFailed", error: lostAnswer(), implausible: false },
+    );
+    const reverted = rows.map((row) => ({
+        ...row,
+        revision_id: 4,
+        can_revert: false,
+    }));
+    const again = apply(
+        {
+            rows: reverted,
+            screen: reduceScreen(opened.screen, {
+                type: "rowsLoaded",
+                day: DAY,
+                history: history(reverted),
+            }),
+        },
+        { type: "save", row: reverted[1]!, action: "revert" },
+    );
+    expect(again.screen.editor).toMatchObject({
+        status: "saving",
+        expectedRevision: 3,
+        write: { action: "revert" },
+    });
+    const fresh = apply(
+        { screen: initialScreen(DAY, "direct"), rows: reverted },
+        { type: "open", row: reverted[1]! },
+        { type: "save", row: reverted[1]!, action: "revert" },
+    );
+    expect(fresh.screen.editor.status).toBe("editing");
 });

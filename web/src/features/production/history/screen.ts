@@ -1,3 +1,5 @@
+import { UnconfirmedError } from "@/lib/api/errors";
+import { outstandingAfter } from "@/lib/idempotency";
 import type { Quality } from "@/lib/production";
 import { qualityOf } from "@/lib/production";
 import {
@@ -7,6 +9,7 @@ import {
     type Editor,
     type History,
     type Interval,
+    type Write,
 } from "./model";
 import {
     canStage,
@@ -50,15 +53,20 @@ export type ScreenEvent =
     | { type: "sent" }
     | {
           type: "sendFailed";
-          error: string;
+          error: unknown;
           refusals: Refusal[];
           fields: FieldRefusals;
       }
-    | { type: "save"; row: Interval; action: "set" | "revert" }
+    | {
+          type: "save";
+          row: Interval;
+          action: "set" | "revert";
+          confirmImplausible?: boolean;
+      }
     | { type: "saved" }
-    | { type: "saveFailed"; message: string; implausible: boolean }
+    | { type: "saveFailed"; error: unknown; implausible: boolean }
     | { type: "reload" }
-    | { type: "reloadFailed"; key: string; message: string }
+    | { type: "reloadFailed"; key: string; error: unknown }
     | { type: "dayShown"; day: string }
     | { type: "rowsLoaded"; day: string; history: History }
     | { type: "accessChanged"; access: Access }
@@ -117,9 +125,42 @@ function away(screen: Screen) {
     return screen.draft !== null && screen.draft.day !== screen.day;
 }
 
+function withAttempt(draft: Draft, attempt: Write | null | undefined): Draft {
+    const { key, energy, quality, expectedRevision } = draft;
+    return {
+        key,
+        energy,
+        quality,
+        expectedRevision,
+        ...(attempt && { attempt }),
+    };
+}
+
 function values(editor: Exclude<Editor, { status: "closed" }>): Draft {
-    const { key, energy, quality, expectedRevision } = editor;
-    return { key, energy, quality, expectedRevision };
+    return withAttempt(editor, editor.attempt);
+}
+
+function writeOf(editor: Draft, action: "set" | "revert") {
+    const energy = energyValue(editor.energy);
+    if (action === "set" && energy === null) return null;
+    return JSON.stringify(
+        action === "set"
+            ? [action, editor.expectedRevision, energy, editor.quality]
+            : [action, editor.expectedRevision],
+    );
+}
+
+export function repeatsAttempt(editor: Draft) {
+    const { attempt } = editor;
+    return !!attempt && writeOf(editor, attempt.action) === attempt.payload;
+}
+
+export function unconfirmed(editor: Editor) {
+    return (
+        editor.status === "failed" &&
+        editor.issue !== "invalid_energy" &&
+        editor.issue.error instanceof UnconfirmedError
+    );
 }
 
 function opened(row: Interval, item: StagedChange | undefined): Draft {
@@ -227,20 +268,22 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
                 editor: { status: "editing", ...opened(event.row, item) },
             };
         }
-        case "change":
+        case "change": {
             if (editor.status !== "editing" && editor.status !== "failed")
                 return screen;
+            const changed = {
+                ...values(editor),
+                ...(event.energy !== undefined && { energy: event.energy }),
+                ...(event.quality !== undefined && { quality: event.quality }),
+            };
             return {
                 ...screen,
-                editor: {
-                    ...values(editor),
-                    ...(event.energy !== undefined && { energy: event.energy }),
-                    ...(event.quality !== undefined && {
-                        quality: event.quality,
-                    }),
-                    status: "editing",
-                },
+                editor:
+                    editor.status === "failed" && unconfirmed(editor)
+                        ? { ...changed, status: "failed", issue: editor.issue }
+                        : { ...changed, status: "editing" },
             };
+        }
         case "cancel":
             if (editor.status === "closed" || locked(editor)) return screen;
             return { ...screen, editor: CLOSED };
@@ -343,7 +386,9 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
                         fields: {
                             ...event.fields,
                             general: event.fields.general.filter(
-                                (text) => text !== event.error,
+                                (text) =>
+                                    !(event.error instanceof Error) ||
+                                    text !== event.error.message,
                             ),
                         },
                     },
@@ -351,13 +396,13 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
             };
         case "save": {
             const open = editingOn(editor, event.row);
-            if (
-                screen.access !== "direct" ||
-                !open ||
-                (event.action === "revert" && !event.row.can_revert)
-            )
+            if (screen.access !== "direct" || !open) return screen;
+            const payload = writeOf(open, event.action);
+            const repeat =
+                open.attempt?.payload === payload ? open.attempt : undefined;
+            if (event.action === "revert" && !event.row.can_revert && !repeat)
                 return screen;
-            if (event.action === "set" && energyValue(open.energy) === null)
+            if (payload === null)
                 return {
                     ...screen,
                     editor: {
@@ -366,7 +411,15 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
                         issue: "invalid_energy",
                     },
                 };
-            return { ...screen, editor: { ...values(open), status: "saving" } };
+            const write = repeat ?? {
+                payload,
+                action: event.action,
+                confirmImplausible: event.confirmImplausible ?? false,
+            };
+            return {
+                ...screen,
+                editor: { ...values(open), status: "saving", write },
+            };
         }
         // A running write locks its editor, so its answer always belongs to the editor that runs it.
         case "saved":
@@ -375,23 +428,32 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
         case "saveFailed": {
             const write = runningWrite(editor);
             if (!write) return screen;
+            if (write.status === "orphaned")
+                return {
+                    ...screen,
+                    editor: {
+                        ...write,
+                        pendingWrite: false,
+                        error: event.error,
+                    },
+                };
             return {
                 ...screen,
-                editor:
-                    write.status === "orphaned"
-                        ? {
-                              ...write,
-                              pendingWrite: false,
-                              error: event.message,
-                          }
-                        : {
-                              ...values(write),
-                              status: "failed",
-                              issue: {
-                                  message: event.message,
-                                  implausible: event.implausible,
-                              },
-                          },
+                editor: {
+                    ...withAttempt(
+                        write,
+                        outstandingAfter(
+                            write.attempt ?? null,
+                            write.write,
+                            event.error,
+                        ),
+                    ),
+                    status: "failed",
+                    issue: {
+                        error: event.error,
+                        implausible: event.implausible,
+                    },
+                },
             };
         }
         case "reload":
@@ -409,7 +471,7 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
                 editor: {
                     ...values(editor),
                     status: "failed",
-                    issue: { message: event.message, implausible: false },
+                    issue: { error: event.error, implausible: false },
                 },
             };
         case "dayShown":
