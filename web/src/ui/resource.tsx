@@ -2,7 +2,7 @@
 import type { ReactNode } from "react";
 import type { Loaded } from "@/lib/api/query";
 import { resourceState } from "./resource-state";
-import { Notice, RefreshFailed } from "./ui";
+import { ReadFailed, RefreshFailed } from "./ui";
 
 export function Resource<T>({
     resource,
@@ -15,7 +15,7 @@ export function Resource<T>({
 }) {
     const state = resourceState(resource);
     if (state.status === "loading") return <p role="status">{loading}</p>;
-    if (state.status === "failed") return <Notice error>{state.error}</Notice>;
+    if (state.status === "failed") return <ReadFailed resource={resource} />;
     return (
         <>
             <RefreshFailed resource={resource} />

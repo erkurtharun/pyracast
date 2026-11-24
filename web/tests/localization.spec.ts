@@ -489,13 +489,16 @@ test("coded forecast errors are explained in the selected language", async ({
     });
     await page.goto("/app/");
     await page.getByRole("button", { name: /East array/ }).click();
-    await expect(page.getByRole("main").getByRole("alert")).toHaveText(
+    const failure = page.getByRole("main").getByRole("alert");
+    await expect(failure.locator("p")).toHaveText(
         "Geçmiş tahminleri için tamamlanmış bir yerel gün seçin.",
     );
+    await expect(failure.getByRole("button")).toHaveText("Tekrar dene");
     await page.getByLabel("Dil", { exact: true }).selectOption("en");
-    await expect(page.getByRole("main").getByRole("alert")).toHaveText(
+    await expect(failure.locator("p")).toHaveText(
         "Choose a completed local day for historical estimates.",
     );
+    await expect(failure.getByRole("button")).toHaveText("Try again");
 });
 
 test.describe("the session end notice", () => {

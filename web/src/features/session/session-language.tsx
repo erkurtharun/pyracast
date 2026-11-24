@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+    useEffect,
+    useLayoutEffect,
+    useRef,
+    useState,
+    type ReactNode,
+} from "react";
 import {
     NextIntlClientProvider,
     useLocale,
@@ -9,6 +16,7 @@ import {
 import { loadCatalogue, useCatalogues } from "@/i18n/catalogue";
 import { isLanguage, type Language } from "@/i18n/language";
 import { shell } from "@/i18n/shell";
+import { readAgain } from "@/lib/api/query";
 import type { Session } from "@/lib/session-client";
 
 export type SessionLanguageState = {
@@ -61,9 +69,14 @@ export function SessionLanguage({
     value: SessionLanguageState;
     children: ReactNode;
 }) {
+    const client = useQueryClient();
+    const shown = useRef(value.locale);
     useLayoutEffect(() => {
         document.documentElement.lang = value.locale;
-    }, [value.locale]);
+        if (shown.current === value.locale) return;
+        shown.current = value.locale;
+        void readAgain(client);
+    }, [value.locale, client]);
     return (
         <NextIntlClientProvider
             locale={value.locale}

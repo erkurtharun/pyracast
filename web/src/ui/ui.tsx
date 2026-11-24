@@ -12,13 +12,27 @@ export function RefreshFailed({ resource }: { resource: Loaded<unknown> }) {
     const format = useFormat();
     if (!resource.error || resource.data === undefined) return null;
     return (
+        <ReadFailed resource={resource}>
+            {t("refreshFailed", {
+                time: format.time(resource.updatedAt, deviceZone(), {
+                    timeStyle: "short",
+                }),
+            })}{" "}
+        </ReadFailed>
+    );
+}
+export function ReadFailed({
+    resource,
+    children,
+}: {
+    resource: Pick<Loaded<unknown>, "error" | "retry">;
+    children?: ReactNode;
+}) {
+    const t = useTranslations("Common");
+    return (
         <div className="notice error" role="alert">
             <p>
-                {t("refreshFailed", {
-                    time: format.time(resource.updatedAt, deviceZone(), {
-                        timeStyle: "short",
-                    }),
-                })}{" "}
+                {children}
                 {resource.error}
             </p>
             <button
