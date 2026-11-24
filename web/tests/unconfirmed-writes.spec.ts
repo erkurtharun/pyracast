@@ -184,6 +184,13 @@ async function readAgainOnFocus(page: Page) {
     await focusWindow(page);
 }
 
+// A focus joins a read on its way; the export is enabled again once the reads a lost outage change started answered.
+async function outageReadsAnswered(page: Page) {
+    await expect(
+        page.getByRole("button", { name: "Download outages CSV", exact: true }),
+    ).toBeEnabled();
+}
+
 function draftOf(page: Page, language: Language = "en") {
     return page.getByRole("region", {
         name: labels[language].draft,
@@ -792,6 +799,7 @@ test("a member's lost resolution is told without the advice after a promotion, a
     });
     await send.click();
     await expectUnconfirmed(card, true);
+    await outageReadsAnswered(page);
     session.changeRole("admin");
     direct = true;
     await readAgainOnFocus(page);
@@ -813,14 +821,12 @@ test("a member's lost resolution is told without the advice after a promotion, a
 test("a lost approval is told without the advice once the review changed, and Approve sends the new fingerprint", async ({
     page,
 }) => {
-    const { request, decisions, detail, approve } = await reviewRequest(
-        page,
-        answers("drop"),
-    );
+    const { request, decisions, detail, approve, refresh } =
+        await reviewRequest(page, answers("drop"));
     await approve.click();
     await expectUnconfirmed(detail, true);
     request.review_fingerprint = "context-2";
-    await readAgainOnFocus(page);
+    await refresh.click();
     await expectUnconfirmed(detail, false);
     await expect(approve).toBeEnabled();
     await approve.click();
@@ -851,6 +857,7 @@ test("a lost outage edit is told without the advice once the plant's time zone c
     const { form, save } = await editOutage(page);
     await save.click();
     await expectUnconfirmed(form, true);
+    await outageReadsAnswered(page);
     timezone = "Europe/London";
     await readAgainOnFocus(page);
     await expectUnconfirmed(form, false);
@@ -1080,6 +1087,7 @@ test("a member's lost outage proposal is told without the advice once a promotio
     const { form, reason, send } = await proposeOutage(page);
     await send.click();
     await expectUnconfirmed(form, true);
+    await outageReadsAnswered(page);
     session.changeRole("admin");
     direct = true;
     await readAgainOnFocus(page);
@@ -1201,6 +1209,7 @@ test("a lost outage proposal is told without the advice once the plant's configu
     const { form, send } = await proposeOutage(page);
     await send.click();
     await expectUnconfirmed(form, true);
+    await outageReadsAnswered(page);
     configuration = { ...configuration, id: 32, revision: 2 };
     await readAgainOnFocus(page);
     await expectUnconfirmed(form, false);
@@ -1660,6 +1669,7 @@ test("an edit of a resolved outage lost after it was applied is advised and save
     });
     await save.click();
     await expectUnconfirmed(form, true);
+    await outageReadsAnswered(page);
     configuration = { ...configuration, id: 32, revision: 2 };
     const reread = page.waitForResponse((response) =>
         response.url().endsWith("/api/tenants/1/sites/"),
@@ -1793,14 +1803,16 @@ test("an orphaned direct change whose outcome is unknown keeps its notice once t
     const session = await signIn(page);
     const server = await serveSplitSlot(page, answers("drop"));
     await openPlant(page, "Production");
-    const { save } = await editEight(page);
+    const { editor, save } = await editEight(page);
     const reread = page.waitForResponse((response) =>
         productionReads.test(response.url()),
     );
     await save.click();
     await reread;
     server.merge();
-    await readAgainOnFocus(page);
+    await editor
+        .getByRole("button", { name: "Reload current values", exact: true })
+        .click();
     const orphan = page.locator(".production-row-editor");
     const repeat = orphan.getByRole("button", {
         name: "Save 0.5 MWh (Valid)",
@@ -1877,7 +1889,6 @@ test("a lost approval whose repeat is throttled keeps its notice beside the thro
     expect(applied()).toBe(1);
 });
 
-// Holds every script that reads the texts of `namespace` until `release`.
 test("a lost import asks before the comparison loads its document, and after Stay its Confirm keeps the advice and applies once", async ({
     page,
 }) => {
