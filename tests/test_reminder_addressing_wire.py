@@ -351,6 +351,46 @@ def test_the_smtp_headers_and_envelope_carry_each_plain_address_as_typed(eight_b
     assert transaction.data.isascii()
 
 
+AUTOMATIC = {
+    "Auto-Submitted": "auto-generated",
+    "X-Auto-Response-Suppress": "OOF, AutoReply",
+    "Content-Language": "en",
+}
+
+
+def assert_automatic(message: WireMessage) -> None:
+    assert {name: message[name] for name in AUTOMATIC} == AUTOMATIC
+    assert message["List-Unsubscribe"] == "<mailto:reminders@example.com?subject=unsubscribe>"
+    assert message["Message-ID"].startswith("<reminder.")
+    for name in ("In-Reply-To", "References", "Thread-Topic", "Thread-Index"):
+        assert message[name] is None
+
+
+def fail_preparation(monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken(*args: object, **kwargs: object) -> EmailMessage:
+        raise RuntimeError("The renderer cannot be used.")
+
+    monkeypatch.setattr(jobs, "build_message", broken)
+
+
+@pytestdb
+@pytest.mark.parametrize("notice", [False, True])
+def test_smtp_carries_the_automatic_mail_headers_of_the_forecast_and_the_notice(
+    monkeypatch: pytest.MonkeyPatch, notice: bool
+) -> None:
+    system = workspace()
+    typed_schedule(system)
+    if notice:
+        fail_preparation(monkeypatch)
+
+    with smtp_wire() as script:
+        delivery_id = send_on()
+
+    assert NotificationDelivery.objects.get(pk=delivery_id).status == "sent"
+    (transaction,) = script.transactions
+    assert_automatic(parsed(transaction.data))
+
+
 @pytest.fixture
 def gmail_requests(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[bytes]]:
     sent: list[bytes] = []
@@ -395,6 +435,23 @@ def test_the_gmail_request_carries_each_plain_address_as_typed(
         typed_as(CC),
         typed_as(BCC),
     ]
+
+
+@pytestdb
+@pytest.mark.parametrize("notice", [False, True])
+def test_gmail_carries_the_automatic_mail_headers_of_the_forecast_and_the_notice(
+    gmail_requests: list[bytes], monkeypatch: pytest.MonkeyPatch, notice: bool
+) -> None:
+    system = workspace()
+    typed_schedule(system)
+    if notice:
+        fail_preparation(monkeypatch)
+
+    delivery_id = send_on()
+
+    assert NotificationDelivery.objects.get(pk=delivery_id).status == "sent"
+    (raw,) = gmail_requests
+    assert_automatic(parsed(raw))
 
 
 @pytestdb

@@ -91,10 +91,12 @@ def test_same_clock_collection_waits_without_spending_mail_attempts_then_uses_pu
     assert delivery.forecast_kind == "current"
     assert delivery.prepared_at is not None
     assert when + timedelta(minutes=1) <= delivery.prepared_at < when + timedelta(minutes=2)
-    assert attached_sheet(mail.outbox[0])["A2"].value == when.astimezone(
+    assert attached_sheet(mail.outbox[0])["B4"].value == when.astimezone(
         ZoneInfo(system.region.timezone)
     ).replace(tzinfo=None)
-    assert "11 Nov 2026" in mail.outbox[0].subject
+    assert "Wed 11 Nov" in mail.outbox[0].subject
+    assert "\n\nForecast data: 10 Nov 2026, 10:05 (UTC+3)\n" in mail.outbox[0].body
+    assert "Newer forecast data" not in mail.outbox[0].body
 
 
 @pytest.mark.parametrize("job_state", ["failed", "stale", "succeeded"])
@@ -103,6 +105,9 @@ def test_terminal_collection_prepares_immediately_using_older_complete_forecast(
 ) -> None:
     system, _ = configured()
     old = complete_saved(system)
+    CollectionSchedule.objects.create(
+        region=system.region, times=["10:00"], enabled=True, effective_from=NOW
+    )
     CollectionJob.objects.create(
         binding=system.binding,
         scheduled_for=SLOT,
@@ -116,7 +121,11 @@ def test_terminal_collection_prepares_immediately_using_older_complete_forecast(
     assert delivery.snapshot_id == old.pk
     assert isinstance(delivery.prepared_message, dict)
     assert delivery.forecast_kind == "saved_complete"
-    assert "Using the last saved forecast." in mail.outbox[0].body
+    assert (
+        "Newer forecast data was not available.\nForecast data: 9 Nov 2026, 16:00 (UTC+3)\n"
+    ) in mail.outbox[0].body
+    sheet = attached_sheet(mail.outbox[0])
+    assert sheet["A12"].value == "Newer forecast data was not available."
 
 
 def test_latest_partial_or_invalid_cache_cannot_hide_complete_saved_tomorrow(
@@ -143,7 +152,7 @@ def test_latest_partial_or_invalid_cache_cannot_hide_complete_saved_tomorrow(
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     assert delivery.snapshot_id == old.pk != partial.pk != bad.pk
     sheet = attached_sheet(mail.outbox[0])
-    assert sheet.cell(_summary_row(sheet, 11), 3).value == pytest.approx(
+    assert sheet.cell(_summary_row(sheet, 11), 2).value == pytest.approx(
         ForecastResult.objects.get(snapshot=old).daily_payloads["2026-11-11"]["daylight"][
             "energy_kwh_m2"
         ]
@@ -177,9 +186,10 @@ def test_missing_due_job_waits_only_to_fixed_deadline_then_sends_honest_unavaila
     assert delivery.binding_id == system.binding.pk
     assert isinstance(delivery.prepared_message, dict)
     assert delivery.forecast_kind == "unavailable"
-    assert "Tomorrow's forecast is unavailable" in mail.outbox[0].body
-    sheet = attached_sheet(mail.outbox[0])
-    assert sheet.cell(_summary_row(sheet, 11), 3).value is None
+    assert mail.outbox[0].subject.endswith(": no forecast for Wed 11 Nov")
+    assert "This email contains no figures." in mail.outbox[0].body
+    assert "Forecast data" not in mail.outbox[0].body
+    assert not mail.outbox[0].attachments
 
 
 def test_credentials_rotated_or_auth_failed_preserves_approved_archived_email() -> None:
@@ -246,18 +256,18 @@ def test_partial_tomorrow_survives_missing_today_and_does_not_invent_daily_total
     assert delivery.snapshot_id == newer.pk
     assert isinstance(delivery.prepared_message, dict)
     assert delivery.forecast_kind == "saved_partial"
-    assert "Unavailable" in mail.outbox[0].body
-    assert "Partial:" in mail.outbox[0].body
+    body = mail.outbox[0].body
+    assert "Today (Tue 10 Nov 2026): No forecast data for this day." in body
+    assert "Tomorrow (Wed 11 Nov 2026): Data is missing for some hours, so no daily total" in body
+    partial = result.daily_payloads["2026-11-11"]["daylight"]["partial_energy_kwh_m2"]
+    assert f"{partial:.2f}" not in body
     sheet = attached_sheet(mail.outbox[0])
-    assert sheet.cell(_summary_row(sheet, 10), 3).value is None
-    row = _summary_row(sheet, 11)
-    assert sheet.cell(row, 3).value == pytest.approx(
-        result.daily_payloads["2026-11-11"]["daylight"]["partial_energy_kwh_m2"]
-    )
-    note = str(sheet.cell(row + 1, 1).value)
-    coverage = result.daily_payloads["2026-11-11"]["daylight"]["coverage_fraction"]
-    assert f"Coverage: {coverage:.0%}" in note
-    assert "Partial estimate" in note
+    assert sheet.cell(_summary_row(sheet, 10), 2).value is None
+    assert sheet.cell(_summary_row(sheet, 11), 2).value is None
+    assert [sheet.cell(row, 1).value for row in (12, 13)] == [
+        "Tue 10 Nov 2026: no forecast data.",
+        "Wed 11 Nov 2026: data is missing for some hours; no daily total.",
+    ]
     assert delivery.forecast_complete is False
 
 
@@ -285,9 +295,8 @@ def test_ineligible_archived_sources_send_unavailable_without_exposing_their_val
     assert process_notification(delivery_id, SLOT + timedelta(minutes=1))
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     assert delivery.snapshot_id is None
-    assert "Tomorrow's forecast is unavailable" in mail.outbox[0].body
-    sheet = attached_sheet(mail.outbox[0])
-    assert sheet.cell(_summary_row(sheet, 11), 3).value is None
+    assert mail.outbox[0].subject.endswith(": no forecast for Wed 11 Nov")
+    assert not mail.outbox[0].attachments
 
 
 def test_same_slot_partial_forecast_exposes_incomplete_saved_data_status() -> None:
@@ -390,7 +399,7 @@ def test_candidate_loading_excludes_unrelated_history_and_defers_provider_json(
     monkeypatch.setattr(ForecastSnapshot, "from_db", classmethod(load))
     assert process_notification(delivery_id, SLOT)
     assert loaded == [usable.pk]
-    assert "Partial:" in mail.outbox[0].body
+    assert "Data is missing for some hours" in mail.outbox[0].body
 
 
 def test_legacy_exact_day_payload_remains_eligible_without_daily_cache() -> None:
@@ -404,7 +413,7 @@ def test_legacy_exact_day_payload_remains_eligible_without_daily_cache() -> None
     assert process_notification(delivery_id, SLOT)
     assert NotificationDelivery.objects.get(pk=delivery_id).snapshot_id == snapshot.pk
     sheet = attached_sheet(mail.outbox[0])
-    assert sheet.cell(_summary_row(sheet, 11), 3).value == pytest.approx(
+    assert sheet.cell(_summary_row(sheet, 11), 2).value == pytest.approx(
         result.payload["daylight"]["energy_kwh_m2"]
     )
 
@@ -446,7 +455,26 @@ def test_collection_retry_after_preparation_deadline_does_not_delay_saved_mail()
     )
     delivery_id = enqueue_due(SLOT)[0]
     assert process_notification(delivery_id, SLOT)
-    assert "Using the last saved forecast." in mail.outbox[0].body
+    assert "\n\nForecast data: 9 Nov 2026, 16:00 (UTC+3)\n" in mail.outbox[0].body
+    assert "Newer forecast data" not in mail.outbox[0].body
+
+
+@pytest.mark.parametrize(("hours", "stale"), [(20, False), (27, True)])
+def test_a_reminder_clock_without_a_collection_calls_only_old_data_not_current(
+    hours: int, stale: bool
+) -> None:
+    system, _ = configured()
+    collected = SLOT - timedelta(hours=hours)
+    complete_saved(system, collected)
+    delivery_id = enqueue_due(SLOT)[0]
+    assert process_notification(delivery_id, SLOT)
+    body = mail.outbox[0].body
+    local = collected.astimezone(ZoneInfo(system.region.timezone))
+    line = f"Forecast data: {local.day} Nov 2026, {local:%H:%M} (UTC+3)\n"
+    notice = "Newer forecast data was not available.\n"
+    assert (notice + line if stale else "\n\n" + line) in body
+    assert ("Newer" in body) is stale
+    assert body.count("2026, ") == 1
 
 
 def test_notification_settings_remain_editable_after_provider_credentials_rotate() -> None:
@@ -508,3 +536,27 @@ def test_a_saved_forecast_is_eligible_only_once_its_snapshot_is_available() -> N
     assert list(eligible_saved_forecasts(delivery, SLOT)) == [snapshot]
     stored_again(ForecastSnapshot.objects.get(pk=snapshot.pk), available_at=None)
     assert not eligible_saved_forecasts(delivery, SLOT).exists()
+
+
+def test_two_clocks_a_day_send_two_editions_each_naming_its_own_clock() -> None:
+    system, _ = configured()
+    complete_saved(system)
+    configure_reminders(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        language="en",
+        enabled=True,
+        recipients=["default@example.com"],
+        times=["10:00", "12:00"],
+        now=NOW,
+    )
+    for slot in (SLOT, SLOT + timedelta(hours=2)):
+        delivery_id = enqueue_due(slot)[-1]
+        assert process_notification(delivery_id, slot)
+    morning, noon = mail.outbox
+    assert morning.subject.endswith(": irradiance forecast for Wed 11 Nov (10:00 edition)")
+    assert noon.subject.endswith(": irradiance forecast for Wed 11 Nov (12:00 edition)")
+    assert morning.attachments[0][0].endswith("-2026-11-11-1000.xlsx")
+    assert noon.attachments[0][0].endswith("-2026-11-11-1200.xlsx")
+    assert morning.extra_headers["Message-ID"] != noon.extra_headers["Message-ID"]

@@ -56,7 +56,7 @@ def test_unexpected_render_failure_sends_a_frozen_plain_unavailable_notice(
     assert delivery.status == "sent"
     assert len(messages) == 2
     assert messages[0].body == messages[1].body
-    assert "No forecast energy total is available" in messages[0].body
+    assert "This email contains no figures." in messages[0].body
     assert not messages[0].attachments
 
 

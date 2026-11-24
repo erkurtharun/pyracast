@@ -1209,7 +1209,7 @@ def assert_account_mail(
     assert message.to == [to]
     assert message.extra_headers["X-Pyracast-Mail"] == prefix
     assert message.subject == subject
-    assert f'<html lang="{language}">' in html(message)
+    assert f'<html lang="{language}" dir="ltr">' in html(message)
 
 
 def assert_code_mail(
