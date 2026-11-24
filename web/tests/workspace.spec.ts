@@ -16,7 +16,6 @@ import {
 } from "./support/workspace";
 import { errorBody } from "./support/errors";
 
-// One half-hour production row that ended before the shared instant.
 function productionCsv(energy: number | string, source = "meter") {
     const start = instant.getTime() - 86_400_000;
     const stamp = (at: number) => new Date(at).toISOString();
