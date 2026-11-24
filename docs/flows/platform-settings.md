@@ -28,7 +28,7 @@ sequenceDiagram
     else "POST without a recent authenticator confirmation"
         V-->>P: "403 confirmation page, nothing stored"
     else "gate passed"
-        V->>D: "settings_context: unlocked SELECT of the limit, default 5 if no row; plants over it"
+        V->>D: "settings_context: unlocked SELECT of the limit, default 5 if no row, plants over it"
         alt "GET"
             V-->>P: "200 form, hidden expected = current value"
         else "value outside 1..100, not a number, or expected missing"
@@ -39,7 +39,7 @@ sequenceDiagram
             V->>O: "actor, value, expected, require_platform_admin"
             O->>D: "BEGIN, SELECT FOR UPDATE row 1, create if missing"
             alt "value equals stored"
-                O-->>V: "unchanged, nothing written"
+                O-->>V: "unchanged, no limit update or log entry, row 1 created if it was missing"
                 V-->>P: "302, info flash already N"
             else "expected differs from stored"
                 O-->>V: "ConflictError, rollback"
@@ -50,7 +50,7 @@ sequenceDiagram
             end
         end
     end
-    R->>D: "later: tenant lock, row FOR SHARE, region, delivery; over-limit plants get no slot or end skipped"
+    R->>D: "later: tenant lock, row FOR SHARE, region, delivery, then over-limit plants get no slot or end skipped"
 ```
 
 ## Data
@@ -80,7 +80,7 @@ sequenceDiagram
 | Value 0, negative, above 100 (the field offers `max="100"`), non-numeric, empty, or `expected` missing or below 1 | 400, page re-rendered with the error summary "Review the recipient limit" |
 | Limit pauses reminders of plants not paused now, no `confirm_pause` | 400, plants listed, nothing stored |
 | `expected_max_recipients` differs from the locked row (and the value differs from it) | 400, non-field error "The settings changed. Reload this page before saving." The bound hidden field stays stale, so a resubmit fails again until the page is reloaded |
-| Value equals the stored value | 302 and the info flash "The recipient limit is already N.", nothing written, no log entry |
+| Value equals the stored value | 302 and the info flash "The recipient limit is already N.", no limit update and no log entry; row 1 is created if it was missing |
 | Audit insert fails (`DatabaseError`) | Whole transaction rolls back, value unchanged; the view does not catch it, so 500 |
 | Row lock not granted within the 5 s `lock_timeout` (a worker, scheduler or reminder save holds it), deadlock or statement timeout | Nothing stored; retry flash and redirect to the referring console page (overview if unknown); JSON callers get 503 `Retry-After: 1` |
 | A second request on the same session while one runs (5 s advisory lock) | 503 page with `Retry-After: 1`; a GET reloads once, a write is never replayed |
