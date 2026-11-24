@@ -644,7 +644,7 @@ test("detail and activation errors remain independent", async ({ page }) => {
     await expect(page.getByText("Activation failed")).toBeVisible();
 });
 
-test("a release in progress shows the maintenance notice instead of a failure", async ({
+test("a release in progress leaves an activation unconfirmed instead of refused", async ({
     page,
 }) => {
     await mockApi(page);
@@ -664,11 +664,11 @@ test("a release in progress shows the maintenance notice instead of a failure", 
     await activate(page, 40);
     await expect(
         page.getByText(
-            "Pyracast is being updated. Try again in a minute; your data is safe.",
+            "The server did not confirm the change. It may have been saved; check before you send it again.",
             { exact: true },
         ),
     ).toBeVisible();
-    await expect(page.getByText(/Request failed/)).toHaveCount(0);
+    await expect(page.getByText(/Pyracast is being updated/)).toHaveCount(0);
 });
 
 test("automatic calibration can be enabled before a fit and disabled without resetting", async ({
