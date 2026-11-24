@@ -3,8 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import type { Tenant } from "@/lib/api";
 import { api, buildUrl } from "@/lib/api/client";
-import { DisplayError } from "@/lib/api/errors";
+import { ApiError, DisplayError, UnconfirmedError } from "@/lib/api/errors";
 import { cadence, useApiQuery, useRefresh } from "@/lib/api/query";
+import { serverTrim, useAttempt } from "@/lib/idempotency";
 import { MISSING } from "@/lib/format/number";
 import { useFormat } from "@/lib/format/use-format";
 import { qualityOf } from "@/lib/production";
@@ -13,7 +14,8 @@ import {
     ActionForm,
     AsyncButton,
     TextAreaField,
-    useErrorMessage,
+    UnconfirmedNotice,
+    WriteFailure,
     formText,
 } from "@/ui/form";
 import { usePageTitle } from "@/ui/page-title";
@@ -41,6 +43,7 @@ type Summary = components["schemas"]["ChangeRequestSummaryOutput"];
 type Scope = "pending" | "history" | "mine";
 type Reading = components["schemas"]["ProductionValueOutput"];
 type Decision = "approve" | "reject" | "withdraw" | "seen";
+type DecisionBody = { review_fingerprint: string } | { reason: string } | null;
 
 export function OwnPendingRequests({
     tenantId,
@@ -373,22 +376,27 @@ function RequestDetail({
     onChanged: (action: Decision | null) => void;
 }) {
     const t = useTranslations("ChangeRequests");
-    const errorMessage = useErrorMessage();
     const path = { tenant_id: tenantId, request_id: id };
     const resource = useApiQuery(
         "/api/tenants/{tenant_id}/change-requests/{request_id}/",
         { path },
     );
     const [state, setState] = useState<
-        { status: "idle" | "pending" } | { status: "error"; message: string }
+        | { status: "idle" | "pending" }
+        | { status: "error"; action: Decision; error: unknown }
     >({ status: "idle" });
-    const [blockedContext, setBlockedContext] = useState<ChangeRequest | null>(
+    const [refusedFingerprint, setRefusedFingerprint] = useState<string | null>(
         null,
     );
+    const attempt = useAttempt<{ action: Decision; body: DecisionBody }>();
+    // The rejection reason as typed, kept while the rejection form is not shown.
+    const [rejection, setRejection] = useState("");
     const heading = useRef<HTMLHeadingElement>(null);
     const receipt = useRef(false);
     const item = resource.data;
-    const reviewBlocked = item !== undefined && blockedContext === item;
+    const reviewBlocked =
+        !!item?.review_fingerprint &&
+        item.review_fingerprint === refusedFingerprint;
     useEffect(() => {
         heading.current?.focus();
     }, []);
@@ -407,20 +415,54 @@ function RequestDetail({
             () => {},
         );
     }, [item, tenantId, id, onChanged]);
-    async function act(action: Decision, run: () => Promise<unknown>) {
+    async function act(
+        action: Decision,
+        body: DecisionBody,
+        run: () => Promise<unknown>,
+    ) {
         if (state.status === "pending") return;
+        const sending = attempt.next({ action, body });
         setState({ status: "pending" });
         try {
             await run();
+            attempt.settle(sending);
             setState({ status: "idle" });
             onChanged(action);
         } catch (error) {
-            if (action === "approve") setBlockedContext(item ?? null);
-            setState({ status: "error", message: errorMessage(error) });
+            attempt.settle(sending, error);
+            if (error instanceof UnconfirmedError)
+                void resource.reload().catch(() => undefined);
+            else if (
+                body &&
+                "review_fingerprint" in body &&
+                !(error instanceof ApiError && error.status === 429)
+            )
+                setRefusedFingerprint(body.review_fingerprint);
+            setState({ status: "error", action, error });
             throw error;
         }
     }
     const pending = state.status === "pending";
+    const approval = item?.review_fingerprint
+        ? { review_fingerprint: item.review_fingerprint }
+        : null;
+    const approvable =
+        !!approval &&
+        !!item?.can_review &&
+        item.status === "pending" &&
+        !pending &&
+        !item?.conflict &&
+        !reviewBlocked &&
+        !resource.error;
+    const rejectable = !!item?.can_review && item.status === "pending";
+    const lost = attempt.outstanding;
+    // The rejection form tells its own outcome while it is shown; the detail tells every other one.
+    const told = (action: Decision) => action !== "reject" || !rejectable;
+    const rejects = (data: FormData) =>
+        attempt.repeats({
+            action: "reject",
+            body: { reason: serverTrim(formText(data, "reason")) },
+        });
     return (
         <section
             id={`request-${id}`}
@@ -432,14 +474,31 @@ function RequestDetail({
             </h3>
             {resource.loading && <p role="status">{t("loading")}</p>}
             {resource.error && <Notice error>{resource.error}</Notice>}
-            {state.status === "error" && <Notice error>{state.message}</Notice>}
+            {state.status === "error" &&
+                !(state.error instanceof UnconfirmedError) &&
+                told(state.action) && <WriteFailure error={state.error} />}
+            {lost && told(lost.action) && (
+                <UnconfirmedNotice
+                    repeatable={
+                        lost.action === "approve" &&
+                        approvable &&
+                        attempt.repeats({ action: "approve", body: approval })
+                    }
+                />
+            )}
             <button
                 className="button secondary"
                 disabled={pending}
                 onClick={() => {
-                    setBlockedContext(item ?? null);
+                    const seen = refusedFingerprint;
                     setState({ status: "idle" });
-                    resource.retry();
+                    void resource.reload().then(
+                        () =>
+                            setRefusedFingerprint((held) =>
+                                held === seen ? null : held,
+                            ),
+                        () => {},
+                    );
                 }}
             >
                 {t("refreshDetails")}
@@ -486,30 +545,17 @@ function RequestDetail({
                             })}
                         </p>
                     )}
-                    {item.can_review && item.status === "pending" && (
+                    {rejectable && (
                         <div className="inbox-decisions">
                             <button
                                 className="button"
-                                disabled={
-                                    pending ||
-                                    !!item.conflict ||
-                                    !item.review_fingerprint ||
-                                    reviewBlocked ||
-                                    !!resource.error
-                                }
+                                disabled={!approvable}
                                 onClick={() => {
-                                    const fingerprint = item.review_fingerprint;
-                                    if (fingerprint)
-                                        void act("approve", () =>
+                                    if (approval)
+                                        void act("approve", approval, () =>
                                             api.post(
                                                 "/api/tenants/{tenant_id}/change-requests/{request_id}/approve/",
-                                                {
-                                                    path,
-                                                    body: {
-                                                        review_fingerprint:
-                                                            fingerprint,
-                                                    },
-                                                },
+                                                { path, body: approval },
                                             ),
                                         ).catch(() => {});
                                 }}
@@ -519,16 +565,23 @@ function RequestDetail({
                             <ActionForm
                                 permitted={!pending}
                                 submit={t("reject")}
+                                attempt={
+                                    lost?.action === "reject"
+                                        ? { repeats: rejects }
+                                        : null
+                                }
+                                onEdit={(data) =>
+                                    setRejection(formText(data, "reason"))
+                                }
                                 onSubmit={async (data) => {
-                                    const reason = formText(
-                                        data,
-                                        "reason",
-                                    ).trim();
+                                    const reason = serverTrim(
+                                        formText(data, "reason"),
+                                    );
                                     if (!reason)
                                         throw new DisplayError(
                                             t("rejectReason"),
                                         );
-                                    await act("reject", () =>
+                                    await act("reject", { reason }, () =>
                                         api.post(
                                             "/api/tenants/{tenant_id}/change-requests/{request_id}/reject/",
                                             { path, body: { reason } },
@@ -539,6 +592,7 @@ function RequestDetail({
                                 <TextAreaField
                                     label={t("rejectReason")}
                                     name="reason"
+                                    defaultValue={rejection}
                                     maxLength={500}
                                     required
                                 />
@@ -552,7 +606,7 @@ function RequestDetail({
                                 className="button secondary"
                                 disabled={pending}
                                 onClick={() => {
-                                    void act("withdraw", () =>
+                                    void act("withdraw", null, () =>
                                         api.post(
                                             "/api/tenants/{tenant_id}/change-requests/{request_id}/withdraw/",
                                             { path },
@@ -569,7 +623,7 @@ function RequestDetail({
                             className="button secondary"
                             disabled={pending}
                             onClick={() => {
-                                void act("seen", () =>
+                                void act("seen", null, () =>
                                     api.post(
                                         "/api/tenants/{tenant_id}/change-requests/{request_id}/seen/",
                                         { path },

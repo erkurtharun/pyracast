@@ -17,6 +17,12 @@ import type { components } from "../src/lib/schema";
 
 type Schemas = components["schemas"];
 
+const proposed = answer("ChangeRequestOutput", {
+    id: 9,
+    kind: "incident",
+    status: "pending",
+});
+
 test.use({ timezoneId: "Europe/Istanbul" });
 
 async function workspace(
@@ -1077,7 +1083,7 @@ test("while a resolution is sent and the list reloads after it, no other proposa
         submissions.push(route.request().postDataJSON());
         await answered.pass();
         sent = true;
-        await route.fulfill({ status: 201, json: {} });
+        await route.fulfill({ status: 201, json: proposed });
     });
     await openOutages(page);
     const inverter = outageCard(page, "Inverter offline");
@@ -1132,7 +1138,7 @@ test("an outage editor that is sending cannot be replaced by a new outage", asyn
     await page.route("**/change-requests/incidents/", async (route) => {
         submissions.push(route.request().postDataJSON());
         await answered.pass();
-        await route.fulfill({ status: 201, json: {} });
+        await route.fulfill({ status: 201, json: proposed });
     });
     await openOutages(page);
     await outageCard(page, "Inverter offline")
@@ -1173,7 +1179,7 @@ test("a resolution form whose outage comes to wait for the member's own request 
     await memberOutages(page, () => memberList(held));
     await page.route("**/change-requests/incidents/", (route) => {
         submissions.push(route.request().postDataJSON());
-        return route.fulfill({ status: 201, json: {} });
+        return route.fulfill({ status: 201, json: proposed });
     });
     await openOutages(page);
     const inverter = outageCard(page, "Inverter offline");
@@ -1375,7 +1381,7 @@ test("a language change while a resolution is sent keeps it sending, sends it on
     await page.route("**/change-requests/incidents/", async (route) => {
         submissions.push(route.request().postDataJSON());
         await answered.pass();
-        await route.fulfill({ status: 201, json: {} });
+        await route.fulfill({ status: 201, json: proposed });
     });
     await openOutages(page);
     const inverter = outageCard(page, "Inverter offline");
@@ -1584,7 +1590,7 @@ test("closing or sending a workflow returns the focus to the control that opened
     await memberOutages(page, () => memberList(sent ? 4 : null));
     await page.route("**/change-requests/incidents/", (route) => {
         sent = true;
-        return route.fulfill({ status: 201, json: {} });
+        return route.fulfill({ status: 201, json: proposed });
     });
     await openOutages(page);
     const inverter = outageCard(page, "Inverter offline");

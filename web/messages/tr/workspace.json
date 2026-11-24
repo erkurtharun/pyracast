@@ -428,6 +428,7 @@
         "rejected": "Reddedildi",
         "withdrawn": "Geri çekildi",
         "submitted": "Onaya gönderildi. Çalışma alanı yöneticisi onaylayana kadar canlı veriler değişmez.",
+        "submittedClosed": "Bu talep zaten kapandı ({status}); bu gönderim hiçbir şeyi değiştirmedi.",
         "submitter": "Gönderen: {name}",
         "submittedAt": "Gönderim: {time}",
         "formerMember": "Eski üye",

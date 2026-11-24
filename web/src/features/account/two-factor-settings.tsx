@@ -8,7 +8,7 @@ import {
     useRef,
     useState,
 } from "react";
-import { ApiError, displayMessage } from "@/lib/api/errors";
+import { ApiError, displayMessage, UnconfirmedError } from "@/lib/api/errors";
 import {
     authRequest,
     type AuthenticatorRecord,
@@ -28,8 +28,9 @@ import {
     type TwoFactorView,
 } from "./two-factor/model";
 import { TwoFactorStatusTag } from "./two-factor/status-tag";
+import { UnconfirmedTitle, useWriteErrorMessage } from "@/ui/form";
 
-type Feedback = { text: string; locale: string };
+type Feedback = { text: string; locale: string } | { lost: UnconfirmedError };
 type Action = "setup" | "activate" | "replace" | "remove";
 
 // The server answered and changed nothing.
@@ -57,7 +58,11 @@ export function TwoFactorSettings({
     const [setupCode, setSetupCode] = useState("");
     const [notice, setNotice] = useState<StatusNotice>();
     const [error, setError] = useState<Feedback>();
-    const [codeError, setCodeError] = useState<Feedback>();
+    const [codeError, setCodeError] = useState<{
+        text: string;
+        locale: string;
+    }>();
+    const writeErrorMessage = useWriteErrorMessage();
     const stepHeadingRef = useRef<HTMLHeadingElement>(null);
     const errorRef = useRef<HTMLDivElement>(null);
     const inFlight = useRef(false);
@@ -69,8 +74,12 @@ export function TwoFactorSettings({
     }, []);
 
     const fail = useCallback(
-        (message: string) => {
-            setError({ text: message, locale });
+        (message: string, failure?: unknown) => {
+            setError(
+                failure instanceof UnconfirmedError
+                    ? { lost: failure }
+                    : { text: message, locale },
+            );
             requestAnimationFrame(() => errorRef.current?.focus());
         },
         [locale],
@@ -160,7 +169,7 @@ export function TwoFactorSettings({
         } catch (failure) {
             if (failure instanceof ApiError && failure.fields.code)
                 setCodeError({ text: failure.fields.code, locale });
-            fail(displayMessage(failure, t("loadFailed")));
+            fail(displayMessage(failure, t("loadFailed")), failure);
             if (action !== "setup" && !refused(failure))
                 await reconcile(action);
         } finally {
@@ -280,7 +289,12 @@ export function TwoFactorSettings({
 
     const facts: Facts = "facts" in view ? view.facts : {};
     const busy = running !== undefined || view.kind === "loading";
-    const activeError = error?.locale === locale ? error.text : undefined;
+    const activeError =
+        error && "lost" in error
+            ? writeErrorMessage(error.lost)
+            : error?.locale === locale
+              ? error.text
+              : undefined;
     const activeCodeError =
         codeError?.locale === locale ? codeError.text : undefined;
 
@@ -303,7 +317,14 @@ export function TwoFactorSettings({
                     role="alert"
                     tabIndex={-1}
                 >
-                    {activeError}
+                    {error && "lost" in error ? (
+                        <>
+                            <UnconfirmedTitle error={error.lost} />
+                            <p>{activeError}</p>
+                        </>
+                    ) : (
+                        activeError
+                    )}
                 </div>
             )}
             <StepUpPrompt

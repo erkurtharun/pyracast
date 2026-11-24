@@ -428,6 +428,7 @@
         "rejected": "Rejected",
         "withdrawn": "Withdrawn",
         "submitted": "Sent for approval. Live data stays unchanged until a workspace administrator approves it.",
+        "submittedClosed": "This request is already closed ({status}); this submission changed nothing.",
         "submitter": "Submitted by {name}",
         "submittedAt": "Submitted {time}",
         "formerMember": "Former member",

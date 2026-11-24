@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { DisplayError } from "@/lib/api/errors";
 import { fromPlantInput, toPlantInput } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
+import { serverTrim } from "@/lib/idempotency";
 import type { components } from "@/lib/schema";
 import { ActionForm, Field, Select, TextAreaField, formText } from "@/ui/form";
 import { Notice } from "@/ui/ui";
@@ -50,6 +51,21 @@ export function plantInstant(
     return instant;
 }
 
+export type Repeats = (change: OutageChange) => boolean;
+
+export function repeatsWith(
+    repeats: Repeats,
+    changeOf: (data: FormData) => OutageChange,
+) {
+    return (data: FormData) => {
+        try {
+            return repeats(changeOf(data));
+        } catch {
+            return false;
+        }
+    };
+}
+
 export function ProposalReason() {
     const t = useTranslations("ChangeRequests");
     return (
@@ -86,6 +102,7 @@ export function OutageEditor({
     controls,
     hold,
     onSubmit,
+    attempt,
     onClose,
 }: {
     outage?: Outage;
@@ -97,6 +114,7 @@ export function OutageEditor({
     // Why this editor cannot send any more; it can still be closed.
     hold: string | null;
     onSubmit: (change: OutageChange) => Promise<void>;
+    attempt: Repeats | null | undefined;
     onClose: () => void;
 }) {
     const t = useTranslations("Outages");
@@ -113,6 +131,43 @@ export function OutageEditor({
             ? undefined
             : t("capacityCeiling", { value: format.number(value, 6) });
     const heading = outage ? t("editOutage") : t("reportOutage");
+    const changeOf = (data: FormData): OutageChange => {
+        const starts = plantInstant(data, "starts_at", timezone, t);
+        const ends = plantInstant(data, "ends_at", timezone, t);
+        if (!starts) throw new DisplayError(t("enterTheOutageStart"));
+        if (ends && Date.parse(ends) <= Date.parse(starts))
+            throw new DisplayError(t("resolutionAfterStart"));
+        const kind = INCIDENT_KINDS.find((value) => value === data.get("kind"));
+        if (!kind) throw new DisplayError(t("chooseAValidOutageType"));
+        const capacity = (key: string) =>
+            impact === "total"
+                ? 0
+                : impact === "unknown" || formText(data, key).trim() === ""
+                  ? null
+                  : Number(data.get(key));
+        const capacities = {
+            available_dc_mw: capacity("available_dc_mw"),
+            available_inverter_mw: capacity("available_inverter_mw"),
+            available_export_mw: capacity("available_export_mw"),
+        };
+        if (
+            impact === "reduced" &&
+            Object.values(capacities).every((value) => value === null)
+        )
+            throw new DisplayError(t("capacityRequired"));
+        const values = {
+            kind,
+            title: serverTrim(formText(data, "title")),
+            notes: serverTrim(formText(data, "notes")),
+            starts_at: starts,
+            ends_at: ends,
+            ...capacities,
+        };
+        const reason = formText(data, "reason");
+        return outage
+            ? { action: "update", outage, values, reason }
+            : { action: "create", values, reason };
+    };
     return (
         <section aria-label={heading} ref={section}>
             <h3>{heading}</h3>
@@ -136,54 +191,8 @@ export function OutageEditor({
                             : t("saveOutage")
                         : proposals("send")
                 }
-                onSubmit={async (data) => {
-                    const starts = plantInstant(data, "starts_at", timezone, t);
-                    const ends = plantInstant(data, "ends_at", timezone, t);
-                    if (!starts)
-                        throw new DisplayError(t("enterTheOutageStart"));
-                    if (ends && Date.parse(ends) <= Date.parse(starts))
-                        throw new DisplayError(t("resolutionAfterStart"));
-                    const kind = INCIDENT_KINDS.find(
-                        (value) => value === data.get("kind"),
-                    );
-                    if (!kind)
-                        throw new DisplayError(t("chooseAValidOutageType"));
-                    const capacity = (key: string) =>
-                        impact === "total"
-                            ? 0
-                            : impact === "unknown" ||
-                                formText(data, key).trim() === ""
-                              ? null
-                              : Number(data.get(key));
-                    const capacities = {
-                        available_dc_mw: capacity("available_dc_mw"),
-                        available_inverter_mw: capacity(
-                            "available_inverter_mw",
-                        ),
-                        available_export_mw: capacity("available_export_mw"),
-                    };
-                    if (
-                        impact === "reduced" &&
-                        Object.values(capacities).every(
-                            (value) => value === null,
-                        )
-                    )
-                        throw new DisplayError(t("capacityRequired"));
-                    const values = {
-                        kind,
-                        title: formText(data, "title").trim(),
-                        notes: formText(data, "notes").trim(),
-                        starts_at: starts,
-                        ends_at: ends,
-                        ...capacities,
-                    };
-                    const reason = formText(data, "reason");
-                    await onSubmit(
-                        outage
-                            ? { action: "update", outage, values, reason }
-                            : { action: "create", values, reason },
-                    );
-                }}
+                attempt={attempt && { repeats: repeatsWith(attempt, changeOf) }}
+                onSubmit={(data) => onSubmit(changeOf(data))}
             >
                 {!direct && <ProposalReason />}
                 <div className="form-grid">

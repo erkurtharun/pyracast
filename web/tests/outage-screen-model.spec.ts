@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { ApiError, UnconfirmedError } from "../src/lib/api/errors";
 import {
     attemptPayload,
     INITIAL_OUTAGES,
@@ -140,12 +141,21 @@ function sentChange({ screen }: Step): OutageChange {
     return { action: "cancel", outage: target, reason: "" };
 }
 
-const failed = (step: Step, current: OutageRow | null, answered = true) =>
+const refused = () => new ApiError("Refused.", { status: 409 });
+const lostAnswer = () => new UnconfirmedError("Not confirmed.");
+const throttled = () =>
+    new ApiError("Too many requests.", { status: 429, code: "throttled" });
+
+const failed = (
+    step: Step,
+    current: OutageRow | null,
+    error: unknown = refused(),
+) =>
     run(step, {
         type: "sendFailed",
         change: sentChange(step),
         current,
-        answered,
+        error,
         direct: step.live.direct,
     });
 
@@ -158,11 +168,19 @@ const events = {
     close: (step: Step) => run(step, { type: "close" }),
     discard: (step: Step) => run(step, { type: "discard" }),
     send: (step: Step) =>
-        run(step, { type: "send", payload: "first", key: "key-1" }),
+        run(step, {
+            type: "send",
+            payload: "first",
+            key: "key-1",
+            change: sentChange(step),
+        }),
     sent: (step: Step) =>
-        run(step, { type: "sent", proposed: !step.live.direct }),
+        run(step, {
+            type: "sent",
+            receipt: step.live.direct ? null : "pending",
+        }),
     fail: (step: Step) => failed(step, null),
-    lost: (step: Step) => failed(step, null, false),
+    lost: (step: Step) => failed(step, null, lostAnswer()),
     // A conflict answer carries the outage as it now stands, with the member's own pending request when there is one.
     conflict: (step: Step) =>
         failed(step, outage(4, { revision: 3, title: "Changed" })),
@@ -229,8 +247,8 @@ function phase({ screen, live }: Step) {
         live.direct ? "direct:" : "",
         status,
         workflow?.stale ? "+stale" : "",
-        workflow?.attempt?.unanswered ? "+lost" : "",
-        screen.submitted ? "+sent" : "",
+        workflow?.attempt ? "+lost" : "",
+        screen.receipt ? "+sent" : "",
         shown.length ? `|${shown.join(",")}` : "",
     ].join("");
 }
@@ -857,35 +875,39 @@ test("a cancelled outage offers no proposal, and an administrator is offered eve
     expect(outageControls(INITIAL_OUTAGES, unread).create).toBe(false);
 });
 
-test("the idempotency key belongs to the open workflow's attempt", () => {
-    const key = (step: Step) => step.screen.workflow?.attempt?.key;
-    const sending = states["update4/sending"];
-    expect(key(sending)).toBe("key-1");
-    const again = run(events.fail(sending), {
-        type: "send",
-        payload: "first",
-        key: "key-2",
-    });
-    expect(key(again)).toBe("key-1");
-    const changed = run(events.fail(again), {
-        type: "send",
-        payload: "second",
-        key: "key-3",
-    });
-    expect(key(changed)).toBe("key-3");
-    for (const event of [
-        events.openCreate,
-        events.openOther,
-        events.close,
-        events.send,
-    ])
-        expect(key(event(changed))).toBe("key-3");
-    const reopened = events.openUpdate(events.close(events.fail(changed)));
+const sentKey = ({ screen }: Step) =>
+    screen.workflow?.phase.status === "sending"
+        ? screen.workflow.phase.sent.key
+        : undefined;
+const sendAs = (payload: string, key: string) => (step: Step) =>
+    run(step, { type: "send", payload, key, change: sentChange(step) });
+
+test("a send repeats the workflow's write whose answer was lost with its key, and any other send is a new request", () => {
+    const first = sendAs("first", "key-1")(states["update4/idle"]);
+    expect(sentKey(first)).toBe("key-1");
+    const afterRefusal = sendAs("first", "key-2")(events.fail(first));
+    expect(sentKey(afterRefusal)).toBe("key-2");
+    const lost = events.lost(afterRefusal);
+    expect(lost.screen.workflow?.attempt?.key).toBe("key-2");
+    expect(sentKey(sendAs("first", "key-3")(lost))).toBe("key-2");
+    const other = sendAs("second", "key-4")(lost);
+    expect(sentKey(other)).toBe("key-4");
+    const otherRefused = events.fail(other);
+    expect(sentKey(sendAs("first", "key-5")(otherRefused))).toBe("key-2");
+    const busy = failed(sendAs("first", "key-6")(lost), null, throttled());
+    expect(sentKey(sendAs("first", "key-7")(busy))).toBe("key-2");
+    const repeatRefused = events.fail(sendAs("first", "key-8")(lost));
+    expect(repeatRefused.screen.workflow?.attempt).toBeNull();
+    expect(sentKey(sendAs("first", "key-9")(repeatRefused))).toBe("key-9");
+    const otherLost = events.lost(other);
+    expect(otherLost.screen.workflow?.attempt?.key).toBe("key-4");
+    expect(sentKey(sendAs("first", "key-10")(otherLost))).toBe("key-10");
+    const reopened = events.openUpdate(events.close(otherRefused));
     expect(reopened.screen.workflow?.attempt).toBeNull();
-    expect(key(events.send(reopened))).toBe("key-1");
+    expect(sentKey(sendAs("first", "key-11")(reopened))).toBe("key-11");
 });
 
-test("a direct creation keeps its key while the values sent stay the same, also after an unconfirmed send, and an edit gets a new key", () => {
+test("a direct creation whose answer was lost keeps its key while the values sent stay the same, and an edit gets a new key", () => {
     const creation = (title: string): OutageChange => ({
         action: "create",
         values: {
@@ -903,27 +925,27 @@ test("a direct creation keeps its key while the values sent stay the same, also 
     const send = (step: Step, change: OutageChange, key: string) =>
         run(step, {
             type: "send",
-            payload: attemptPayload(change, true),
+            payload: attemptPayload(change, true, 31),
             key,
+            change,
         });
-    const key = (step: Step) => step.screen.workflow?.attempt?.key;
     const first = send(
         events.openCreate(directStart),
         creation("Inverter offline"),
         "key-1",
     );
     const again = send(
-        events.fail(first),
+        events.lost(first),
         creation("Inverter offline"),
         "key-2",
     );
-    expect(key(again)).toBe("key-1");
+    expect(sentKey(again)).toBe("key-1");
     const edited = send(
-        events.fail(again),
+        events.lost(again),
         creation("Inverter tripped"),
         "key-3",
     );
-    expect(key(edited)).toBe("key-3");
+    expect(sentKey(edited)).toBe("key-3");
 });
 
 test("a direct edit refused as stale ends as saved only when an unanswered try of the same change left exactly that write", () => {
@@ -951,24 +973,25 @@ test("a direct edit refused as stale ends as saved only when an unanswered try o
     const send = (step: Step, change: OutageChange) =>
         run(step, {
             type: "send",
-            payload: attemptPayload(change, step.live.direct),
+            payload: attemptPayload(change, step.live.direct, 31),
             key: "key",
+            change,
         });
     const refuse = (
         step: Step,
         change: OutageChange,
         current: OutageRow | null,
-        answered = true,
+        error: unknown = refused(),
     ) =>
         run(step, {
             type: "sendFailed",
             change,
             current,
-            answered,
+            error,
             direct: step.live.direct,
         });
     const lostOnce = (opened: Step, change = edit()) =>
-        send(refuse(send(opened, change), change, null, false), change);
+        send(refuse(send(opened, change), change, null, lostAnswer()), change);
     const ending = (step: Step) => step.screen.workflow?.phase;
     const opened = events.openUpdate(directStart);
 
@@ -982,8 +1005,23 @@ test("a direct edit refused as stale ends as saved only when an unanswered try o
     expect(ending(saved)).toEqual({ status: "saved" });
     expect(events.sent(saved).screen).toEqual({
         workflow: null,
-        submitted: false,
+        receipt: null,
     });
+
+    const throttledRepeat = refuse(lostOnce(opened), edit(), null, throttled());
+    expect(
+        ending(refuse(send(throttledRepeat, edit()), edit(), written)),
+    ).toEqual({ status: "saved" });
+    for (const status of [200, 502, 503]) {
+        const lost = new UnconfirmedError("Not confirmed.", { status });
+        const repeated = send(
+            refuse(send(opened, edit()), edit(), null, lost),
+            edit(),
+        );
+        expect(ending(refuse(repeated, edit(), written))).toEqual({
+            status: "saved",
+        });
+    }
 
     const cancelled = refuse(lostOnce(opened), edit(), {
         ...written,
@@ -1009,10 +1047,12 @@ test("a direct edit refused as stale ends as saved only when an unanswered try o
         ending(refuse(lostOnce(opened), edit(), { ...written, revision: 4 })),
     ).toEqual({ status: "idle" });
 
-    const refused = refuse(send(opened, edit()), edit(), null);
-    expect(ending(refuse(send(refused, edit()), edit(), written))).toEqual({
-        status: "idle",
-    });
+    const refusedFirst = refuse(send(opened, edit()), edit(), null);
+    expect(ending(refuse(send(refusedFirst, edit()), edit(), written))).toEqual(
+        {
+            status: "idle",
+        },
+    );
 
     const answeredAfterLoss = refuse(lostOnce(opened), edit(), null);
     expect(
@@ -1020,7 +1060,7 @@ test("a direct edit refused as stale ends as saved only when an unanswered try o
     ).toEqual({ status: "idle" });
 
     const changed = edit({ title: "Grid tripped" });
-    const afterLoss = refuse(send(opened, edit()), edit(), null, false);
+    const afterLoss = refuse(send(opened, edit()), edit(), null, lostAnswer());
     expect(
         ending(
             refuse(send(afterLoss, changed), changed, {
@@ -1130,4 +1170,116 @@ test("a workflow whose outage closed meanwhile cannot send, and discarding its s
     expect(events.discard(states["cancel4/idle"]).screen).toBe(
         states["cancel4/idle"].screen,
     );
+});
+
+test("restoring the input of an outage edit whose answer was lost sends that edit against its own revision after another edit was refused as stale", () => {
+    const opened = events.openUpdate(directStart);
+    const workflowOutage = (step: Step) =>
+        step.screen.workflow && step.screen.workflow.kind !== "create"
+            ? step.screen.workflow.outage
+            : outage(4);
+    const edit = (step: Step, title: string): OutageChange => {
+        const target = workflowOutage(step);
+        return {
+            action: "update",
+            outage: target,
+            values: { ...valuesOf(target), title },
+            reason: "",
+        };
+    };
+    const send = (step: Step, change: OutageChange, key: string) =>
+        run(step, {
+            type: "send",
+            payload: attemptPayload(change, true, 31),
+            key,
+            change,
+        });
+    const sentOf = (step: Step) =>
+        step.screen.workflow?.phase.status === "sending"
+            ? step.screen.workflow.phase.sent
+            : undefined;
+    const fail = (step: Step, current: OutageRow | null, error: unknown) =>
+        run(step, {
+            type: "sendFailed",
+            change: sentOf(step)!.change,
+            current,
+            error,
+            direct: true,
+        });
+    const first = send(opened, edit(opened, "A"), "key-a");
+    const lost = fail(first, null, lostAnswer());
+    const applied = outage(4, { revision: 3, title: "A" });
+    const other = send(lost, edit(lost, "B"), "key-b");
+    const stale = fail(other, applied, refused());
+    expect(workflowOutage(stale).revision).toBe(3);
+    const again = send(stale, edit(stale, "A"), "key-c");
+    expect(sentOf(again)).toMatchObject({
+        key: "key-a",
+        change: { outage: { revision: 2 }, values: { title: "A" } },
+    });
+    expect(fail(again, applied, refused()).screen.workflow?.phase).toEqual({
+        status: "saved",
+    });
+    const fresh = send(stale, edit(stale, "C"), "key-d");
+    expect(sentOf(fresh)).toMatchObject({
+        key: "key-d",
+        change: { outage: { revision: 3 } },
+    });
+});
+
+test("an outage request is named by its trimmed reason, the viewer's access and the plant's configuration", () => {
+    const create = (reason: string): OutageChange => ({
+        action: "create",
+        values: valuesOf(outage(4)),
+        reason,
+    });
+    const named = attemptPayload(create("Meter checked"), false, 31);
+    expect(attemptPayload(create(" Meter checked  "), false, 31)).toBe(named);
+    expect(attemptPayload(create("Meter checked"), false, 32)).not.toBe(named);
+    expect(attemptPayload(create("Meter checked"), true, 31)).not.toBe(named);
+    expect(attemptPayload(create("Meter"), false, 31)).not.toBe(named);
+    const update = (revision: number): OutageChange => ({
+        action: "update",
+        outage: outage(4, { revision }),
+        values: valuesOf(outage(4)),
+        reason: "",
+    });
+    expect(attemptPayload(update(2), false, 31)).toBe(
+        attemptPayload(update(3), false, 31),
+    );
+});
+
+test("an outage request is named by the configuration the server checks it against and by its reason as the server strips it", () => {
+    const update = (ends_at: string | null): OutageChange => ({
+        action: "update",
+        outage: outage(4, { ends_at, declared_configuration_id: 31 }),
+        values: { ...valuesOf(outage(4)), ends_at },
+        reason: "",
+    });
+    const ended = "2026-11-09T10:00:00Z";
+    expect(attemptPayload(update(ended), true, 32)).toBe(
+        attemptPayload(update(ended), true, 31),
+    );
+    expect(attemptPayload(update(null), true, 32)).not.toBe(
+        attemptPayload(update(null), true, 31),
+    );
+    const resolve: OutageChange = {
+        action: "resolve",
+        outage: outage(4),
+        ends_at: ended,
+        reason: "Restarted",
+    };
+    expect(attemptPayload(resolve, false, 32)).toBe(
+        attemptPayload(resolve, false, 31),
+    );
+    const create = (reason: string): OutageChange => ({
+        action: "create",
+        values: valuesOf(outage(4)),
+        reason,
+    });
+    const named = attemptPayload(create("Meter checked"), false, 31);
+    expect(
+        attemptPayload(create("\u0085Meter checked\u001f　"), false, 31),
+    ).toBe(named);
+    expect(attemptPayload(create("Meter checked﻿"), false, 31)).not.toBe(named);
 });

@@ -8,7 +8,13 @@ import { useApiList, useRefresh } from "@/lib/api/query";
 import { deviceZone } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
 import type { components } from "@/lib/schema";
-import { Field, FieldErrors, formText } from "@/ui/form";
+import {
+    Field,
+    FieldErrors,
+    formText,
+    UnconfirmedTitle,
+    useWriteErrorMessage,
+} from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import { useForgetDeletion } from "@/features/trash/recent-deletion";
 import {
@@ -35,7 +41,7 @@ type Submission =
     | { kind: "saving" }
     | {
           kind: "error";
-          message: string;
+          error: unknown;
           fields: Record<string, string>;
           holder: number | null;
       };
@@ -109,6 +115,7 @@ function Wizard({
     onOpen,
 }: WizardProps & { existing?: Site; trashed: readonly Trashed[] }) {
     const t = useTranslations("PlantOnboarding");
+    const writeErrorMessage = useWriteErrorMessage();
     const format = useFormat();
     const refresh = useRefresh();
     const forget = useForgetDeletion();
@@ -156,6 +163,12 @@ function Wizard({
     const busy = saving || offer.kind === "restoring";
     const fields = status.kind === "error" ? status.fields : {};
     const holder = status.kind === "error" ? status.holder : null;
+    const failure =
+        status.kind === "error"
+            ? writeErrorMessage(status.error, {
+                  fallback: t("unableToSaveThisPlant"),
+              })
+            : "";
     const at = (name: (typeof steps)[number]) => steps.indexOf(name);
     // Focus only after the commit that shows the step and re-enables its fields.
     const [focusRequest, setFocusRequest] = useState<{ field?: string }>();
@@ -261,7 +274,7 @@ function Wizard({
             const refused = error instanceof ApiError ? error.fields : {};
             setStatus({
                 kind: "error",
-                message: displayMessage(error, t("unableToSaveThisPlant")),
+                error,
                 fields: refused,
                 holder: holderOf(error),
             });
@@ -562,8 +575,9 @@ function Wizard({
                         tabIndex={-1}
                         ref={errorAlert}
                     >
-                        <p>{status.message}</p>
-                        {unplacedFields(fields, !!existing, status.message).map(
+                        <UnconfirmedTitle error={status.error} />
+                        <p>{failure}</p>
+                        {unplacedFields(fields, !!existing, failure).map(
                             ([field, message]) => (
                                 <p key={field}>{message}</p>
                             ),

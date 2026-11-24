@@ -39,12 +39,24 @@ export class ApiError extends DisplayError {
 // Status 0 like a lost connection, but this tab refused the request before it left.
 export class NotSentError extends ApiError {}
 
-export function answerLost(error: unknown) {
-    return (
-        error instanceof ApiError &&
-        error.status === 0 &&
-        !(error instanceof NotSentError)
-    );
+export class UnconfirmedError extends ApiError {}
+
+export function answerLost(error: unknown): boolean {
+    return error instanceof UnconfirmedError;
+}
+
+// A POST that changes nothing, such as a preview, failed as a read would when its answer was lost.
+export function readFailure(error: unknown) {
+    if (!(error instanceof UnconfirmedError)) return error;
+    const { status } = error;
+    const t = browserErrors();
+    const message =
+        status === 0
+            ? t("network")
+            : status < 300
+              ? t("invalidResponse")
+              : t("request", { status });
+    return new ApiError(message, { status });
 }
 
 // The compiler keeps this set equal to the generated vocabulary.
@@ -171,7 +183,7 @@ type ContractBody = Record<string, unknown> & {
     message: string;
 };
 
-function isContractBody(data: unknown): data is ContractBody {
+export function isContractBody(data: unknown): data is ContractBody {
     return (
         isRecord(data) &&
         typeof data.code === "string" &&
