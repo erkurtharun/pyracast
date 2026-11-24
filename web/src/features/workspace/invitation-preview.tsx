@@ -2,11 +2,11 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api/client";
-import { ApiError } from "@/lib/api/errors";
+import { ApiError, readFailure } from "@/lib/api/errors";
 import { useFormat } from "@/lib/format/use-format";
 import type { components } from "@/lib/schema";
 import { useErrorMessage } from "@/ui/form";
-import { Notice } from "@/ui/ui";
+import { Notice, ReadFailed } from "@/ui/ui";
 import { useLabel } from "@/ui/vocabulary";
 
 type Preview = components["schemas"]["InvitationPreviewOutput"];
@@ -15,14 +15,15 @@ export type PreviewState =
     | { status: "loading" }
     | { status: "ready"; preview: Preview }
     | { status: "unavailable" }
-    | { status: "failed"; error: unknown };
+    | { status: "failed"; error: unknown; retry: () => void };
 
 // The answer depends on the signed-in account: the account that accepted still sees its invitation.
 export function useInvitationPreview(
     token: string | null | undefined,
     account: number | undefined,
 ): PreviewState {
-    const request = `${account ?? ""}:${token ?? ""}`;
+    const [attempt, setAttempt] = useState(0);
+    const request = `${account ?? ""}:${token ?? ""}:${attempt}`;
     const [answer, setAnswer] = useState<{
         request: string;
         state: PreviewState;
@@ -43,7 +44,11 @@ export function useInvitationPreview(
                         failure instanceof ApiError &&
                         failure.code === "invitation_unavailable"
                             ? { status: "unavailable" }
-                            : { status: "failed", error: failure },
+                            : {
+                                  status: "failed",
+                                  error: readFailure(failure),
+                                  retry: () => setAttempt((count) => count + 1),
+                              },
                 });
             },
         );
@@ -64,7 +69,14 @@ export function InvitationDetails({ state }: { state: PreviewState }) {
     if (state.status === "unavailable")
         return <Notice error>{t("invitationUnavailable")}</Notice>;
     if (state.status === "failed")
-        return <Notice error>{errorMessage(state.error)}</Notice>;
+        return (
+            <ReadFailed
+                resource={{
+                    error: errorMessage(state.error),
+                    retry: state.retry,
+                }}
+            />
+        );
     const { preview } = state;
     return (
         <div className="invitation-details">

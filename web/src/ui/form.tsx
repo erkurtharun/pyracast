@@ -12,8 +12,9 @@ import {
     type ReactNode,
     type RefObject,
 } from "react";
-import { ApiError, displayMessage } from "@/lib/api/errors";
+import { ApiError, displayMessage, UnconfirmedError } from "@/lib/api/errors";
 import { useAnnounce } from "./live-region";
+import { Notice } from "./ui";
 import { useCanManageWorkspace } from "./workspace-access";
 
 type Variant = "primary" | "secondary" | "danger";
@@ -44,6 +45,49 @@ export function FieldErrors({
 export function useErrorMessage() {
     const t = useTranslations("Common");
     return (error: unknown) => displayMessage(error, t("unexpected"));
+}
+
+// `repeatable` only while the next send is the identical request of a write the server applies once, and can be sent.
+function useWriteErrorMessage() {
+    const errorMessage = useErrorMessage();
+    const t = useTranslations("Errors");
+    return (error: unknown, repeatable = false) =>
+        error instanceof UnconfirmedError
+            ? t(repeatable ? "unconfirmedRepeatable" : "unconfirmed")
+            : errorMessage(error);
+}
+
+function useErrorTitle() {
+    const t = useTranslations("Errors");
+    return (error: unknown, title: string) =>
+        error instanceof UnconfirmedError ? t("unconfirmedTitle") : title;
+}
+
+export function WriteFailure({
+    error,
+    repeatable = false,
+    lead,
+    children,
+}: {
+    error: unknown;
+    repeatable?: boolean;
+    lead?: string;
+    children?: ReactNode;
+}) {
+    const t = useTranslations("Errors");
+    const message = useWriteErrorMessage()(error, repeatable);
+    return (
+        <Notice error>
+            {error instanceof UnconfirmedError && (
+                <strong>{t("unconfirmedTitle")}</strong>
+            )}
+            <p>
+                {lead && `${lead} `}
+                {message}
+                {children}
+            </p>
+        </Notice>
+    );
 }
 
 function describedBy(...ids: (string | false | undefined)[]) {
@@ -340,7 +384,7 @@ type FormState =
     | { status: "idle" | "pending" | "success" }
     | {
           status: "error";
-          message: string;
+          error: unknown;
           fields: Record<string, string>;
           entries: FieldEntry[];
       };
@@ -355,6 +399,7 @@ export function ActionForm({
     success,
     variant = "primary",
     onEdit,
+    repeatable,
 }: {
     children: ReactNode;
     submit: string;
@@ -367,12 +412,16 @@ export function ActionForm({
     errorTitle?: string;
     success?: string | null;
     variant?: Variant;
+    repeatable?: (data: FormData) => boolean;
 }) {
     const t = useTranslations("Common");
-    const errorMessage = useErrorMessage();
+    const writeErrorMessage = useWriteErrorMessage();
+    const errorHeading = useErrorTitle();
     const canManage = useCanManageWorkspace();
     const canSubmit = permitted ?? canManage;
     const [state, setState] = useState<FormState>({ status: "idle" });
+    // What the form held at its last submission or change; disabled controls are missing from a form's data.
+    const [entered, setEntered] = useState<FormData | null>(null);
     const busy = pending ?? state.status === "pending";
     const running = useRef(false);
     const errorRef = useRef<HTMLDivElement>(null);
@@ -380,13 +429,21 @@ export function ActionForm({
     useEffect(() => {
         if (state.status === "error") errorRef.current?.focus();
     }, [state]);
+    const repeats =
+        state.status === "error" &&
+        state.error instanceof UnconfirmedError &&
+        canSubmit &&
+        !busy &&
+        !!entered &&
+        !!repeatable?.(entered);
     return (
         <form
             ref={formRef}
             className={canSubmit ? undefined : "readonly-form"}
-            onChange={() => {
+            onChange={(event) => {
                 onEdit?.();
                 if (state.status === "success") setState({ status: "idle" });
+                if (repeatable) setEntered(new FormData(event.currentTarget));
             }}
             onSubmit={(event) =>
                 void (async () => {
@@ -394,6 +451,7 @@ export function ActionForm({
                     if (!canSubmit || busy || running.current) return;
                     running.current = true;
                     const data = new FormData(event.currentTarget);
+                    setEntered(data);
                     setState({ status: "pending" });
                     try {
                         await onSubmit(data);
@@ -403,7 +461,7 @@ export function ActionForm({
                             error instanceof ApiError ? error.fields : {};
                         setState({
                             status: "error",
-                            message: errorMessage(error),
+                            error,
                             fields,
                             entries: fieldEntries(formRef.current, fields),
                         });
@@ -416,8 +474,11 @@ export function ActionForm({
             {state.status === "error" && (
                 <FormAlert
                     alertRef={errorRef}
-                    title={errorTitle ?? t("saveFailed")}
-                    message={state.message}
+                    title={errorHeading(
+                        state.error,
+                        errorTitle ?? t("saveFailed"),
+                    )}
+                    message={writeErrorMessage(state.error, repeats)}
                     entries={state.entries}
                     onSelect={(name) => {
                         const field = formRef.current?.elements.namedItem(name);
@@ -471,11 +532,12 @@ export function AsyncButton({
     disabled?: boolean;
 }) {
     const t = useTranslations("Common");
-    const errorMessage = useErrorMessage();
+    const writeErrorMessage = useWriteErrorMessage();
+    const errorHeading = useErrorTitle();
     const announce = useAnnounce();
     const canManage = useCanManageWorkspace();
     const [state, setState] = useState<
-        { status: "idle" | "pending" } | { status: "error"; message: string }
+        { status: "idle" | "pending" } | { status: "error"; error: unknown }
     >({ status: "idle" });
     const running = useRef(false);
     const alertRef = useRef<HTMLDivElement>(null);
@@ -488,8 +550,11 @@ export function AsyncButton({
             {state.status === "error" && (
                 <FormAlert
                     alertRef={alertRef}
-                    title={errorTitle ?? t("actionFailed")}
-                    message={state.message}
+                    title={errorHeading(
+                        state.error,
+                        errorTitle ?? t("actionFailed"),
+                    )}
+                    message={writeErrorMessage(state.error)}
                 />
             )}
             <button
@@ -507,10 +572,7 @@ export function AsyncButton({
                             setState({ status: "idle" });
                             if (success) announce(success);
                         } catch (error) {
-                            setState({
-                                status: "error",
-                                message: errorMessage(error),
-                            });
+                            setState({ status: "error", error });
                         } finally {
                             running.current = false;
                         }

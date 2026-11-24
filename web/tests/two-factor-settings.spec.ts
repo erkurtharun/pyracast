@@ -856,6 +856,32 @@ for (const operation of ["remove", "replace"] as const) {
     });
 }
 
+for (const lost of ["aborted", "cut"] as const)
+    test(`replacing recovery codes whose answer was ${lost} says the change is unconfirmed without calling a repeat safe`, async ({
+        page,
+    }) => {
+        await mockTwoFactor(page, { enabled: true });
+        await page.route(`**${authenticatorsPath}/recovery-codes`, (route) =>
+            route.request().method() !== "POST"
+                ? route.fallback()
+                : lost === "aborted"
+                  ? route.abort("failed")
+                  : route.fulfill({
+                        status: 200,
+                        contentType: "application/json",
+                        body: "{",
+                    }),
+        );
+        await openSettings(page);
+        await replaceCodes(page);
+        const alert = page.getByRole("alert").filter({
+            hasText:
+                "The server did not confirm the change. It may have been saved; check before you send it again.",
+        });
+        await expect(alert).toBeVisible();
+        await expect(alert).not.toContainText("sending it again unchanged");
+    });
+
 test("an activation committed before a lost response reconciles the actual enabled status", async ({
     page,
 }) => {
