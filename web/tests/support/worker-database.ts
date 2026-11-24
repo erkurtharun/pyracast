@@ -10,11 +10,20 @@ type Request = {
     onerror: Handler;
     onupgradeneeded: Handler;
 };
+type Stage = "open" | "readonly" | "readwrite";
+type State = "waiting" | "running" | "committing" | "finished";
 
 export type SavedRecords = {
     holder?: unknown;
     plants?: object[];
     days?: object[];
+};
+
+type Pause = {
+    created: Promise<void>;
+    reached: Promise<void>;
+    release: () => void;
+    fail: () => void;
 };
 
 const KEY_PATHS: Record<string, string[] | null> = {
@@ -63,8 +72,16 @@ class KeyRange {
 
 function keyOf(store: string, value: unknown, key?: Key): Key {
     const path = KEY_PATHS[store];
-    if (!path) return key as Key;
+    if (key !== undefined || !path) return key as Key;
     return path.map((field) => (value as Record<string, Key>)[field] as Key);
+}
+
+function putInto(stores: Stores, store: string, value: unknown, key?: Key) {
+    const stored = keyOf(store, value, key);
+    entriesOf(stores, store).set(JSON.stringify(stored), {
+        key: stored,
+        value: structuredClone(value),
+    });
 }
 
 function filled(records: SavedRecords): Stores {
@@ -73,16 +90,10 @@ function filled(records: SavedRecords): Stores {
         plants: new Map(),
         days: new Map(),
     };
-    const put = (store: string, value: unknown, key?: Key) => {
-        const stored = keyOf(store, value, key);
-        entriesOf(stores, store).set(JSON.stringify(stored), {
-            key: stored,
-            value: structuredClone(value),
-        });
-    };
-    if (records.holder !== undefined) put("holder", records.holder, "holder");
-    for (const plant of records.plants ?? []) put("plants", plant);
-    for (const day of records.days ?? []) put("days", day);
+    if (records.holder !== undefined)
+        putInto(stores, "holder", records.holder, "holder");
+    for (const plant of records.plants ?? []) putInto(stores, "plants", plant);
+    for (const day of records.days ?? []) putInto(stores, "days", day);
     return stores;
 }
 
@@ -94,6 +105,34 @@ const copied = (stores: Stores): Stores =>
         ]),
     );
 
+function gate() {
+    let create = () => {};
+    let reach = () => {};
+    let decided: boolean | undefined;
+    let waiting: ((passes: boolean) => void) | undefined;
+    const decide = (passes: boolean) => {
+        if (decided !== undefined) return;
+        decided = passes;
+        waiting?.(passes);
+    };
+    const pause: Pause = {
+        created: new Promise<void>((resolve) => (create = resolve)),
+        reached: new Promise<void>((resolve) => (reach = resolve)),
+        release: () => decide(true),
+        fail: () => decide(false),
+    };
+    return {
+        pause,
+        create: () => create(),
+        hold: (go: (passes: boolean) => void) => {
+            reach();
+            if (decided === undefined) waiting = go;
+            else go(decided);
+        },
+    };
+}
+
+// Transactions run one at a time in creation order; a paused one waits before it starts, as behind a lock.
 export function savedDatabase(
     options: {
         version?: number;
@@ -108,41 +147,123 @@ export function savedDatabase(
     const version = options.version ?? 1;
     const opens: string[] = [];
     const transactions: string[] = [];
+    const created: Record<Stage, number> = {
+        open: 0,
+        readonly: 0,
+        readwrite: 0,
+    };
+    const pauses = new Map<string, ReturnType<typeof gate>>();
+    const queue: (() => void)[] = [];
+    const idlers: (() => void)[] = [];
+    let busy = false;
     let connections = 0;
 
-    function transaction(names: string[], mode: string) {
+    function pause(stage: Stage, nth = 0) {
+        const held = gate();
+        pauses.set(`${stage} ${created[stage] + nth}`, held);
+        return held.pause;
+    }
+
+    function take(stage: Stage) {
+        const name = `${stage} ${created[stage]++}`;
+        const held = pauses.get(name);
+        pauses.delete(name);
+        held?.create();
+        return held;
+    }
+
+    function next() {
+        if (busy) return;
+        const start = queue.shift();
+        if (!start) return wake();
+        busy = true;
+        start();
+    }
+
+    function wake() {
+        if (busy || queue.length > 0 || connections > 0) return;
+        for (const resolve of idlers.splice(0)) resolve();
+    }
+
+    function transaction(names: string[], mode: "readonly" | "readwrite") {
         transactions.push(`${mode} ${names.join(",")}`);
-        const working = mode === "readwrite" ? copied(stores!) : stores!;
+        const held = take(mode);
+        let state: State = "waiting";
+        let locked = false;
+        let working = stores!;
         let pending = 0;
-        let finished = false;
+        const deferred: (() => void)[] = [];
+        const finish = (commit: boolean, error: unknown) => {
+            if (state === "finished") return;
+            state = "finished";
+            if (commit && mode === "readwrite") stores = working;
+            handle.error = error;
+            queueMicrotask(() => {
+                (commit ? handle.oncomplete : handle.onabort)?.({});
+                if (!locked) return;
+                busy = false;
+                next();
+            });
+        };
+        const settle = () =>
+            queueMicrotask(() => {
+                if (state !== "running" || pending > 0) return;
+                state = "committing";
+                finish(true, null);
+            });
+        const run = () => {
+            if (state !== "waiting") return;
+            state = "running";
+            working = mode === "readwrite" ? copied(stores!) : stores!;
+            for (const perform of deferred.splice(0)) perform();
+            settle();
+        };
+        const start = () => {
+            locked = true;
+            if (state === "finished") {
+                busy = false;
+                next();
+            } else if (held)
+                held.hold((passes) =>
+                    passes
+                        ? run()
+                        : finish(
+                              false,
+                              new DOMException("write failed", "UnknownError"),
+                          ),
+                );
+            else run();
+        };
         const handle = {
-            error: null,
+            error: null as unknown,
             oncomplete: null as Handler,
             onerror: null as Handler,
             onabort: null as Handler,
             objectStore: (name: string) => store(name),
+            abort: () => {
+                if (state === "committing" || state === "finished")
+                    throw new DOMException("finished", "InvalidStateError");
+                finish(false, null);
+            },
         };
-        const settle = () =>
-            queueMicrotask(() => {
-                if (pending > 0 || finished) return;
-                finished = true;
-                if (mode === "readwrite") stores = working;
-                handle.oncomplete?.({});
-            });
-        const request = (run: () => unknown) => {
-            if (finished)
-                throw new DOMException("finished", "InvalidStateError");
+        const request = (work: () => unknown) => {
+            if (state === "committing" || state === "finished")
+                throw new DOMException("finished", "TransactionInactiveError");
             const answer = {
                 result: undefined as unknown,
                 onsuccess: null as Handler,
             };
             pending++;
-            queueMicrotask(() => {
-                answer.result = run();
-                answer.onsuccess?.({ target: answer });
-                pending--;
-                settle();
-            });
+            const perform = () =>
+                queueMicrotask(() => {
+                    if (state !== "running") return;
+                    answer.result = work();
+                    answer.onsuccess?.({ target: answer });
+                    pending--;
+                    settle();
+                });
+            if (state === "running") perform();
+            else deferred.push(perform);
             return answer;
         };
         const store = (name: string) => {
@@ -153,7 +274,7 @@ export function savedDatabase(
                 [...entries().values()]
                     .filter(({ key }) => !range || range.includes(key))
                     .sort((first, second) => compareKeys(first.key, second.key))
-                    .map(({ value }) => structuredClone(value));
+                    .map((entry) => structuredClone(entry));
             const writable = () => {
                 if (mode !== "readwrite")
                     throw new DOMException(name, "ReadOnlyError");
@@ -165,24 +286,22 @@ export function savedDatabase(
                             entries().get(JSON.stringify(key))?.value,
                         ),
                     ),
-                getAll: (range?: KeyRange) => request(() => sorted(range)),
+                getAll: (range?: KeyRange) =>
+                    request(() => sorted(range).map(({ value }) => value)),
+                getAllKeys: (range?: KeyRange) =>
+                    request(() => sorted(range).map(({ key }) => key)),
                 clear: () => {
                     writable();
                     return request(() => entries().clear());
                 },
                 put: (value: unknown, key?: Key) => {
                     writable();
-                    return request(() => {
-                        const stored = keyOf(name, value, key);
-                        entries().set(JSON.stringify(stored), {
-                            key: stored,
-                            value: structuredClone(value),
-                        });
-                    });
+                    return request(() => putInto(working, name, value, key));
                 },
             };
         };
-        settle();
+        queue.push(start);
+        next();
         return handle;
     }
 
@@ -192,7 +311,10 @@ export function savedDatabase(
         return {
             version,
             onversionchange: null as Handler,
-            transaction: (names: string[], mode = "readonly") => {
+            transaction: (
+                names: string[],
+                mode: "readonly" | "readwrite" = "readonly",
+            ) => {
                 if (closed)
                     throw new DOMException("closed", "InvalidStateError");
                 return transaction(names, mode);
@@ -200,8 +322,25 @@ export function savedDatabase(
             close: () => {
                 if (!closed) connections--;
                 closed = true;
+                wake();
             },
         };
+    }
+
+    function answer(request: Request) {
+        if (!stores) {
+            let aborted = false;
+            request.transaction = { abort: () => (aborted = true) };
+            request.onupgradeneeded?.({ oldVersion: 0 });
+            if (aborted) {
+                request.error = new DOMException("aborted", "AbortError");
+                request.onerror?.({});
+                return;
+            }
+            stores = filled({});
+        }
+        request.result = connection();
+        request.onsuccess?.({});
     }
 
     const indexedDB = {
@@ -215,24 +354,21 @@ export function savedDatabase(
                 onerror: null,
                 onupgradeneeded: null,
             };
+            const held = take("open");
             if (options.answers === false) return request;
             queueMicrotask(() => {
-                if (!stores) {
-                    let aborted = false;
-                    request.transaction = { abort: () => (aborted = true) };
-                    request.onupgradeneeded?.({ oldVersion: 0 });
-                    if (aborted) {
-                        request.error = new DOMException(
-                            "aborted",
-                            "AbortError",
-                        );
-                        request.onerror?.({});
-                        return;
-                    }
-                    stores = filled({});
-                }
-                request.result = connection();
-                request.onsuccess?.({});
+                if (!held) answer(request);
+                else
+                    held.hold((passes) => {
+                        if (passes) answer(request);
+                        else {
+                            request.error = new DOMException(
+                                "denied",
+                                "UnknownError",
+                            );
+                            request.onerror?.({});
+                        }
+                    });
             });
             return request;
         },
@@ -250,6 +386,14 @@ export function savedDatabase(
         },
         opens,
         transactions,
+        pause,
+        idle: () =>
+            new Promise<void>((resolve) => {
+                idlers.push(resolve);
+                wake();
+            }),
+        put: (store: string, value: unknown, key?: Key) =>
+            putInto(stores!, store, value, key),
         openConnections: () => connections,
         exists: () => stores !== undefined,
         holder: () => values("holder")[0],

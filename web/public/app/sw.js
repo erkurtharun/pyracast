@@ -2,6 +2,7 @@ const DATABASE = "pyracast-saved";
 const FORMAT = 1;
 const READ_LIMIT_MS = 3000;
 const DAY_MS = 86_400_000;
+const MAX_TIME = 8.64e15;
 const COPY_DAYS = 90;
 const MAX_ROWS = 52;
 const LANGUAGES = ["en", "tr"];
@@ -186,7 +187,7 @@ const TEXTS = {
 };
 
 const STYLE = `body { margin: 0; font-family: system-ui, sans-serif; background: #f6f7f9; color: #1d2430; }
-main { max-width: 48rem; margin: 10vh auto; padding: 0 1rem; }
+main { max-width: 48rem; margin: 10vh auto; padding: 0 1rem; overflow-wrap: anywhere; }
 section + section { margin-top: 2rem; padding-top: 2rem; border-top: 1px solid #d6dae1; }
 a { color: inherit; display: inline-block; min-height: 1.5rem; line-height: 1.5rem; }
 li + li { margin-top: 0.25rem; }
@@ -196,7 +197,8 @@ nav ul, .days { padding-left: 1.25rem; }
 svg { display: block; width: 100%; height: 10rem; margin: 1rem 0; background: #ffffff; border: 1px solid #d6dae1; }
 .energy { fill: #2f6fb3; }
 .affected { fill: #c2581b; }
-table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+.table { overflow-x: auto; margin-top: 1rem; }
+table { border-collapse: collapse; width: 100%; overflow-wrap: break-word; }
 caption { text-align: left; font-weight: 600; margin-bottom: 0.5rem; }
 th, td { padding: 0.25rem 0.5rem; border-bottom: 1px solid #d6dae1; text-align: left; }
 td.number { text-align: right; font-variant-numeric: tabular-nums; }
@@ -280,51 +282,52 @@ function page(html) {
 
 async function saved(url) {
     const address = addressOf(new URL(url));
-    const records = await within(
-        connected((database) => readRecords(database, address)),
-    );
     const now = Date.now();
-    const holder = records && holderOf(records.holder);
-    let outcome;
-    if (holder && expired(holder, now)) {
-        if (
-            records.held > 0 &&
-            (await within(
-                connected((database) =>
-                    removeFigures(database, (stored) => expired(stored, now)),
-                ),
-            ))
-        )
-            outcome = "expired";
-    } else if (holder && address.removal && address.token === holder.removal) {
-        if (
-            await within(
-                connected((database) =>
-                    removeFigures(
-                        database,
-                        (stored) => stored.removal === address.token,
-                    ),
-                ),
-            )
-        )
-            outcome = "removed";
-    }
-    return buildPage(records, address, {
-        now,
-        zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        outcome,
-    });
+    const build = (copy, outcome) =>
+        buildPage(copy, address, {
+            now,
+            zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            outcome,
+        });
+    const read = await limited((limit) =>
+        connected(limit, (database) => readCopy(database, limit, address)),
+    );
+    if (!read.copy) return NOTICE;
+    const removal = removalOf(read.copy, address, now);
+    if (!removal) return build(read.copy);
+    const written = await limited((limit) =>
+        connected(limit, (database) =>
+            readCopy(database, limit, address, removal),
+        ),
+    );
+    if (!written.copy) return NOTICE;
+    return build(
+        written.copy,
+        written.outcome === "removed" ? removal.sentence : undefined,
+    );
+}
+
+function removalOf(copy, address, now) {
+    const holder = copy.holder;
+    if (!holder || copy.held === 0) return undefined;
+    if (expired(holder, now))
+        return { holder, deactivates: false, sentence: "expired" };
+    if (address.removal && address.token === holder.removal)
+        return { holder, deactivates: true, sentence: "removed" };
+    return undefined;
 }
 
 function addressOf(url) {
     const date = url.searchParams.get("date");
     const plant = url.pathname.match(
-        /^\/app\/w\/([1-9]\d*)\/plants\/([1-9]\d*)(?:\/([^/]*))?/,
+        /^\/app\/w\/([1-9]\d*)\/plants\/([1-9]\d*)(?=\/|$)(?:\/([^/]*))?/,
     );
-    if (plant)
+    const tenant = Number(plant?.[1]);
+    const site = Number(plant?.[2]);
+    if (isId(tenant) && isId(site))
         return {
-            tenant: Number(plant[1]),
-            site: Number(plant[2]),
+            tenant,
+            site,
             kind: plant[3] === "production" ? "production" : "forecast",
             date: isDate(date) ? date : undefined,
         };
@@ -336,20 +339,31 @@ function addressOf(url) {
     };
 }
 
-function within(work) {
-    return new Promise((resolve) => {
-        const timer = setTimeout(() => resolve(undefined), READ_LIMIT_MS);
-        work.then(
-            (value) => {
-                clearTimeout(timer);
-                resolve(value);
-            },
-            () => {
-                clearTimeout(timer);
-                resolve(undefined);
-            },
-        );
+function limited(work) {
+    const limit = { over: false, transaction: undefined };
+    const finished = work(limit).then(
+        (copy) => ({ outcome: copy.outcome ?? "read", copy }),
+        () => ({ outcome: "failed" }),
+    );
+    let timer;
+    const late = new Promise((resolve) => {
+        timer = setTimeout(() => {
+            limit.over = true;
+            resolve({ outcome: "timeout" });
+            if (limit.transaction) abandoned(limit.transaction);
+        }, READ_LIMIT_MS);
     });
+    return Promise.race([finished, late]).finally(() => clearTimeout(timer));
+}
+
+// abort() throws once the transaction has begun to commit; that write then stands.
+function abandoned(transaction) {
+    try {
+        transaction.abort();
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 function opened() {
@@ -369,9 +383,10 @@ function opened() {
     });
 }
 
-async function connected(work) {
+async function connected(limit, work) {
     const database = await opened();
     try {
+        if (limit.over) throw new Error("The copy opened after its limit.");
         return await work(database);
     } finally {
         database.close();
@@ -386,56 +401,83 @@ function completed(transaction, result) {
     });
 }
 
-function readRecords(database, address) {
+function readCopy(database, limit, address, removal) {
     const transaction = database.transaction(
         ["holder", "plants", "days"],
-        "readonly",
+        removal ? "readwrite" : "readonly",
     );
-    const records = { holder: undefined, plants: [], days: [], held: 0 };
+    limit.transaction = transaction;
+    const copy = {
+        holder: undefined,
+        held: 0,
+        plants: [],
+        plant: undefined,
+        days: [],
+        outcome: undefined,
+    };
     const holder = transaction.objectStore("holder").get("holder");
     holder.onsuccess = () => {
-        records.holder = holder.result;
+        copy.holder = holderOf(holder.result);
     };
-    const plants = transaction.objectStore("plants").getAll();
-    plants.onsuccess = () => {
-        records.plants = plants.result;
-        records.held = plants.result.length;
-        const plant = address.tenant
-            ? plants.result.find(
-                  (record) =>
-                      record?.tenant === address.tenant &&
-                      record?.site === address.site,
-              )
-            : undefined;
-        if (!plant || !isId(plant.plant)) return;
-        const key = [plant.tenant, plant.site, plant.plant, address.kind];
-        const days = transaction
-            .objectStore("days")
-            .getAll(IDBKeyRange.bound(key, [...key, []]));
-        days.onsuccess = () => {
-            records.days = days.result;
-        };
+    const plants = transaction.objectStore("plants");
+    const keys = plants.getAllKeys();
+    const values = plants.getAll();
+    values.onsuccess = () => {
+        copy.held = values.result.length;
+        if (removal) {
+            copy.outcome = removed(transaction, copy, removal);
+            if (copy.outcome === "removed") return;
+        }
+        copy.plants = values.result
+            .map((value, index) => plantOf(value, keys.result[index]))
+            .filter(Boolean);
+        copy.plant =
+            address.tenant === undefined
+                ? undefined
+                : copy.plants.find(
+                      (held) =>
+                          held.tenant === address.tenant &&
+                          held.site === address.site,
+                  );
+        if (copy.plant) readDays(transaction, copy, address.kind);
     };
-    return completed(transaction, () => records);
+    return completed(transaction, () => copy);
 }
 
-function removeFigures(database, applies) {
-    const transaction = database.transaction(
-        ["holder", "plants", "days"],
-        "readwrite",
-    );
-    const holders = transaction.objectStore("holder");
-    const stored = holders.get("holder");
-    let removed = false;
-    stored.onsuccess = () => {
-        const holder = holderOf(stored.result);
-        if (!holder || !applies(holder)) return;
-        transaction.objectStore("plants").clear();
-        transaction.objectStore("days").clear();
-        holders.put({ ...stored.result, active: false }, "holder");
-        removed = true;
+function readDays(transaction, copy, kind) {
+    const { tenant, site, plant } = copy.plant;
+    const prefix = [tenant, site, plant, kind];
+    const range = IDBKeyRange.bound(prefix, [...prefix, []]);
+    const days = transaction.objectStore("days");
+    const keys = days.getAllKeys(range);
+    const values = days.getAll(range);
+    values.onsuccess = () => {
+        copy.days = values.result
+            .map((value, index) =>
+                dayOf(value, keys.result[index], copy.plant, kind),
+            )
+            .filter(Boolean);
     };
-    return completed(transaction, () => removed);
+}
+
+const HOLDER_IDENTITY = ["user", "session", "active", "confirmedAt", "removal"];
+
+function removed(transaction, copy, removal) {
+    if (
+        !copy.holder ||
+        HOLDER_IDENTITY.some(
+            (field) => copy.holder[field] !== removal.holder[field],
+        )
+    )
+        return "changed";
+    if (copy.held === 0) return "nothing";
+    transaction.objectStore("plants").clear();
+    transaction.objectStore("days").clear();
+    if (removal.deactivates)
+        transaction
+            .objectStore("holder")
+            .put({ ...copy.holder, active: false }, "holder");
+    return "removed";
 }
 
 function expired(holder, now) {
@@ -448,12 +490,18 @@ function expired(holder, now) {
 const isId = (value) => Number.isSafeInteger(value) && value > 0;
 const isText = (value) => typeof value === "string";
 const isFlag = (value) => typeof value === "boolean";
-const isTime = (value) => typeof value === "number" && Number.isFinite(value);
+const isTime = (value) =>
+    Number.isSafeInteger(value) && Math.abs(value) <= MAX_TIME;
 const isFigure = (value) =>
     value === null || (typeof value === "number" && Number.isFinite(value));
+const isEnergy = (value) => isFigure(value) && (value === null || value >= 0);
 const orNull = (check) => (value) => value === null || check(value);
 const isRecord = (value) =>
     typeof value === "object" && value !== null && !Array.isArray(value);
+const sameKey = (key, expected) =>
+    Array.isArray(key) &&
+    key.length === expected.length &&
+    key.every((part, index) => part === expected[index]);
 
 function isDate(value) {
     if (!isText(value) || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -461,12 +509,34 @@ function isDate(value) {
     return !Number.isNaN(day.getTime()) && day.toISOString().startsWith(value);
 }
 
+const INSTANT =
+    /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):(\d{2}))$/;
+
 function isInstant(value) {
+    const parts = isText(value) && INSTANT.exec(value);
+    if (!parts) return false;
+    const [, date, hour, minute, second, offsetHour = 0, offsetMinute = 0] =
+        parts;
     return (
-        isText(value) &&
-        /^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
-        !Number.isNaN(new Date(value).getTime())
+        isDate(date) &&
+        Number(hour) < 24 &&
+        Number(minute) < 60 &&
+        Number(second) < 60 &&
+        Number(offsetHour) < 24 &&
+        Number(offsetMinute) < 60 &&
+        !Number.isNaN(Date.parse(value))
     );
+}
+
+function ordered(rows) {
+    let previous = -Infinity;
+    return rows.every((row) => {
+        const start = Date.parse(row.start);
+        const end = Date.parse(row.end);
+        const follows = previous <= start && start < end;
+        previous = end;
+        return follows;
+    });
 }
 
 function isZone(value) {
@@ -493,14 +563,14 @@ function holderOf(value) {
         session: isText,
         active: isFlag,
         confirmedAt: isTime,
-        removal: (token) => isText(token) && /^[0-9a-f]{32}$/.test(token),
+        removal: (token) => isText(token) && /^[0-9a-f]{32}$/i.test(token),
         retryAt: orNull(isTime),
     })
         ? value
         : undefined;
 }
 
-function plantOf(value) {
+function plantOf(value, key) {
     return matches(value, {
         tenant: isId,
         site: isId,
@@ -510,13 +580,16 @@ function plantOf(value) {
         openedAt: orNull(isTime),
         attemptedAt: orNull(isTime),
         refreshedAt: orNull(isTime),
-    })
+    }) && sameKey(key, [value.tenant, value.site, value.plant])
         ? value
         : undefined;
 }
 
 const rowsOf = (check) => (rows) =>
-    Array.isArray(rows) && rows.length <= MAX_ROWS && rows.every(check);
+    Array.isArray(rows) &&
+    rows.length <= MAX_ROWS &&
+    rows.every(check) &&
+    ordered(rows);
 
 const FORECAST_DAY = {
     source_kind: isText,
@@ -537,8 +610,8 @@ const FORECAST_DAY = {
         matches(row, {
             start: isInstant,
             end: isInstant,
-            mwh: isFigure,
-            affected_mwh: isFigure,
+            mwh: isEnergy,
+            affected_mwh: isEnergy,
             sources: orNull(
                 (sources) => Array.isArray(sources) && sources.every(isText),
             ),
@@ -549,19 +622,40 @@ const FORECAST_DAY = {
 const PRODUCTION_DAY = {
     total_mwh: isFigure,
     complete: isFlag,
-    rows: rowsOf((row) =>
-        matches(row, {
-            start: isInstant,
-            end: isInstant,
-            mwh: isFigure,
-            quality: orNull(isText),
-            source: orNull(isText),
-            provisional: orNull(isFlag),
-        }),
+    rows: rowsOf(
+        (row) =>
+            matches(row, {
+                start: isInstant,
+                end: isInstant,
+                mwh: isEnergy,
+                quality: orNull(isText),
+                source: orNull(isText),
+                provisional: orNull(isFlag),
+            }) &&
+            [row.quality, row.source, row.provisional].every(
+                (field) => (field === null) === (row.mwh === null),
+            ),
     ),
 };
 
-function dayOf(value, plant, kind) {
+function forecastFits(day) {
+    if (day.unavailable_reason === null)
+        return (
+            day.source_kind === "mixed" ||
+            day.rows.every((row) => row.sources === null)
+        );
+    return (
+        day.freshness === "missing" &&
+        day.stale_reason === null &&
+        day.collected_at === null &&
+        day.total_mwh === null &&
+        day.partial === false &&
+        day.affected === null &&
+        day.rows.length === 0
+    );
+}
+
+function dayOf(value, key, plant, kind) {
     return matches(value, {
         tenant: (tenant) => tenant === plant.tenant,
         site: (site) => site === plant.site,
@@ -570,27 +664,32 @@ function dayOf(value, plant, kind) {
         date: isDate,
         timezone: isZone,
         ...(kind === "forecast" ? FORECAST_DAY : PRODUCTION_DAY),
-    })
+    }) &&
+        sameKey(key, [
+            plant.tenant,
+            plant.site,
+            plant.plant,
+            kind,
+            value.date,
+        ]) &&
+        (kind === "production" || forecastFits(value))
         ? value
         : undefined;
 }
 
-function buildPage(records, address, { now, zone, outcome }) {
-    const holder = records && holderOf(records.holder);
+function buildPage(copy, address, { now, zone, outcome }) {
+    const holder = copy.holder;
     if (!holder) return NOTICE;
     const languages = [holder.language];
     const sentence = (key) => (text) => `<p>${escape(text[key])}</p>\n`;
     if (outcome) return noticePage({ languages, body: sentence(outcome) });
     if (!holder.active || expired(holder, now))
         return noticePage({ languages });
-    const plants = records.plants
-        .map(plantOf)
-        .filter(Boolean)
-        .sort(
-            (first, second) =>
-                first.workspace.localeCompare(second.workspace) ||
-                first.name.localeCompare(second.name),
-        );
+    const plants = [...copy.plants].sort(
+        (first, second) =>
+            first.workspace.localeCompare(second.workspace) ||
+            first.name.localeCompare(second.name),
+    );
     const format = formats(holder.language, zone, now);
     if (address.removal && address.token === undefined && plants.length > 0)
         return noticePage({
@@ -598,19 +697,14 @@ function buildPage(records, address, { now, zone, outcome }) {
             title: TEXTS[holder.language].confirmHeading,
             body: (text) => confirmation(text, holder.removal),
         });
-    const plant = address.tenant
-        ? plants.find(
-              (held) =>
-                  held.tenant === address.tenant && held.site === address.site,
-          )
-        : undefined;
-    if (plant) {
-        const days = records.days
-            .map((day) => dayOf(day, plant, address.kind))
-            .filter(Boolean)
-            .sort((first, second) => first.date.localeCompare(second.date));
-        return plantPage(holder.language, plant, address, days, format);
-    }
+    if (copy.plant)
+        return plantPage(
+            holder.language,
+            copy.plant,
+            address,
+            copy.days,
+            format,
+        );
     return noticePage({
         languages,
         body: (text) => savedList(text, plants, format),
@@ -776,16 +870,19 @@ function label(labels, code) {
 }
 
 function intervalFormat(language, day) {
+    const offset = new Intl.DateTimeFormat(language, {
+        timeZone: day.timezone,
+        timeZoneName: "shortOffset",
+    });
     const offsets = new Set(
-        day.rows.map(
-            (row) =>
-                new Intl.DateTimeFormat(language, {
-                    timeZone: day.timezone,
-                    timeZoneName: "shortOffset",
-                })
-                    .formatToParts(new Date(row.start))
-                    .find((part) => part.type === "timeZoneName")?.value,
-        ),
+        day.rows
+            .flatMap((row) => [row.start, row.end])
+            .map(
+                (instant) =>
+                    offset
+                        .formatToParts(new Date(instant))
+                        .find((part) => part.type === "timeZoneName")?.value,
+            ),
     );
     const time = new Intl.DateTimeFormat(language, {
         timeZone: day.timezone,
@@ -873,13 +970,15 @@ function forecastDay(text, plant, day, format, language) {
 }
 
 function table(caption, head, rows) {
-    return `<table>
+    return `<div class="table" role="region" aria-label="${escape(caption)}" tabindex="0">
+<table>
 <caption>${escape(caption)}</caption>
 <thead><tr>${head.map((cell) => `<th scope="col">${escape(cell)}</th>`).join("")}</tr></thead>
 <tbody>
 ${rows.join("\n")}
 </tbody>
 </table>
+</div>
 `;
 }
 

@@ -21,6 +21,7 @@ export type ScriptOptions = {
     now?: number;
     zone?: string;
     setTimeout?: (run: () => void, delay: number) => unknown;
+    clearTimeout?: (timer: unknown) => void;
 };
 
 function clockAt(now: number) {
@@ -74,7 +75,7 @@ export function loadScript(file: string, options: ScriptOptions = {}) {
         URL,
         Response,
         setTimeout: options.setTimeout ?? setTimeout,
-        clearTimeout,
+        clearTimeout: options.clearTimeout ?? clearTimeout,
         fetch: (request: unknown) => {
             fetched.push(request);
             return network();

@@ -1,7 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { routes } from "../src/lib/routes";
 import { instant } from "./support/test";
-import { savedDatabase, type SavedRecords } from "./support/worker-database";
+import {
+    savedDatabase,
+    type SavedDatabase,
+    type SavedRecords,
+} from "./support/worker-database";
 import { loadScript, SCOPE, type ScriptOptions } from "./support/worker-script";
 import { workerWithdrawn } from "./support/worker-state";
 
@@ -13,6 +17,10 @@ const TOKEN = "0123456789abcdef0123456789abcdef";
 const KEY = { tenant: 3, site: 5, plant: 8 };
 const NOTICE_POLICY =
     "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'";
+const WORKER = "../public/app/sw.js";
+const EXPIRED =
+    "The saved figures were removed from this device because no one signed in here for 90 days or the device clock was changed.";
+const REMOVED = "The saved figures were removed from this device.";
 
 type Language = "en" | "tr";
 type Row = Record<string, unknown>;
@@ -102,20 +110,47 @@ function copy(records: SavedRecords = {}) {
     });
 }
 
-async function savedAnswer(
-    address: string,
-    database = copy(),
-    options: ScriptOptions = {},
-) {
-    const worker = loadScript("../public/app/sw.js", {
+const savedWorker = (database: SavedDatabase, options: ScriptOptions = {}) =>
+    loadScript(WORKER, {
         database,
         now: NOW,
         zone: "Europe/Istanbul",
         ...options,
     });
+
+async function visit(worker: ReturnType<typeof loadScript>, address: string) {
     const { answer } = await worker.navigate({ url: `${ORIGIN}${address}` });
     expect(answer).toBeDefined();
-    return { response: answer!, body: await answer!.text(), database };
+    return answer!;
+}
+
+async function savedAnswer(
+    address: string,
+    database = copy(),
+    options: ScriptOptions = {},
+) {
+    const answer = await visit(savedWorker(database, options), address);
+    return { response: answer, body: await answer.text(), database };
+}
+
+function manualTimers() {
+    const pending = new Set<() => void>();
+    return {
+        setTimeout: (run: () => void) => {
+            const timer = () => run();
+            pending.add(timer);
+            return timer;
+        },
+        clearTimeout: (timer: unknown) => {
+            pending.delete(timer as () => void);
+        },
+        fire: () => {
+            for (const timer of [...pending]) {
+                pending.delete(timer);
+                timer();
+            }
+        },
+    };
 }
 
 const savedPage = async (
@@ -147,6 +182,19 @@ const shownDay = (body: string) => body.match(/Plant day (\S+),/)?.[1];
 const bothLanguages = (body: string) =>
     body.includes('<section lang="en">') &&
     body.includes('<section lang="tr">');
+
+const expectNotice = (body: string) => {
+    expect(bothLanguages(body)).toBe(true);
+    expect(links(body)).toEqual([
+        ["", "Try again"],
+        ["", "Tekrar dene"],
+    ]);
+};
+
+const heldDates = (body: string) =>
+    links(body)
+        .map(([href]) => href?.match(/\?date=(.+)$/)?.[1])
+        .filter(Boolean);
 
 const LABELS: Record<Language, Record<string, string>> = {
     en: {
@@ -416,6 +464,31 @@ if (!workerWithdrawn)
                     "02:00 GMT+2–02:00 GMT+1",
                     "02:00 GMT+1–03:00 GMT+1",
                 ]);
+            });
+
+            test("names the offset when it changes at the end of the last interval", async () => {
+                const start = Date.parse("2026-09-05T04:00:00Z");
+                const rows = Array.from({ length: 24 }, (_, index) => ({
+                    start: new Date(start + index * HOUR).toISOString(),
+                    end: new Date(start + (index + 1) * HOUR).toISOString(),
+                    mwh: 1,
+                    affected_mwh: null,
+                    sources: null,
+                }));
+                const body = await savedPage(
+                    plantAddress("forecast", "2026-09-05"),
+                    copy({
+                        days: [
+                            forecastDay("2026-09-05", {
+                                timezone: "America/Santiago",
+                                rows,
+                            }),
+                        ],
+                    }),
+                );
+                const intervals = tableRows(body).map(([interval]) => interval);
+                expect(intervals[0]).toBe("00:00 GMT-4–01:00 GMT-4");
+                expect(intervals.at(-1)).toBe("23:00 GMT-4–01:00 GMT-3");
             });
         });
 
@@ -711,6 +784,10 @@ if (!workerWithdrawn)
                     "/app/w/3/plants/6/forecast/",
                     "/app/w/4/plants/5/forecast/",
                     "/app/w/0/plants/5/forecast/",
+                    "/app/w/3/plants/5oops/production/",
+                    "/app/w/3/plants/5%2Fproduction/",
+                    "/app/w/3/plants/05/forecast/",
+                    "/app/w/99999999999999999999/plants/5/forecast/",
                     "/app/account/",
                 ]) {
                     const body = await savedPage(address);
@@ -719,6 +796,20 @@ if (!workerWithdrawn)
                         "North field",
                     ]);
                     expect(body, address).not.toContain("Plant day");
+                }
+            });
+
+            test("gives way to a held plant's forecast after its complete site segment", async () => {
+                for (const address of [
+                    "/app/w/3/plants/5",
+                    "/app/w/3/plants/5/",
+                    "/app/w/3/plants/5/settings/",
+                ]) {
+                    const body = await savedPage(
+                        address,
+                        copy({ days: [forecastDay("2026-11-11")] }),
+                    );
+                    expect(shownDay(body), address).toBe("2026-11-11");
                 }
             });
 
@@ -742,6 +833,8 @@ if (!workerWithdrawn)
                             { ...plant(), site: 7, refreshedAt: "yesterday" },
                             { ...plant(), site: 8, plant: 0 },
                             { ...plant(), site: 9, workspace: undefined },
+                            { ...plant(), site: 10, refreshedAt: 1e20 },
+                            { ...plant(), site: 11, openedAt: NOW + 0.5 },
                         ],
                     }),
                 );
@@ -750,6 +843,125 @@ if (!workerWithdrawn)
                     routes.plant(3, 5),
                     "/app/?saved=remove",
                 ]);
+            });
+
+            test("leaves out a plant record whose key disagrees with it", async () => {
+                const database = copy();
+                database.put("plants", plant({ tenant: 4 }), [3, 6, 9]);
+                const body = await savedPage(routes.entry(), database);
+                expect(links(body).map(([href]) => href)).toEqual([
+                    "",
+                    routes.plant(3, 5),
+                    "/app/?saved=remove",
+                ]);
+            });
+
+            test("reads the days of the valid plant when a malformed one shares its site", async () => {
+                const body = await savedPage(
+                    plantAddress("forecast", "2026-11-11"),
+                    copy({
+                        plants: [{ ...plant(), plant: 1, name: 4 }, plant()],
+                        days: [forecastDay("2026-11-11")],
+                    }),
+                );
+                expect(shownDay(body)).toBe("2026-11-11");
+            });
+
+            test("leaves out a day stored under a key that disagrees with it and keeps its neighbours", async () => {
+                const database = copy({ days: [forecastDay("2026-11-13")] });
+                database.put("days", forecastDay("2026-11-12"), [
+                    KEY.tenant,
+                    KEY.site,
+                    KEY.plant,
+                    "forecast",
+                    "2026-11-11",
+                ]);
+                for (const date of ["2026-11-11", "2026-11-12"]) {
+                    const body = await savedPage(
+                        plantAddress("forecast", date),
+                        database,
+                    );
+                    expect(shownDay(body), date).toBeUndefined();
+                    expect(heldDates(body), date).toEqual(["2026-11-13"]);
+                }
+            });
+
+            test("leaves out a day the format rules out and keeps its neighbours", async () => {
+                const forecastRows = (rows: Row[]) =>
+                    forecastDay("2026-11-11").rows.map((row, index) => ({
+                        ...row,
+                        ...rows[index],
+                    }));
+                const productionRows = (rows: Row[]) =>
+                    productionDay("2026-11-11").rows.map((row, index) => ({
+                        ...row,
+                        ...rows[index],
+                    }));
+                const broken: Row[] = [
+                    forecastDay("2026-11-11", {
+                        rows: forecastRows([{ start: "2026-11-31T09:00:00Z" }]),
+                    }),
+                    forecastDay("2026-11-11", {
+                        rows: forecastRows([
+                            {},
+                            {},
+                            { end: "2026-11-11T24:00:00Z" },
+                        ]),
+                    }),
+                    forecastDay("2026-11-11", {
+                        collected_at: "2026-02-30T06:00:00+00:00",
+                    }),
+                    forecastDay("2026-11-11", {
+                        source_kind: "estimated_actuals",
+                        freshness: "missing",
+                        unavailable_reason: "estimated_actuals_unavailable",
+                        collected_at: null,
+                    }),
+                    forecastDay("2026-11-11", {
+                        rows: forecastRows([{ mwh: -0.5 }]),
+                    }),
+                    forecastDay("2026-11-11", {
+                        rows: forecastRows([{}, { affected_mwh: -1 }]),
+                    }),
+                    forecastDay("2026-11-11", {
+                        rows: forecastRows([
+                            { end: "2026-11-11T08:00:00.000Z" },
+                        ]),
+                    }),
+                    forecastDay("2026-11-11", {
+                        rows: forecastRows([]).reverse(),
+                    }),
+                    forecastDay("2026-11-11", {
+                        rows: forecastRows([{ sources: ["forecast"] }]),
+                    }),
+                    productionDay("2026-11-11", {
+                        rows: productionRows([
+                            {},
+                            {},
+                            { quality: "valid", provisional: true },
+                        ]),
+                    }),
+                    productionDay("2026-11-11", {
+                        rows: productionRows([{ quality: null }]),
+                    }),
+                    productionDay("2026-11-11", {
+                        rows: productionRows([{ mwh: -0.25 }]),
+                    }),
+                ];
+                for (const day of broken) {
+                    const kind = day.kind as "forecast" | "production";
+                    const neighbour =
+                        kind === "forecast"
+                            ? forecastDay("2026-11-12")
+                            : productionDay("2026-11-12");
+                    const body = await savedPage(
+                        plantAddress(kind, "2026-11-11"),
+                        copy({ days: [day, neighbour] }),
+                    );
+                    const shown = JSON.stringify(day).slice(0, 120);
+                    expect(shownDay(body), shown).toBeUndefined();
+                    expect(heldDates(body), shown).toEqual(["2026-11-12"]);
+                }
             });
 
             test("does not show a day record that does not match the format", async () => {
@@ -810,14 +1022,6 @@ if (!workerWithdrawn)
         });
 
         test.describe("the notice without a copy that can be shown", () => {
-            const expectNotice = (body: string) => {
-                expect(bothLanguages(body)).toBe(true);
-                expect(links(body)).toEqual([
-                    ["", "Try again"],
-                    ["", "Tekrar dene"],
-                ]);
-            };
-
             test("appears without a database and creates none", async () => {
                 const database = savedDatabase();
                 expectNotice(await savedPage(plantAddress(), database));
@@ -849,6 +1053,26 @@ if (!workerWithdrawn)
                             copy({ holder: value }),
                         ),
                     );
+            });
+
+            test("appears for a holder time no date can represent, and the copy stays", async () => {
+                for (const value of [
+                    holder({ confirmedAt: 1e20 }),
+                    holder({ confirmedAt: -1e20 }),
+                    holder({ confirmedAt: NOW - DAY + 0.5 }),
+                    holder({ retryAt: 1e20 }),
+                ]) {
+                    const database = copy({
+                        holder: value,
+                        days: [forecastDay("2026-11-11")],
+                    });
+                    expectNotice(await savedPage(plantAddress(), database));
+                    expect(database.plants()).toHaveLength(1);
+                    expect(database.days()).toHaveLength(1);
+                    expect(database.transactions).toEqual([
+                        "readonly holder,plants,days",
+                    ]);
+                }
             });
 
             test("appears within the read limit when the database never answers", async () => {
@@ -907,15 +1131,11 @@ if (!workerWithdrawn)
                         plantAddress("forecast", "2026-11-11"),
                         database,
                     );
-                    expect(first).toContain(
-                        "The saved figures were removed from this device because no one signed in here for 90 days or the device clock was changed.",
-                    );
+                    expect(first).toContain(EXPIRED);
                     expect(first).not.toContain("North field");
                     expect(database.plants()).toEqual([]);
                     expect(database.days()).toEqual([]);
-                    expect(database.holder()).toEqual(
-                        holder({ confirmedAt, active: false }),
-                    );
+                    expect(database.holder()).toEqual(holder({ confirmedAt }));
                     const second = await savedPage(
                         plantAddress("forecast", "2026-11-11"),
                         database,
@@ -934,6 +1154,133 @@ if (!workerWithdrawn)
                 );
                 expect(shownDay(body)).toBe("2026-11-11");
             });
+
+            test("says so once when two navigations overlap", async () => {
+                const confirmedAt = NOW - 91 * DAY;
+                const database = copy({
+                    holder: holder({ confirmedAt }),
+                    days: [forecastDay("2026-11-11")],
+                });
+                const reads = [
+                    database.pause("readonly"),
+                    database.pause("readonly", 1),
+                ];
+                const worker = savedWorker(database);
+                const answers = [1, 2].map(() =>
+                    visit(worker, plantAddress("forecast", "2026-11-11")),
+                );
+                await reads[1]!.created;
+                for (const read of reads) read.release();
+                const bodies = await Promise.all(
+                    answers.map(async (answer) => (await answer).text()),
+                );
+                expect(
+                    bodies.filter((body) => body.includes(EXPIRED)),
+                ).toHaveLength(1);
+                expect(
+                    bodies.some((body) => body.includes("North field")),
+                ).toBe(false);
+                expect(database.transactions).toEqual([
+                    "readonly holder,plants,days",
+                    "readonly holder,plants,days",
+                    "readwrite holder,plants,days",
+                    "readwrite holder,plants,days",
+                ]);
+                expect(database.plants()).toEqual([]);
+                expect(database.holder()).toEqual(holder({ confirmedAt }));
+            });
+
+            test("is not emptied when the holder was confirmed again before the removal", async () => {
+                const database = copy({
+                    holder: holder({ confirmedAt: NOW - 91 * DAY }),
+                    days: [forecastDay("2026-11-11")],
+                });
+                const write = database.pause("readwrite");
+                const answer = visit(
+                    savedWorker(database),
+                    plantAddress("forecast", "2026-11-11"),
+                );
+                await write.reached;
+                database.put("holder", holder(), "holder");
+                write.release();
+                const body = await (await answer).text();
+                expect(body).not.toContain(EXPIRED);
+                expect(shownDay(body)).toBe("2026-11-11");
+                expect(database.plants()).toHaveLength(1);
+                expect(database.days()).toHaveLength(1);
+            });
+        });
+
+        test.describe("a removal that does not finish", () => {
+            const REMOVALS = [
+                {
+                    name: "the expiry",
+                    address: plantAddress("forecast", "2026-11-11"),
+                    holder: holder({ confirmedAt: NOW - 91 * DAY }),
+                },
+                {
+                    name: "the removal",
+                    address: `/app/?saved=remove&token=${TOKEN}`,
+                    holder: holder(),
+                },
+            ];
+            const held = (stored: Row) =>
+                copy({ holder: stored, days: [forecastDay("2026-11-11")] });
+            const expectKept = async (database: SavedDatabase, stored: Row) => {
+                await database.idle();
+                expect(database.plants()).toHaveLength(1);
+                expect(database.days()).toHaveLength(1);
+                expect(database.holder()).toEqual(stored);
+                expect(database.openConnections()).toBe(0);
+            };
+
+            for (const removal of REMOVALS) {
+                test(`answers the notice and keeps the copy when ${removal.name} aborts`, async () => {
+                    const database = held(removal.holder);
+                    const write = database.pause("readwrite");
+                    const answer = visit(
+                        savedWorker(database),
+                        removal.address,
+                    );
+                    await write.reached;
+                    write.fail();
+                    expectNotice(await (await answer).text());
+                    await expectKept(database, removal.holder);
+                });
+
+                test(`answers the notice at the limit and writes nothing later when ${removal.name} has not started`, async () => {
+                    const database = held(removal.holder);
+                    const timers = manualTimers();
+                    const write = database.pause("readwrite");
+                    const answer = visit(
+                        savedWorker(database, timers),
+                        removal.address,
+                    );
+                    await write.reached;
+                    timers.fire();
+                    expectNotice(await (await answer).text());
+                    write.release();
+                    await expectKept(database, removal.holder);
+                });
+
+                test(`answers the notice at the limit and closes a connection opened later when ${removal.name} waits for the copy`, async () => {
+                    const database = held(removal.holder);
+                    const timers = manualTimers();
+                    const opening = database.pause("open", 1);
+                    const answer = visit(
+                        savedWorker(database, timers),
+                        removal.address,
+                    );
+                    await opening.reached;
+                    timers.fire();
+                    expectNotice(await (await answer).text());
+                    opening.release();
+                    await expectKept(database, removal.holder);
+                    expect(database.transactions).not.toContain(
+                        "readwrite holder,plants,days",
+                    );
+                });
+            }
         });
 
         test.describe("the removal on a saved page", () => {
@@ -959,9 +1306,7 @@ if (!workerWithdrawn)
                     `/app/?saved=remove&token=${TOKEN}`,
                     database,
                 );
-                expect(body).toContain(
-                    "<p>The saved figures were removed from this device.</p>",
-                );
+                expect(body).toContain(`<p>${REMOVED}</p>`);
                 expect(links(body)).toEqual([["", "Try again"]]);
                 expect(database.plants()).toEqual([]);
                 expect(database.days()).toEqual([]);
@@ -971,6 +1316,98 @@ if (!workerWithdrawn)
                     database,
                 );
                 expect(after).not.toContain("Plant day");
+            });
+
+            test("with the stored token a second time says nothing was removed and writes nothing", async () => {
+                const database = copy({ days: [forecastDay("2026-11-11")] });
+                const address = `/app/?saved=remove&token=${TOKEN}`;
+                await savedPage(address, database);
+                const written = database.transactions.length;
+                const again = await savedPage(address, database);
+                expect(again).not.toContain(REMOVED);
+                expect(links(again)).toEqual([["", "Try again"]]);
+                expect(database.transactions.slice(written)).toEqual([
+                    "readonly holder,plants,days",
+                ]);
+            });
+
+            test("says so once when two navigations with the stored token overlap", async () => {
+                const database = copy({ days: [forecastDay("2026-11-11")] });
+                const reads = [
+                    database.pause("readonly"),
+                    database.pause("readonly", 1),
+                ];
+                const worker = savedWorker(database);
+                const answers = [1, 2].map(() =>
+                    visit(worker, `/app/?saved=remove&token=${TOKEN}`),
+                );
+                await reads[1]!.created;
+                for (const read of reads) read.release();
+                const bodies = await Promise.all(
+                    answers.map(async (answer) => (await answer).text()),
+                );
+                expect(
+                    bodies.filter((body) => body.includes(REMOVED)),
+                ).toHaveLength(1);
+                expect(
+                    bodies.some((body) => body.includes("North field")),
+                ).toBe(false);
+                expect(database.plants()).toEqual([]);
+                expect(database.holder()).toEqual(holder({ active: false }));
+            });
+
+            test("shows the copy of another holder met by the removal instead of removing it", async () => {
+                const database = copy({ days: [forecastDay("2026-11-11")] });
+                const other = holder({
+                    user: 9,
+                    language: "tr",
+                    removal: "f".repeat(32),
+                });
+                const write = database.pause("readwrite");
+                const answer = visit(
+                    savedWorker(database),
+                    `/app/?saved=remove&token=${TOKEN}`,
+                );
+                await write.reached;
+                database.put("holder", other, "holder");
+                write.release();
+                const body = await (await answer).text();
+                expect(body).toContain('<html lang="tr">');
+                expect(body).not.toContain("silindi");
+                expect(links(body)).toContainEqual([
+                    routes.plant(3, 5),
+                    "North field",
+                ]);
+                expect(database.plants()).toHaveLength(1);
+                expect(database.holder()).toEqual(other);
+            });
+
+            test("accepts a stored token in capital hex and compares the given one exactly", async () => {
+                const upper = TOKEN.toUpperCase();
+                const database = copy({
+                    holder: holder({ removal: upper }),
+                    days: [forecastDay("2026-11-11")],
+                });
+                expect(
+                    shownDay(
+                        await savedPage(
+                            plantAddress("forecast", "2026-11-11"),
+                            database,
+                        ),
+                    ),
+                ).toBe("2026-11-11");
+                expect(
+                    await savedPage("/app/?saved=remove", database),
+                ).toContain(`token=${upper}"`);
+                await savedPage(`/app/?saved=remove&token=${TOKEN}`, database);
+                expect(database.plants()).toHaveLength(1);
+                expect(
+                    await savedPage(
+                        `/app/?saved=remove&token=${upper}`,
+                        database,
+                    ),
+                ).toContain(REMOVED);
+                expect(database.plants()).toEqual([]);
             });
 
             test("with another token removes nothing", async () => {

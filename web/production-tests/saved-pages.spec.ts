@@ -1,5 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
 import { accessibilityViolations } from "../tests/support/accessibility";
+import { expect, test, type Page } from "../tests/support/test";
 import { workerWithdrawn } from "../tests/support/worker-state";
 
 const NOTICE_POLICY =
@@ -7,13 +7,19 @@ const NOTICE_POLICY =
 const TOKEN = "0123456789abcdef0123456789abcdef";
 const KEY = { tenant: 3, site: 5, plant: 8 };
 const FORECAST = "/app/w/3/plants/5/forecast/";
+const PRODUCTION = "/app/w/3/plants/5/production/";
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const EXPIRED =
     "The saved figures were removed from this device because no one signed in here for 90 days or the device clock was changed.";
 
 type Marked = Window & { violations?: string[] };
-type Seed = { confirmedAge: number; dates: [string, ...string[]] };
+type Seed = {
+    confirmedAge: number;
+    dates: [string, ...string[]];
+    name?: string;
+    source?: string;
+};
 
 function rows(date: string, extra: object) {
     const start = Date.parse(`${date}T09:00:00Z`);
@@ -41,14 +47,14 @@ const forecastDay = (date: string) => ({
     rows: rows(date, { affected_mwh: null, sources: null }),
 });
 
-const productionDay = (date: string) => ({
+const productionDay = (date: string, source: string) => ({
     ...KEY,
     kind: "production",
     date,
     timezone: "Europe/Istanbul",
     total_mwh: 2,
     complete: true,
-    rows: rows(date, { quality: "valid", source: "epias", provisional: true }),
+    rows: rows(date, { quality: "valid", source, provisional: true }),
 });
 
 async function controlled(page: Page) {
@@ -60,65 +66,70 @@ async function controlled(page: Page) {
     ).toBe(true);
 }
 
-async function seed(page: Page, { confirmedAge, dates }: Seed) {
+// The copy's times are read from the worker's own clock, whatever the shared page clock says.
+async function workerClock(page: Page) {
+    const context = page.context();
+    const worker =
+        context.serviceWorkers()[0] ??
+        (await context.waitForEvent("serviceworker"));
+    return worker.evaluate(() => Date.now());
+}
+
+async function seed(page: Page, seeded: Seed) {
+    const now = await workerClock(page);
     const records = {
         holder: {
             user: 7,
             language: "en",
             session: "tag-1",
             active: true,
+            confirmedAt: now - seeded.confirmedAge,
             removal: TOKEN,
             retryAt: null,
         },
         plant: {
             ...KEY,
-            name: "North field",
+            name: seeded.name ?? "North field",
             workspace: "Solar Co",
             openedAt: null,
             attemptedAt: null,
+            refreshedAt: now - 2 * HOUR,
         },
-        days: [...dates.map(forecastDay), productionDay(dates[0])],
+        days: [
+            ...seeded.dates.map(forecastDay),
+            productionDay(seeded.dates[0], seeded.source ?? "epias"),
+        ],
     };
-    await page.evaluate(
-        async ({ holder, plant, days, confirmedAge }) => {
-            const request = indexedDB.open("pyracast-saved", 1);
-            request.onupgradeneeded = () => {
-                request.result.createObjectStore("holder");
-                request.result.createObjectStore("plants", {
-                    keyPath: ["tenant", "site", "plant"],
-                });
-                request.result.createObjectStore("days", {
-                    keyPath: ["tenant", "site", "plant", "kind", "date"],
-                });
-            };
-            const database = await new Promise<IDBDatabase>(
-                (resolve, reject) => {
-                    request.onsuccess = () => resolve(request.result);
-                    request.onerror = () =>
-                        reject(new Error("The copy could not be created."));
-                },
-            );
-            const now = Date.now();
-            const transaction = database.transaction(
-                ["holder", "plants", "days"],
-                "readwrite",
-            );
-            transaction
-                .objectStore("holder")
-                .put({ ...holder, confirmedAt: now - confirmedAge }, "holder");
-            transaction
-                .objectStore("plants")
-                .put({ ...plant, refreshedAt: now - 2 * 3_600_000 });
-            for (const day of days) transaction.objectStore("days").put(day);
-            await new Promise((resolve, reject) => {
-                transaction.oncomplete = resolve;
-                transaction.onerror = () =>
-                    reject(new Error("The copy could not be written."));
+    await page.evaluate(async ({ holder, plant, days }) => {
+        const request = indexedDB.open("pyracast-saved", 1);
+        request.onupgradeneeded = () => {
+            request.result.createObjectStore("holder");
+            request.result.createObjectStore("plants", {
+                keyPath: ["tenant", "site", "plant"],
             });
-            database.close();
-        },
-        { ...records, confirmedAge },
-    );
+            request.result.createObjectStore("days", {
+                keyPath: ["tenant", "site", "plant", "kind", "date"],
+            });
+        };
+        const database = await new Promise<IDBDatabase>((resolve, reject) => {
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () =>
+                reject(new Error("The copy could not be created."));
+        });
+        const transaction = database.transaction(
+            ["holder", "plants", "days"],
+            "readwrite",
+        );
+        transaction.objectStore("holder").put(holder, "holder");
+        transaction.objectStore("plants").put(plant);
+        for (const day of days) transaction.objectStore("days").put(day);
+        await new Promise((resolve, reject) => {
+            transaction.oncomplete = resolve;
+            transaction.onerror = () =>
+                reject(new Error("The copy could not be written."));
+        });
+        database.close();
+    }, records);
 }
 
 const stored = (page: Page) =>
@@ -177,6 +188,12 @@ async function expectSavedPage(page: Page) {
     expect(await accessibilityViolations(page)).toEqual([]);
 }
 
+const pageWidth = (page: Page) =>
+    page.evaluate(() => ({
+        scroll: document.documentElement.scrollWidth,
+        view: document.documentElement.clientWidth,
+    }));
+
 const fresh: Seed = { confirmedAge: DAY, dates: ["2026-11-11", "2026-11-12"] };
 
 if (!workerWithdrawn)
@@ -201,7 +218,7 @@ if (!workerWithdrawn)
                 page.getByRole("heading", { name: "November 11, 2026" }),
             ).toBeVisible();
             await expect(
-                page.getByText(/^Read from the server on /),
+                page.getByText(/^Read from the server on .*, 2 hours ago\.$/),
             ).toBeVisible();
             await expect(
                 page.getByRole("img", {
@@ -218,7 +235,7 @@ if (!workerWithdrawn)
             ).toBeVisible();
 
             await page.getByRole("link", { name: "Production" }).click();
-            await expect(page).toHaveURL("/app/w/3/plants/5/production/");
+            await expect(page).toHaveURL(PRODUCTION);
             await expect(
                 page.getByRole("heading", {
                     name: "North field, Solar Co: Production",
@@ -251,7 +268,35 @@ if (!workerWithdrawn)
             ).toBeVisible();
         });
 
-        test("a copy outside its 90 days is emptied and the notice says so once", async ({
+        test("stored text wraps at phone width and a wide table scrolls inside itself", async ({
+            page,
+        }) => {
+            await page.setViewportSize({ width: 360, height: 740 });
+            await offlineWithCopy(page, {
+                ...fresh,
+                name: "N".repeat(200),
+                source: "S".repeat(120),
+            });
+            for (const address of [
+                "/app/",
+                `${FORECAST}?date=2026-11-11`,
+                PRODUCTION,
+            ]) {
+                await page.goto(address);
+                const width = await pageWidth(page);
+                expect(width.scroll, address).toBeLessThanOrEqual(width.view);
+            }
+            const table = page.getByRole("region", {
+                name: "Energy per interval",
+            });
+            const scrolls = await table.evaluate(
+                (region) => region.scrollWidth > region.clientWidth,
+            );
+            expect(scrolls).toBe(true);
+            await expectSavedPage(page);
+        });
+
+        test("a copy outside its 90 days is emptied, keeps its holder and the notice says so once", async ({
             page,
         }) => {
             await offlineWithCopy(page, { ...fresh, confirmedAge: 91 * DAY });
@@ -259,7 +304,7 @@ if (!workerWithdrawn)
             await expect(page.getByText(EXPIRED)).toBeVisible();
             await expect(page.getByText("North field")).toHaveCount(0);
             expect(await stored(page)).toEqual({
-                active: false,
+                active: true,
                 plants: 0,
                 days: 0,
             });
@@ -270,6 +315,32 @@ if (!workerWithdrawn)
                 }),
             ).toBeVisible();
             await expect(page.getByText(EXPIRED)).toHaveCount(0);
+        });
+
+        test("two pages that open an expired copy together say once that it was emptied", async ({
+            page,
+            context,
+        }) => {
+            await offlineWithCopy(page, { ...fresh, confirmedAge: 91 * DAY });
+            const other = await context.newPage();
+            await Promise.all(
+                [page, other].map((opened) =>
+                    opened.goto(`${FORECAST}?date=2026-11-11`),
+                ),
+            );
+            const told = await Promise.all(
+                [page, other].map((opened) =>
+                    opened.getByText(EXPIRED).count(),
+                ),
+            );
+            expect([...told].sort()).toEqual([0, 1]);
+            for (const opened of [page, other])
+                await expect(opened.getByText("North field")).toHaveCount(0);
+            expect(await stored(page)).toEqual({
+                active: true,
+                plants: 0,
+                days: 0,
+            });
         });
 
         test("removing the saved figures leaves no saved page", async ({
