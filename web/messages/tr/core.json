@@ -215,7 +215,8 @@
         "signingOut": "Çıkış yapılıyor",
         "unconfirmed": "Oturumunuz doğrulanamadı",
         "unconfirmedHelp": "Bu sayfa ve girdikleriniz korunuyor. Sunucu yanıt verdiğinde yeniden gösterilir.",
-        "retry": "Tekrar dene"
+        "retry": "Tekrar dene",
+        "showSavedFigures": "Kaydedilen değerleri göster"
     },
     "InstallApp": {
         "install": "Uygulamayı yükle",

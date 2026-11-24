@@ -20,9 +20,11 @@ import {
     isCurrent,
     loadSession,
     observedTagKey,
+    savedCopyState,
     sessionOwner,
     sessionState,
     signOut,
+    startSavedCopy,
     useSessionClock,
     useSessionState,
     useSessionUnconfirmed,
@@ -37,7 +39,10 @@ import { useLanguageHandoff } from "./language-handoff";
 import { SessionLanguage, useSessionLanguage } from "./session-language";
 import { Notice } from "@/ui/ui";
 
-if (typeof window !== "undefined") captureInstallPrompt();
+if (typeof window !== "undefined") {
+    captureInstallPrompt();
+    startSavedCopy();
+}
 clearInvitationWith(clearWorkspaceInvitation);
 
 export function AppRoot({ children }: { children: ReactNode }) {
@@ -298,8 +303,23 @@ function Screens({
     );
 }
 
+function useSavedFiguresShown() {
+    const [shown, setShown] = useState(false);
+    useEffect(() => {
+        let active = true;
+        void savedCopyState().then((state) => {
+            if (active) setShown(state === "on");
+        });
+        return () => {
+            active = false;
+        };
+    }, []);
+    return shown;
+}
+
 function SessionUnconfirmed() {
     const t = useTranslations("Session");
+    const savedFigures = useSavedFiguresShown();
     return (
         <main className="auth-page">
             <div className="auth-card">
@@ -312,6 +332,11 @@ function SessionUnconfirmed() {
                 >
                     {t("retry")}
                 </button>
+                {savedFigures && (
+                    <button className="button secondary" onClick={reloadPage}>
+                        {t("showSavedFigures")}
+                    </button>
+                )}
             </div>
         </main>
     );
