@@ -210,7 +210,7 @@ test("unsafe requests carry the CSRF token of the current session", async () => 
 });
 
 test("a session read started before sign-out is not handed out after it", async () => {
-    adoptSession(signedIn("token"));
+    await adoptSession(signedIn("token"));
     let release!: () => void;
     const held = new Promise<void>((resolve) => {
         release = resolve;
@@ -352,7 +352,7 @@ for (const [name, body] of [
     ],
 ] as const) {
     test(`an authentication request answered 401 with ${name} fails`, async () => {
-        adoptSession(signedIn("token"));
+        await adoptSession(signedIn("token"));
         answer(() => json(body, 401));
         const error = await authRequest("account/providers", "DELETE", {
             provider: "google",
@@ -366,7 +366,7 @@ for (const [name, body] of [
 
 for (const authenticated of [false, true, null]) {
     test(`allauth's 401 with is_authenticated ${authenticated} is returned to its caller`, async () => {
-        adoptSession(signedIn("token"));
+        await adoptSession(signedIn("token"));
         const body = {
             status: 401,
             data: { flows: [] },
@@ -381,7 +381,7 @@ for (const authenticated of [false, true, null]) {
 }
 
 test("an authentication answer carries its HTTP status, not the status its body names", async () => {
-    adoptSession(signedIn("token"));
+    await adoptSession(signedIn("token"));
     answer(() => json({ status: 401, meta: { is_authenticated: false } }));
     const result = await authRequest("auth/session", "GET");
     expect(result).toEqual({
@@ -449,7 +449,7 @@ test("a URL requires every named path parameter", () => {
 });
 
 test("a session read that discovers expiry adopts it once a second read agrees", async () => {
-    adoptSession(signedIn("token"));
+    await adoptSession(signedIn("token"));
     answer(
         () => json(anonymous("anonymous")),
         () => json(anonymous("anonymous")),
@@ -460,7 +460,7 @@ test("a session read that discovers expiry adopts it once a second read agrees",
 });
 
 test("a confirmed sign-out ends the document without reading the session", async () => {
-    adoptSession(signedIn("token"));
+    await adoptSession(signedIn("token"));
     answer(() => json({ status: 401, meta: { is_authenticated: false } }, 401));
     await signOut();
     expect(sessionState()).toMatchObject({
@@ -483,7 +483,7 @@ for (const [name, body] of [
     ],
 ] as const) {
     test(`a sign-out answered with ${name} keeps the document and fails`, async () => {
-        adoptSession(signedIn("token"));
+        await adoptSession(signedIn("token"));
         answer(() => json(body, 401));
         const error = await signOut().catch((failure) => failure);
         expect(error).toBeInstanceOf(ApiError);
@@ -497,7 +497,7 @@ for (const [name, body] of [
 }
 
 test("a sign-out refused for a key another tab renewed signs out the renewed session", async () => {
-    adoptSession(signedIn("token"));
+    await adoptSession(signedIn("token"));
     answer(changed, () => json(signedIn("rotated")), signedOutAnswer);
     await signOut();
     expect(sessionState()).toMatchObject({
@@ -562,7 +562,7 @@ test("an account change answered as signed out is not repeated", async () => {
 });
 
 test("leaving a sign-in stage after which the browser holds a signed-in session is reported", async () => {
-    adoptSession(anonymous("token"));
+    await adoptSession(anonymous("token"));
     answer(signedOutAnswer, () =>
         json({ ...signedIn("other"), session_tag: "other-session" }),
     );

@@ -87,7 +87,7 @@ export function LanguageSelect() {
                             }
                             try {
                                 const sentAt = Date.now();
-                                adoptSession(
+                                await adoptSession(
                                     await api.post("/api/session/language/", {
                                         body: { language },
                                     }),

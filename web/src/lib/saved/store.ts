@@ -1,3 +1,5 @@
+import type { Deadline } from "./deadline";
+
 const SAVED_FIGURES = true;
 
 const databaseName = "pyracast-saved";
@@ -6,7 +8,6 @@ const holderKey = "holder";
 const storeNames = ["holder", "plants", "days"];
 const dayMs = 86_400_000;
 const keptForMs = 90 * dayMs;
-const answerLimitMs = 2_000;
 const latestInstant = 8_640_000_000_000_000;
 
 type Holder = {
@@ -30,26 +31,20 @@ export type Removal = {
     outstanding: () => string | null;
     acknowledge: (removal: string) => void;
 };
-type Handoff = "verified" | "cleared" | "superseded" | "unverified";
-type Outcome = "done" | "absent" | "unavailable" | "failed" | "pending";
-
-function deadline() {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const reached = new Promise<"pending">((resolve) => {
-        timer = setTimeout(() => resolve("pending"), answerLimitMs);
-    });
-    return { reached, clear: () => clearTimeout(timer) };
-}
+type SignedOut = { user: number; session: string };
+type Handoff = "verified" | "cleared" | "superseded" | "blocked" | "unverified";
+type Outcome =
+    "done" | "absent" | "blocked" | "unavailable" | "failed" | "pending";
 
 function openExisting(
-    reached: Promise<unknown>,
-): Promise<IDBDatabase | "absent" | "unavailable"> {
+    reached: Promise<void>,
+): Promise<IDBDatabase | "absent" | "blocked" | "unavailable"> {
     return new Promise((resolve) => {
         let request: IDBOpenDBRequest;
         try {
             request = indexedDB.open(databaseName, format);
         } catch {
-            resolve("unavailable");
+            resolve("blocked");
             return;
         }
         let answered = false;
@@ -97,19 +92,19 @@ function run(
     }).finally(() => database.close());
 }
 
-// A transaction still waiting at the limit goes on; work that must not land late re-checks inside it.
+// A transaction still waiting at the deadline goes on; work that must not land late re-checks inside it.
 async function transact(
     mode: IDBTransactionMode,
     work: (transaction: IDBTransaction) => void,
+    limit: Deadline,
 ): Promise<Outcome> {
-    const limit = deadline();
-    try {
-        const database = await openExisting(limit.reached);
-        if (typeof database === "string") return database;
-        return await Promise.race([run(database, mode, work), limit.reached]);
-    } finally {
-        limit.clear();
-    }
+    if (limit.expired()) return "pending";
+    const database = await openExisting(limit.reached);
+    if (typeof database === "string") return database;
+    return Promise.race([
+        run(database, mode, work),
+        limit.reached.then(() => "pending" as const),
+    ]);
 }
 
 function withHolder(
@@ -145,10 +140,11 @@ function isHolder(value: unknown): value is Holder {
         user > 0 &&
         (language === "en" || language === "tr") &&
         typeof session === "string" &&
+        session !== "" &&
         typeof active === "boolean" &&
         isInstant(confirmedAt) &&
         typeof removal === "string" &&
-        /^[0-9a-f]{32}$/.test(removal) &&
+        /^[0-9a-f]{32}$/i.test(removal) &&
         (retryAt === null || isInstant(retryAt))
     );
 }
@@ -170,16 +166,17 @@ function pause(
 ) {
     clearFigures(transaction);
     if (isHolder(holder)) store.put({ ...holder, active: false }, holderKey);
-    else if (holder !== undefined) store.delete(holderKey);
+    else store.delete(holderKey);
 }
 
 function current(confirmedAt: number, now: number) {
     return now - confirmedAt <= keptForMs && confirmedAt - now <= dayMs;
 }
 
-function deleteDatabase(): Promise<"deleted" | "failed" | "pending"> {
-    const limit = deadline();
-    return new Promise<"deleted" | "failed" | "pending">((resolve) => {
+function deleteDatabase(
+    limit: Deadline,
+): Promise<"deleted" | "failed" | "pending"> {
+    return new Promise((resolve) => {
         try {
             const request = indexedDB.deleteDatabase(databaseName);
             request.onsuccess = () => resolve("deleted");
@@ -187,103 +184,135 @@ function deleteDatabase(): Promise<"deleted" | "failed" | "pending"> {
         } catch {
             resolve("failed");
         }
-        void limit.reached.then(resolve);
-    }).finally(limit.clear);
+        void limit.reached.then(() => resolve("pending"));
+    });
 }
 
-async function removeCopy(): Promise<"deleted" | "kept"> {
-    const outcome = await transact("readwrite", clearAll);
+async function removeCopy(limit: Deadline): Promise<"deleted" | "kept"> {
+    const outcome = await transact("readwrite", clearAll, limit);
     if (outcome === "absent") return "deleted";
-    return outcome === "done" && (await deleteDatabase()) === "deleted"
+    return outcome === "done" && (await deleteDatabase(limit)) === "deleted"
         ? "deleted"
         : "kept";
 }
 
-export async function deleteCopy() {
-    return (await deleteDatabase()) === "deleted";
+export async function deleteCopy(limit: Deadline) {
+    return (await deleteDatabase(limit)) === "deleted";
 }
 
-async function removeOutstanding(removal: Removal) {
+async function removeOutstanding(removal: Removal, limit: Deadline) {
     if (removal.outstanding() === null) return;
-    await transact("readwrite", (transaction) =>
-        withHolder(transaction, (holder, store) => {
-            const outstanding = removal.outstanding();
-            if (outstanding === null) return;
-            pause(transaction, holder, store);
-            transaction.addEventListener("complete", () =>
-                removal.acknowledge(outstanding),
-            );
-        }),
+    await transact(
+        "readwrite",
+        (transaction) =>
+            withHolder(transaction, (holder, store) => {
+                const outstanding = removal.outstanding();
+                if (outstanding === null) return;
+                pause(transaction, holder, store);
+                transaction.addEventListener("complete", () =>
+                    removal.acknowledge(outstanding),
+                );
+            }),
+        limit,
     );
 }
 
-export async function removeFigures(committed: () => void) {
-    const outcome = await transact("readwrite", (transaction) => {
-        transaction.addEventListener("complete", committed);
-        withHolder(transaction, (holder, store) =>
-            pause(transaction, holder, store),
-        );
-    });
+export async function removeFigures(
+    signedOut: SignedOut,
+    committed: () => void,
+    limit: Deadline,
+) {
+    const outcome = await transact(
+        "readwrite",
+        (transaction) => {
+            transaction.addEventListener("complete", committed);
+            withHolder(transaction, (holder, store) => {
+                if (
+                    isHolder(holder) &&
+                    (holder.user !== signedOut.user ||
+                        holder.session !== signedOut.session)
+                )
+                    return;
+                pause(transaction, holder, store);
+            });
+        },
+        limit,
+    );
     return outcome === "done" || outcome === "absent";
 }
 
-export async function start(removal: Removal): Promise<"deleted" | "kept"> {
-    if (!SAVED_FIGURES) return removeCopy();
-    await removeOutstanding(removal);
+export async function start(
+    removal: Removal,
+    limit: Deadline,
+): Promise<"deleted" | "kept"> {
+    if (!SAVED_FIGURES) return removeCopy(limit);
+    await removeOutstanding(removal, limit);
     return "kept";
 }
 
 export async function adopt(
     observation: Observation,
     removal: Removal,
+    limit: Deadline,
 ): Promise<Handoff> {
     const read: { handoff: Handoff } = { handoff: "verified" };
-    const outcome = await transact("readwrite", (transaction) =>
-        withHolder(transaction, (holder, store) => {
-            if (!observation.present()) {
-                read.handoff = "superseded";
-                return;
-            }
-            const outstanding = removal.outstanding();
-            if (outstanding !== null)
-                transaction.addEventListener("complete", () =>
-                    removal.acknowledge(outstanding),
+    const outcome = await transact(
+        "readwrite",
+        (transaction) =>
+            withHolder(transaction, (holder, store) => {
+                if (limit.expired()) {
+                    read.handoff = "unverified";
+                    return;
+                }
+                if (!observation.present()) {
+                    read.handoff = "superseded";
+                    return;
+                }
+                const outstanding = removal.outstanding();
+                if (outstanding !== null)
+                    transaction.addEventListener("complete", () =>
+                        removal.acknowledge(outstanding),
+                    );
+                if (!isHolder(holder) || holder.user !== observation.user) {
+                    read.handoff = "cleared";
+                    clearAll(transaction);
+                    return;
+                }
+                if (
+                    outstanding !== null ||
+                    !current(holder.confirmedAt, observation.adoptedAt)
+                )
+                    clearFigures(transaction);
+                store.put(
+                    {
+                        ...holder,
+                        ...(outstanding !== null && { active: false }),
+                        confirmedAt: observation.adoptedAt,
+                        language: observation.language,
+                        ...(holder.session !== observation.session && {
+                            session: observation.session,
+                            active: true,
+                        }),
+                    },
+                    holderKey,
                 );
-            if (!isHolder(holder) || holder.user !== observation.user) {
-                read.handoff = "cleared";
-                clearAll(transaction);
-                return;
-            }
-            if (
-                outstanding !== null ||
-                !current(holder.confirmedAt, Date.now())
-            )
-                clearFigures(transaction);
-            store.put(
-                {
-                    ...holder,
-                    ...(outstanding !== null && { active: false }),
-                    confirmedAt: observation.adoptedAt,
-                    language: observation.language,
-                    ...(holder.session !== observation.session && {
-                        session: observation.session,
-                        active: true,
-                    }),
-                },
-                holderKey,
-            );
-        }),
+            }),
+        limit,
     );
     if (outcome === "absent") return "verified";
+    if (outcome === "blocked") return "blocked";
     return outcome === "done" ? read.handoff : "unverified";
 }
 
-export async function copyState(): Promise<CopyState> {
+export async function copyState(limit: Deadline): Promise<CopyState> {
     const read: { holder?: unknown } = {};
-    const outcome = await transact("readonly", (transaction) =>
-        withHolder(transaction, (holder) => {
-            read.holder = holder;
-        }),
+    const outcome = await transact(
+        "readonly",
+        (transaction) =>
+            withHolder(transaction, (holder) => {
+                read.holder = holder;
+            }),
+        limit,
     );
     if (outcome === "absent") return "off";
     if (outcome !== "done") return "unavailable";

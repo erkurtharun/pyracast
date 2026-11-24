@@ -15,6 +15,7 @@ import { reloadPage } from "@/lib/on-demand";
 import { routes } from "@/lib/routes";
 import { browserErrors } from "@/i18n/browser";
 import {
+    clearHandoffFailure,
     clearInvitationWith,
     confirmIdleSession,
     isCurrent,
@@ -25,6 +26,7 @@ import {
     sessionState,
     signOut,
     startSavedCopy,
+    useHandoffFailed,
     useSessionClock,
     useSessionState,
     useSessionUnconfirmed,
@@ -49,6 +51,7 @@ export function AppRoot({ children }: { children: ReactNode }) {
     const [client] = useState(createQueryClient);
     const { session, failure, fail, clear, retry } = useSessionBootstrap();
     const { retired, signOut: leaving } = useSessionState();
+    const unchecked = useHandoffFailed();
     const handoff = useLanguageHandoff(session);
     const language = useSessionLanguage(session, handoff.status !== "ready");
     const ready =
@@ -69,6 +72,14 @@ export function AppRoot({ children }: { children: ReactNode }) {
                     <Bootstrap retry={retry} />
                 ) : leaving.status !== "idle" ? (
                     <SigningOut state={leaving} />
+                ) : unchecked ? (
+                    <Bootstrap
+                        failure={{ kind: "savedFigures" }}
+                        retry={() => {
+                            clearHandoffFailure();
+                            retry();
+                        }}
+                    />
                 ) : ready && current ? (
                     <QueryOwner value={sessionOwner(session)}>
                         <Screens
@@ -109,17 +120,21 @@ function Bootstrap({
     failure?:
         | { kind: "catalogue" }
         | { kind: "language" }
+        | { kind: "savedFigures" }
         | { kind: "session"; message: string };
     retry: () => void;
 }) {
     const language = useTranslations("Language");
     const page = useTranslations("AppError");
+    const bootstrap = useTranslations("Bootstrap");
     const error =
         failure?.kind === "catalogue"
             ? page("description")
             : failure?.kind === "language"
               ? language("failed")
-              : failure?.message;
+              : failure?.kind === "savedFigures"
+                ? bootstrap("savedFiguresUnchecked")
+                : failure?.message;
     return <LaunchCard failure={error ? { error, retry } : undefined} />;
 }
 

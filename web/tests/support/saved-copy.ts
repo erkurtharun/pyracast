@@ -181,14 +181,16 @@ export function readCopy(page: Page): Promise<ReadCopy> {
             const request = indexedDB.open("pyracast-saved");
             request.onupgradeneeded = () => request.transaction?.abort();
             request.onerror = () =>
-                void listed().then((exists) =>
-                    exists
-                        ? reject(
-                              new Error(
-                                  "The copy exists but cannot be opened.",
-                              ),
-                          )
-                        : resolve(absent),
+                void listed().then(
+                    (exists) =>
+                        exists
+                            ? reject(
+                                  new Error(
+                                      "The copy exists but cannot be opened.",
+                                  ),
+                              )
+                            : resolve(absent),
+                    reject,
                 );
             request.onsuccess = () => {
                 const database = request.result;
@@ -218,7 +220,8 @@ export function readCopy(page: Page): Promise<ReadCopy> {
     });
 }
 
-// Holds a write transaction over the copy's plants in another page until `release`, which closes it.
+// Holds a write transaction over the whole copy in another page until `release`, which may first
+// write a holder in it and then lets it commit; the copy's transactions queued meanwhile run after it.
 export async function holdCopy(page: Page) {
     const other = await page.context().newPage();
     await onBlankPage(other);
@@ -229,23 +232,35 @@ export async function holdCopy(page: Page) {
                 request.onsuccess = () => {
                     const database = request.result;
                     database.onversionchange = () => database.close();
-                    const store = database
-                        .transaction(["plants"], "readwrite")
-                        .objectStore("plants");
+                    const transaction = database.transaction(
+                        ["holder", "plants", "days"],
+                        "readwrite",
+                    );
                     const keep = () => {
-                        if ("copyReleased" in window) {
+                        const release = Reflect.get(window, "copyReleased") as
+                            { holder?: unknown } | undefined;
+                        if (release) {
+                            if (release.holder)
+                                transaction
+                                    .objectStore("holder")
+                                    .put(release.holder, "holder");
                             database.close();
                             return;
                         }
-                        store.count().onsuccess = keep;
+                        transaction.objectStore("plants").count().onsuccess =
+                            keep;
                     };
                     keep();
                     resolve();
                 };
             }),
     );
-    return () =>
-        other.evaluate(() => Object.assign(window, { copyReleased: true }));
+    return (holder?: Holder) =>
+        other.evaluate(
+            (written) =>
+                Object.assign(window, { copyReleased: { holder: written } }),
+            holder,
+        );
 }
 
 // Keeps a connection to the copy open in another page that ignores a request to delete it.
@@ -266,7 +281,6 @@ export async function blockDeletion(page: Page) {
     return () => other.evaluate(() => "deletionAsked" in window);
 }
 
-// Every clear of an object store throws in this page's documents while the storage key is set.
 export async function refuseClears(page: Page) {
     await page.addInitScript(() => {
         const clear = Object.getOwnPropertyDescriptor(
@@ -282,6 +296,35 @@ export async function refuseClears(page: Page) {
     await page.evaluate(() => window.localStorage.setItem("refuseClears", "1"));
     return () =>
         page.evaluate(() => window.localStorage.removeItem("refuseClears"));
+}
+
+// Counts the write transactions each later document of this page opens, so a case can wait until its work is queued.
+export async function countWrites(page: Page) {
+    await page.addInitScript(() => {
+        const transaction = Object.getOwnPropertyDescriptor(
+            IDBDatabase.prototype,
+            "transaction",
+        )!.value as (
+            this: IDBDatabase,
+            ...operands: unknown[]
+        ) => IDBTransaction;
+        IDBDatabase.prototype.transaction = function (
+            this: IDBDatabase,
+            ...operands: unknown[]
+        ) {
+            if (operands[1] === "readwrite") {
+                const count = Reflect.get(window, "copyWrites") as
+                    number | undefined;
+                Object.assign(window, { copyWrites: (count ?? 0) + 1 });
+            }
+            return transaction.apply(this, operands);
+        } as IDBDatabase["transaction"];
+    });
+    return () =>
+        page.evaluate(
+            () =>
+                (Reflect.get(window, "copyWrites") as number | undefined) ?? 0,
+        );
 }
 
 // The store chunk is the only script that names the database; holding it holds the document's copy work.
@@ -308,38 +351,57 @@ export async function watchStoreChunk(page: Page, held = false) {
 
 const constant = "const SAVED_FIGURES = true;";
 
-// The store module as source in a blank page of the origin, with its withdrawal constant set.
-export async function loadStore(page: Page, savedFigures: boolean) {
-    const file = path.resolve(__dirname, "../../src/lib/saved/store.ts");
-    const source = readFileSync(file, "utf8");
-    if (!source.includes(constant))
-        throw new Error(`${file} no longer declares ${constant}`);
-    const { outputText } = ts.transpileModule(
-        source.replace(constant, `const SAVED_FIGURES = ${savedFigures};`),
-        {
-            compilerOptions: {
-                target: ts.ScriptTarget.ES2022,
-                module: ts.ModuleKind.CommonJS,
-            },
+function transpiled(name: string, source = (text: string) => text) {
+    const file = path.resolve(__dirname, `../../src/lib/saved/${name}.ts`);
+    return ts.transpileModule(source(readFileSync(file, "utf8")), {
+        compilerOptions: {
+            target: ts.ScriptTarget.ES2022,
+            module: ts.ModuleKind.CommonJS,
         },
-    );
+    }).outputText;
+}
+
+// The store module and its deadline as source in a blank page of the origin, with the withdrawal constant set.
+export async function loadStore(page: Page, savedFigures: boolean) {
+    const store = transpiled("store", (source) => {
+        if (!source.includes(constant))
+            throw new Error(`store.ts no longer declares ${constant}`);
+        return source.replace(
+            constant,
+            `const SAVED_FIGURES = ${savedFigures};`,
+        );
+    });
     await onBlankPage(page);
     await page.evaluate(
-        `(() => { const exports = {}; ${outputText}\nwindow.savedStore = exports; })()`,
+        `(() => {
+            const load = (text) => { const exports = {}; new Function("exports", text)(exports); return exports; };
+            window.savedDeadline = load(${JSON.stringify(transpiled("deadline"))});
+            window.savedStore = load(${JSON.stringify(store)});
+        })()`,
     );
 }
 
 type LoadedStore = Record<
     "start" | "copyState",
-    (removal?: unknown) => Promise<string>
+    (...operands: unknown[]) => Promise<string>
 >;
 
-// Calls an operation of the loaded store and keeps its answer in the page until `answer` reads it.
+// Calls an operation of the loaded store under the application's two-second deadline and keeps
+// its answer in the page until `answer` reads it.
 export async function callStore(page: Page, operation: keyof LoadedStore) {
     await page.evaluate((name) => {
         const store = Reflect.get(window, "savedStore") as LoadedStore;
+        const { deadline } = Reflect.get(window, "savedDeadline") as {
+            deadline: (limitMs: number) => unknown;
+        };
         const none = { outstanding: () => null, acknowledge: () => {} };
-        Object.assign(window, { storeAnswer: store[name](none) });
+        const limit = deadline(2_000);
+        Object.assign(window, {
+            storeAnswer:
+                name === "start"
+                    ? store.start(none, limit)
+                    : store[name](limit),
+        });
     }, operation);
     return () =>
         page.evaluate(
