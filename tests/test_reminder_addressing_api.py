@@ -31,7 +31,6 @@ from pyracast.notifications.models import (
     ReminderSchedule,
 )
 from pyracast.notifications.operations import (
-    MAX_RECIPIENT_LIMIT,
     AddressChoice,
     MemberChoice,
     configure_reminders,
@@ -995,13 +994,10 @@ def test_the_published_role_lists_carry_their_bounds() -> None:
     lists = schemas["ReminderInput"]["properties"]
     entry = schemas["AddressRoleInput"]["properties"]["memberships"]
 
-    assert [lists[name].get("maxItems") for name in ("address_roles", "member_roles")] == [
-        MAX_RECIPIENT_LIMIT,
-        MAX_RECIPIENT_LIMIT,
-    ]
-    assert (entry.get("maxItems"), entry["items"].get("minimum")) == (MAX_RECIPIENT_LIMIT, 1)
+    assert [lists[name].get("maxItems") for name in ("address_roles", "member_roles")] == [100, 100]
+    assert (entry.get("maxItems"), entry["items"].get("minimum")) == (100, 1)
     member = schemas["MemberRoleInput"]["properties"]["memberships"]
-    assert (member.get("maxItems"), member["items"].get("minimum")) == (MAX_RECIPIENT_LIMIT, 1)
+    assert (member.get("maxItems"), member["items"].get("minimum")) == (100, 1)
 
 
 def test_a_delivery_row_erasure_keeps_for_another_verified_holder_keeps_its_visible_role() -> None:

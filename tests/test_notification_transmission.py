@@ -1,6 +1,6 @@
 import uuid
 from collections.abc import Iterator
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -17,6 +17,7 @@ from pyracast.notifications.models import (
     NotificationSettings,
 )
 from pyracast.notifications.operations import recipient_limit
+from pyracast.notifications.recipients import Headers, carries_exactly
 from pyracast.notifications.scheduler import MAX_LATENESS
 from pyracast.regions.models import Region
 from tests.support.notification_transmission import BACKEND, OpeningBackend
@@ -197,29 +198,61 @@ def test_mail_authentication_failure_remains_retryable_and_visible() -> None:
     assert delivery.last_error == "mail_credentials_rejected"
 
 
-def test_authority_lock_wait_cannot_move_transmission_past_its_deadline(
+@pytest.mark.parametrize("slow", ["authority lock", "message check"])
+@pytest.mark.parametrize(
+    ("start", "passed", "outcome"),
+    [
+        pytest.param(
+            SLOT + MAX_LATENESS - timedelta(seconds=1),
+            timedelta(seconds=2),
+            ("skipped", "delivery_deadline_exceeded"),
+            id="deadline",
+        ),
+        pytest.param(
+            SLOT,
+            LEASE_DURATION + timedelta(seconds=1),
+            ("retry", "interrupted_connection"),
+            id="lease",
+        ),
+    ],
+)
+def test_waiting_for_the_authority_or_checking_the_message_cannot_move_transmission_past_a_cutoff(
     monkeypatch: pytest.MonkeyPatch,
+    slow: str,
+    start: datetime,
+    passed: timedelta,
+    outcome: tuple[str, str],
 ) -> None:
     delivery = ready()
     clock = [0.0]
     monkeypatch.setattr(
         "pyracast.background.clock.time", SimpleNamespace(monotonic=lambda: clock[0])
     )
-    original = recipient_limit
+    limit, check = recipient_limit, carries_exactly
     calls = 0
 
     def slow_lock(*, lock: bool = False) -> int:
         nonlocal calls
         calls += 1
         if calls == 2:
-            clock[0] = 2
-        return original(lock=lock)
+            clock[0] = passed.total_seconds()
+        return limit(lock=lock)
 
-    monkeypatch.setattr(jobs, "recipient_limit", slow_lock)
-    assert not process_notification(delivery.pk, SLOT + MAX_LATENESS - timedelta(seconds=1))
+    def slow_check(message: EmailMessage, placed: Headers) -> bool:
+        carried = check(message, placed)
+        clock[0] = passed.total_seconds()
+        return carried
+
+    if slow == "authority lock":
+        monkeypatch.setattr(jobs, "recipient_limit", slow_lock)
+    else:
+        monkeypatch.setattr(jobs, "carries_exactly", slow_check)
+    assert not process_notification(delivery.pk, start)
     assert not OpeningBackend.sent
     delivery.refresh_from_db()
-    assert delivery.last_error == "delivery_deadline_exceeded"
+    assert (delivery.status, delivery.last_error) == outcome
+    assert delivery.transmit_started_at is None
+    assert delivery.lease_token is None
 
 
 def test_database_failure_before_transmission_is_a_known_non_send(

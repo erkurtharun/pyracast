@@ -1117,8 +1117,11 @@ def test_a_password_reset_typed_with_a_capital_the_database_cannot_lower_is_eras
     assert not OutboundMail.objects.exists()
 
 
-def test_a_reminder_entry_typed_with_such_a_capital_that_another_account_verifies_is_kept() -> None:
-    earlier, current = f"held.later@{NEWER_CAPITAL}.com", "moved.on@example.com"
+@pytest.mark.parametrize("verified", [True, False], ids=["verified meanwhile", "not verified"])
+def test_a_reminder_entry_typed_in_other_letter_case_stays_only_while_another_account_verifies_it(
+    verified: bool,
+) -> None:
+    earlier, current = "Held.Later@Example.com", "moved.on@example.com"
     person = person_with(current)
     tenant, _inviter = administered_workspace()
     Membership.objects.create(tenant=tenant, user=person)
@@ -1135,7 +1138,6 @@ def test_a_reminder_entry_typed_with_such_a_capital_that_another_account_verifie
         ),
         effective_from=NOW,
     )
-    # An administrator's entry keeps the address as typed; its key is folded by Python.
     entry = ReminderRecipient.objects.create(
         schedule=schedule, address=earlier, key=recipient_key(earlier)
     )
@@ -1143,14 +1145,19 @@ def test_a_reminder_entry_typed_with_such_a_capital_that_another_account_verifie
 
     def verify() -> None:
         Tenant.objects.select_for_update().get(pk=tenant.pk)
-        EmailAddress.objects.create(
-            user=newcomer, email=earlier.lower(), primary=True, verified=True
-        )
+        if verified:
+            EmailAddress.objects.create(
+                user=newcomer, email=earlier.lower(), primary=True, verified=True
+            )
 
     behind_open_transaction(verify, lambda: erase_account(person.pk, execute=True))
 
-    assert list(ReminderRecipient.objects.values_list("pk", "address")) == [(entry.pk, earlier)]
-    assert ReminderSchedule.objects.get(pk=schedule.pk).revision == revision
+    assert list(ReminderRecipient.objects.values_list("pk", "address")) == (
+        [(entry.pk, earlier)] if verified else []
+    )
+    assert ReminderSchedule.objects.get(pk=schedule.pk).revision == revision + (
+        0 if verified else 1
+    )
 
 
 def test_a_reminder_entry_committed_in_another_workspace_after_the_workspace_locks_is_kept(

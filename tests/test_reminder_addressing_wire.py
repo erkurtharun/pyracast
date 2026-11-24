@@ -9,7 +9,7 @@ import httpx
 import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
-from django.core.mail import EmailMessage
+from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.core.validators import validate_email
 from django.test import Client, override_settings
 from django.utils import timezone
@@ -17,7 +17,9 @@ from django.utils import timezone
 from pyracast.accounts.models import Membership
 from pyracast.mail.gmail import SEND_SCOPE, TOKEN_URL
 from pyracast.mail.policy import wire_policy
+from pyracast.notifications import jobs
 from pyracast.notifications.jobs import process_notification
+from pyracast.notifications.mail import build_message
 from pyracast.notifications.models import (
     DeliveryRecipient,
     NotificationDelivery,
@@ -456,6 +458,19 @@ def test_several_plain_addresses_read_back_exactly_in_every_serialization() -> N
     assert carries_exactly(composed([], [], bcc + to), ([], [], bcc + to))
 
 
+def test_plain_headers_over_an_envelope_in_another_order_differ_from_their_placement() -> None:
+    to, cc, bcc = (typed_as(role) for role in (TO, CC, BCC))
+    message = composed(to[::-1], cc, bcc)
+    message.extra_headers["To"] = ", ".join(to)
+
+    assert serialized_headers(message) == {
+        "smtp 7bit": (to, cc, []),
+        "smtp 8bit": (to, cc, []),
+        "gmail": (to, cc, bcc),
+    }
+    assert not carries_exactly(message, (to, cc, bcc))
+
+
 @pytestdb
 def test_a_visible_choice_does_not_pass_to_a_distinct_ace_domain() -> None:
     system = workspace()
@@ -875,11 +890,7 @@ def test_a_list_whose_texts_are_not_plain_is_skipped_before_the_transmit_marker(
 ) -> None:
     system = workspace()
     delivery_id = queued(system)
-    before = list(
-        DeliveryRecipient.objects.filter(delivery_id=delivery_id)
-        .order_by("pk")
-        .values_list("address", "role")
-    )
+    before = frozen_roles(delivery_id)
 
     with smtp_wire() as script:
         if transport == "smtp":
@@ -891,14 +902,44 @@ def test_a_list_whose_texts_are_not_plain_is_skipped_before_the_transmit_marker(
     assert skipped_as_invalid(delivery_id)
     assert NotificationDelivery.objects.get(pk=delivery_id).transmit_started_at is None
     assert set(role for _, role in before) <= {BCC}
-    assert (
-        list(
-            DeliveryRecipient.objects.filter(delivery_id=delivery_id)
-            .order_by("pk")
-            .values_list("address", "role")
-        )
-        == before
+    assert frozen_roles(delivery_id) == before
+
+
+def frozen_roles(delivery_id: int) -> list[tuple[str, str | None]]:
+    return list(
+        DeliveryRecipient.objects.filter(delivery_id=delivery_id)
+        .order_by("pk")
+        .values_list("address", "role")
     )
+
+
+@pytestdb
+@pytest.mark.parametrize("transport", ["smtp", "gmail"])
+def test_a_composed_copy_header_other_than_the_placement_stops_the_send_at_the_transmit_marker(
+    gmail_requests: list[bytes], transport: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system = workspace()
+    typed_schedule(system)
+    delivery_id = enqueue_due(SLOT)[-1]
+    before = frozen_roles(delivery_id)
+
+    def composed_with_another_copy(delivery: NotificationDelivery) -> EmailMultiAlternatives:
+        message = build_message(delivery)
+        message.extra_headers["Cc"] = ", ".join(typed_as(CC)[::-1])
+        return message
+
+    monkeypatch.setattr(jobs, "build_message", composed_with_another_copy)
+    with smtp_wire() as script:
+        if transport == "smtp":
+            assert not process_notification(delivery_id, SLOT)
+    if transport == "gmail":
+        assert not process_notification(delivery_id, SLOT)
+
+    assert (script.transactions, gmail_requests) == ([], [])
+    assert skipped_as_invalid(delivery_id)
+    delivery = NotificationDelivery.objects.get(pk=delivery_id)
+    assert (delivery.transmit_started_at, delivery.lease_token) == (None, None)
+    assert frozen_roles(delivery_id) == before
 
 
 @pytestdb
