@@ -70,7 +70,7 @@ sequenceDiagram
 
 | Condition | Result |
 | --- | --- |
-| Malformed address, longer than 254 characters or already on this account | 400 with `fields.email` |
+| Address that is not plain (`AddEmailInput.clean_email`, `accounts.addresses.plain_address`: "Enter a valid email address."), longer than 254 characters or already on this account | 400 with `fields.email`; no code is mailed |
 | Address belongs to another account | 200 (enumeration prevention) and a code is mailed to it; at verify 400 `email_taken` only if the other account holds it verified, otherwise the change succeeds |
 | No confirmation, or the account's credentials changed since the session's last | 401; the shared prompt opens and the request resumes |
 | Session expired while sending | 409 (anonymous POST) |
@@ -91,5 +91,5 @@ sequenceDiagram
 
 ## Tests
 
-- `tests/test_auth_lifecycle.py` (reauthentication, notice, concurrent confirmations), `tests/test_account_email_confirmation.py` (user-row lock order), `tests/test_account_endpoints.py`, `tests/test_pending_process_authority.py` (a change ends with the account's state).
+- `tests/test_plain_addresses.py` (an address that is not plain is refused and mails nothing), `tests/test_auth_lifecycle.py` (reauthentication, notice, concurrent confirmations), `tests/test_account_email_confirmation.py` (user-row lock order), `tests/test_account_endpoints.py`, `tests/test_pending_process_authority.py` (a change ends with the account's state).
 - Playwright `web/tests/account-security.spec.ts` (mocked API).

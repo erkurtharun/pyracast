@@ -1,6 +1,6 @@
 # List workspace members and remove a viewer
 
-A workspace administrator opens the Members screen, sees the active members and removes a viewer through a confirm panel. Removal ends the viewer's access to that workspace at once, strips the member from reminder recipients, closes matching pending invitations and writes an audit row. The user account, other memberships and workspace resources are kept.
+A workspace administrator opens the Members screen, sees the active members and removes a viewer through a confirm panel. Removal ends the viewer's access to that workspace at once, hides the recipients of every visible reminder schedule of the workspace, strips the member from reminder recipients, closes matching pending invitations and writes an audit row. The user account, other memberships and workspace resources are kept.
 
 ## Entry points
 
@@ -38,7 +38,7 @@ sequenceDiagram
     end
     Op->>DB: "read all EmailAddress rows and the primary email of the target"
     Op->>Rc: "tenant, membership pk, verified addresses plus primary email"
-    Rc->>DB: "lock regions, delete recipient rows, advance schedule revisions, revoke delivery rows"
+    Rc->>DB: "lock regions, hide visible schedules, delete recipient rows, advance schedule revisions, revoke delivery rows"
     Op->>DB: "close pending invitations, insert removal row, delete membership, COMMIT"
     opt any lock wait over 5 s (account rows, tenant, region)
         V-->>UI: "503 busy, Retry-After 1, rollback"
@@ -56,8 +56,9 @@ sequenceDiagram
 | `account_emailaddress` | R (lock) | all addresses close invitations; verified ones strip recipients |
 | `regions_region` | R (lock) | tenant regions locked in pk order |
 | `notifications_reminderrecipient`, `notifications_reminderrecipienttie` | R/W | rows tied to the membership, or untied with the key of one of its addresses (any schedule of the workspace), are deleted |
-| `notifications_reminderschedule` | W | `revision` advances for each schedule that lost a recipient |
-| `notifications_deliveryrecipient` | R/W | rows of open deliveries (`pending`, `retry`, `sending`, `uncertain`) for those keys get `revoked` when their schedule no longer authorizes them without the membership |
+| `notifications_reminderschedule` | R (lock)/W | every visible schedule of the workspace is locked and set hidden (`hide_recipients`, `hidden_by_departure`, `revision` plus one; `configured_by` and `effective_from` kept); `revision` advances once for each other schedule that lost a recipient |
+| `notifications_remindermemberrole` | D | the member's choices go with the membership (cascade) |
+| `notifications_deliveryrecipient` | R/W | rows of open deliveries (`pending`, `retry`, `sending`, `uncertain`) for those keys get `revoked` when their schedule no longer authorizes them without the membership; a row keeps its `role` |
 | `accounts_workspaceinvitation` | W | pending invitations to the member's addresses get `revoked_at` and `revoked_reason` `member_removed`; the deadline is kept |
 | `accounts_workspacememberremoval` | W | append-only audit row; the console reads it to tell a repeated removal from an unknown member |
 
@@ -89,13 +90,14 @@ sequenceDiagram
 
 - Removing the administrator, or oneself, is refused before any lock is taken, and checked again under the account and tenant locks. Lock order is the member's account rows (`FOR NO KEY UPDATE`), Tenant, Region (pk order), the backend's one order for a person and a workspace (`docs/ARCHITECTURE.md`). Mail transmission in `pyracast.notifications.jobs` takes Tenant first, then Region and delivery, so removal cannot interleave with the transmit marker. The marker only fixes the recipients of the current attempt, whose send happens after it commits and may still reach the removed member; the revocation is still written, and a retry after a known not-sent outcome excludes the revoked address. Account rows come first so an address verified or an acceptance committed meanwhile is among the addresses read.
 - Removal is idempotent and writes the audit row only when a membership was deleted. A workspace has one administrator, so "not the administrator" and "not yourself" are one rule. The `workspace_member_removed` security event is written after commit.
-- Invitation closing uses every `EmailAddress` row (verified or not) plus the primary email, case-insensitively, over the workspace's pending (open, unexpired) invitations. Recipient stripping uses verified addresses and the primary email (`recipient_key`, case-folded; a blank address is no key) and the rows tied to the membership; an address another active member holds stays on open deliveries, and an unverified alias saved as an external recipient stays.
+- Invitation closing uses every `EmailAddress` row (verified or not) plus the primary email, case-insensitively, over the workspace's pending (open, unexpired) invitations. Recipient stripping uses verified addresses and the primary email (`recipient_key`: the exact text with only `A`-`Z` lower-cased; a blank address is no key) and the rows tied to the membership; an address another active member holds stays on open deliveries, and an unverified alias saved as an external recipient stays. The revocation (`recipients._revoke_unauthorized`) selects in SQL, by stored key, the open delivery rows of the workspace's schedules whose key is one of the departure's keys (the member's addresses and the keys of the typed rows the removal deletes), returns before any statement when there is none, and revokes those the schedule no longer authorizes without the leaving membership; rows of other keys are left to narrowing.
+- A departure hides (`recipients.hide_visible_schedules`, after the region locks and before a recipient row goes): it reads nothing about holders or spellings, writes no audit event of its own (the removal row records the cause) and leaves a hidden schedule as it is; one removal advances a schedule's revision once. Every other stored choice stays; a membership id left in a typed row's `role_members` keeps that choice resting until the next decision. The administrator's next save is the fresh decision and clears `hidden_by_departure` (flow `reminder-configuration`).
 - Recipients are tied to the membership pk, so a rejoin gets a new pk and cannot revive an old slot. Terminal deliveries keep their history; the member's change requests stay pending for administrator review, and a rejoined member does not see them again.
 - Sessions are not ended. Access disappears because each request re-reads the membership; open tabs of the removed user see 403 `membership_required` on workspace routes and lose the workspace at the next tenant list read (every 120 s).
 
 ## Tests
 
 - `tests/test_workspace_member_removal.py`: CSRF, live-session access loss, preservation of account and resources, rejected actors, administrator target, unknown target, invitation closing, audit rollback, concurrent removal, serialization with transfer and acceptance (operation level, not HTTP), the two administrators removing each other, addresses verified or accepted while the removal runs.
-- Recipient effects: `tests/test_reminder_recipient_rows.py`, `test_reminder_revision.py`, `test_notification_groups.py`, `test_notification_group_boundaries.py`, `test_notification_recipient_history.py`, `test_notification_revocations.py`. Proposals: `tests/test_change_request_boundaries.py`, `test_change_request_concurrency.py`. HTTP failures: `tests/test_workspace_http_failures.py`; lists without a tenant lock and viewer 403: `tests/test_workspace_authorization.py`; response shape: `tests/test_workspaces.py` `test_workspace_invitation_api_is_scoped_and_never_returns_secrets`. Console: `tests/test_admin_workspace_management.py`, `tests/test_platform_workspace_authority.py`.
+- Recipient effects: `tests/test_reminder_recipient_rows.py`, `test_reminder_revision.py`, `test_notification_groups.py`, `test_notification_group_boundaries.py`, `test_notification_recipient_history.py`, `test_notification_revocations.py`, `test_reminder_addressing_departure.py` (hiding, the mark cleared by the next save, a save racing a removal, revocation by key). Proposals: `tests/test_change_request_boundaries.py`, `test_change_request_concurrency.py`. HTTP failures: `tests/test_workspace_http_failures.py`; lists without a tenant lock and viewer 403: `tests/test_workspace_authorization.py`; response shape: `tests/test_workspaces.py` `test_workspace_invitation_api_is_scoped_and_never_returns_secrets`. Console: `tests/test_admin_workspace_management.py`, `tests/test_platform_workspace_authority.py`.
 - `web/tests/workspace-member-removal.spec.ts` (mocked API): 320 and 390 px panel, cancel, buttons disabled while pending (one DELETE), 400 refetch, 403 role loss, workspace switch.
 - Gaps: no test of the `is_active` listing filter; no browser test against the real backend.

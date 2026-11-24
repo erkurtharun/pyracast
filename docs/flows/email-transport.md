@@ -53,12 +53,12 @@ sequenceDiagram
 | `notifications_outboundmail` | R/W | Written by the request (`pending`); the worker leases it, sets `attempts`, `transmit_started_at`, `status`, `last_error`, `finished_at` and erases `sealed_code` on every end. Ended intents are deleted 7 days after `finished_at`; the closed-invitation sweep and account erasure delete the mail of the invitations they delete (flows `member-invitation`, `account-erasure`) |
 | `accounts_workspaceinvitation` | W | `delivery_status` set to `sent`, `failed` or `uncertain` when the intent ends; the token digest is minted at send time |
 | `notifications_notificationdelivery` | R/W | Reminder only: `message_token` (stable `Message-ID`), `transmit_started_at`, `status`, `last_error`, `sent_at`, `attempts` (owned by `reminder-delivery`) |
-| `notifications_deliveryrecipient` | R/W | Reminder only: `_mark_transmit` deletes the candidate rows that are revoked or no longer current; the rows left are the BCC envelope (owned by `reminder-delivery`) |
+| `notifications_deliveryrecipient` | R/W | Reminder only: `_mark_transmit` deletes the candidate rows that are revoked or no longer current; the rows left are the envelope, each with the `role` it was sent in (owned by `reminder-delivery`) |
 | `accounts_tenant`, `notifications_notificationsettings`, `regions_region` | R (row lock) | `_mark_transmit` locks them before writing a reminder's transmit marker |
 
 ## Authorization
 
-- The transport has no caller check: it sends whatever the caller built. Authorization is the caller's: `authorize_workspace_admin` in `invite_workspace_member`, allauth flows for account mail, and at send time the intent's own recheck (an invitation must still be pending, event mail needs a current member) and, for reminders, the tenant and region lock plus recipient recheck in `_mark_transmit`.
+- The transport has no caller check: it sends whatever the caller built. Authorization is the caller's: `authorize_workspace_admin` in `invite_workspace_member`, allauth flows for account mail, and at send time the intent's own recheck (an invitation must still be pending, event mail needs a current member) and, for reminders, the tenant and region lock, the recipient recheck and the check of the composed message's To, Cc and Bcc in `_mark_transmit`.
 - Gmail enforces one sender: `_send` refuses a message whose `From` differs from the `DEFAULT_FROM_EMAIL` address and the token response must carry exactly the `gmail.send` scope.
 
 ## Failure paths
@@ -89,7 +89,7 @@ sequenceDiagram
 - Wire bytes: CRLF line ends; `Content-Type` is never folded into encoded-words; non-ASCII subjects use encoded-words of at most 75 characters and attachment names keep RFC 2231. SMTP sends an 8-bit body only to a server that advertises 8BITMIME, else 7-bit transfer encodings. Reminders carry `Message-ID: <reminder.{message_token}@{sender domain}>`.
 - Open-before-authorize: the connection is opened outside any database transaction, then `before_send` rechecks authority under a row lock, renders the message and writes `transmit_started_at`. After that marker an interruption is `uncertain` and never resent; an outbound mail is therefore sent at most once.
 - The mailer claims an intent with a lease and checks the lease and expiry again after the row lock; expired or taken-over leases record nothing.
-- Reminder recipients travel as BCC: SMTP puts them in the envelope only, Gmail adds a `Bcc` header because it routes by headers.
+- Reminder headers follow the placement the transmit marker sets (flow `reminder-delivery`): every recipient in `Bcc` when the schedule hides recipients, otherwise `To` and `Cc` as placed and the rest in `Bcc`. SMTP (`mail/smtp.py`) writes `To` and `Cc` into the content Django serializes and sends `RCPT` for every address of `message.recipients()`, so a Bcc address is in the envelope only; Gmail (`mail/gmail.py`) carries `To` and `Cc` from Django's headers and adds a `Bcc` header with the hidden addresses, because it routes by headers. Before the marker `notifications.recipients.carries_exactly` reads `To`, `Cc` and `Bcc` back from the bytes each transport writes (`mail/policy.py` `wire_policy`, both body types) and refuses a message that does not carry exactly the placed lists.
 - Retry budget for known non-sends (outbound mail and reminders): at most 8 attempts, delay `30 * 2^attempts` seconds capped at 1800 plus 0-30 s jitter; a reminder retries only while the retry time is before `scheduled_for + 2 hours`, an outbound mail while it is before `expires_at`.
 - All timeouts are 15 s (SMTP socket, httpx per operation). Requests never wait for a transport.
 
@@ -97,4 +97,5 @@ sequenceDiagram
 
 - `tests/test_claim_contention.py`: an outbound mail delivery behind a held mail lock ends without claiming.
 - `tests/test_mail_wire.py` (bytes on both transports), `tests/test_mail_outcomes.py` (outcome per error class and SMTP phase), `tests/test_mail_configuration.py` (deploy check, `check_mail` exit codes), `tests/test_outbound_mail.py` (lease, retry bound, crash and takeover, uncertain, expiry), `tests/test_notification_transmission.py`.
+- Reminder headers: `tests/test_smtp_mail.py` (a Cc header without To, no Bcc header in the content) and `tests/test_reminder_addressing_send.py` (on a loopback SMTP server: `To` and `Cc` in the content, the envelope, no hidden address in the content, a mail with Cc and no To; in the recorded Gmail request: `To`, `Cc` and the added `Bcc`), `tests/test_reminder_addressing_wire.py` (each plain address as typed in the SMTP headers and envelope under both body types and in the Gmail request, an all-hidden Gmail message, texts that read back otherwise fail the check), `tests/test_gmail_mail.py`.
 - Gaps: no live Gmail or provider SMTP; no Playwright test touches mail (browser tests mock the API).
