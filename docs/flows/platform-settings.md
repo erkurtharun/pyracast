@@ -31,7 +31,7 @@ sequenceDiagram
         V->>D: "settings_context: unlocked SELECT of the limit, default 5 if no row; plants over it"
         alt "GET"
             V-->>P: "200 form, hidden expected = current value"
-        else "value outside 1..32767, not a number, or expected missing"
+        else "value outside 1..100, not a number, or expected missing"
             V-->>P: "400 form re-rendered with field error"
         else "limit pauses plants not paused now and confirm_pause missing"
             V-->>P: "400 plants listed, confirmation asked"
@@ -57,7 +57,7 @@ sequenceDiagram
 
 | Table | R/W | What |
 | --- | --- | --- |
-| `notifications_notificationsettings` | R/W | Singleton row `id=1` (`notificationsettings_id_chk`, `notificationsettings_max_recipients_chk` >= 1, smallint). GET and the page checks read it without a lock; reminder paths read it `FOR SHARE`; `set_recipient_limit` locks it `FOR UPDATE`, creating it if absent, and updates only `max_recipients`. |
+| `notifications_notificationsettings` | R/W | Singleton row `id=1` (`notificationsettings_id_chk`, `notificationsettings_max_recipients_chk`: 1 to 100, `notifications.models.MAX_RECIPIENT_LIMIT`, smallint). GET and the page checks read it without a lock; reminder paths read it `FOR SHARE`; `set_recipient_limit` locks it `FOR UPDATE`, creating it if absent, validates the value with the model's validators (`full_clean`) and updates only `max_recipients`. |
 | `django_admin_log` | W | One `CHANGE` row per effective change: object `1`, repr "Email reminder settings", message "Recipient limit changed from X to Y.", user = actor. |
 | `notifications_reminderschedule`, `notifications_reminderrecipient`, `accounts_membership`, `regions_region`, `plants_plant` | R | Enabled schedules of live plants, counted as the scheduler counts recipients, for the over-limit list. |
 | `auth_user`, `django_session`, `mfa_authenticator`, `django_content_type` | R | Session user and flags, the session's authenticator record, content type for the log row. The session middleware refreshes session rows at most once a minute. |
@@ -67,7 +67,7 @@ sequenceDiagram
 - Gate: `PlatformAdminSite.has_permission` requires an active staff superuser and `security.has_mfa_evidence` (any age). `admin_view` adds CSRF, `never_cache`, a recent authenticator confirmation for every unsafe method and `contained`. A failure redirects to `admin:login`, which `PlatformAdminSite.login` sends to `/app/?next=<console path>` (anonymous) or `/app/`.
 - CSRF: `CsrfViewMiddleware` and `admin_view` (`csrf_protect`); a POST without a valid token is 403 before the gate runs, also for anonymous callers.
 - Operation: `set_recipient_limit` repeats `require_platform_admin` (active staff superuser). It checks no authenticator evidence, so it is a second line, not a replacement for `has_permission`.
-- Database: the singleton and positive-value check constraints bound the row even for writers that bypass the form. Tenant scope: none. The setting is platform-wide; customers read it through the reminders API (`recipient_limit`, `recipient_count`, `recipient_limit_exceeded`).
+- Database: the singleton and range check constraints bound the row even for writers that bypass the form. Tenant scope: none. The setting is platform-wide; customers read it through the reminders API (`recipient_limit`, `recipient_count`, `recipient_limit_exceeded`).
 
 ## Failure paths
 
@@ -77,7 +77,7 @@ sequenceDiagram
 | POST with a missing or wrong CSRF token | 403 |
 | Unsafe method without a recent authenticator confirmation | 403 confirmation page, nothing stored |
 | Method other than GET or POST (HEAD included) after the gate | 405 |
-| Value 0, negative, above 32767, non-numeric, empty, or `expected` missing or below 1 | 400, page re-rendered with the error summary "Review the recipient limit" |
+| Value 0, negative, above 100 (the field offers `max="100"`), non-numeric, empty, or `expected` missing or below 1 | 400, page re-rendered with the error summary "Review the recipient limit" |
 | Limit pauses reminders of plants not paused now, no `confirm_pause` | 400, plants listed, nothing stored |
 | `expected_max_recipients` differs from the locked row (and the value differs from it) | 400, non-field error "The settings changed. Reload this page before saving." The bound hidden field stays stale, so a resubmit fails again until the page is reloaded |
 | Value equals the stored value | 302 and the info flash "The recipient limit is already N.", nothing written, no log entry |
