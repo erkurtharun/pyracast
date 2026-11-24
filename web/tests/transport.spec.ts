@@ -406,7 +406,7 @@ test("a change whose body cannot be written is not sent and not reported as unco
 });
 
 test("a change refused before it left this tab is not unconfirmed", async () => {
-    adoptSession(signedIn("token"));
+    await adoptSession(signedIn("token"));
     let release!: () => void;
     const held = new Promise<void>((resolve) => {
         release = resolve;
