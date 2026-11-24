@@ -385,10 +385,8 @@ async function handOff(
     if (handoff === "superseded") return "superseded";
     if (limit.expired()) return "unhanded";
     if (handoff === "cleared") {
-        void boundedStore((store, deletion) => store.deleteCopy(deletion)).then(
-            (deleted) => {
-                if (deleted) forgetSavedCopy();
-            },
+        void boundedStore((store, deletion) =>
+            store.deleteCopy(deletion, forgetSavedCopy),
         );
         return "handed";
     }

@@ -263,7 +263,8 @@ export async function holdCopy(page: Page) {
         );
 }
 
-// Keeps a connection to the copy open in another page that ignores a request to delete it.
+// Keeps a connection to the copy open in another page that ignores a request to delete it
+// until `release` closes it.
 export async function blockDeletion(page: Page) {
     const other = await page.context().newPage();
     await onBlankPage(other);
@@ -272,13 +273,21 @@ export async function blockDeletion(page: Page) {
             new Promise<void>((resolve) => {
                 const request = indexedDB.open("pyracast-saved");
                 request.onsuccess = () => {
-                    request.result.onversionchange = () =>
+                    const database = request.result;
+                    database.onversionchange = () =>
                         Object.assign(window, { deletionAsked: true });
+                    Object.assign(window, { heldCopy: database });
                     resolve();
                 };
             }),
     );
-    return () => other.evaluate(() => "deletionAsked" in window);
+    return {
+        asked: () => other.evaluate(() => "deletionAsked" in window),
+        release: () =>
+            other.evaluate(() =>
+                (Reflect.get(window, "heldCopy") as IDBDatabase).close(),
+            ),
+    };
 }
 
 export async function refuseClears(page: Page) {

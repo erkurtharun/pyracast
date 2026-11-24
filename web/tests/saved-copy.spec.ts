@@ -530,6 +530,27 @@ test("a start under another user leaves no database and no flag", async ({
     await expect.poll(() => readCopy(page)).toEqual(absent);
 });
 
+test("a start under another user whose deletion another window holds past two seconds forgets the flag once the database is deleted", async ({
+    page,
+}) => {
+    await seedCopy(page);
+    await expectHeldFigures(page);
+    const deletion = await blockDeletion(page);
+    await signedIn(page, { current: secondAccount });
+    await page.goto("/app/w/1/");
+    await expect(plants(page)).toBeVisible();
+    await expect.poll(deletion.asked).toBe(true);
+    await pauseClock(page);
+    await page.clock.runFor(2_000);
+    expect(
+        await page.evaluate(() =>
+            window.localStorage.getItem("pyracast.saved"),
+        ),
+    ).toBe("1");
+    await deletion.release();
+    await expect.poll(() => readCopy(page)).toEqual(absent);
+});
+
 test("another user's copy whose clear is refused keeps a signed-in start from showing the session until a later try clears it", async ({
     page,
 }) => {
@@ -931,11 +952,11 @@ test("the store answers within its limit while another window keeps the copy fro
 }) => {
     await seedCopy(page);
     await expectHeldFigures(page);
-    const deletionAsked = await blockDeletion(page);
+    const deletion = await blockDeletion(page);
     await loadStore(page, false);
     await pauseClock(page);
     const started = await callStore(page, "start");
-    await expect.poll(deletionAsked).toBe(true);
+    await expect.poll(deletion.asked).toBe(true);
     await page.clock.runFor(2_000);
     expect(await started()).toBe("kept");
     const state = await callStore(page, "copyState");

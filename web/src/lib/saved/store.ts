@@ -175,11 +175,15 @@ function current(confirmedAt: number, now: number) {
 
 function deleteDatabase(
     limit: Deadline,
+    deleted = () => {},
 ): Promise<"deleted" | "failed" | "pending"> {
     return new Promise((resolve) => {
         try {
             const request = indexedDB.deleteDatabase(databaseName);
-            request.onsuccess = () => resolve("deleted");
+            request.onsuccess = () => {
+                deleted();
+                resolve("deleted");
+            };
             request.onerror = () => resolve("failed");
         } catch {
             resolve("failed");
@@ -196,8 +200,9 @@ async function removeCopy(limit: Deadline): Promise<"deleted" | "kept"> {
         : "kept";
 }
 
-export async function deleteCopy(limit: Deadline) {
-    return (await deleteDatabase(limit)) === "deleted";
+// A deletion still waiting at the deadline goes on; `deleted` runs whenever it succeeds.
+export async function deleteCopy(limit: Deadline, deleted: () => void) {
+    await deleteDatabase(limit, deleted);
 }
 
 async function removeOutstanding(removal: Removal, limit: Deadline) {
