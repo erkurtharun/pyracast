@@ -1,7 +1,9 @@
 "use client";
+import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
-import { useApiList } from "@/lib/api/query";
+import { useContext, useEffect, useMemo, useRef } from "react";
+import { keys } from "@/lib/api/keys";
+import { QueryOwner, useApiList } from "@/lib/api/query";
 import { appQuery, routes } from "@/lib/routes";
 import { useSessionState } from "@/lib/session-client";
 import { storedInvitation } from "@/features/workspace/workspace-invitation";
@@ -10,7 +12,7 @@ import { LaunchCard } from "./app-root";
 import { RequireUser } from "./require-user";
 
 const consoleRoot = "/admin/";
-const unprintable = /\|(?! )[\p{C}\p{Z}]/u;
+const unprintable = /\\|(?! )[\p{C}\p{Z}]/u;
 
 type Target = { href: string; document?: boolean };
 
@@ -60,28 +62,38 @@ function EntryResolver() {
     return target ? <Navigate {...target} /> : <WorkspaceEntry />;
 }
 
-// The shell reads the same list under the same key, so it shows the workspace without reading again.
 function WorkspaceEntry() {
     const tenants = useApiList("/api/tenants/", {});
-    if (!tenants.data)
-        return (
-            <LaunchCard
-                failure={
-                    tenants.error
-                        ? { error: tenants.error, retry: tenants.retry }
-                        : undefined
-                }
-            />
+    const owner = useContext(QueryOwner);
+    const list = useMemo(
+        () => ({ queryKey: keys.path(owner ?? "", "/api/tenants/") }),
+        [owner],
+    );
+    const client = useQueryClient();
+    const reading = useIsFetching(list) > 0;
+    const router = useRouter();
+    const dispatched = useRef(false);
+    const rows = tenants.error ? undefined : tenants.data?.results;
+    useEffect(() => {
+        if (dispatched.current || reading || !rows || client.isFetching(list))
+            return;
+        dispatched.current = true;
+        const tenant = chooseWorkspace(rows);
+        router.replace(
+            tenant ? routes.portfolio(tenant.id) : routes.workspaces(),
         );
-    const tenant = chooseWorkspace(tenants.data.results);
+    }, [client, list, reading, router, rows]);
     return (
-        <Navigate
-            href={tenant ? routes.portfolio(tenant.id) : routes.workspaces()}
+        <LaunchCard
+            failure={
+                tenants.error && !reading
+                    ? { error: tenants.error, retry: tenants.retry }
+                    : undefined
+            }
         />
     );
 }
 
-// The router keeps this screen, the launch card, until the navigation commits.
 function Navigate({ href, document }: Target) {
     const router = useRouter();
     useEffect(() => {

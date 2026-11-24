@@ -29,7 +29,7 @@ function recordRequests(page: Page) {
     return events;
 }
 
-// Read after every DOM change once parsed: a superset of what was painted.
+// Read after every DOM change from the document's creation: a superset of what was painted.
 async function recordScreens(page: Page) {
     await page.addInitScript(() => {
         const screens: string[] = [];
@@ -53,14 +53,12 @@ async function recordScreens(page: Page) {
             const shown = screen();
             if (shown !== last) screens.push(shown);
         };
-        document.addEventListener("DOMContentLoaded", () => {
-            record();
-            new MutationObserver(record).observe(document, {
-                childList: true,
-                subtree: true,
-                characterData: true,
-                attributes: true,
-            });
+        record();
+        new MutationObserver(record).observe(document, {
+            childList: true,
+            subtree: true,
+            characterData: true,
+            attributes: true,
         });
     });
     return () =>
@@ -98,6 +96,12 @@ test("a signed-in launch reaches the plants through one navigation behind the la
         "sent RSC /app/w/1/",
         "sent GET /api/tenants/1/sites/",
     ]);
+    expect(shown).toEqual(
+        expect.arrayContaining([
+            "answered GET /api/session/",
+            "answered GET /api/tenants/",
+        ]),
+    );
     expect(shown.indexOf("answered GET /api/session/")).toBeLessThan(
         shown.indexOf("sent GET /api/tenants/"),
     );
@@ -105,7 +109,7 @@ test("a signed-in launch reaches the plants through one navigation behind the la
         shown.indexOf("sent RSC /app/w/1/"),
     );
     expect(await servedStatuses(page, await response!.text())).toBe(1);
-    expect(await screens()).toEqual(["launch card", "shell"]);
+    expect(await screens()).toEqual(["no screen", "launch card", "shell"]);
     await expect(page).toHaveURL("/app/w/1/");
     await expect(page.getByText("Loading your workspaces…")).toHaveCount(0);
 });
@@ -120,7 +124,11 @@ test("a signed-out launch shows the launch card and then the sign-in form", asyn
         page.getByRole("heading", { name: "Welcome back" }),
     ).toBeVisible();
     expect(await servedStatuses(page, await response!.text())).toBe(1);
-    expect(await screens()).toEqual(["launch card", "sign-in form"]);
+    expect(await screens()).toEqual([
+        "no screen",
+        "launch card",
+        "sign-in form",
+    ]);
     await expect(page).toHaveURL("/app/");
 });
 
@@ -167,10 +175,15 @@ test("the launch card stays while the workspaces are read", async ({
     await expect(page).toHaveURL("/app/w/1/");
 });
 
+const sentCount = (events: string[], name: string) =>
+    events.filter((event) => event === `sent ${name}`).length;
+
 test("a launch whose workspace list fails offers Try again on the card", async ({
     page,
 }) => {
+    await page.clock.setFixedTime(instant);
     await mockApi(page);
+    const events = recordRequests(page);
     let failing = true;
     await page.route("**/api/tenants/", (route) =>
         failing
@@ -188,10 +201,14 @@ test("a launch whose workspace list fails offers Try again on the card", async (
         page.getByText("The workspaces could not be read."),
     ).toBeVisible();
     await expect(page).toHaveURL("/app/");
+    const lists = sentCount(events, "GET /api/tenants/");
+    const sessions = sentCount(events, "GET /api/session/");
     failing = false;
     await page.getByRole("button", { name: "Try again", exact: true }).click();
     await expect(plantCard(page)).toBeVisible();
     await expect(page).toHaveURL("/app/w/1/");
+    expect(sentCount(events, "GET /api/tenants/")).toBe(lists + 1);
+    expect(sentCount(events, "GET /api/session/")).toBe(sessions);
 });
 
 const twoWorkspaces = paged([
@@ -278,4 +295,118 @@ test("a launch with an invitation stored in the tab opens the invitation", async
     ).toBeVisible();
     await expect(page).toHaveURL("/app/invitation/");
     expect(tenants).toEqual([]);
+});
+
+async function openStartAddress(page: Page) {
+    await page.evaluate(() =>
+        (
+            window as unknown as {
+                next: { router: { push(href: string): void } };
+            }
+        ).next.router.push("/app/"),
+    );
+}
+
+const pastFreshness = new Date(instant.getTime() + 10_000);
+
+test("a start address opened with a cached workspace list chooses from the list read again", async ({
+    page,
+}) => {
+    await mockApi(page);
+    let workspaces = twoWorkspaces;
+    await page.route("**/api/tenants/", (route) =>
+        route.fulfill({ json: workspaces }),
+    );
+    await serveSecondWorkspace(page);
+    await page.goto("/app/w/2/");
+    await expect(plantCard(page, /West array/)).toBeVisible();
+    workspaces = paged([
+        tenantRow({ id: 1, name: "Sunfield Energy", role: "admin" }),
+    ]);
+    await page.clock.setFixedTime(pastFreshness);
+    const events = recordRequests(page);
+    await openStartAddress(page);
+    await expect(plantCard(page)).toBeVisible();
+    await expect(page).toHaveURL("/app/w/1/");
+    expect(events.filter((event) => event.startsWith("sent "))).toEqual([
+        "sent RSC /app/",
+        "sent GET /api/tenants/",
+        "sent RSC /app/w/1/",
+        "sent GET /api/tenants/1/sites/",
+    ]);
+    await expect(
+        page.getByText("This workspace is not available to your account."),
+    ).toHaveCount(0);
+});
+
+test("a start address whose cached workspace list cannot be read again offers Try again on the card", async ({
+    page,
+}) => {
+    await mockApi(page);
+    let failing = false;
+    await page.route("**/api/tenants/", (route) =>
+        failing
+            ? route.fulfill({
+                  status: 503,
+                  json: errorBody("busy", "The workspaces could not be read."),
+              })
+            : route.fallback(),
+    );
+    await page.goto("/app/w/1/");
+    await expect(plantCard(page)).toBeVisible();
+    failing = true;
+    await page.clock.setFixedTime(pastFreshness);
+    await openStartAddress(page);
+    await expect(
+        page.getByRole("heading", { name: "Pyracast could not be opened" }),
+    ).toBeVisible();
+    await expect(
+        page.getByText("The workspaces could not be read."),
+    ).toBeVisible();
+    await expect(page).toHaveURL("/app/");
+    failing = false;
+    await page.getByRole("button", { name: "Try again", exact: true }).click();
+    await expect(plantCard(page)).toBeVisible();
+    await expect(page).toHaveURL("/app/w/1/");
+});
+
+test("the shell shows the plants while it reads a workspace list that turned stale during the navigation", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const navigation = Promise.withResolvers<void>();
+    const workspaceRoute = Promise.withResolvers<void>();
+    await page.route(
+        (url) => url.pathname === "/app/w/1/",
+        async (route) => {
+            if (route.request().headers().rsc === "1") {
+                navigation.resolve();
+                await workspaceRoute.promise;
+            }
+            await route.fallback();
+        },
+    );
+    let lists = 0;
+    const secondList = Promise.withResolvers<void>();
+    const secondListAnswer = Promise.withResolvers<void>();
+    await page.route("**/api/tenants/", async (route) => {
+        lists += 1;
+        if (lists === 2) {
+            secondList.resolve();
+            await secondListAnswer.promise;
+        }
+        await route.fallback();
+    });
+    await page.goto("/app/");
+    await navigation.promise;
+    await page.clock.fastForward(3_000);
+    workspaceRoute.resolve();
+    await secondList.promise;
+    await expect(plantCard(page)).toBeVisible();
+    expect(lists).toBe(2);
+    const answered = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/tenants/",
+    );
+    secondListAnswer.resolve();
+    await answered;
 });
