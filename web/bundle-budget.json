@@ -7,10 +7,11 @@
     },
     "onDemand": {
         "Calibrations": 15147,
-        "Outages": 19206,
-        "ProductionSection": 30543,
+        "Outages": 19690,
+        "ProductionSection": 32773,
         "ForecastPerformance": 7130,
         "ReminderEditor": 12896,
+        "copyState": 3052,
         "english": 73541,
         "turkish": 79775
     },

@@ -67,6 +67,17 @@ export function StatusTag<G extends Group>({
     return <Tag tone={tone}>{label(group, value)}</Tag>;
 }
 
+export function useReceipt() {
+    const t = useTranslations("ChangeRequests");
+    const label = useLabel();
+    return (status: Vocabulary["ChangeRequestStatus"]) =>
+        status === "pending"
+            ? t("submitted")
+            : t("submittedClosed", {
+                  status: label("ChangeRequestStatus", status),
+              });
+}
+
 // Codes the API returns as plain strings: a known code gets its message, any other the given fallback.
 export function useCodeLabel(namespace: string) {
     const t = useTranslations(namespace);

@@ -12,6 +12,7 @@ import {
 import { ApiError, NotSentError } from "./api/errors";
 import { authRequest, authUrl, type AuthResult } from "./auth-api";
 import { browserErrors } from "@/i18n/browser";
+import type { CopyState, Removal } from "./saved/store";
 
 export type Session = components["schemas"]["SessionOutput"];
 export type SessionUser = components["schemas"]["SessionUserOutput"];
@@ -47,6 +48,12 @@ type ShownOwner = {
     signOut?: "keepInvitation" | "clearInvitation";
 };
 type PreviousEnd = { notice?: "ended" | "changed"; clearInvitation: boolean };
+// The store of saved figures loads only where this flag is set or cannot be read.
+const savedFlagKey = "pyracast.saved";
+// An outstanding removal's identity: nothing renews the copy before it, and only that removal acknowledges it.
+const savedRemovalKey = "pyracast.savedRemoval";
+const savedSignOutLimitMs = 2_000;
+type SavedStore = typeof import("./saved/store");
 
 let state: SessionState = {
     ended: false,
@@ -66,6 +73,8 @@ let adopted: { mark: Mark; session: Session } | undefined;
 let confirming: Promise<Tag> | undefined;
 let signingOut = false;
 let clearTabInvitation = () => {};
+let savedStore: Promise<SavedStore> | undefined;
+let savedWork: Promise<unknown> = Promise.resolve();
 const listeners = new Set<() => void>();
 
 export function sessionState() {
@@ -226,7 +235,137 @@ export function isCurrent(session: Session | undefined) {
     return observed === null || observed === tagOf(session);
 }
 
+function readStored(key: string): string | null | undefined {
+    try {
+        return window.localStorage.getItem(key);
+    } catch {
+        return undefined;
+    }
+}
+
+function writeStored(key: string, value: string | null) {
+    try {
+        if (value === null) window.localStorage.removeItem(key);
+        else window.localStorage.setItem(key, value);
+    } catch {
+        return;
+    }
+}
+
+function savedCopyFlagged() {
+    return readStored(savedFlagKey) !== null;
+}
+
+function forgetSavedCopy() {
+    writeStored(savedFlagKey, null);
+    writeStored(savedRemovalKey, null);
+}
+
+function outstandingRemoval() {
+    const removal = readStored(savedRemovalKey);
+    return typeof removal === "string" ? removal : null;
+}
+
+function newRemoval() {
+    return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+        byte.toString(16).padStart(2, "0"),
+    ).join("");
+}
+
+const savedRemoval: Removal = {
+    outstanding: outstandingRemoval,
+    acknowledge: (removal) => {
+        if (outstandingRemoval() === removal)
+            writeStored(savedRemovalKey, null);
+    },
+};
+
+// The copy's operations run one after another, in the order this document asked for them.
+function withSavedStore<T>(
+    work: (store: SavedStore) => Promise<T>,
+): Promise<T | undefined> {
+    const next = savedWork.then(async () => {
+        savedStore ??= import("./saved/store");
+        return work(await savedStore);
+    });
+    savedWork = next.catch(() => undefined);
+    return next.catch(() => {
+        savedStore = undefined;
+        return undefined;
+    });
+}
+
+export function startSavedCopy() {
+    if (!savedCopyFlagged()) {
+        if (outstandingRemoval() !== null) writeStored(savedRemovalKey, null);
+        return;
+    }
+    void withSavedStore(async (store) => {
+        if ((await store.start(savedRemoval)) === "deleted") forgetSavedCopy();
+    });
+}
+
+function handOffNeeded(session: Session) {
+    return Boolean(session.user) && savedCopyFlagged();
+}
+
+// False when a later observation superseded this one: its session must then not be adopted.
+async function handOff(
+    { user, language, session_tag }: Session,
+    present: () => boolean,
+    adoptedAt: number,
+) {
+    if (!user) return true;
+    const handoff = await withSavedStore((store) =>
+        store.adopt(
+            {
+                user: user.id,
+                session: session_tag ?? "",
+                language,
+                adoptedAt,
+                present,
+            },
+            savedRemoval,
+        ),
+    );
+    if (handoff === "superseded") return false;
+    if (handoff === "cleared")
+        void withSavedStore((store) => store.deleteCopy()).then((deleted) => {
+            if (deleted) forgetSavedCopy();
+        });
+    else if (handoff !== "verified") writeStored(savedRemovalKey, newRemoval());
+    return true;
+}
+
+async function removeSavedFigures() {
+    if (!savedCopyFlagged()) return;
+    const removal = newRemoval();
+    const removed = withSavedStore((store) =>
+        store.removeFigures(() => savedRemoval.acknowledge(removal)),
+    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const limit = new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), savedSignOutLimitMs);
+    });
+    const done = await Promise.race([removed, limit]);
+    clearTimeout(timer);
+    if (!done) writeStored(savedRemovalKey, removal);
+}
+
+export async function savedCopyState(): Promise<CopyState> {
+    if (!savedCopyFlagged()) return "off";
+    const copy =
+        (await withSavedStore((store) => store.copyState())) ?? "unavailable";
+    return copy === "on" && outstandingRemoval() !== null ? "paused" : copy;
+}
+
 export function adoptSession(session: Session, sentAt?: number) {
+    if (handOffNeeded(session))
+        void handOff(session, () => state.session === session, Date.now());
+    applySession(session, sentAt);
+}
+
+function applySession(session: Session, sentAt?: number) {
     const owner = sessionOwner(session) ?? null;
     if (documentOwner === undefined) {
         documentOwner = owner;
@@ -293,9 +432,16 @@ function startRead(): Flight {
     const sentAt = Date.now();
     const current: Flight = {
         ...started,
-        promise: confirmedRead().then((session) => {
-            if (unchangedSince(started)) {
-                adoptSession(session, sentAt);
+        promise: confirmedRead().then(async (session) => {
+            const handed =
+                !handOffNeeded(session) ||
+                (await handOff(
+                    session,
+                    () => unchangedSince(started),
+                    Date.now(),
+                ));
+            if (handed && unchangedSince(started)) {
+                applySession(session, sentAt);
                 return session;
             }
             if (flight === current) flight = undefined;
@@ -350,6 +496,7 @@ export async function signOut({ keepInvitation = false } = {}) {
     }
     signingOut = true;
     try {
+        if (shown) await removeSavedFigures();
         const ended = await authRequest(signOutPath, "DELETE");
         if (!signedOutBy(ended))
             throw new ApiError(browserErrors()("invalidResponse"));

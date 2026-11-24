@@ -418,6 +418,7 @@
         "refresh_failed": "Could not refresh saved production. {error}",
         "propose_interval": "Suggest correction for {interval}",
         "remove_correction": "Remove correction",
+        "save_value": "Save {energy} MWh ({quality})",
         "remove_correction_interval": "Remove correction for {interval}"
     },
     "ProductionImport": {

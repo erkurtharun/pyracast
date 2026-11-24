@@ -1,5 +1,10 @@
 import { browserErrors } from "@/i18n/browser";
-import { ApiError, errorFromResponse } from "./errors";
+import {
+    ApiError,
+    errorFromResponse,
+    isContractBody,
+    UnconfirmedError,
+} from "./errors";
 
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export type LaneRequest = { method: Method; url: string; body?: unknown };
@@ -10,6 +15,10 @@ const TIMEOUT_MS = 95_000;
 // session_busy is refused before any view runs, so one retry is safe for every method.
 const MAX_RETRY_SECONDS = 2;
 const SESSION_READ = "/api/session/";
+// Traefik's bad gateway and header timeout and Cloudflare's 520-524 do not say whether a change was applied.
+const UPSTREAM_LOST = new Set([502, 504, 520, 521, 522, 523, 524]);
+// The gateway also answers with this refusal for a 502 after the upstream ended, when a change may be committed.
+const MAINTENANCE = "maintenance";
 
 let csrfToken: string | undefined;
 let epoch = 0;
@@ -121,36 +130,49 @@ async function attempt(request: LaneRequest, tag: Tag, retried = false) {
     return attempt(request, tag, true);
 }
 
+function upstreamLost(status: number, data: unknown) {
+    return isContractBody(data)
+        ? data.code === MAINTENANCE
+        : UPSTREAM_LOST.has(status);
+}
+
 async function deliver(request: LaneRequest, tag: Tag): Promise<Exchange> {
     refuse(request, tag);
     const { method, url, body } = request;
     const t = browserErrors();
+    const init: RequestInit = {
+        method,
+        credentials: "same-origin",
+        cache: "no-store",
+        // The API never redirects a request it understood, so a redirect answers nothing that was asked.
+        redirect: "error",
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+        headers: {
+            ...(body === undefined
+                ? {}
+                : { "Content-Type": "application/json" }),
+            ...(csrfToken && (unsafe(method) || url.startsWith("/api/auth/"))
+                ? { "X-CSRFToken": csrfToken }
+                : {}),
+            ...(tag === undefined ? {} : { "X-Session-Tag": tag }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    };
     let response: Response;
     try {
-        response = await fetch(url, {
-            method,
-            credentials: "same-origin",
-            cache: "no-store",
-            signal: AbortSignal.timeout(TIMEOUT_MS),
-            headers: {
-                ...(body === undefined
-                    ? {}
-                    : { "Content-Type": "application/json" }),
-                ...(csrfToken &&
-                (unsafe(method) || url.startsWith("/api/auth/"))
-                    ? { "X-CSRFToken": csrfToken }
-                    : {}),
-                ...(tag === undefined ? {} : { "X-Session-Tag": tag }),
-            },
-            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        });
+        response = await fetch(url, init);
     } catch {
-        throw new ApiError(unsafe(method) ? t("unconfirmed") : t("network"));
+        if (unsafe(method)) throw new UnconfirmedError(t("unconfirmed"));
+        throw new ApiError(t("network"));
     }
     const { status, ok } = response;
     if (status === 204) return { status, ok, data: null };
     const data: unknown = await response.json().catch(() => unreadable);
+    if (unsafe(method) && !ok && upstreamLost(status, data))
+        throw new UnconfirmedError(t("unconfirmed"), { status });
     if (data !== unreadable) return { status, ok, data };
-    if (ok) throw new ApiError(t("invalidResponse"), { status });
-    return { status, ok, data: null };
+    if (!ok) return { status, ok, data: null };
+    if (unsafe(method))
+        throw new UnconfirmedError(t("unconfirmed"), { status });
+    throw new ApiError(t("invalidResponse"), { status });
 }

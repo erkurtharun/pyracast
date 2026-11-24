@@ -856,6 +856,49 @@ for (const operation of ["remove", "replace"] as const) {
     });
 }
 
+for (const lost of ["aborted", "cut"] as const)
+    test(`replacing recovery codes whose answer was ${lost} heads the change as unconfirmed without calling a repeat safe, also after the language changed`, async ({
+        page,
+    }) => {
+        const state = await mockTwoFactor(page, { enabled: true });
+        await page.route("**/api/session/language/", (route) => {
+            const language = route.request().postDataJSON().language as string;
+            state.account.current = accountWith({
+                language_preference: language,
+            });
+            return route.fulfill({
+                json: { ...sessionIdentity(state.account.current), language },
+            });
+        });
+        await page.route(`**${authenticatorsPath}/recovery-codes`, (route) =>
+            route.request().method() !== "POST"
+                ? route.fallback()
+                : lost === "aborted"
+                  ? route.abort("failed")
+                  : route.fulfill({
+                        status: 200,
+                        contentType: "application/json",
+                        body: "{",
+                    }),
+        );
+        await openSettings(page);
+        await replaceCodes(page);
+        const alert = twoFactorPanel(page).getByRole("alert");
+        await expect(alert).toHaveText(
+            "Change not confirmedThe server did not confirm the change. It may have been saved; check before you send it again.",
+        );
+        await page.getByLabel("Language", { exact: true }).selectOption("tr");
+        await expect(page.locator("html")).toHaveAttribute("lang", "tr");
+        await expect(
+            page
+                .locator("section")
+                .filter({ has: page.locator(".mfa-header") })
+                .getByRole("alert"),
+        ).toHaveText(
+            "Değişiklik onaylanmadıSunucu değişikliği onaylamadı. Değişiklik kaydedilmiş olabilir; yeniden göndermeden önce kontrol edin.",
+        );
+    });
+
 test("an activation committed before a lost response reconciles the actual enabled status", async ({
     page,
 }) => {

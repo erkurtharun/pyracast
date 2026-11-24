@@ -189,10 +189,16 @@ export function savedDatabase(
         transactions.push(`${mode} ${names.join(",")}`);
         const held = take(mode);
         let state: State = "waiting";
-        let locked = false;
+        let lock: "waiting" | "held" | "released" = "waiting";
         let working = stores!;
         let pending = 0;
         const deferred: (() => void)[] = [];
+        const release = () => {
+            if (lock !== "held") return;
+            lock = "released";
+            busy = false;
+            next();
+        };
         const finish = (commit: boolean, error: unknown) => {
             if (state === "finished") return;
             state = "finished";
@@ -200,9 +206,7 @@ export function savedDatabase(
             handle.error = error;
             queueMicrotask(() => {
                 (commit ? handle.oncomplete : handle.onabort)?.({});
-                if (!locked) return;
-                busy = false;
-                next();
+                release();
             });
         };
         const settle = () =>
@@ -219,11 +223,9 @@ export function savedDatabase(
             settle();
         };
         const start = () => {
-            locked = true;
-            if (state === "finished") {
-                busy = false;
-                next();
-            } else if (held)
+            lock = "held";
+            if (state === "finished") release();
+            else if (held)
                 held.hold((passes) =>
                     passes
                         ? run()
@@ -394,6 +396,9 @@ export function savedDatabase(
             }),
         put: (store: string, value: unknown, key?: Key) =>
             putInto(stores!, store, value, key),
+        replace: (records: SavedRecords) => {
+            stores = filled(records);
+        },
         openConnections: () => connections,
         exists: () => stores !== undefined,
         holder: () => values("holder")[0],

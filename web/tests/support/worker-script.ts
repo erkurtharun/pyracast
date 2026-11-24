@@ -18,16 +18,17 @@ export type Navigation = {
 export type ScriptOptions = {
     preload?: boolean;
     database?: SavedDatabase;
-    now?: number;
+    now?: number | (() => number);
+    monotonic?: () => number;
     zone?: string;
     setTimeout?: (run: () => void, delay: number) => unknown;
     clearTimeout?: (timer: unknown) => void;
 };
 
-function clockAt(now: number) {
+function clockAt(now: number | (() => number)) {
     return class extends Date {
         static now() {
-            return now;
+            return typeof now === "function" ? now() : now;
         }
     };
 }
@@ -76,6 +77,7 @@ export function loadScript(file: string, options: ScriptOptions = {}) {
         Response,
         setTimeout: options.setTimeout ?? setTimeout,
         clearTimeout: options.clearTimeout ?? clearTimeout,
+        performance: { now: options.monotonic ?? (() => performance.now()) },
         fetch: (request: unknown) => {
             fetched.push(request);
             return network();

@@ -3,10 +3,11 @@ import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef } from "react";
 import type { PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
-import { ApiError } from "@/lib/api/errors";
+import { ApiError, UnconfirmedError } from "@/lib/api/errors";
+import type { Vocabulary } from "@/lib/vocabulary";
 import { useFormat } from "@/lib/format/use-format";
-import { useProposalKey } from "@/lib/idempotency";
-import { ControlField, useErrorMessage } from "@/ui/form";
+import { serverTrim, useAttempt } from "@/lib/idempotency";
+import { ControlField, UnconfirmedNotice, WriteFailure } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import { useLabel } from "@/ui/vocabulary";
 import type { Interval } from "./model";
@@ -17,6 +18,13 @@ import {
     type StagedChange,
 } from "./proposal";
 import type { Controls, Proposal, Screen, ScreenEvent } from "./screen";
+
+type ProposalBody = {
+    configuration_id: number;
+    unit: "MWh";
+    changes: ReturnType<typeof proposalChanges>;
+    reason: string;
+};
 
 export function ProposalDraft({
     scope,
@@ -49,13 +57,12 @@ export function ProposalDraft({
     onReturn: () => void;
     onDiscard: () => void;
     onReload: () => Promise<unknown>;
-    onSent: () => void;
+    onSent: (status: Vocabulary["ChangeRequestStatus"]) => void;
 }) {
     const t = useTranslations("ChangeRequests");
     const format = useFormat();
     const label = useLabel();
-    const errorMessage = useErrorMessage();
-    const proposalKey = useProposalKey();
+    const attempt = useAttempt<ProposalBody>();
     const headingId = useId();
     const heldId = useId();
     const heading = useRef<HTMLHeadingElement>(null);
@@ -79,41 +86,44 @@ export function ProposalDraft({
         if (send.status === "reason_missing") reasonRef.current?.focus();
     }, [send]);
 
+    const bodyOf = ({ items, reason }: Proposal): ProposalBody => ({
+        configuration_id: configuration,
+        unit: "MWh",
+        changes: proposalChanges(items),
+        reason: serverTrim(reason),
+    });
+
     async function submit() {
         if (running.current) return;
         const sent = request({ type: "send", rows })?.draft;
         if (sent?.send.status !== "sending") return;
         running.current = true;
-        const body = {
-            configuration_id: configuration,
-            unit: "MWh" as const,
-            changes: proposalChanges(sent.items),
-            reason: sent.reason.trim(),
-        };
+        const body = bodyOf(sent);
+        const sending = attempt.next(body);
         try {
-            await api.post(
+            const proposal = await api.post(
                 "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/change-requests/production/",
                 {
                     path: scope,
-                    body: {
-                        ...body,
-                        idempotency_key: proposalKey.forPayload(body),
-                    },
+                    body: { ...body, idempotency_key: sending.key },
                 },
             );
-            proposalKey.reset();
-            onSent();
+            attempt.settle(sending);
+            onSent(proposal.status);
         } catch (error) {
+            attempt.settle(sending, error);
             onEvent({
                 type: "sendFailed",
-                error: errorMessage(error),
+                error,
                 refusals: refusals(error, sent.items),
                 fields: fieldRefusals(error),
             });
             // A refusal of what was sent shows the current rows, so the stale items are named.
             if (
-                error instanceof ApiError &&
-                (error.status === 400 || error.status === 409)
+                error instanceof UnconfirmedError ||
+                (error instanceof ApiError &&
+                    (error.status === 400 || error.status === 409) &&
+                    error.code !== "session_changed")
             )
                 void onReload().catch(() => undefined);
         } finally {
@@ -220,10 +230,19 @@ export function ProposalDraft({
                         />
                     )}
                 </ControlField>
-                {send.status === "failed" && (
-                    <Notice error>
-                        {[send.error, ...send.fields.general].join(" ")}
-                    </Notice>
+                {send.status === "failed" &&
+                    !(send.error instanceof UnconfirmedError) && (
+                        <WriteFailure error={send.error}>
+                            {send.fields.general.length > 0 &&
+                                ` ${send.fields.general.join(" ")}`}
+                        </WriteFailure>
+                    )}
+                {attempt.outstanding && (
+                    <UnconfirmedNotice
+                        repeatable={
+                            controls.send && attempt.repeats(bodyOf(draft))
+                        }
+                    />
                 )}
                 {held && (
                     <p className="field-error" id={heldId} role="status">
