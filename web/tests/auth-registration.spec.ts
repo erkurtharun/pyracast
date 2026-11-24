@@ -602,7 +602,6 @@ for (const [flow, field, value, submit] of [
 test("a resend offered again after a wait stage counts from the code that was sent", async ({
     page,
 }) => {
-    await page.clock.install();
     await mockApi(page, { anonymous: true });
     await page.route("**/api/auth/browser/v1/auth/signup", (route) =>
         route.fulfill({
@@ -687,7 +686,6 @@ test("a failed exit keeps the stage and says the sign-in was not ended", async (
 test("resend is disabled with a countdown after a code is sent", async ({
     page,
 }) => {
-    await page.clock.install();
     await mockApi(page, { anonymous: true });
     await page.route("**/api/auth/browser/v1/auth/signup", (route) =>
         route.fulfill({

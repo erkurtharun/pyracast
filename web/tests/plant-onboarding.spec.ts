@@ -5,7 +5,6 @@ import { errorBody } from "./support/errors";
 test("a temporary site refresh failure preserves an open technical draft", async ({
     page,
 }) => {
-    await page.clock.install();
     await mockApi(page);
     let fail = false;
     const message = "Site refresh temporarily failed.";
@@ -40,7 +39,6 @@ test("a temporary site refresh failure preserves an open technical draft", async
 test("an older pending submission cannot replace a saved technical update", async ({
     page,
 }) => {
-    await page.clock.install();
     await mockApi(page);
     const pending = { ...plant, current_configuration: null };
     let requestStarted!: () => void;
@@ -135,7 +133,6 @@ test("an older pending submission cannot replace a saved technical update", asyn
 test("technical details shown before a reload ends follow the reloaded revision", async ({
     page,
 }) => {
-    await page.clock.install();
     await mockApi(page);
     let reloaded = false;
     let release!: () => void;
@@ -302,7 +299,6 @@ for (const section of ["Forecast", "Settings"] as const) {
     test(`administrator approval refreshes a submitted plant while ${section} is open`, async ({
         page,
     }) => {
-        await page.clock.install();
         await mockApi(page, { empty: true });
         let submitted = false;
         let approved = false;

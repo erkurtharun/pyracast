@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./support/test";
 
 test("the mocked browser suite registers no worker", async ({ page }) => {
     await page.goto("/privacy/");

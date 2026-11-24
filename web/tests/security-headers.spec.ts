@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./support/test";
 import { productionServer } from "./support/server";
 
 test("a fresh CSP nonce permits the app and blocks injected scripts", async ({
