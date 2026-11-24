@@ -1,3 +1,4 @@
+import type { QueryClient } from "@tanstack/react-query";
 import { expect, instant, test, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
 import { errorBody } from "./support/errors";
@@ -38,7 +39,9 @@ function watchScreens() {
         if (document.querySelector("input[type=password]"))
             return "sign-in form";
         const main = document.querySelector("main");
-        if (!main) return "no screen";
+        // The parser can yield inside the served card, so a main it has not closed yet is not a screen yet.
+        if (!main || (document.readyState === "loading" && !main.nextSibling))
+            return "no screen";
         const statuses = document.querySelectorAll("[role=status]").length;
         if (main.querySelector(".auth-card .loading-indicator"))
             return statuses === 1
@@ -75,9 +78,27 @@ async function recordScreensFromNow(page: Page) {
     return shownScreens(page);
 }
 
+function watchAddressReplacements() {
+    const addresses: string[] = [];
+    Object.assign(window, { replacedAddresses: addresses });
+    const replace = history.replaceState.bind(history);
+    history.replaceState = (data, unused, url) => {
+        addresses.push(String(url));
+        replace(data, unused, url);
+    };
+}
+
+async function recordAddressReplacements(page: Page) {
+    await page.addInitScript(watchAddressReplacements);
+    return () =>
+        page.evaluate(
+            () => Reflect.get(window, "replacedAddresses") as string[],
+        );
+}
+
 async function holdRequest(page: Page, name: string) {
     const reached = Promise.withResolvers<void>();
-    const answer = Promise.withResolvers<void>();
+    const answer = Promise.withResolvers<string | undefined>();
     let held = false;
     await page.route(
         (url) => url.pathname === name.slice(name.indexOf(" ") + 1),
@@ -85,12 +106,53 @@ async function holdRequest(page: Page, name: string) {
             if (!held && requestName(route.request()) === name) {
                 held = true;
                 reached.resolve();
-                await answer.promise;
+                const location = await answer.promise;
+                if (location) {
+                    const { search } = new URL(route.request().url());
+                    await route.fulfill({
+                        status: 307,
+                        headers: { location: `${location}${search}` },
+                    });
+                    return;
+                }
             }
             await route.fallback();
         },
     );
-    return { reached: reached.promise, release: () => answer.resolve() };
+    return {
+        reached: reached.promise,
+        release: () => answer.resolve(undefined),
+        redirect: (location: string) => answer.resolve(location),
+    };
+}
+
+type Fiber = {
+    memoizedProps?: { client?: Partial<QueryClient> };
+    return: Fiber | null;
+};
+
+// The page exposes the query client only through React's fiber of the screen.
+function settledListReads() {
+    const screen = document.querySelector("main");
+    const key =
+        screen &&
+        Object.keys(screen).find((name) => name.startsWith("__reactFiber$"));
+    let fiber = (
+        screen && key ? Reflect.get(screen, key) : null
+    ) as Fiber | null;
+    while (fiber && !fiber.memoizedProps?.client?.getQueryCache)
+        fiber = fiber.return;
+    const state = fiber?.memoizedProps?.client
+        ?.getQueryCache?.()
+        .getAll()
+        .find((query) => query.queryKey.includes("/api/tenants/"))?.state;
+    return state ? state.dataUpdateCount + state.errorUpdateCount : 0;
+}
+
+// The query cache tells React in a zero-delay timer, so a timer queued after the stored answer runs after the screens rendered it.
+async function listTakenIn(page: Page, reads: number) {
+    await expect.poll(() => page.evaluate(settledListReads)).toBe(reads);
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve)));
 }
 
 async function failWorkspaceReads(page: Page) {
@@ -105,9 +167,6 @@ async function failWorkspaceReads(page: Page) {
     );
     return reads;
 }
-
-const listAnswer = (response: { url(): string }) =>
-    new URL(response.url()).pathname === "/api/tenants/";
 
 async function readStaleListsOnFocus(page: Page) {
     await page.evaluate(() =>
@@ -424,16 +483,21 @@ test("a start address with a workspace list error in the cache keeps the launch 
     await expect(plantCard(page)).toBeVisible();
     reads.failing = true;
     await page.clock.setFixedTime(pastFreshness);
-    const failed = page.waitForResponse(listAnswer);
     await readStaleListsOnFocus(page);
-    const answer = await failed;
-    expect(answer.status()).toBe(503);
-    await answer.finished();
+    await expect(
+        page
+            .getByRole("alert")
+            .filter({ hasText: "The workspaces could not be read." }),
+    ).toBeVisible();
     reads.failing = false;
     const list = await holdRequest(page, "GET /api/tenants/");
     const screens = await recordScreensFromNow(page);
     await openStartAddress(page);
     await list.reached;
+    await expect(
+        page.getByRole("progressbar", { name: "Loading…" }),
+    ).toBeVisible();
+    expect(await screens()).toEqual(["shell", "launch card"]);
     list.release();
     await expect(plantCard(page)).toBeVisible();
     await expect(page).toHaveURL("/app/w/1/");
@@ -461,9 +525,8 @@ test("a launch sends one navigation while the workspace list changes before the 
     await navigation.reached;
     workspaces = reorderedWorkspaces;
     await page.clock.setFixedTime(pastFreshness);
-    const changed = page.waitForResponse(listAnswer);
     await readStaleListsOnFocus(page);
-    await (await changed).finished();
+    await listTakenIn(page, 2);
     navigation.release();
     await expect(plantCard(page)).toBeVisible();
     await expect(page).toHaveURL("/app/w/1/");
@@ -485,16 +548,48 @@ test("a launch keeps the card loading when the workspace list fails after the na
     await navigation.reached;
     reads.failing = true;
     await page.clock.setFixedTime(pastFreshness);
-    const failed = page.waitForResponse(listAnswer);
     await readStaleListsOnFocus(page);
-    const answer = await failed;
-    expect(answer.status()).toBe(503);
-    await answer.finished();
+    await listTakenIn(page, 2);
     reads.failing = false;
     navigation.release();
     await expect(plantCard(page)).toBeVisible();
     await expect(page).toHaveURL("/app/w/1/");
     expect(await screens()).toEqual(["no screen", "launch card", "shell"]);
+});
+
+test("a launch whose navigation returns to the start address keeps the card loading without a second navigation", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(instant);
+    await mockApi(page);
+    const reads = await failWorkspaceReads(page);
+    const navigation = await holdRequest(page, "RSC /app/w/1/");
+    const screens = await recordScreens(page);
+    const addresses = await recordAddressReplacements(page);
+    const events = recordRequests(page);
+    await page.goto("/app/");
+    await navigation.reached;
+    expect(await addresses()).toEqual(["/app/"]);
+    reads.failing = true;
+    await page.clock.setFixedTime(pastFreshness);
+    await readStaleListsOnFocus(page);
+    await listTakenIn(page, 2);
+    reads.failing = false;
+    navigation.redirect("/app/");
+    await expect.poll(addresses).toEqual(["/app/", "/app/"]);
+    expect(await screens()).toEqual(["no screen", "launch card"]);
+    await readStaleListsOnFocus(page);
+    await listTakenIn(page, 3);
+    expect(await screens()).toEqual(["no screen", "launch card"]);
+    expect(await addresses()).toEqual(["/app/", "/app/"]);
+    expect(events.filter((event) => event.startsWith("sent RSC "))).toEqual([
+        "sent RSC /app/w/1/",
+        "sent RSC /app/",
+    ]);
+    await expect(page).toHaveURL("/app/");
+    await expect(
+        page.getByRole("progressbar", { name: "Loading…" }),
+    ).toBeVisible();
 });
 
 test("the shell shows the plants while it reads a workspace list that turned stale during the navigation", async ({

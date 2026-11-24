@@ -1,7 +1,13 @@
 "use client";
 import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useContext, useEffect, useMemo, useState, useTransition } from "react";
+import {
+    useContext,
+    useEffect,
+    useMemo,
+    useState,
+    useSyncExternalStore,
+} from "react";
 import { keys } from "@/lib/api/keys";
 import { QueryOwner, useApiList } from "@/lib/api/query";
 import { appQuery, routes } from "@/lib/routes";
@@ -62,6 +68,23 @@ function EntryResolver() {
     return target ? <Navigate {...target} /> : <WorkspaceEntry />;
 }
 
+// Read as an external store: a render of any priority after set() sees it, which a state update does not guarantee.
+function createLatch() {
+    let set = false;
+    const listeners = new Set<() => void>();
+    return {
+        isSet: () => set,
+        set: () => {
+            set = true;
+            for (const listener of listeners) listener();
+        },
+        subscribe: (listener: () => void) => {
+            listeners.add(listener);
+            return () => void listeners.delete(listener);
+        },
+    };
+}
+
 function WorkspaceEntry() {
     const tenants = useApiList("/api/tenants/", {});
     const owner = useContext(QueryOwner) ?? "";
@@ -79,25 +102,29 @@ function WorkspaceEntry() {
     };
     const [readsAtMount] = useState(settledReads);
     const answered = settledReads() !== readsAtMount;
-    const [navigating, startNavigation] = useTransition();
+    const [navigation] = useState(createLatch);
+    const dispatched = useSyncExternalStore(
+        navigation.subscribe,
+        navigation.isSet,
+        navigation.isSet,
+    );
     const router = useRouter();
     const rows = tenants.error ? undefined : tenants.data?.results;
     const { retry } = tenants;
     useEffect(() => {
-        if (navigating || reading || client.isFetching(list)) return;
+        if (navigation.isSet() || reading || client.isFetching(list)) return;
         if (rows) {
+            navigation.set();
             const tenant = chooseWorkspace(rows);
-            startNavigation(() =>
-                router.replace(
-                    tenant ? routes.portfolio(tenant.id) : routes.workspaces(),
-                ),
+            router.replace(
+                tenant ? routes.portfolio(tenant.id) : routes.workspaces(),
             );
         } else if (!answered) retry();
-    }, [answered, client, list, navigating, reading, retry, router, rows]);
+    }, [answered, client, list, navigation, reading, retry, router, rows]);
     return (
         <LaunchCard
             failure={
-                tenants.error && answered && !reading && !navigating
+                tenants.error && answered && !reading && !dispatched
                     ? { error: tenants.error, retry }
                     : undefined
             }
