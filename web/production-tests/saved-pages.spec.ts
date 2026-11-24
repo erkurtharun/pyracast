@@ -21,11 +21,14 @@ type Seed = {
     source?: string;
 };
 
+const emitted = (time: number) =>
+    new Date(time).toISOString().replace(".000Z", "Z");
+
 function rows(date: string, extra: object) {
     const start = Date.parse(`${date}T09:00:00Z`);
     return [0, 1].map((index) => ({
-        start: new Date(start + index * HOUR).toISOString(),
-        end: new Date(start + (index + 1) * HOUR).toISOString(),
+        start: emitted(start + index * HOUR),
+        end: emitted(start + (index + 1) * HOUR),
         mwh: 0.5 + index,
         ...extra,
     }));
@@ -271,18 +274,30 @@ if (!workerWithdrawn)
         test("stored text wraps at phone width and a wide table scrolls inside itself", async ({
             page,
         }) => {
+            const name = "N".repeat(200);
             await page.setViewportSize({ width: 360, height: 740 });
             await offlineWithCopy(page, {
                 ...fresh,
-                name: "N".repeat(200),
+                name,
                 source: "S".repeat(120),
             });
-            for (const address of [
-                "/app/",
-                `${FORECAST}?date=2026-11-11`,
-                PRODUCTION,
-            ]) {
+            for (const [address, saved] of [
+                ["/app/", page.getByRole("link", { name })],
+                [
+                    `${FORECAST}?date=2026-11-11`,
+                    page.getByRole("heading", {
+                        name: `${name}, Solar Co: Forecast`,
+                    }),
+                ],
+                [
+                    PRODUCTION,
+                    page.getByRole("heading", {
+                        name: `${name}, Solar Co: Production`,
+                    }),
+                ],
+            ] as const) {
                 await page.goto(address);
+                await expect(saved, address).toBeVisible();
                 const width = await pageWidth(page);
                 expect(width.scroll, address).toBeLessThanOrEqual(width.view);
             }

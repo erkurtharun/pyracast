@@ -282,10 +282,9 @@ function page(html) {
 
 async function saved(url) {
     const address = addressOf(new URL(url));
-    const now = Date.now();
     const build = (copy, outcome) =>
         buildPage(copy, address, {
-            now,
+            now: copy.readAt,
             zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
             outcome,
         });
@@ -293,7 +292,7 @@ async function saved(url) {
         connected(limit, (database) => readCopy(database, limit, address)),
     );
     if (!read.copy) return NOTICE;
-    const removal = removalOf(read.copy, address, now);
+    const removal = removalOf(read.copy, address);
     if (!removal) return build(read.copy);
     const written = await limited((limit) =>
         connected(limit, (database) =>
@@ -307,10 +306,10 @@ async function saved(url) {
     );
 }
 
-function removalOf(copy, address, now) {
+function removalOf(copy, address) {
     const holder = copy.holder;
     if (!holder || copy.held === 0) return undefined;
-    if (expired(holder, now))
+    if (expired(holder, copy.readAt))
         return { holder, deactivates: false, sentence: "expired" };
     if (address.removal && address.token === holder.removal)
         return { holder, deactivates: true, sentence: "removed" };
@@ -340,15 +339,20 @@ function addressOf(url) {
 }
 
 function limited(work) {
-    const limit = { over: false, transaction: undefined };
+    const deadline = performance.now() + READ_LIMIT_MS;
+    const limit = { timedOut: false, transaction: undefined };
+    limit.over = () => limit.timedOut || performance.now() >= deadline;
     const finished = work(limit).then(
-        (copy) => ({ outcome: copy.outcome ?? "read", copy }),
+        (copy) =>
+            limit.over()
+                ? { outcome: "timeout" }
+                : { outcome: copy.outcome ?? "read", copy },
         () => ({ outcome: "failed" }),
     );
     let timer;
     const late = new Promise((resolve) => {
         timer = setTimeout(() => {
-            limit.over = true;
+            limit.timedOut = true;
             resolve({ outcome: "timeout" });
             if (limit.transaction) abandoned(limit.transaction);
         }, READ_LIMIT_MS);
@@ -386,7 +390,7 @@ function opened() {
 async function connected(limit, work) {
     const database = await opened();
     try {
-        if (limit.over) throw new Error("The copy opened after its limit.");
+        if (limit.over()) throw new Error("The copy opened after its limit.");
         return await work(database);
     } finally {
         database.close();
@@ -414,6 +418,7 @@ function readCopy(database, limit, address, removal) {
         plant: undefined,
         days: [],
         outcome: undefined,
+        readAt: undefined,
     };
     const holder = transaction.objectStore("holder").get("holder");
     holder.onsuccess = () => {
@@ -425,6 +430,11 @@ function readCopy(database, limit, address, removal) {
     values.onsuccess = () => {
         copy.held = values.result.length;
         if (removal) {
+            if (limit.over()) {
+                abandoned(transaction);
+                return;
+            }
+            copy.readAt = Date.now();
             copy.outcome = removed(transaction, copy, removal);
             if (copy.outcome === "removed") return;
         }
@@ -441,7 +451,10 @@ function readCopy(database, limit, address, removal) {
                   );
         if (copy.plant) readDays(transaction, copy, address.kind);
     };
-    return completed(transaction, () => copy);
+    return completed(transaction, () => {
+        if (!removal) copy.readAt = Date.now();
+        return copy;
+    });
 }
 
 function readDays(transaction, copy, kind) {
@@ -471,6 +484,8 @@ function removed(transaction, copy, removal) {
     )
         return "changed";
     if (copy.held === 0) return "nothing";
+    if (removal.sentence === "expired" && !expired(copy.holder, copy.readAt))
+        return "changed";
     transaction.objectStore("plants").clear();
     transaction.objectStore("days").clear();
     if (removal.deactivates)
@@ -498,6 +513,9 @@ const isEnergy = (value) => isFigure(value) && (value === null || value >= 0);
 const orNull = (check) => (value) => value === null || check(value);
 const isRecord = (value) =>
     typeof value === "object" && value !== null && !Array.isArray(value);
+const isList = (value) =>
+    Array.isArray(value) &&
+    value.findIndex((_, index) => !Object.hasOwn(value, index)) === -1;
 const sameKey = (key, expected) =>
     Array.isArray(key) &&
     key.length === expected.length &&
@@ -525,6 +543,31 @@ function isInstant(value) {
         Number(offsetHour) < 24 &&
         Number(offsetMinute) < 60 &&
         !Number.isNaN(Date.parse(value))
+    );
+}
+
+const isBoundary = (value) => isInstant(value) && !value.includes(".");
+
+function localDate(timeZone) {
+    const format = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    });
+    return (instant) => {
+        const parts = format.formatToParts(instant);
+        const part = (type) => parts.find((item) => item.type === type).value;
+        return `${part("year").padStart(4, "0")}-${part("month")}-${part("day")}`;
+    };
+}
+
+function onDay(day) {
+    const dateOf = localDate(day.timezone);
+    return day.rows.every(
+        (row) =>
+            dateOf(Date.parse(row.start)) === day.date &&
+            dateOf(Date.parse(row.end) - 1) === day.date,
     );
 }
 
@@ -585,10 +628,11 @@ function plantOf(value, key) {
         : undefined;
 }
 
-const rowsOf = (check) => (rows) =>
-    Array.isArray(rows) &&
+const rowsOf = (check, figured) => (rows) =>
+    isList(rows) &&
     rows.length <= MAX_ROWS &&
     rows.every(check) &&
+    (rows.length === 0 || rows.some(figured)) &&
     ordered(rows);
 
 const FORECAST_DAY = {
@@ -606,16 +650,18 @@ const FORECAST_DAY = {
             partial: isFlag,
         }),
     ),
-    rows: rowsOf((row) =>
-        matches(row, {
-            start: isInstant,
-            end: isInstant,
-            mwh: isEnergy,
-            affected_mwh: isEnergy,
-            sources: orNull(
-                (sources) => Array.isArray(sources) && sources.every(isText),
-            ),
-        }),
+    rows: rowsOf(
+        (row) =>
+            matches(row, {
+                start: isBoundary,
+                end: isBoundary,
+                mwh: isEnergy,
+                affected_mwh: isEnergy,
+                sources: orNull(
+                    (sources) => isList(sources) && sources.every(isText),
+                ),
+            }),
+        (row) => row.mwh !== null || row.affected_mwh !== null,
     ),
 };
 
@@ -625,8 +671,8 @@ const PRODUCTION_DAY = {
     rows: rowsOf(
         (row) =>
             matches(row, {
-                start: isInstant,
-                end: isInstant,
+                start: isBoundary,
+                end: isBoundary,
                 mwh: isEnergy,
                 quality: orNull(isText),
                 source: orNull(isText),
@@ -635,14 +681,17 @@ const PRODUCTION_DAY = {
             [row.quality, row.source, row.provisional].every(
                 (field) => (field === null) === (row.mwh === null),
             ),
+        (row) => row.mwh !== null,
     ),
 };
 
 function forecastFits(day) {
     if (day.unavailable_reason === null)
         return (
-            day.source_kind === "mixed" ||
-            day.rows.every((row) => row.sources === null)
+            (day.source_kind === "mixed" ||
+                day.rows.every((row) => row.sources === null)) &&
+            (day.affected !== null ||
+                day.rows.every((row) => row.affected_mwh === null))
         );
     return (
         day.freshness === "missing" &&
@@ -672,7 +721,8 @@ function dayOf(value, key, plant, kind) {
             kind,
             value.date,
         ]) &&
-        (kind === "production" || forecastFits(value))
+        (kind === "production" || forecastFits(value)) &&
+        onDay(value)
         ? value
         : undefined;
 }
@@ -782,19 +832,8 @@ function chosenDay(days, address, now) {
 }
 
 function plantDay(timeZone, offset, now) {
-    const parts = new Intl.DateTimeFormat("en-US", {
-        timeZone,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-    }).formatToParts(now);
-    const part = (type) =>
-        Number(parts.find((item) => item.type === type).value);
-    return new Date(
-        Date.UTC(part("year"), part("month") - 1, part("day") + offset),
-    )
-        .toISOString()
-        .slice(0, 10);
+    const today = Date.parse(`${localDate(timeZone)(now)}T00:00:00Z`);
+    return new Date(today + offset * DAY_MS).toISOString().slice(0, 10);
 }
 
 function plantPage(language, plant, address, days, format) {

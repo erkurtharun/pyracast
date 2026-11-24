@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { routes } from "../src/lib/routes";
+import type { components } from "../src/lib/schema";
 import { instant } from "./support/test";
 import {
     savedDatabase,
@@ -24,6 +25,7 @@ const REMOVED = "The saved figures were removed from this device.";
 
 type Language = "en" | "tr";
 type Row = Record<string, unknown>;
+type DaysAnswer = components["schemas"]["PlantDaysOutput"];
 
 const holder = (overrides: Row = {}) => ({
     user: 7,
@@ -46,13 +48,33 @@ const plant = (overrides: Row = {}) => ({
     ...overrides,
 });
 
-function hours(date: string, count: number, from = 9) {
-    const start = Date.parse(`${date}T00:00:00Z`) + from * HOUR;
+const emitted = (time: number) =>
+    new Date(time).toISOString().replace(".000Z", "Z");
+
+function intervals(first: string, count: number, length = HOUR) {
+    const start = Date.parse(first);
     return Array.from({ length: count }, (_, index) => ({
-        start: new Date(start + index * HOUR).toISOString(),
-        end: new Date(start + (index + 1) * HOUR).toISOString(),
+        start: emitted(start + index * length),
+        end: emitted(start + (index + 1) * length),
     }));
 }
+
+const hours = (date: string, count: number) =>
+    intervals(`${date}T09:00:00Z`, count);
+
+const energyRows = (
+    first: string,
+    values: (number | null)[],
+    length = HOUR,
+) => {
+    const times = intervals(first, values.length, length);
+    return values.map((mwh, index) => ({
+        ...times[index]!,
+        mwh,
+        affected_mwh: null,
+        sources: null,
+    }));
+};
 
 function forecastDay(date: string, overrides: Row = {}) {
     const rows = hours(date, 3).map((interval, index) => ({
@@ -149,6 +171,16 @@ function manualTimers() {
                 pending.delete(timer);
                 timer();
             }
+        },
+    };
+}
+
+function clock(start: number) {
+    let time = start;
+    return {
+        now: () => time,
+        advance: (by: number) => {
+            time += by;
         },
     };
 }
@@ -427,17 +459,10 @@ if (!workerWithdrawn)
                 const day = (date: string, start: string, count: number) =>
                     forecastDay(date, {
                         timezone: "Europe/Berlin",
-                        rows: Array.from({ length: count }, (_, index) => ({
-                            start: new Date(
-                                Date.parse(start) + index * HOUR,
-                            ).toISOString(),
-                            end: new Date(
-                                Date.parse(start) + (index + 1) * HOUR,
-                            ).toISOString(),
-                            mwh: index,
-                            affected_mwh: null,
-                            sources: null,
-                        })),
+                        rows: energyRows(
+                            start,
+                            Array.from({ length: count }, (_, index) => index),
+                        ),
                     });
                 const short = await savedPage(
                     plantAddress("forecast", "2026-03-29"),
@@ -456,25 +481,21 @@ if (!workerWithdrawn)
                 expect(tableRows(short)[2]?.[0]).toBe(
                     "03:00 GMT+2–04:00 GMT+2",
                 );
-                const intervals = tableRows(long).map(([interval]) => interval);
-                expect(intervals).toHaveLength(25);
+                const labels = tableRows(long).map(([interval]) => interval);
+                expect(labels).toHaveLength(25);
                 expect(bars(long, "energy")).toBe(25);
-                expect(new Set(intervals).size).toBe(25);
-                expect(intervals.slice(2, 4)).toEqual([
+                expect(new Set(labels).size).toBe(25);
+                expect(labels.slice(2, 4)).toEqual([
                     "02:00 GMT+2–02:00 GMT+1",
                     "02:00 GMT+1–03:00 GMT+1",
                 ]);
             });
 
             test("names the offset when it changes at the end of the last interval", async () => {
-                const start = Date.parse("2026-09-05T04:00:00Z");
-                const rows = Array.from({ length: 24 }, (_, index) => ({
-                    start: new Date(start + index * HOUR).toISOString(),
-                    end: new Date(start + (index + 1) * HOUR).toISOString(),
-                    mwh: 1,
-                    affected_mwh: null,
-                    sources: null,
-                }));
+                const rows = energyRows(
+                    "2026-09-05T04:00:00Z",
+                    Array.from({ length: 24 }, () => 1),
+                );
                 const body = await savedPage(
                     plantAddress("forecast", "2026-09-05"),
                     copy({
@@ -486,9 +507,9 @@ if (!workerWithdrawn)
                         ],
                     }),
                 );
-                const intervals = tableRows(body).map(([interval]) => interval);
-                expect(intervals[0]).toBe("00:00 GMT-4–01:00 GMT-4");
-                expect(intervals.at(-1)).toBe("23:00 GMT-4–01:00 GMT-3");
+                const labels = tableRows(body).map(([interval]) => interval);
+                expect(labels[0]).toBe("00:00 GMT-4–01:00 GMT-4");
+                expect(labels.at(-1)).toBe("23:00 GMT-4–01:00 GMT-3");
             });
         });
 
@@ -618,7 +639,10 @@ if (!workerWithdrawn)
             test("follows the time zone of the plant's days, not the device's", async () => {
                 const days = ["2026-11-11", "2026-11-12", "2026-11-13"].map(
                     (date) =>
-                        forecastDay(date, { timezone: "Pacific/Kiritimati" }),
+                        forecastDay(date, {
+                            timezone: "Pacific/Kiritimati",
+                            rows: energyRows(`${date}T09:00:00+14:00`, [1]),
+                        }),
                 );
                 expect(
                     shownDay(
@@ -886,21 +910,25 @@ if (!workerWithdrawn)
                 }
             });
 
-            test("leaves out a day the format rules out and keeps its neighbours", async () => {
-                const forecastRows = (rows: Row[]) =>
-                    forecastDay("2026-11-11").rows.map((row, index) => ({
-                        ...row,
-                        ...rows[index],
-                    }));
-                const productionRows = (rows: Row[]) =>
-                    productionDay("2026-11-11").rows.map((row, index) => ({
-                        ...row,
-                        ...rows[index],
-                    }));
-                const broken: Row[] = [
+            const forecastRows = (rows: Row[]) =>
+                forecastDay("2026-11-11").rows.map((row, index) => ({
+                    ...row,
+                    ...rows[index],
+                }));
+            const productionRows = (rows: Row[]) =>
+                productionDay("2026-11-11").rows.map((row, index) => ({
+                    ...row,
+                    ...rows[index],
+                }));
+            const ruledOut: [string, Row][] = [
+                [
+                    "with an impossible date in an interval",
                     forecastDay("2026-11-11", {
                         rows: forecastRows([{ start: "2026-11-31T09:00:00Z" }]),
                     }),
+                ],
+                [
+                    "with an interval ending at hour 24",
                     forecastDay("2026-11-11", {
                         rows: forecastRows([
                             {},
@@ -908,32 +936,162 @@ if (!workerWithdrawn)
                             { end: "2026-11-11T24:00:00Z" },
                         ]),
                     }),
+                ],
+                [
+                    "with an impossible collection date",
                     forecastDay("2026-11-11", {
                         collected_at: "2026-02-30T06:00:00+00:00",
                     }),
+                ],
+                [
+                    "with a reason and figures",
                     forecastDay("2026-11-11", {
                         source_kind: "estimated_actuals",
                         freshness: "missing",
                         unavailable_reason: "estimated_actuals_unavailable",
                         collected_at: null,
                     }),
+                ],
+                [
+                    "with negative energy",
                     forecastDay("2026-11-11", {
                         rows: forecastRows([{ mwh: -0.5 }]),
                     }),
+                ],
+                [
+                    "with negative energy with outages",
                     forecastDay("2026-11-11", {
                         rows: forecastRows([{}, { affected_mwh: -1 }]),
                     }),
+                ],
+                [
+                    "with an interval that ends before it starts",
+                    forecastDay("2026-11-11", {
+                        rows: forecastRows([{ end: "2026-11-11T08:00:00Z" }]),
+                    }),
+                ],
+                [
+                    "with milliseconds in an interval time",
                     forecastDay("2026-11-11", {
                         rows: forecastRows([
-                            { end: "2026-11-11T08:00:00.000Z" },
+                            { start: "2026-11-11T09:00:00.000Z" },
                         ]),
                     }),
+                ],
+                [
+                    "with intervals that overlap by less than a millisecond",
+                    forecastDay("2026-11-11", {
+                        rows: forecastRows([
+                            { end: "2026-11-11T10:00:00.000900Z" },
+                            { start: "2026-11-11T10:00:00.000100Z" },
+                        ]),
+                    }),
+                ],
+                [
+                    "with an interval time without seconds",
+                    forecastDay("2026-11-11", {
+                        rows: forecastRows([{ start: "2026-11-11T09:00Z" }]),
+                    }),
+                ],
+                [
+                    "with a fraction of a second in a production interval",
+                    productionDay("2026-11-11", {
+                        rows: productionRows([
+                            {},
+                            {},
+                            { end: "2026-11-11T12:00:00.5Z" },
+                        ]),
+                    }),
+                ],
+                [
+                    "with energy with outages but no outage scenario",
+                    forecastDay("2026-11-11", {
+                        rows: forecastRows([{ affected_mwh: 1000 }]),
+                    }),
+                ],
+                [
+                    "with forecast intervals none of which has a figure",
+                    forecastDay("2026-11-11", {
+                        total_mwh: null,
+                        rows: forecastRows([{ mwh: null }, { mwh: null }]),
+                    }),
+                ],
+                [
+                    "with production intervals none of which has a figure",
+                    productionDay("2026-11-11", {
+                        total_mwh: null,
+                        rows: productionRows([]).slice(2),
+                    }),
+                ],
+                [
+                    "whose intervals are a hole",
+                    forecastDay("2026-11-11", { rows: new Array(1) }),
+                ],
+                [
+                    "with a hole after its forecast intervals",
+                    forecastDay("2026-11-11", {
+                        rows: Object.assign(forecastRows([]), { length: 4 }),
+                    }),
+                ],
+                [
+                    "with a hole in the sources of an interval",
+                    forecastDay("2026-11-11", {
+                        source_kind: "mixed",
+                        rows: forecastRows([
+                            {
+                                sources: Object.assign(["forecast"], {
+                                    length: 2,
+                                }),
+                            },
+                        ]),
+                    }),
+                ],
+                [
+                    "with a hole after its production intervals",
+                    productionDay("2026-11-11", {
+                        rows: Object.assign(productionRows([]), { length: 4 }),
+                    }),
+                ],
+                [
+                    "with an interval on the next date",
+                    forecastDay("2026-11-11", {
+                        rows: forecastRows([
+                            {},
+                            {},
+                            {
+                                start: "2026-11-12T09:00:00Z",
+                                end: "2026-11-12T10:00:00Z",
+                            },
+                        ]),
+                    }),
+                ],
+                [
+                    "with an interval that ends after the local midnight",
+                    forecastDay("2026-11-11", {
+                        timezone: "Asia/Tokyo",
+                        rows: energyRows("2026-11-11T14:00:00Z", [1, 1]),
+                    }),
+                ],
+                [
+                    "with production intervals on another local date",
+                    productionDay("2026-11-11", {
+                        timezone: "Pacific/Kiritimati",
+                    }),
+                ],
+                [
+                    "with intervals in reverse order",
                     forecastDay("2026-11-11", {
                         rows: forecastRows([]).reverse(),
                     }),
+                ],
+                [
+                    "with sources on a day that is not mixed",
                     forecastDay("2026-11-11", {
                         rows: forecastRows([{ sources: ["forecast"] }]),
                     }),
+                ],
+                [
+                    "with production marks on a missing value",
                     productionDay("2026-11-11", {
                         rows: productionRows([
                             {},
@@ -941,14 +1099,22 @@ if (!workerWithdrawn)
                             { quality: "valid", provisional: true },
                         ]),
                     }),
+                ],
+                [
+                    "with a production value without its quality",
                     productionDay("2026-11-11", {
                         rows: productionRows([{ quality: null }]),
                     }),
+                ],
+                [
+                    "with negative production",
                     productionDay("2026-11-11", {
                         rows: productionRows([{ mwh: -0.25 }]),
                     }),
-                ];
-                for (const day of broken) {
+                ],
+            ];
+            for (const [name, day] of ruledOut)
+                test(`leaves out a day ${name} and keeps its neighbours`, async () => {
                     const kind = day.kind as "forecast" | "production";
                     const neighbour =
                         kind === "forecast"
@@ -958,11 +1124,9 @@ if (!workerWithdrawn)
                         plantAddress(kind, "2026-11-11"),
                         copy({ days: [day, neighbour] }),
                     );
-                    const shown = JSON.stringify(day).slice(0, 120);
-                    expect(shownDay(body), shown).toBeUndefined();
-                    expect(heldDates(body), shown).toEqual(["2026-11-12"]);
-                }
-            });
+                    expect(shownDay(body)).toBeUndefined();
+                    expect(heldDates(body)).toEqual(["2026-11-12"]);
+                });
 
             test("does not show a day record that does not match the format", async () => {
                 const missing: Row = forecastDay("2026-11-11");
@@ -977,13 +1141,11 @@ if (!workerWithdrawn)
                         affected: { status: "estimated" },
                     }),
                     forecastDay("2026-11-11", {
-                        rows: Array.from({ length: 53 }, () => ({
-                            start: "2026-11-11T00:00:00Z",
-                            end: "2026-11-11T00:30:00Z",
-                            mwh: 1,
-                            affected_mwh: null,
-                            sources: null,
-                        })),
+                        rows: energyRows(
+                            "2026-11-11T00:00:00Z",
+                            Array.from({ length: 53 }, () => 1),
+                            HOUR / 4,
+                        ),
                     }),
                 ];
                 for (const day of broken) {
@@ -1001,23 +1163,174 @@ if (!workerWithdrawn)
                 }
             });
 
+            test("shows the days of a days-read answer as the backend emits them", async () => {
+                const answer: DaysAnswer = {
+                    plant_id: KEY.plant,
+                    name: "North field",
+                    today: "2026-11-11",
+                    forecast: [
+                        {
+                            date: "2026-11-12",
+                            timezone: "Europe/Istanbul",
+                            source_kind: "forecast",
+                            freshness: "fresh",
+                            stale_reason: null,
+                            unavailable_reason: null,
+                            collected_at: "2026-11-11T06:00:00.123456Z",
+                            total_mwh: 1.5,
+                            partial: false,
+                            affected: null,
+                            rows: energyRows(
+                                "2026-11-11T21:00:00Z",
+                                Array.from({ length: 24 }, (_, hour) =>
+                                    hour === 12 ? 1.5 : 0,
+                                ),
+                            ),
+                        },
+                    ],
+                    production: [
+                        {
+                            date: "2026-11-10",
+                            timezone: "Europe/Istanbul",
+                            total_mwh: 0.5,
+                            complete: false,
+                            rows: intervals("2026-11-09T21:00:00Z", 24).map(
+                                (interval, hour) =>
+                                    hour === 12
+                                        ? {
+                                              ...interval,
+                                              mwh: 0.5,
+                                              quality: "valid",
+                                              source: "epias",
+                                              provisional: false,
+                                          }
+                                        : {
+                                              ...interval,
+                                              mwh: null,
+                                              quality: null,
+                                              source: null,
+                                              provisional: null,
+                                          },
+                            ),
+                        },
+                    ],
+                };
+                const database = copy({
+                    days: [
+                        ...answer.forecast.map((day) => ({
+                            ...KEY,
+                            kind: "forecast",
+                            ...day,
+                        })),
+                        ...answer.production.map((day) => ({
+                            ...KEY,
+                            kind: "production",
+                            ...day,
+                        })),
+                    ],
+                });
+                const forecast = await savedPage(
+                    plantAddress("forecast", "2026-11-12"),
+                    database,
+                );
+                expect(shownDay(forecast)).toBe("2026-11-12");
+                expect(tableRows(forecast)).toHaveLength(24);
+                const production = await savedPage(
+                    plantAddress("production", "2026-11-10"),
+                    database,
+                );
+                expect(shownDay(production)).toBe("2026-11-10");
+                expect(tableRows(production)).toHaveLength(24);
+            });
+
             test("shows a day of the most rows a local day has", async () => {
-                const rows = Array.from({ length: 52 }, (_, index) => ({
-                    start: new Date(
-                        Date.parse("2026-10-24T22:00:00Z") + (index * HOUR) / 2,
-                    ).toISOString(),
-                    end: new Date(
-                        Date.parse("2026-10-24T22:30:00Z") + (index * HOUR) / 2,
-                    ).toISOString(),
-                    mwh: 1,
-                    affected_mwh: null,
-                    sources: null,
-                }));
+                const rows = energyRows(
+                    "2026-10-24T22:00:00Z",
+                    Array.from({ length: 52 }, () => 1),
+                    HOUR / 2,
+                );
                 const body = await savedPage(
                     plantAddress("forecast", "2026-10-25"),
-                    copy({ days: [forecastDay("2026-10-25", { rows })] }),
+                    copy({
+                        days: [
+                            forecastDay("2026-10-25", {
+                                timezone: "Antarctica/Troll",
+                                rows,
+                            }),
+                        ],
+                    }),
                 );
                 expect(tableRows(body)).toHaveLength(52);
+            });
+
+            test("shows a day at the edge of each rule of the format", async () => {
+                const edges: Row[] = [
+                    forecastDay("2026-11-11", {
+                        total_mwh: 2,
+                        rows: energyRows("2026-11-11T09:00:00Z", [
+                            null,
+                            2,
+                            null,
+                        ]),
+                    }),
+                    forecastDay("2026-11-11", {
+                        affected: {
+                            status: "estimated",
+                            total_mwh: 1000,
+                            partial: false,
+                        },
+                        rows: forecastDay("2026-11-11").rows.map((row) => ({
+                            ...row,
+                            affected_mwh: 1000,
+                        })),
+                    }),
+                    forecastDay("2026-11-11", {
+                        timezone: "Asia/Tokyo",
+                        rows: energyRows("2026-11-10T15:00:00Z", [1, 1]).concat(
+                            energyRows("2026-11-11T14:00:00Z", [1]),
+                        ),
+                    }),
+                    forecastDay("2026-11-11", {
+                        timezone: "Europe/Istanbul",
+                        rows: [
+                            {
+                                start: "2026-11-11T12:00:00+03:00",
+                                end: "2026-11-11T13:00:00+03:00",
+                                mwh: 1,
+                                affected_mwh: null,
+                                sources: null,
+                            },
+                        ],
+                    }),
+                    productionDay("2026-11-11", {
+                        total_mwh: 0.25,
+                        rows: productionDay("2026-11-11").rows.map(
+                            (row, index) =>
+                                index === 0
+                                    ? row
+                                    : {
+                                          ...row,
+                                          mwh: null,
+                                          quality: null,
+                                          source: null,
+                                          provisional: null,
+                                      },
+                        ),
+                    }),
+                ];
+                for (const day of edges) {
+                    const body = await savedPage(
+                        plantAddress(
+                            day.kind as "forecast" | "production",
+                            "2026-11-11",
+                        ),
+                        copy({ days: [day] }),
+                    );
+                    expect(
+                        shownDay(body),
+                        JSON.stringify(day).slice(0, 120),
+                    ).toBe("2026-11-11");
+                }
             });
         });
 
@@ -1091,6 +1404,34 @@ if (!workerWithdrawn)
                 expect(delays).toEqual([3000]);
             });
 
+            for (const [stage, event] of [
+                ["open", "opens"],
+                ["readonly", "is read"],
+            ] as const)
+                test(`appears when the copy ${event} after the read limit before the limit's timer has run`, async () => {
+                    const database = copy({
+                        days: [forecastDay("2026-11-11")],
+                    });
+                    const ticks = clock(0);
+                    const late = database.pause(stage);
+                    const answer = visit(
+                        savedWorker(database, {
+                            ...manualTimers(),
+                            monotonic: ticks.now,
+                        }),
+                        plantAddress("forecast", "2026-11-11"),
+                    );
+                    await late.reached;
+                    ticks.advance(3000);
+                    late.release();
+                    expectNotice(await (await answer).text());
+                    await database.idle();
+                    expect(database.transactions).toEqual(
+                        stage === "open" ? [] : ["readonly holder,plants,days"],
+                    );
+                    expect(database.plants()).toHaveLength(1);
+                });
+
             test("appears when reading the copy fails", async () => {
                 const database = copy();
                 database.indexedDB.open = () => {
@@ -1155,6 +1496,71 @@ if (!workerWithdrawn)
                 expect(shownDay(body)).toBe("2026-11-11");
             });
 
+            test("is not shown when it passes its last day while it is read", async () => {
+                const database = copy({
+                    holder: holder({ confirmedAt: NOW - 90 * DAY }),
+                    days: [forecastDay("2026-11-11")],
+                });
+                const time = clock(NOW);
+                const read = database.pause("readonly");
+                const answer = visit(
+                    savedWorker(database, { now: time.now }),
+                    plantAddress("forecast", "2026-11-11"),
+                );
+                await read.reached;
+                time.advance(200);
+                read.release();
+                const body = await (await answer).text();
+                expect(body).toContain(EXPIRED);
+                expect(body).not.toContain("North field");
+                expect(database.plants()).toEqual([]);
+                expect(database.days()).toEqual([]);
+            });
+
+            test("is not emptied when it comes within a day of the clock while it is read", async () => {
+                const database = copy({
+                    holder: holder({ confirmedAt: NOW + DAY + 1 }),
+                    days: [forecastDay("2026-11-11")],
+                });
+                const time = clock(NOW);
+                const read = database.pause("readonly");
+                const answer = visit(
+                    savedWorker(database, { now: time.now }),
+                    plantAddress("forecast", "2026-11-11"),
+                );
+                await read.reached;
+                time.advance(2);
+                read.release();
+                const body = await (await answer).text();
+                expect(shownDay(body)).toBe("2026-11-11");
+                expect(database.plants()).toHaveLength(1);
+                expect(database.days()).toHaveLength(1);
+                expect(database.transactions).toEqual([
+                    "readonly holder,plants,days",
+                ]);
+            });
+
+            test("is not emptied when it comes within a day of the clock before the removal starts", async () => {
+                const database = copy({
+                    holder: holder({ confirmedAt: NOW + DAY + 1 }),
+                    days: [forecastDay("2026-11-11")],
+                });
+                const time = clock(NOW);
+                const write = database.pause("readwrite");
+                const answer = visit(
+                    savedWorker(database, { now: time.now }),
+                    plantAddress("forecast", "2026-11-11"),
+                );
+                await write.reached;
+                time.advance(2);
+                write.release();
+                const body = await (await answer).text();
+                expect(body).not.toContain(EXPIRED);
+                expect(shownDay(body)).toBe("2026-11-11");
+                expect(database.plants()).toHaveLength(1);
+                expect(database.days()).toHaveLength(1);
+            });
+
             test("says so once when two navigations overlap", async () => {
                 const confirmedAt = NOW - 91 * DAY;
                 const database = copy({
@@ -1201,11 +1607,17 @@ if (!workerWithdrawn)
                     plantAddress("forecast", "2026-11-11"),
                 );
                 await write.reached;
-                database.put("holder", holder(), "holder");
+                database.replace({
+                    holder: holder(),
+                    plants: [plant()],
+                    days: [forecastDay("2026-11-11", { total_mwh: 4.2 })],
+                });
                 write.release();
                 const body = await (await answer).text();
                 expect(body).not.toContain(EXPIRED);
                 expect(shownDay(body)).toBe("2026-11-11");
+                expect(body).toContain("Day total: 4.2 MWh");
+                expect(body).not.toContain("Day total: 1.735 MWh");
                 expect(database.plants()).toHaveLength(1);
                 expect(database.days()).toHaveLength(1);
             });
@@ -1279,6 +1691,45 @@ if (!workerWithdrawn)
                     expect(database.transactions).not.toContain(
                         "readwrite holder,plants,days",
                     );
+                });
+
+                test(`answers the notice and writes nothing when ${removal.name} gets the copy after its limit before the limit's timer has run`, async () => {
+                    const database = held(removal.holder);
+                    const ticks = clock(0);
+                    const opening = database.pause("open", 1);
+                    const answer = visit(
+                        savedWorker(database, {
+                            ...manualTimers(),
+                            monotonic: ticks.now,
+                        }),
+                        removal.address,
+                    );
+                    await opening.reached;
+                    ticks.advance(3000);
+                    opening.release();
+                    expectNotice(await (await answer).text());
+                    await expectKept(database, removal.holder);
+                    expect(database.transactions).not.toContain(
+                        "readwrite holder,plants,days",
+                    );
+                });
+
+                test(`answers the notice and writes nothing when ${removal.name} starts after its limit before the limit's timer has run`, async () => {
+                    const database = held(removal.holder);
+                    const ticks = clock(0);
+                    const write = database.pause("readwrite");
+                    const answer = visit(
+                        savedWorker(database, {
+                            ...manualTimers(),
+                            monotonic: ticks.now,
+                        }),
+                        removal.address,
+                    );
+                    await write.reached;
+                    ticks.advance(3000);
+                    write.release();
+                    expectNotice(await (await answer).text());
+                    await expectKept(database, removal.holder);
                 });
             }
         });
@@ -1369,16 +1820,22 @@ if (!workerWithdrawn)
                     `/app/?saved=remove&token=${TOKEN}`,
                 );
                 await write.reached;
-                database.put("holder", other, "holder");
+                database.replace({
+                    holder: other,
+                    plants: [plant({ site: 6, plant: 9, name: "South field" })],
+                });
                 write.release();
                 const body = await (await answer).text();
                 expect(body).toContain('<html lang="tr">');
                 expect(body).not.toContain("silindi");
                 expect(links(body)).toContainEqual([
-                    routes.plant(3, 5),
-                    "North field",
+                    routes.plant(3, 6),
+                    "South field",
                 ]);
-                expect(database.plants()).toHaveLength(1);
+                expect(body).not.toContain("North field");
+                expect(database.plants()).toEqual([
+                    plant({ site: 6, plant: 9, name: "South field" }),
+                ]);
                 expect(database.holder()).toEqual(other);
             });
 
@@ -1459,3 +1916,44 @@ if (!workerWithdrawn)
             expect(database.openConnections()).toBe(0);
         });
     });
+
+test.describe("the in-memory saved database", () => {
+    type Transaction = {
+        abort: () => void;
+        oncomplete: (() => void) | null;
+        onabort: (() => void) | null;
+    };
+    type Connection = {
+        transaction: (names: string[], mode: "readwrite") => Transaction;
+        close: () => void;
+    };
+
+    test("starts a transaction only after the one holding the lock ends when a queued one was aborted before its turn", async () => {
+        const database = copy();
+        const third = database.pause("readwrite", 2);
+        const request = database.indexedDB.open("pyracast-saved");
+        const connection = await new Promise<Connection>((resolve) => {
+            request.onsuccess = () => resolve(request.result as Connection);
+        });
+        const order: string[] = [];
+        const write = (name: string) => {
+            const transaction = connection.transaction(["plants"], "readwrite");
+            transaction.oncomplete = () => order.push(name);
+            transaction.onabort = () => order.push(`${name} aborted`);
+            return transaction;
+        };
+        const first = write("A");
+        const second = write("B");
+        write("C");
+        write("D");
+        first.oncomplete = () => {
+            order.push("A");
+            second.abort();
+        };
+        await third.reached;
+        third.release();
+        connection.close();
+        await database.idle();
+        expect(order).toEqual(["A", "B aborted", "C", "D"]);
+    });
+});
