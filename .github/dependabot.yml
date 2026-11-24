@@ -21,6 +21,9 @@ updates:
     ignore:
       # The build backend follows the uv release pinned in CI and the image.
       - dependency-name: uv-build
+      # Pika 1.5 deprecates BlockingConnection, which Dramatiq calls; lift once a Dramatiq release no longer does.
+      - dependency-name: pika
+        versions: ['>=1.5']
   - package-ecosystem: github-actions
     directory: /
     schedule:
