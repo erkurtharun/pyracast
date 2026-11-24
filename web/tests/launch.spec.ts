@@ -29,40 +29,90 @@ function recordRequests(page: Page) {
     return events;
 }
 
-// Read after every DOM change from the document's creation: a superset of what was painted.
-async function recordScreens(page: Page) {
-    await page.addInitScript(() => {
-        const screens: string[] = [];
-        Object.assign(window, { launchScreens: screens });
-        const screen = () => {
-            if (document.querySelector(".shell")) return "shell";
-            if (document.querySelector("input[type=password]"))
-                return "sign-in form";
-            const main = document.querySelector("main");
-            if (!main) return "no screen";
-            const statuses = document.querySelectorAll("[role=status]").length;
-            if (main.querySelector(".auth-card .loading-indicator"))
-                return statuses === 1
-                    ? "launch card"
-                    : `launch card with ${statuses} statuses`;
-            return `other: ${main.textContent}`;
-        };
-        const record = () => {
-            const last = screens.at(-1);
-            if (last === "shell" || last === "sign-in form") return;
-            const shown = screen();
-            if (shown !== last) screens.push(shown);
-        };
-        record();
-        new MutationObserver(record).observe(document, {
-            childList: true,
-            subtree: true,
-            characterData: true,
-            attributes: true,
-        });
+// Read after every DOM change: a superset of what was painted, until the shell or the sign-in form follows another screen.
+function watchScreens() {
+    const screens: string[] = [];
+    Object.assign(window, { launchScreens: screens });
+    const screen = () => {
+        if (document.querySelector(".shell")) return "shell";
+        if (document.querySelector("input[type=password]"))
+            return "sign-in form";
+        const main = document.querySelector("main");
+        if (!main) return "no screen";
+        const statuses = document.querySelectorAll("[role=status]").length;
+        if (main.querySelector(".auth-card .loading-indicator"))
+            return statuses === 1
+                ? "launch card"
+                : `launch card with ${statuses} statuses`;
+        return `other: ${main.textContent}`;
+    };
+    const record = () => {
+        const last = screens.at(-1);
+        if (screens.length > 1 && (last === "shell" || last === "sign-in form"))
+            return;
+        const shown = screen();
+        if (shown !== last) screens.push(shown);
+    };
+    record();
+    new MutationObserver(record).observe(document, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true,
     });
-    return () =>
-        page.evaluate(() => Reflect.get(window, "launchScreens") as string[]);
+}
+
+const shownScreens = (page: Page) => () =>
+    page.evaluate(() => Reflect.get(window, "launchScreens") as string[]);
+
+async function recordScreens(page: Page) {
+    await page.addInitScript(watchScreens);
+    return shownScreens(page);
+}
+
+async function recordScreensFromNow(page: Page) {
+    await page.evaluate(watchScreens);
+    return shownScreens(page);
+}
+
+async function holdRequest(page: Page, name: string) {
+    const reached = Promise.withResolvers<void>();
+    const answer = Promise.withResolvers<void>();
+    let held = false;
+    await page.route(
+        (url) => url.pathname === name.slice(name.indexOf(" ") + 1),
+        async (route) => {
+            if (!held && requestName(route.request()) === name) {
+                held = true;
+                reached.resolve();
+                await answer.promise;
+            }
+            await route.fallback();
+        },
+    );
+    return { reached: reached.promise, release: () => answer.resolve() };
+}
+
+async function failWorkspaceReads(page: Page) {
+    const reads = { failing: false };
+    await page.route("**/api/tenants/", (route) =>
+        reads.failing
+            ? route.fulfill({
+                  status: 503,
+                  json: errorBody("busy", "The workspaces could not be read."),
+              })
+            : route.fallback(),
+    );
+    return reads;
+}
+
+const listAnswer = (response: { url(): string }) =>
+    new URL(response.url()).pathname === "/api/tenants/";
+
+async function readStaleListsOnFocus(page: Page) {
+    await page.evaluate(() =>
+        window.dispatchEvent(new Event("visibilitychange")),
+    );
 }
 
 async function servedStatuses(page: Page, html: string) {
@@ -312,6 +362,7 @@ const pastFreshness = new Date(instant.getTime() + 10_000);
 test("a start address opened with a cached workspace list chooses from the list read again", async ({
     page,
 }) => {
+    await page.clock.setFixedTime(instant);
     await mockApi(page);
     let workspaces = twoWorkspaces;
     await page.route("**/api/tenants/", (route) =>
@@ -342,19 +393,12 @@ test("a start address opened with a cached workspace list chooses from the list 
 test("a start address whose cached workspace list cannot be read again offers Try again on the card", async ({
     page,
 }) => {
+    await page.clock.setFixedTime(instant);
     await mockApi(page);
-    let failing = false;
-    await page.route("**/api/tenants/", (route) =>
-        failing
-            ? route.fulfill({
-                  status: 503,
-                  json: errorBody("busy", "The workspaces could not be read."),
-              })
-            : route.fallback(),
-    );
+    const reads = await failWorkspaceReads(page);
     await page.goto("/app/w/1/");
     await expect(plantCard(page)).toBeVisible();
-    failing = true;
+    reads.failing = true;
     await page.clock.setFixedTime(pastFreshness);
     await openStartAddress(page);
     await expect(
@@ -364,10 +408,93 @@ test("a start address whose cached workspace list cannot be read again offers Tr
         page.getByText("The workspaces could not be read."),
     ).toBeVisible();
     await expect(page).toHaveURL("/app/");
-    failing = false;
+    reads.failing = false;
     await page.getByRole("button", { name: "Try again", exact: true }).click();
     await expect(plantCard(page)).toBeVisible();
     await expect(page).toHaveURL("/app/w/1/");
+});
+
+test("a start address with a workspace list error in the cache keeps the launch card until its own read answers", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(instant);
+    await mockApi(page);
+    const reads = await failWorkspaceReads(page);
+    await page.goto("/app/w/1/");
+    await expect(plantCard(page)).toBeVisible();
+    reads.failing = true;
+    await page.clock.setFixedTime(pastFreshness);
+    const failed = page.waitForResponse(listAnswer);
+    await readStaleListsOnFocus(page);
+    const answer = await failed;
+    expect(answer.status()).toBe(503);
+    await answer.finished();
+    reads.failing = false;
+    const list = await holdRequest(page, "GET /api/tenants/");
+    const screens = await recordScreensFromNow(page);
+    await openStartAddress(page);
+    await list.reached;
+    list.release();
+    await expect(plantCard(page)).toBeVisible();
+    await expect(page).toHaveURL("/app/w/1/");
+    expect(await screens()).toEqual(["shell", "launch card", "shell"]);
+});
+
+const reorderedWorkspaces = paged([
+    tenantRow({ id: 2, name: "Second Energy", role: "viewer" }),
+    tenantRow({ id: 1, name: "Sunfield Energy", role: "admin" }),
+]);
+
+test("a launch sends one navigation while the workspace list changes before the plants open", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(instant);
+    await mockApi(page);
+    let workspaces = twoWorkspaces;
+    await page.route("**/api/tenants/", (route) =>
+        route.fulfill({ json: workspaces }),
+    );
+    await serveSecondWorkspace(page);
+    const navigation = await holdRequest(page, "RSC /app/w/1/");
+    const events = recordRequests(page);
+    await page.goto("/app/");
+    await navigation.reached;
+    workspaces = reorderedWorkspaces;
+    await page.clock.setFixedTime(pastFreshness);
+    const changed = page.waitForResponse(listAnswer);
+    await readStaleListsOnFocus(page);
+    await (await changed).finished();
+    navigation.release();
+    await expect(plantCard(page)).toBeVisible();
+    await expect(page).toHaveURL("/app/w/1/");
+    expect(events.filter((event) => event.startsWith("sent RSC "))).toEqual([
+        "sent RSC /app/w/1/",
+    ]);
+    expect(sentCount(events, "GET /api/tenants/")).toBe(2);
+});
+
+test("a launch keeps the card loading when the workspace list fails after the navigation is sent", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(instant);
+    await mockApi(page);
+    const reads = await failWorkspaceReads(page);
+    const navigation = await holdRequest(page, "RSC /app/w/1/");
+    const screens = await recordScreens(page);
+    await page.goto("/app/");
+    await navigation.reached;
+    reads.failing = true;
+    await page.clock.setFixedTime(pastFreshness);
+    const failed = page.waitForResponse(listAnswer);
+    await readStaleListsOnFocus(page);
+    const answer = await failed;
+    expect(answer.status()).toBe(503);
+    await answer.finished();
+    reads.failing = false;
+    navigation.release();
+    await expect(plantCard(page)).toBeVisible();
+    await expect(page).toHaveURL("/app/w/1/");
+    expect(await screens()).toEqual(["no screen", "launch card", "shell"]);
 });
 
 test("the shell shows the plants while it reads a workspace list that turned stale during the navigation", async ({

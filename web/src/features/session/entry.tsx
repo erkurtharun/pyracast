@@ -1,7 +1,7 @@
 "use client";
 import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useContext, useEffect, useMemo, useRef } from "react";
+import { useContext, useEffect, useMemo, useState, useTransition } from "react";
 import { keys } from "@/lib/api/keys";
 import { QueryOwner, useApiList } from "@/lib/api/query";
 import { appQuery, routes } from "@/lib/routes";
@@ -64,30 +64,41 @@ function EntryResolver() {
 
 function WorkspaceEntry() {
     const tenants = useApiList("/api/tenants/", {});
-    const owner = useContext(QueryOwner);
+    const owner = useContext(QueryOwner) ?? "";
     const list = useMemo(
-        () => ({ queryKey: keys.path(owner ?? "", "/api/tenants/") }),
+        () => ({ queryKey: keys.path(owner, "/api/tenants/") }),
         [owner],
     );
     const client = useQueryClient();
     const reading = useIsFetching(list) > 0;
-    const router = useRouter();
-    const dispatched = useRef(false);
-    const rows = tenants.error ? undefined : tenants.data?.results;
-    useEffect(() => {
-        if (dispatched.current || reading || !rows || client.isFetching(list))
-            return;
-        dispatched.current = true;
-        const tenant = chooseWorkspace(rows);
-        router.replace(
-            tenant ? routes.portfolio(tenant.id) : routes.workspaces(),
+    const settledReads = () => {
+        const state = client.getQueryState(
+            keys.request(owner, "/api/tenants/"),
         );
-    }, [client, list, reading, router, rows]);
+        return (state?.dataUpdateCount ?? 0) + (state?.errorUpdateCount ?? 0);
+    };
+    const [readsAtMount] = useState(settledReads);
+    const answered = settledReads() !== readsAtMount;
+    const [navigating, startNavigation] = useTransition();
+    const router = useRouter();
+    const rows = tenants.error ? undefined : tenants.data?.results;
+    const { retry } = tenants;
+    useEffect(() => {
+        if (navigating || reading || client.isFetching(list)) return;
+        if (rows) {
+            const tenant = chooseWorkspace(rows);
+            startNavigation(() =>
+                router.replace(
+                    tenant ? routes.portfolio(tenant.id) : routes.workspaces(),
+                ),
+            );
+        } else if (!answered) retry();
+    }, [answered, client, list, navigating, reading, retry, router, rows]);
     return (
         <LaunchCard
             failure={
-                tenants.error && !reading
-                    ? { error: tenants.error, retry: tenants.retry }
+                tenants.error && answered && !reading && !navigating
+                    ? { error: tenants.error, retry }
                     : undefined
             }
         />
