@@ -1298,6 +1298,31 @@ test("a failed reload keeps the write whose answer was lost beside the read's fa
     expect(read.editor).not.toHaveProperty("issue");
 });
 
+test("rows read after a failed reload drop the read's failure and keep the write whose answer was lost, also once the interval is gone", () => {
+    const lost = lostSet(3);
+    const attempt = (lost.screen.editor as Draft).attempt;
+    const reloading = apply(lost, { type: "reload" });
+    const failed = apply(reloading, {
+        type: "reloadFailed",
+        key: editorKey(reloading),
+        error: new ApiError("Not found."),
+    });
+    const recovered = reduceScreen(failed.screen, {
+        type: "rowsLoaded",
+        day: DAY,
+        history: history(adminRows(DAY)),
+    });
+    expect(recovered.editor).toMatchObject({ status: "editing", attempt });
+    expect(recovered.editor).not.toHaveProperty("issue");
+    const gone = reduceScreen(failed.screen, {
+        type: "rowsLoaded",
+        day: DAY,
+        history: history([]),
+    });
+    expect(gone.editor).toMatchObject({ status: "orphaned", attempt });
+    expect(gone.editor).not.toHaveProperty("error");
+});
+
 test("an access or day change keeps an editor whose write's outcome is unknown, and only a direct writer can send it again", () => {
     const lost = lostSet(3);
     const attempt = (lost.screen.editor as Draft).attempt;

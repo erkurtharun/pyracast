@@ -189,6 +189,7 @@ export function repeatsAttempt(editor: Draft) {
 function outstandingIssue(editor: Editor) {
     return editor.status === "failed" &&
         editor.issue !== "invalid_energy" &&
+        !editor.issue.read &&
         editor.attempt
         ? editor.issue
         : undefined;
@@ -301,6 +302,12 @@ export function reconcileEditor(
             ...(issue && { error: issue.error }),
         };
     }
+    if (
+        editor.status === "failed" &&
+        editor.issue !== "invalid_energy" &&
+        editor.issue.read
+    )
+        return { ...values(editor), status: "editing" };
     if (editor.status !== "reloading") return editor;
     return {
         ...values(editor),
@@ -550,7 +557,11 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
                 editor: {
                     ...values(editor),
                     status: "failed",
-                    issue: { error: event.error, implausible: false },
+                    issue: {
+                        error: event.error,
+                        implausible: false,
+                        read: true,
+                    },
                 },
             };
         case "dayShown":

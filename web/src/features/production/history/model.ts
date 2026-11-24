@@ -23,7 +23,8 @@ export type Draft = {
     attempt?: Write;
 };
 
-type WriteIssue = { error: unknown; implausible: boolean };
+// A failed read of the editor's current values is told until a later read answers.
+type WriteIssue = { error: unknown; implausible: boolean; read?: true };
 type EditorIssue = "invalid_energy" | WriteIssue;
 
 // Why an editor can no longer act: its interval went away, holds the member's own request, or its day is not shown.

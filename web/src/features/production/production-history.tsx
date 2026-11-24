@@ -198,6 +198,15 @@ export function ProductionHistory({
                   quality: label("ObservationQuality", write.change.quality),
               });
     const orphanRepeats = repeatsOrphan(screen);
+    const datedInterval = (key: string) => {
+        const [start = "", end = ""] = key.split("/");
+        const date = format.time(start, history?.timezone ?? timezone, {
+            year: "numeric",
+            month: "short",
+            day: "2-digit",
+        });
+        return `${date} ${time(start)}–${time(end)}`;
+    };
 
     // Applies an event decided on the shown state; null when the screen refuses it.
     function request(event: ScreenEvent) {
@@ -406,7 +415,7 @@ export function ProductionHistory({
                     )}
                     <ControlField
                         label={t("attempted_energy", {
-                            interval: editor.key.split("/").map(time).join("–"),
+                            interval: datedInterval(editor.key),
                         })}
                     >
                         <input value={editor.energy} readOnly />
@@ -442,7 +451,14 @@ export function ProductionHistory({
             {reading.loading ? (
                 <p role="status">{t("loading_production_history")}</p>
             ) : !history ? (
-                <ReadFailed resource={reading} />
+                <>
+                    {editor.status !== "closed" &&
+                        editor.status !== "orphaned" &&
+                        editor.attempt && (
+                            <UnconfirmedNotice repeatable={false} />
+                        )}
+                    <ReadFailed resource={reading} />
+                </>
             ) : (
                 <>
                     <div
