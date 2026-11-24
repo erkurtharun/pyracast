@@ -29,7 +29,8 @@ dev = [
     "django-stubs-ext>=6.1.2",
     "djangorestframework-stubs>=3.18.2",
     "hypothesis>=6.170.15",
-    "pika>=1.4.4",
+    # Pika 1.5 deprecates BlockingConnection, which Dramatiq calls; lift once a Dramatiq release no longer does.
+    "pika>=1.4.4,<1.5",
     "pip-audit",
     "polib==1.2.0",
     "psutil>=7.2.2",
