@@ -306,6 +306,8 @@ SPECTACULAR_SETTINGS = {
         "PreparedMessageFormatEnum": "pyracast.notifications.models.PreparedMessageFormat",
         "PreparedMessageKindEnum": "pyracast.notifications.models.PreparedMessageKind",
         "ReminderStateEnum": "pyracast.notifications.models.ReminderState",
+        "RecipientRoleEnum": "pyracast.notifications.models.RecipientRole",
+        "ReminderMemberKindEnum": ["administrator", "member"],
         "FreshnessEnum": "pyracast.api.serializers.Freshness",
         "StaleReasonEnum": "pyracast.api.serializers.StaleReason",
         "PerformanceDayReasonEnum": "pyracast.plants.performance.DayReason",

@@ -1,3 +1,4 @@
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 
@@ -5,29 +6,45 @@ from django.contrib.admin.models import CHANGE, LogEntry
 from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
-from django.core.validators import validate_email
 from django.db import connection, transaction
 from django.utils import translation
 from django.utils.translation import gettext
 
+from pyracast.accounts.addresses import plain_address
 from pyracast.accounts.authorization import require_platform_admin, tenant_membership
 from pyracast.accounts.models import Language, WorkspaceRole
 from pyracast.connections.models import MAX_DAILY_QUOTA
 from pyracast.errors import ConflictError, DomainError, ErrorCode
 from pyracast.local_time import CLOCK_PATTERN
+from pyracast.notifications.addressing import sent_hidden
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.models import (
     NotificationSettings,
+    RecipientRole,
     ReminderSchedule,
 )
 from pyracast.notifications.recipients import (
+    HIDDEN,
+    NO_CHOICE,
     NO_MEMBERS,
+    Choices,
+    Explicit,
+    Resolved,
+    TypedChoice,
+    Workspace,
+    choices,
+    disclosure_digest,
     effective,
     explicit_recipients,
     grouped_recipients,
-    needs_members,
+    member_choices,
+    placements,
     planned_recipients,
+    reads_people,
+    recipient_key,
+    store_member_choices,
     store_recipients,
+    typed_choices,
     workspace,
     workspaces,
 )
@@ -45,7 +62,7 @@ def validate_recipient(address: str) -> None:
             gettext("Recipient addresses cannot exceed %(limit)s characters."),
             params={"limit": RECIPIENT_MAX_LENGTH},
         )
-    validate_email(address)
+    plain_address(address)
 
 
 def _all_valid(addresses: list[str]) -> bool:
@@ -58,11 +75,11 @@ def _all_valid(addresses: list[str]) -> bool:
 
 
 def invalid_recipient_region_ids() -> set[int]:
-    """Regions whose enabled reminders would go to an invalid address, in at most three
-    statements."""
-    schedules: dict[int, tuple[int, bool, int]] = {}
+    """Regions whose enabled reminders would go to an invalid address, or read people holding
+    one, in at most three statements."""
+    schedules: dict[int, tuple[int, bool, bool, int]] = {}
     rows: list[tuple[int, int, str, int | None]] = []
-    for pk, region_id, include, tenant_id, row, address, membership_id in (
+    for pk, region_id, include, hide, tenant_id, row, address, membership_id in (
         ReminderSchedule.objects.filter(
             active_region("region__"),
             enabled=True,
@@ -74,30 +91,29 @@ def invalid_recipient_region_ids() -> set[int]:
             "pk",
             "region_id",
             "include_workspace_members",
+            "hide_recipients",
             "region__tenant_id",
             "recipient_rows__pk",
             "recipient_rows__address",
             "recipient_rows__ties__membership_id",
         )
     ):
-        schedules[pk] = (region_id, include, tenant_id)
+        schedules[pk] = (region_id, include, hide, tenant_id)
         if row is not None:
             rows.append((pk, row, address, membership_id))
     explicit = grouped_recipients(rows)
-    members = workspaces(
-        {
-            tenant_id
-            for pk, (_, include, tenant_id) in schedules.items()
-            if needs_members(include, explicit.get(pk, []))
-        }
-    )
-    return {
-        region_id
-        for pk, (region_id, include, tenant_id) in schedules.items()
-        if not _all_valid(
-            effective(include, explicit.get(pk, []), members.get(tenant_id, NO_MEMBERS))
-        )
+    read = {
+        pk: reads_people(include, hide, explicit.get(pk, []))
+        for pk, (_, include, hide, _) in schedules.items()
     }
+    members = workspaces({tenant_id for pk, (*_, tenant_id) in schedules.items() if read[pk]})
+    found = set()
+    for pk, (region_id, include, _, tenant_id) in schedules.items():
+        people = members[tenant_id] if read[pk] else NO_MEMBERS
+        addresses = effective(include, explicit.get(pk, []), people)
+        if people.holds_non_plain or not _all_valid(addresses):
+            found.add(region_id)
+    return found
 
 
 SHARED_LIMIT = (
@@ -158,6 +174,24 @@ def set_recipient_limit(actor: User, value: int, *, expected: int) -> RecipientL
 
 
 @dataclass(frozen=True)
+class AddressChoice:
+    """`memberships` are the members of the address the form showed; `None` clears the choice."""
+
+    address: str
+    role: RecipientRole | None
+    memberships: frozenset[int]
+
+
+@dataclass(frozen=True)
+class MemberChoice:
+    """`memberships` and `address` are a member row the form showed; `None` deletes the choice."""
+
+    memberships: frozenset[int]
+    address: str
+    role: RecipientRole | None
+
+
+@dataclass(frozen=True)
 class ReminderSettings:
     enabled: bool
     recipients: tuple[str, ...]
@@ -173,15 +207,23 @@ def get_reminder_schedule(
     membership = tenant_membership(actor, tenant_id)
     region = Region.objects.active().get(pk=region_id, tenant_id=tenant_id)
     schedule = ReminderSchedule.objects.filter(region=region).first() or ReminderSchedule(
-        region=region, effective_from=now, language=translation.get_language()
+        region=region,
+        effective_from=now,
+        language=translation.get_language(),
+        hide_recipients=False,
     )
     return schedule, membership.role == WorkspaceRole.ADMIN
 
 
 def _check_recipients(submitted: ReminderSettings) -> None:
     for address in submitted.recipients:
-        validate_recipient(address)
-    if len({address.casefold() for address in submitted.recipients}) != len(submitted.recipients):
+        try:
+            validate_recipient(address)
+        except ValidationError as error:
+            raise ValidationError({"recipients": error}) from None
+    if len({recipient_key(address) for address in submitted.recipients}) != len(
+        submitted.recipients
+    ):
         raise DomainError(ErrorCode.DUPLICATE_RECIPIENTS, field="recipients")
     if submitted.enabled and not (submitted.recipients or submitted.include_workspace_members):
         raise DomainError(ErrorCode.RECIPIENT_REQUIRED, field="recipients")
@@ -227,6 +269,79 @@ def _check_recipient_limit(count: int, current: int, limit: int, unchanged_pause
         )
 
 
+def _check_entries(entries: Iterable[AddressChoice | MemberChoice], members: Workspace) -> None:
+    """Every entry names exactly the members of its address in this read of people."""
+    if not all(members.are_members(entry.address, entry.memberships) for entry in entries):
+        raise ConflictError(ErrorCode.REMINDER_SCHEDULE_CHANGED)
+
+
+def _member_choices(choices: Sequence[MemberChoice]) -> dict[int, RecipientRole | None]:
+    decided: dict[int, RecipientRole | None] = {}
+    for choice in choices:
+        decided.update(dict.fromkeys(choice.memberships, choice.role))
+    return decided
+
+
+def _typed_choice(entry: AddressChoice) -> TypedChoice:
+    if entry.role is None:
+        return NO_CHOICE
+    if entry.role == RecipientRole.BCC:
+        return HIDDEN
+    return TypedChoice(entry.role, entry.memberships)
+
+
+def _typed_choices(
+    planned: Sequence[Explicit], stored: Choices, changes: Sequence[AddressChoice]
+) -> list[TypedChoice]:
+    named = {recipient_key(entry.address): entry for entry in changes}
+    return [
+        _typed_choice(entry)
+        if (entry := named.get(recipient_key(row.address)))
+        else stored.typed(row.address) or NO_CHOICE
+        for row in planned
+    ]
+
+
+def _check_disclosure(
+    schedule: ReminderSchedule,
+    members: Workspace,
+    planned: Sequence[Explicit],
+    addresses: Sequence[str],
+    roles: Sequence[TypedChoice],
+    decided: dict[int, RecipientRole | None],
+    submitted: str | None,
+) -> None:
+    """The administrator's preview digest binds the visible result about to be saved."""
+    chosen = member_choices(schedule)
+    for pk, role in decided.items():
+        if role is None:
+            chosen.pop(pk, None)
+        else:
+            chosen[pk] = role
+    read = choices(
+        [(row.address, role, row.ties) for row, role in zip(planned, roles, strict=True)], chosen
+    )
+    if submitted != disclosure_digest(schedule, members, addresses, read):
+        raise ConflictError(ErrorCode.REMINDER_DISCLOSURE_CHANGED)
+
+
+def _audit_details(schedule: ReminderSchedule, resolved: Resolved) -> dict[str, int]:
+    visible = [
+        address
+        for address, role in zip(
+            resolved.addresses,
+            placements(schedule, resolved.members, resolved.addresses),
+            strict=True,
+        )
+        if role != RecipientRole.BCC
+    ]
+    return {
+        "schedule_revision": schedule.revision,
+        "visible_recipients": len(visible),
+        "visible_outside": sum(resolved.members.member(address) is None for address in visible),
+    }
+
+
 def configure_reminders(
     actor: User,
     tenant_id: int,
@@ -239,13 +354,23 @@ def configure_reminders(
     include_workspace_members: bool = False,
     now: datetime,
     expected_revision: int | None = None,
+    hide_recipients: bool = True,
+    address_roles: Sequence[AddressChoice] | None = None,
+    member_roles: Sequence[MemberChoice] | None = None,
+    disclosure: str | None = None,
+    preview: bool = False,
 ) -> ReminderSchedule:
     """`expected_revision` is the revision the administrator's form was read at; a schedule
-    changed since then is refused instead of overwritten."""
+    changed since then is refused instead of overwritten. A visible result is saved only with
+    the `disclosure` of its preview; a preview binds nothing."""
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
     if language not in Language.values:
         raise ValidationError(gettext("A supported reminder language is required."))
+    if not hide_recipients and sent_hidden(hide_recipients):
+        raise ValidationError(
+            {"hide_recipients": gettext("Recipients cannot be shown to each other yet.")}
+        )
     submitted = ReminderSettings(
         enabled,
         tuple(address.strip() for address in recipients),
@@ -275,25 +400,34 @@ def configure_reminders(
         if enabled and (created or not stored.enabled):
             _check_enabling(region)
         members = workspace(tenant_id)
+        _check_entries([*(address_roles or ()), *(member_roles or ())], members)
+        decided = _member_choices(member_roles or ())
         current = len(effective(stored.include_workspace_members, explicit, members))
-        planned = planned_recipients(tenant_id, explicit, submitted.recipients)
+        planned = planned_recipients(members, explicit, submitted.recipients)
         schedule.include_workspace_members = include_workspace_members
         unchanged_pause = not enabled and replace(submitted, enabled=stored.enabled) == stored
-        _check_recipient_limit(
-            len(effective(include_workspace_members, planned, members)),
-            current,
-            limit,
-            unchanged_pause,
-        )
-        store_recipients(schedule, explicit, planned)
+        addresses = effective(include_workspace_members, planned, members)
+        _check_recipient_limit(len(addresses), current, limit, unchanged_pause)
+        stored_typed = typed_choices(schedule)
+        stored_roles = [choice for _, choice, _ in stored_typed]
+        roles = _typed_choices(planned, choices(stored_typed, {}), address_roles or ())
+        mode = schedule.hide_recipients != hide_recipients or schedule.hidden_by_departure
+        schedule.hide_recipients = hide_recipients
+        if not preview and not sent_hidden(hide_recipients):
+            _check_disclosure(schedule, members, planned, addresses, roles, decided, disclosure)
+        rows = store_recipients(schedule, explicit, planned, roles=roles, stored_roles=stored_roles)
+        chosen = store_member_choices(schedule, decided)
         schedule.enabled, schedule.times, schedule.language = (
             enabled,
             list(submitted.times),
             language,
         )
-        if created or submitted != stored:
+        schedule.hidden_by_departure = False
+        configured = created or submitted != stored or mode or roles != stored_roles or chosen
+        if configured:
             schedule.configured_by = actor
             schedule.effective_from = now
+        if configured or rows:
             schedule.revision += 1
             schedule.save()
             record_audit(
@@ -301,6 +435,6 @@ def configure_reminders(
                 actor=actor,
                 region=region,
                 revision=region.revision,
-                details={"schedule_revision": schedule.revision},
+                details=_audit_details(schedule, Resolved(planned, members, addresses)),
             )
         return schedule

@@ -1,11 +1,12 @@
 import uuid
 
 from django.conf import settings
+from django.contrib.postgres.fields import ArrayField
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils.translation import gettext_lazy
 
-from pyracast.accounts.models import Language
+from pyracast.accounts.models import Language, Membership
 from pyracast.connections.models import SiteBinding
 from pyracast.db import TIME_ITEMS, choices_check, json_shape_check, lease_check
 from pyracast.forecasts.models import ForecastSnapshot
@@ -37,6 +38,12 @@ class NotificationSettings(models.Model):
         return "Email reminder settings"
 
 
+class RecipientRole(models.TextChoices):
+    TO = "to", "To"
+    CC = "cc", "Cc"
+    BCC = "bcc", "Bcc"
+
+
 class ReminderSchedule(models.Model):
     configured_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True
@@ -44,6 +51,8 @@ class ReminderSchedule(models.Model):
     region = models.ForeignKey(Region, on_delete=models.CASCADE)
     enabled = models.BooleanField(default=False)
     include_workspace_members = models.BooleanField(default=False)
+    hide_recipients = models.BooleanField(default=True)
+    hidden_by_departure = models.BooleanField(default=False)
     times = models.JSONField(default=list)
     effective_from = models.DateTimeField()
     language = models.CharField(max_length=2, choices=Language, default=Language.EN)
@@ -54,10 +63,30 @@ class ReminderSchedule(models.Model):
             models.UniqueConstraint(fields=("region",), name="%(class)s_region_uniq"),
             choices_check("language", Language),
             json_shape_check("times", "array", TIME_ITEMS),
+            models.CheckConstraint(
+                condition=models.Q(hidden_by_departure=False) | models.Q(hide_recipients=True),
+                name="%(class)s_hidden_by_departure_chk",
+            ),
         )
 
     def __str__(self) -> str:
         return f"Reminders of region {self.region_id}"
+
+
+class Cardinality(models.Func):
+    function = "cardinality"
+    output_field = models.IntegerField()
+
+
+class Dimensions(models.Func):
+    function = "array_ndims"
+    output_field = models.IntegerField()
+
+
+class AllPositive(models.Func):
+    # A null element makes the comparison unknown, which IS TRUE refuses like an id below 1.
+    template = "(1 <= ALL(%(expressions)s)) IS TRUE"
+    output_field = models.BooleanField()
 
 
 class ReminderRecipient(models.Model):
@@ -65,13 +94,26 @@ class ReminderRecipient(models.Model):
         ReminderSchedule, on_delete=models.CASCADE, related_name="recipient_rows"
     )
     address = models.TextField()
-    # `recipients.recipient_key(address)`: the identity used for uniqueness, removal and counts.
+    # `recipients.recipient_key(address)`, the identity: for uniqueness and departure selection.
     key = models.TextField()
+    role = models.CharField(max_length=3, choices=RecipientRole, blank=True, default="")
+    # Plain membership ids, like the ties: the address's members when its To or Cc was chosen.
+    role_members = ArrayField(models.BigIntegerField(), blank=True, default=list)
 
     class Meta:
         ordering = ("pk",)
         constraints = (
             models.UniqueConstraint(fields=("schedule", "key"), name="%(class)s_schedule_key_uniq"),
+            choices_check("role", RecipientRole, blank=True),
+            models.CheckConstraint(
+                condition=models.Q(models.lookups.Exact(Cardinality("role_members"), 0))
+                | models.Q(
+                    models.lookups.Exact(Dimensions("role_members"), 1),
+                    AllPositive("role_members"),
+                    role__in=[RecipientRole.TO, RecipientRole.CC],
+                ),
+                name="%(class)s_role_members_chk",
+            ),
         )
 
     def __str__(self) -> str:
@@ -92,6 +134,25 @@ class ReminderRecipientTie(models.Model):
 
     def __str__(self) -> str:
         return f"Recipient {self.recipient_id} tied to membership {self.membership_id}"
+
+
+class ReminderMemberRole(models.Model):
+    schedule = models.ForeignKey(
+        ReminderSchedule, on_delete=models.CASCADE, related_name="member_roles"
+    )
+    membership = models.ForeignKey(Membership, on_delete=models.CASCADE)
+    role = models.CharField(max_length=3, choices=RecipientRole)
+
+    class Meta:
+        constraints = (
+            models.UniqueConstraint(
+                fields=("schedule", "membership"), name="%(class)s_schedule_membership_uniq"
+            ),
+            choices_check("role", RecipientRole),
+        )
+
+    def __str__(self) -> str:
+        return f"Role of membership {self.membership_id} in schedule {self.schedule_id}"
 
 
 class NotificationDeliveryError(models.TextChoices):
@@ -248,8 +309,9 @@ class NotificationDelivery(models.Model):
 
 class DeliveryRecipient(models.Model):
     """A candidate address of one delivery. The claim and the transmit marker delete the rows they
-    exclude, so after the marker the rows are the envelope; a later member removal only sets
-    `revoked`, which keeps the address out of later attempts."""
+    exclude, so after the marker the rows are the envelope and `role` is the header each address
+    had in that attempt; a later member removal only sets `revoked`, which keeps the address out
+    of later attempts."""
 
     delivery = models.ForeignKey(
         NotificationDelivery, on_delete=models.CASCADE, related_name="recipient_rows"
@@ -257,11 +319,13 @@ class DeliveryRecipient(models.Model):
     address = models.TextField()
     key = models.TextField()
     revoked = models.BooleanField(default=False)
+    role = models.CharField(max_length=3, choices=RecipientRole, default=RecipientRole.BCC)
 
     class Meta:
         ordering = ("pk",)
         constraints = (
             models.UniqueConstraint(fields=("delivery", "key"), name="%(class)s_delivery_key_uniq"),
+            choices_check("role", RecipientRole),
         )
 
     def __str__(self) -> str:

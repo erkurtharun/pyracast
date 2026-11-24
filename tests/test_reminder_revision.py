@@ -6,11 +6,13 @@ from django.test import Client
 
 from pyracast.accounts.operations import remove_workspace_member
 from pyracast.errors import DomainError
-from pyracast.notifications.operations import configure_reminders
+from pyracast.notifications.models import RecipientRole
+from pyracast.notifications.operations import AddressChoice
 from pyracast.regions.models import AuditEvent
 from pyracast.trash import restore_region, trash_region
 from tests.support.domain import NOW, System, make_system
 from tests.support.notification_groups import member
+from tests.support.notifications import confirmed_save
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -95,12 +97,16 @@ def test_a_restore_from_trash_advances_the_revision() -> None:
     assert put(system, 1, times=["12:00"]).status_code == 409
 
 
-def reminder_events(system: System) -> list[tuple[int, int, str]]:
+def reminder_events(system: System) -> list[tuple[int, int, str, dict[str, int]]]:
     return list(
         AuditEvent.objects.filter(region=system.region, action="reminder_schedule_updated")
         .order_by("pk")
-        .values_list("actor_id", "region_id", "action")
+        .values_list("actor_id", "region_id", "action", "details")
     )
+
+
+def hidden(revision: int) -> dict[str, int]:
+    return {"schedule_revision": revision, "visible_recipients": 0, "visible_outside": 0}
 
 
 def save(system: System, **changes: Any) -> None:
@@ -110,7 +116,7 @@ def save(system: System, **changes: Any) -> None:
         "times": ["10:00"],
         "language": "en",
     } | changes
-    configure_reminders(system.member, system.tenant.pk, system.region.pk, now=NOW, **values)
+    confirmed_save(system.member, system.tenant.pk, system.region.pk, now=NOW, **values)
 
 
 def test_each_saved_change_is_audited_once_and_an_unchanged_save_not_at_all() -> None:
@@ -121,8 +127,25 @@ def test_each_saved_change_is_audited_once_and_an_unchanged_save_not_at_all() ->
     save(system, recipients=["ops@example.com", "plant@example.com"])
 
     assert reminder_events(system) == [
-        (system.member.pk, system.region.pk, "reminder_schedule_updated"),
-        (system.member.pk, system.region.pk, "reminder_schedule_updated"),
+        (system.member.pk, system.region.pk, "reminder_schedule_updated", hidden(1)),
+        (system.member.pk, system.region.pk, "reminder_schedule_updated", hidden(2)),
+    ]
+
+
+def test_a_visible_save_audits_how_many_addresses_it_shows_and_how_many_are_outside() -> None:
+    system = make_system(approved=True)
+    save(system, recipients=["ops@example.com", "plant@example.com"])
+
+    save(
+        system,
+        recipients=["ops@example.com", "plant@example.com"],
+        hide_recipients=False,
+        address_roles=[AddressChoice("ops@example.com", RecipientRole.TO, frozenset())],
+    )
+
+    assert [details for *_, details in reminder_events(system)] == [
+        hidden(1),
+        {"schedule_revision": 2, "visible_recipients": 1, "visible_outside": 1},
     ]
 
 

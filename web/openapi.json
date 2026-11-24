@@ -5147,6 +5147,137 @@
                         },
                         "description": ""
                     },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "description": "The request input was refused.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Sign-in is required.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Access was refused.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "The addressed item or page does not exist.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "415": {
+                        "description": "Send the request as JSON.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API failure.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/reminders/preview/": {
+            "post": {
+                "operationId": "tenants_regions_reminders_preview_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ReminderInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ReminderPreviewOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
                     "400": {
                         "description": "The request input was refused.",
                         "content": {
@@ -5742,6 +5873,88 @@
                     "created_at",
                     "id"
                 ]
+            },
+            "AddedAddressOutput": {
+                "type": "object",
+                "properties": {
+                    "address": {
+                        "type": "string",
+                        "format": "email"
+                    },
+                    "role": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/RecipientRoleEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "placement": {
+                        "$ref": "#/components/schemas/RecipientRoleEnum"
+                    },
+                    "eligible": {
+                        "type": "boolean"
+                    },
+                    "memberships": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
+                    }
+                },
+                "required": [
+                    "address",
+                    "eligible",
+                    "memberships",
+                    "placement",
+                    "role"
+                ]
+            },
+            "AddressRoleInput": {
+                "type": "object",
+                "properties": {
+                    "address": {
+                        "type": "string",
+                        "format": "email",
+                        "maxLength": 254
+                    },
+                    "role": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/RecipientRoleEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "memberships": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer",
+                            "minimum": 1
+                        },
+                        "maxItems": 32767
+                    }
+                },
+                "required": ["address", "memberships", "role"]
+            },
+            "AddressRoleOutput": {
+                "type": "object",
+                "properties": {
+                    "address": {
+                        "type": "string",
+                        "format": "email"
+                    },
+                    "role": {
+                        "$ref": "#/components/schemas/RecipientRoleEnum"
+                    }
+                },
+                "required": ["address", "role"]
             },
             "AffectedDayOutput": {
                 "type": "object",
@@ -7334,6 +7547,7 @@
                     "duplicate_recipients",
                     "recipient_limit_exceeded",
                     "reminder_schedule_changed",
+                    "reminder_disclosure_changed",
                     "plant_not_approved",
                     "provider_account_unavailable",
                     "configuration_changed",
@@ -7346,7 +7560,7 @@
                     "plant_edit_blocked"
                 ],
                 "type": "string",
-                "description": "* `invalid_request` - Invalid Request\n* `bad_request` - Bad Request\n* `session_ended` - Session Ended\n* `session_changed` - Session Changed\n* `not_authenticated` - Not Authenticated\n* `csrf_failed` - Csrf Failed\n* `permission_denied` - Permission Denied\n* `invalid_proxy_headers` - Invalid Proxy Headers\n* `membership_required` - Membership Required\n* `workspace_admin_required` - Workspace Admin Required\n* `admin_edits_directly` - Admin Edits Directly\n* `platform_admin_required` - Platform Admin Required\n* `invitation_email_unverified` - Invitation Email Unverified\n* `not_found` - Not Found\n* `method_not_allowed` - Method Not Allowed\n* `not_acceptable` - Not Acceptable\n* `unsupported_media_type` - Unsupported Media Type\n* `conflict` - Conflict\n* `throttled` - Throttled\n* `session_busy` - Session Busy\n* `invitation_rate_limited` - Invitation Rate Limited\n* `provider_throttled` - Provider Throttled\n* `quota_exhausted` - Quota Exhausted\n* `server_error` - Server Error\n* `provider_unavailable` - Provider Unavailable\n* `busy` - Busy\n* `database_conflict` - Database Conflict\n* `request_timeout` - Request Timeout\n* `provider_authentication_failed` - Provider Authentication Failed\n* `maintenance` - Maintenance\n* `request_too_large` - Request Too Large\n* `forecast_sources_changed` - Forecast Sources Changed\n* `configuration_unavailable` - Configuration Unavailable\n* `location_already_has_plant` - Location Already Has Plant\n* `plant_submission_required` - Plant Submission Required\n* `estimated_actuals_unavailable` - Estimated Actuals Unavailable\n* `location_unchanged` - Location Unchanged\n* `location_already_exists` - Location Already Exists\n* `calculation_out_of_range` - Calculation Out Of Range\n* `trash_retention_expired` - Trash Retention Expired\n* `date_out_of_range` - Date Out Of Range\n* `completed_day_required` - Completed Day Required\n* `invalid_epias_plant` - Invalid Epias Plant\n* `epias_plant_identity_mismatch` - Epias Plant Identity Mismatch\n* `incident_closed` - Incident Closed\n* `incident_overlap` - Incident Overlap\n* `incident_starts_in_future` - Incident Starts In Future\n* `incident_ends_before_start` - Incident Ends Before Start\n* `incident_ends_in_future` - Incident Ends In Future\n* `incident_capacity_exceeded` - Incident Capacity Exceeded\n* `production_implausible` - Production Implausible\n* `invitation_unavailable` - Invitation Unavailable\n* `invitation_member_exists` - Invitation Member Exists\n* `workspace_admin_not_removable` - Workspace Admin Not Removable\n* `member_unavailable` - Member Unavailable\n* `region_revision_changed` - Region Revision Changed\n* `location_change_already_pending` - Location Change Already Pending\n* `location_change_already_reviewed` - Location Change Already Reviewed\n* `incident_revision_changed` - Incident Revision Changed\n* `idempotency_key_reused` - Idempotency Key Reused\n* `pending_request_limit` - Pending Request Limit\n* `production_revision_changed` - Production Revision Changed\n* `request_already_closed` - Request Already Closed\n* `request_conflict` - Request Conflict\n* `review_context_changed` - Review Context Changed\n* `workspace_admin_changed` - Workspace Admin Changed\n* `reminder_time_required` - Reminder Time Required\n* `duplicate_reminder_times` - Duplicate Reminder Times\n* `too_many_reminder_times` - Too Many Reminder Times\n* `recipient_required` - Recipient Required\n* `duplicate_recipients` - Duplicate Recipients\n* `recipient_limit_exceeded` - Recipient Limit Exceeded\n* `reminder_schedule_changed` - Reminder Schedule Changed\n* `plant_not_approved` - Plant Not Approved\n* `provider_account_unavailable` - Provider Account Unavailable\n* `configuration_changed` - Configuration Changed\n* `production_source_changed` - Production Source Changed\n* `outage_history_changed` - Outage History Changed\n* `incumbent_changed` - Incumbent Changed\n* `calibration_not_activatable` - Calibration Not Activatable\n* `review_reason_required` - Review Reason Required\n* `plant_parameters_changed` - Plant Parameters Changed\n* `plant_edit_blocked` - Plant Edit Blocked"
+                "description": "* `invalid_request` - Invalid Request\n* `bad_request` - Bad Request\n* `session_ended` - Session Ended\n* `session_changed` - Session Changed\n* `not_authenticated` - Not Authenticated\n* `csrf_failed` - Csrf Failed\n* `permission_denied` - Permission Denied\n* `invalid_proxy_headers` - Invalid Proxy Headers\n* `membership_required` - Membership Required\n* `workspace_admin_required` - Workspace Admin Required\n* `admin_edits_directly` - Admin Edits Directly\n* `platform_admin_required` - Platform Admin Required\n* `invitation_email_unverified` - Invitation Email Unverified\n* `not_found` - Not Found\n* `method_not_allowed` - Method Not Allowed\n* `not_acceptable` - Not Acceptable\n* `unsupported_media_type` - Unsupported Media Type\n* `conflict` - Conflict\n* `throttled` - Throttled\n* `session_busy` - Session Busy\n* `invitation_rate_limited` - Invitation Rate Limited\n* `provider_throttled` - Provider Throttled\n* `quota_exhausted` - Quota Exhausted\n* `server_error` - Server Error\n* `provider_unavailable` - Provider Unavailable\n* `busy` - Busy\n* `database_conflict` - Database Conflict\n* `request_timeout` - Request Timeout\n* `provider_authentication_failed` - Provider Authentication Failed\n* `maintenance` - Maintenance\n* `request_too_large` - Request Too Large\n* `forecast_sources_changed` - Forecast Sources Changed\n* `configuration_unavailable` - Configuration Unavailable\n* `location_already_has_plant` - Location Already Has Plant\n* `plant_submission_required` - Plant Submission Required\n* `estimated_actuals_unavailable` - Estimated Actuals Unavailable\n* `location_unchanged` - Location Unchanged\n* `location_already_exists` - Location Already Exists\n* `calculation_out_of_range` - Calculation Out Of Range\n* `trash_retention_expired` - Trash Retention Expired\n* `date_out_of_range` - Date Out Of Range\n* `completed_day_required` - Completed Day Required\n* `invalid_epias_plant` - Invalid Epias Plant\n* `epias_plant_identity_mismatch` - Epias Plant Identity Mismatch\n* `incident_closed` - Incident Closed\n* `incident_overlap` - Incident Overlap\n* `incident_starts_in_future` - Incident Starts In Future\n* `incident_ends_before_start` - Incident Ends Before Start\n* `incident_ends_in_future` - Incident Ends In Future\n* `incident_capacity_exceeded` - Incident Capacity Exceeded\n* `production_implausible` - Production Implausible\n* `invitation_unavailable` - Invitation Unavailable\n* `invitation_member_exists` - Invitation Member Exists\n* `workspace_admin_not_removable` - Workspace Admin Not Removable\n* `member_unavailable` - Member Unavailable\n* `region_revision_changed` - Region Revision Changed\n* `location_change_already_pending` - Location Change Already Pending\n* `location_change_already_reviewed` - Location Change Already Reviewed\n* `incident_revision_changed` - Incident Revision Changed\n* `idempotency_key_reused` - Idempotency Key Reused\n* `pending_request_limit` - Pending Request Limit\n* `production_revision_changed` - Production Revision Changed\n* `request_already_closed` - Request Already Closed\n* `request_conflict` - Request Conflict\n* `review_context_changed` - Review Context Changed\n* `workspace_admin_changed` - Workspace Admin Changed\n* `reminder_time_required` - Reminder Time Required\n* `duplicate_reminder_times` - Duplicate Reminder Times\n* `too_many_reminder_times` - Too Many Reminder Times\n* `recipient_required` - Recipient Required\n* `duplicate_recipients` - Duplicate Recipients\n* `recipient_limit_exceeded` - Recipient Limit Exceeded\n* `reminder_schedule_changed` - Reminder Schedule Changed\n* `reminder_disclosure_changed` - Reminder Disclosure Changed\n* `plant_not_approved` - Plant Not Approved\n* `provider_account_unavailable` - Provider Account Unavailable\n* `configuration_changed` - Configuration Changed\n* `production_source_changed` - Production Source Changed\n* `outage_history_changed` - Outage History Changed\n* `incumbent_changed` - Incumbent Changed\n* `calibration_not_activatable` - Calibration Not Activatable\n* `review_reason_required` - Review Reason Required\n* `plant_parameters_changed` - Plant Parameters Changed\n* `plant_edit_blocked` - Plant Edit Blocked"
             },
             "EvidenceStateEnum": {
                 "enum": ["current", "stale"],
@@ -8621,6 +8835,75 @@
                 "enum": ["net_export", "ac_generation"],
                 "type": "string",
                 "description": "* `net_export` - Net export\n* `ac_generation` - AC generation"
+            },
+            "MemberAddressOutput": {
+                "type": "object",
+                "properties": {
+                    "memberships": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
+                    },
+                    "address": {
+                        "type": "string",
+                        "format": "email"
+                    },
+                    "kind": {
+                        "$ref": "#/components/schemas/ReminderMemberKindEnum"
+                    },
+                    "role": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/RecipientRoleEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "placement": {
+                        "$ref": "#/components/schemas/RecipientRoleEnum"
+                    }
+                },
+                "required": [
+                    "address",
+                    "kind",
+                    "memberships",
+                    "placement",
+                    "role"
+                ]
+            },
+            "MemberRoleInput": {
+                "type": "object",
+                "properties": {
+                    "memberships": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer",
+                            "minimum": 1
+                        },
+                        "maxItems": 32767
+                    },
+                    "address": {
+                        "type": "string",
+                        "format": "email",
+                        "maxLength": 254
+                    },
+                    "role": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/RecipientRoleEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    }
+                },
+                "required": ["address", "memberships", "role"]
             },
             "MetricScopeEnum": {
                 "enum": ["daylight_intervals", "full_day"],
@@ -10748,6 +11031,11 @@
                     "starts_at"
                 ]
             },
+            "RecipientRoleEnum": {
+                "enum": ["to", "cc", "bcc"],
+                "type": "string",
+                "description": "* `to` - To\n* `cc` - Cc\n* `bcc` - Bcc"
+            },
             "ReferenceKindEnum": {
                 "enum": ["active_calibration", "uncalibrated_reference"],
                 "type": "string",
@@ -10846,9 +11134,26 @@
                             "type": "string",
                             "format": "email"
                         }
+                    },
+                    "members": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/MemberAddressOutput"
+                        }
+                    },
+                    "added": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AddedAddressOutput"
+                        }
                     }
                 },
-                "required": ["recipients", "workspace_recipients"]
+                "required": [
+                    "added",
+                    "members",
+                    "recipients",
+                    "workspace_recipients"
+                ]
             },
             "ReminderDeliveryOutput": {
                 "type": "object",
@@ -10921,6 +11226,13 @@
                             "format": "email"
                         },
                         "nullable": true
+                    },
+                    "recipient_roles": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AddressRoleOutput"
+                        },
+                        "nullable": true
                     }
                 },
                 "required": [
@@ -10931,6 +11243,7 @@
                     "last_error",
                     "late",
                     "recipient_count",
+                    "recipient_roles",
                     "recipients",
                     "scheduled_for",
                     "sent_at",
@@ -10971,6 +11284,27 @@
                     "expected_revision": {
                         "type": "integer",
                         "minimum": 0
+                    },
+                    "hide_recipients": {
+                        "type": "boolean"
+                    },
+                    "address_roles": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AddressRoleInput"
+                        },
+                        "maxItems": 32767
+                    },
+                    "member_roles": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/MemberRoleInput"
+                        },
+                        "maxItems": 32767
+                    },
+                    "disclosure": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
                     }
                 },
                 "required": [
@@ -10981,6 +11315,11 @@
                     "recipients",
                     "times"
                 ]
+            },
+            "ReminderMemberKindEnum": {
+                "enum": ["administrator", "member"],
+                "type": "string",
+                "description": "* `administrator` - administrator\n* `member` - member"
             },
             "ReminderOutcomeOutput": {
                 "type": "object",
@@ -11019,6 +11358,13 @@
                     },
                     "include_workspace_members": {
                         "type": "boolean"
+                    },
+                    "hide_recipients": {
+                        "type": "boolean"
+                    },
+                    "hidden_by_departure": {
+                        "type": "boolean",
+                        "nullable": true
                     },
                     "language": {
                         "$ref": "#/components/schemas/LanguageEnum"
@@ -11065,6 +11411,93 @@
                     "daily_reminder_limit",
                     "deliveries",
                     "enabled",
+                    "hidden_by_departure",
+                    "hide_recipients",
+                    "include_workspace_members",
+                    "language",
+                    "recipient_count",
+                    "recipient_limit",
+                    "recipient_limit_exceeded",
+                    "revision",
+                    "state",
+                    "times",
+                    "workspace_member_count"
+                ]
+            },
+            "ReminderPreviewOutput": {
+                "type": "object",
+                "properties": {
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "state": {
+                        "$ref": "#/components/schemas/ReminderStateEnum"
+                    },
+                    "revision": {
+                        "type": "integer"
+                    },
+                    "include_workspace_members": {
+                        "type": "boolean"
+                    },
+                    "hide_recipients": {
+                        "type": "boolean"
+                    },
+                    "hidden_by_departure": {
+                        "type": "boolean",
+                        "nullable": true
+                    },
+                    "language": {
+                        "$ref": "#/components/schemas/LanguageEnum"
+                    },
+                    "times": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "recipient_limit": {
+                        "type": "integer"
+                    },
+                    "recipient_count": {
+                        "type": "integer"
+                    },
+                    "workspace_member_count": {
+                        "type": "integer"
+                    },
+                    "recipient_limit_exceeded": {
+                        "type": "boolean"
+                    },
+                    "daily_reminder_limit": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "addresses": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ReminderAddressesOutput"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "deliveries": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ReminderDeliveryOutput"
+                        }
+                    },
+                    "disclosure": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                    }
+                },
+                "required": [
+                    "addresses",
+                    "daily_reminder_limit",
+                    "deliveries",
+                    "disclosure",
+                    "enabled",
+                    "hidden_by_departure",
+                    "hide_recipients",
                     "include_workspace_members",
                     "language",
                     "recipient_count",

@@ -106,6 +106,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0008_review_and_role_mail",
             "0009_purge_warning_mail",
             "0010_delivery_preparation_metadata",
+            "0011_recipient_roles",
         ),
         "plants": (
             "0002_plant_event_action_and_calibration_error_checks",

@@ -119,6 +119,6 @@ def test_plants_over_the_limit_are_read_in_a_fixed_number_of_queries() -> None:
     schedules += [crowded_workspace(index) for index in (2, 3)]
     three_workspaces = read_crowded(3)
 
-    assert one_workspace == (5, [4])
-    assert three_workspaces == (5, [4, 4, 4])
+    assert one_workspace == (4, [4])
+    assert three_workspaces == (4, [4, 4, 4])
     assert [len(effective_recipients(schedule)) for schedule in schedules] == [4, 4, 4]

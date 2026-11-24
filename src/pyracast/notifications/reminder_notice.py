@@ -12,8 +12,7 @@ from pyracast.notifications.models import NotificationDelivery
 
 
 def unsubscribe_header() -> dict[str, str]:
-    """One message reaches every recipient in BCC, so the header names only the sender's
-    mailbox, where a reply asks the workspace to stop the reminders."""
+    """It names the sender's mailbox only, never a recipient's: one message reaches them all."""
     address = parseaddr(settings.DEFAULT_FROM_EMAIL)[1]
     return {"List-Unsubscribe": f"<mailto:{address}?subject=unsubscribe>"}
 

@@ -39,6 +39,7 @@ from pyracast.notifications.models import (
     NotificationDelivery,
     NotificationDeliveryError,
     NotificationDeliveryStatus,
+    ReminderMemberRole,
     ReminderRecipient,
     ReminderRecipientTie,
     ReminderSchedule,
@@ -288,6 +289,7 @@ def _purge_region(region: Region, plants: list[Plant], budget: _Budget) -> None:
     _delete(NotificationDelivery.objects.filter(schedule__region=region), budget)
     _delete(ReminderRecipientTie.objects.filter(recipient__schedule__region=region), budget)
     _delete(ReminderRecipient.objects.filter(schedule__region=region), budget)
+    _delete(ReminderMemberRole.objects.filter(schedule__region=region), budget)
     _delete(ReminderSchedule.objects.filter(region=region), budget)
     _delete(CollectionSchedule.objects.filter(region=region), budget)
     _detach(

@@ -50,6 +50,7 @@ API_ROUTES = sorted(
         (REGION + "location-change-requests/<int:request_id>/withdraw/", ("POST",)),
         (REGION + "plants/", ("GET", "POST")),
         (REGION + "reminders/", ("GET", "PUT")),
+        (REGION + "reminders/preview/", ("POST",)),
         (REGION + "restore/", ("POST",)),
         (REGION + "resubmit/", ("POST",)),
         (PLANT, ("PUT",)),

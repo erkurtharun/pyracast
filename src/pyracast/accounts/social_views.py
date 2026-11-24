@@ -55,6 +55,7 @@ from django.template.loader import render_to_string
 from django.views.decorators.http import require_GET
 from requests import RequestException
 
+from pyracast.accounts.addresses import plain_address
 from pyracast.accounts.processes import (
     PROVIDER_SIGNUP_SESSION_KEY,
     credential_write,
@@ -91,6 +92,11 @@ class RetiredProvider(Provider):
 
 
 class CompanySocialSignupInput(SignupInput):
+    def clean_email(self) -> str:
+        plain_address(self.cleaned_data["email"])
+        email: str = super().clean_email()
+        return email
+
     def save(self, request: HttpRequest) -> User:
         # The account keeps only the address typed in the form; it is verified at signup only
         # when the provider vouches for that same address, otherwise by a mailed code.
