@@ -1103,13 +1103,13 @@ test("a member's lost outage proposal is told without the advice once a promotio
 
 // Outer whitespace the server strips from a text: ordinary spaces, and characters a browser's trim keeps.
 const outerSpace = {
-    spaces: (text: string) => ` ${text}  `,
-    "a next line": (text: string) => `${text}\u0085`,
-    separators: (text: string) => `\u001f${text}\u001c`,
+    "outer spaces": (text: string) => ` ${text}  `,
+    "a trailing next line": (text: string) => `${text}\u0085`,
+    "outer separators": (text: string) => `\u001f${text}\u001c`,
 };
 
 for (const [name, padded] of Object.entries(outerSpace)) {
-    test(`a lost outage proposal whose reason only gained outer ${name} is sent again with its key and stores one proposal`, async ({
+    test(`a lost outage proposal whose reason only gained ${name} is sent again with its key and stores one proposal`, async ({
         page,
     }) => {
         await page.clock.setFixedTime(now);
@@ -1129,7 +1129,7 @@ for (const [name, padded] of Object.entries(outerSpace)) {
         expect(server.created()).toBe(1);
     });
 
-    test(`a lost outage report whose title only gained outer ${name} is saved again with its key and makes one outage`, async ({
+    test(`a lost outage report whose title only gained ${name} is saved again with its key and makes one outage`, async ({
         page,
     }) => {
         await page.clock.setFixedTime(now);
@@ -1149,7 +1149,7 @@ for (const [name, padded] of Object.entries(outerSpace)) {
         expect(server.applied()).toBe(1);
     });
 
-    test(`a lost proposal whose reason only gained outer ${name} is sent again with its key and stores one request`, async ({
+    test(`a lost proposal whose reason only gained ${name} is sent again with its key and stores one request`, async ({
         page,
     }) => {
         await page.clock.setFixedTime(now);
