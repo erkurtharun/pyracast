@@ -1,14 +1,20 @@
 "use client";
-import { useTranslations } from "next-intl";
+import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useContext, useEffect, useMemo, useRef } from "react";
+import { keys } from "@/lib/api/keys";
+import { QueryOwner, useApiList } from "@/lib/api/query";
 import { appQuery, routes } from "@/lib/routes";
 import { useSessionState } from "@/lib/session-client";
-import { RequireUser } from "./require-user";
 import { storedInvitation } from "@/features/workspace/workspace-invitation";
+import { chooseWorkspace } from "@/features/workspace/workspace-choice";
+import { LaunchCard } from "./app-root";
+import { RequireUser } from "./require-user";
 
 const consoleRoot = "/admin/";
 const unprintable = /\\|(?! )[\p{C}\p{Z}]/u;
+
+type Target = { href: string; document?: boolean };
 
 // The server validates the return address too; this check keeps a crafted link on this
 // origin and inside the console after the browser has normalised it.
@@ -27,7 +33,7 @@ function consoleDestination(next: string | null) {
         : consoleRoot;
 }
 
-function destination(canAdmin: boolean) {
+function destination(canAdmin: boolean): Target | undefined {
     const { search } = window.location;
     const params = new URLSearchParams(search);
     // A signed-in browser completes every provider return on the account page.
@@ -39,7 +45,7 @@ function destination(canAdmin: boolean) {
             href: consoleDestination(params.get("next")),
             document: true,
         };
-    return { href: routes.workspaces() };
+    return undefined;
 }
 
 export function Entry() {
@@ -51,19 +57,48 @@ export function Entry() {
 }
 
 function EntryResolver() {
-    const t = useTranslations("Dashboard");
-    const router = useRouter();
     const canAdmin = Boolean(useSessionState().session?.user?.can_admin);
-    useEffect(() => {
-        const target = destination(canAdmin);
-        if ("document" in target) window.location.replace(target.href);
-        else router.replace(target.href);
-    }, [canAdmin, router]);
-    return (
-        <main className="auth-page">
-            <p role="status">
-                {canAdmin ? t("openingAdmin") : t("loadingWorkspaces")}
-            </p>
-        </main>
+    const target = destination(canAdmin);
+    return target ? <Navigate {...target} /> : <WorkspaceEntry />;
+}
+
+function WorkspaceEntry() {
+    const tenants = useApiList("/api/tenants/", {});
+    const owner = useContext(QueryOwner);
+    const list = useMemo(
+        () => ({ queryKey: keys.path(owner ?? "", "/api/tenants/") }),
+        [owner],
     );
+    const client = useQueryClient();
+    const reading = useIsFetching(list) > 0;
+    const router = useRouter();
+    const dispatched = useRef(false);
+    const rows = tenants.error ? undefined : tenants.data?.results;
+    useEffect(() => {
+        if (dispatched.current || reading || !rows || client.isFetching(list))
+            return;
+        dispatched.current = true;
+        const tenant = chooseWorkspace(rows);
+        router.replace(
+            tenant ? routes.portfolio(tenant.id) : routes.workspaces(),
+        );
+    }, [client, list, reading, router, rows]);
+    return (
+        <LaunchCard
+            failure={
+                tenants.error && !reading
+                    ? { error: tenants.error, retry: tenants.retry }
+                    : undefined
+            }
+        />
+    );
+}
+
+function Navigate({ href, document }: Target) {
+    const router = useRouter();
+    useEffect(() => {
+        if (document) window.location.replace(href);
+        else router.replace(href);
+    }, [document, href, router]);
+    return <LaunchCard />;
 }

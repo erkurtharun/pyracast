@@ -977,6 +977,8 @@ for (const next of [
     "http://[::1/admin/",
     " /admin/plants/7/",
     "/admin/plants/7/\u2028",
+    "/admin/plants\\7/",
+    "/admin/plants/\t7/",
 ]) {
     test(`an administrator lands on the console overview for ${JSON.stringify(next)}`, async ({
         page,

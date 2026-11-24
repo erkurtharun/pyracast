@@ -107,7 +107,6 @@ function Bootstrap({
         | { kind: "session"; message: string };
     retry: () => void;
 }) {
-    const t = useTranslations("Bootstrap");
     const language = useTranslations("Language");
     const page = useTranslations("AppError");
     const error =
@@ -116,15 +115,25 @@ function Bootstrap({
             : failure?.kind === "language"
               ? language("failed")
               : failure?.message;
+    return <LaunchCard failure={error ? { error, retry } : undefined} />;
+}
+
+export function LaunchCard({
+    failure,
+}: {
+    failure?: { error: string; retry: () => void };
+}) {
+    const t = useTranslations("Bootstrap");
+    const page = useTranslations("AppError");
     return (
         <main className="auth-page">
             <div className="auth-card">
-                <Brand surface="light" />
-                {error ? (
+                {failure ? (
                     <>
+                        <Brand surface="light" />
                         <h1>{t("title")}</h1>
-                        <Notice error>{error}</Notice>
-                        <button className="button" onClick={retry}>
+                        <Notice error>{failure.error}</Notice>
+                        <button className="button" onClick={failure.retry}>
                             {t("retry")}
                         </button>
                         <a className="text-button" href={routes.entry()}>
@@ -132,11 +141,18 @@ function Bootstrap({
                         </a>
                     </>
                 ) : (
-                    <div
-                        className="loading-indicator"
-                        role="progressbar"
-                        aria-label={t("loading")}
-                    />
+                    <>
+                        <h1 className="launch-brand">
+                            <Brand surface="light" />
+                        </h1>
+                        <div role="status">
+                            <div
+                                className="loading-indicator"
+                                role="progressbar"
+                                aria-label={t("loading")}
+                            />
+                        </div>
+                    </>
                 )}
             </div>
         </main>
