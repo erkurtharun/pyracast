@@ -13,7 +13,7 @@ from django.db.models import Case, F, Q, Value, When
 from pyracast.accounts.addresses import is_plain
 from pyracast.accounts.models import Membership, WorkspaceRole
 from pyracast.mail.policy import wire_policy
-from pyracast.notifications.addressing import Candidate, members_choice, roles, sent_hidden
+from pyracast.notifications.addressing import Candidate, members_choice, roles
 from pyracast.notifications.models import (
     DeliveryRecipient,
     NotificationDelivery,
@@ -219,7 +219,7 @@ def reads_people(
     include_workspace_members: bool, hide_recipients: bool, explicit: Sequence[Explicit]
 ) -> bool:
     """Whether the list depends on the workspace's people: for its members or for placement."""
-    return needs_members(include_workspace_members, explicit) or not sent_hidden(hide_recipients)
+    return needs_members(include_workspace_members, explicit) or not hide_recipients
 
 
 def resolve(schedule: ReminderSchedule) -> Resolved:
@@ -331,7 +331,7 @@ def placements(
 ) -> list[RecipientRole]:
     """The header of each address of the list; a schedule sent hidden, or a read of people
     holding an address that is not plain, reads no choice and hides every address."""
-    hidden = sent_hidden(schedule.hide_recipients) or members.holds_non_plain
+    hidden = schedule.hide_recipients or members.holds_non_plain
     found = (
         [Candidate(address) for address in addresses]
         if hidden
@@ -366,7 +366,7 @@ def disclosure_digest(
 ) -> str:
     """A digest of the mode and the exact `To` and `Cc` lists the configuration places."""
     to, cc, _ = headers(addresses, placements(schedule, members, addresses, read))
-    shown = {"hidden": sent_hidden(schedule.hide_recipients), "to": to, "cc": cc}
+    shown = {"hidden": schedule.hide_recipients, "to": to, "cc": cc}
     canonical = json.dumps(shown, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("ascii")).hexdigest()
 

@@ -13,6 +13,7 @@ import {
     answered,
     changed,
     createQueryClient,
+    discard,
     fetchList,
     pollInterval,
     readAgain,
@@ -536,6 +537,33 @@ test("a reload whose key the screen left meanwhile answers with that key's own r
         await server.resolve(1, "rows of the left key");
         expect(await reloaded).toEqual({ value: "rows of the left key" });
         await shown.shows(rows("rows of the shown key"));
+    } finally {
+        shown.stop();
+    }
+});
+
+test("a discarded entry loses its rows at once, never stores the read that was running and is read again", async () => {
+    const client = createQueryClient();
+    const server = heldReads();
+    const shown = await shownWithRows(client, server);
+    try {
+        void client.refetchQueries({ queryKey: sitesKey, exact: true });
+        await server.sent(2);
+        discard(client, sitesKey);
+        expect(client.getQueryData(sitesKey)).toBeUndefined();
+        expect(shown.now()).toEqual(pending);
+        await server.sent(3);
+        await server.resolve(1, "rows read before the discard");
+        expect(stored(client, sitesKey).state.data).toBeUndefined();
+        expect(shown.now()).toEqual(pending);
+        await server.resolve(2, "rows read after the discard");
+        await shown.shows(rows("rows read after the discard"));
+        expect(shown.history()).toEqual([
+            pending,
+            rows("rows"),
+            pending,
+            rows("rows read after the discard"),
+        ]);
     } finally {
         shown.stop();
     }

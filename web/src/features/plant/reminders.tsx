@@ -1,333 +1,105 @@
-﻿"use client";
+"use client";
 import { useTranslations } from "next-intl";
 import { ScrollRegion } from "@/ui/scroll-region";
-import { Fragment, useEffect, useId, useRef, useState } from "react";
-import type { components } from "@/lib/schema";
+import dynamic from "next/dynamic";
+import {
+    useEffect,
+    useEffectEvent,
+    useId,
+    useRef,
+    useState,
+    type RefObject,
+} from "react";
+import { flushSync } from "react-dom";
 import type { Region, RegionScope } from "@/lib/api";
-import { api } from "@/lib/api/client";
-import { ApiError } from "@/lib/api/errors";
 import { MISSING } from "@/lib/format/number";
 import { useFormat } from "@/lib/format/use-format";
-import { isLanguage } from "@/i18n/language";
 import { useApiQuery, useRefresh } from "@/lib/api/query";
-import {
-    ActionForm,
-    AsyncButton,
-    CheckboxField,
-    Select,
-    formText,
-    formTexts,
-} from "@/ui/form";
+import { ActionForm } from "@/ui/form";
 import { Resource } from "@/ui/resource";
-import { Empty, Notice } from "@/ui/ui";
+import { Empty } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
-type ReminderSchedule = components["schemas"]["ReminderOutput"];
-type Delivery = ReminderSchedule["deliveries"][number];
-type Outcome = Pick<Delivery, "scheduled_for" | "status" | "last_error">;
-export type ReminderSummary = components["schemas"]["ReminderSummaryOutput"];
+import { useCanManageWorkspace } from "@/ui/workspace-access";
+import { sectionUnavailable } from "@/lib/on-demand";
+import {
+    EMPTY,
+    edited,
+    type Answer,
+    type Desk,
+    type Outcome,
+    type Panel,
+} from "./reminder-draft";
+import { ReminderFields, rowsOf, type Change } from "./reminder-fields";
+import { ReminderOutcome } from "./reminder-line";
+import styles from "./reminders.module.css";
+type Delivery = Answer["deliveries"][number];
 const PATH = "/api/tenants/{tenant_id}/regions/{region_id}/reminders/";
-function ReminderOutcome({
-    outcome,
-    timezone,
-}: {
-    outcome: Outcome;
-    timezone: string;
-}) {
+const ReminderEditor = dynamic(
+    () =>
+        import("./reminder-recipients").then(
+            (module) => module.ReminderEditor,
+            sectionUnavailable,
+        ),
+    { loading: EditorLoading },
+);
+function EditorLoading() {
     const t = useTranslations("Reminders");
-    const format = useFormat();
-    const label = useLabel();
+    return <p className="fine">{t("loadingEmailReminders")}</p>;
+}
+
+const START: Panel = { draft: EMPTY, outcome: "none", dropped: [] };
+
+const READ_ONLY: Change = {
+    enabled: () => undefined,
+    times: () => undefined,
+    language: () => undefined,
+};
+
+function RecipientCount({ answer }: { answer: Answer }) {
+    const t = useTranslations("Reminders");
     return (
         <>
-            {t("lastEmail", {
-                status: label("NotificationDeliveryStatus", outcome.status),
-                scheduled: format.time(outcome.scheduled_for, timezone),
-            })}
-            {outcome.last_error &&
-                ` ${label("NotificationDeliveryError", outcome.last_error)}`}
+            <p className="recipient-count">
+                {t("recipientCountOnly", {
+                    count: answer.recipient_count,
+                    limit: answer.recipient_limit,
+                })}
+            </p>
+            <p className="fine">
+                {t(
+                    answer.hide_recipients
+                        ? "recipientsHidden"
+                        : "recipientsVisible",
+                )}
+            </p>
         </>
     );
 }
-export function ReminderLine({
-    reminder,
-    timezone,
-}: {
-    reminder: ReminderSummary;
-    timezone: string;
-}) {
-    const t = useTranslations("Reminders");
-    const label = useLabel();
-    return (
-        <p className="fine">
-            {t("dailyEmail", { state: label("ReminderState", reminder.state) })}
-            {reminder.last_delivery && (
-                <>
-                    {" · "}
-                    <ReminderOutcome
-                        outcome={reminder.last_delivery}
-                        timezone={timezone}
-                    />
-                </>
-            )}
-        </p>
-    );
-}
-function useRowFocus(rows: { id: number }[]) {
-    const prefix = useId();
-    const pending = useRef<number | null>(null);
-    useEffect(() => {
-        if (pending.current !== null) {
-            document.getElementById(`${prefix}-${pending.current}`)?.focus();
-            pending.current = null;
-        }
-    }, [prefix, rows]);
-    return {
-        prefix,
-        focusRow: (id: number) => {
-            pending.current = id;
-        },
-    };
-}
-function DeliveryTimes({ data }: { data: ReminderSchedule }) {
-    const t = useTranslations("Reminders");
 
-    const [rows, setRows] = useState(() =>
-        (data.times.length ? data.times : [""]).map((value, id) => ({
-            id,
-            value,
-        })),
-    );
-    const { prefix, focusRow } = useRowFocus(rows);
-    const limit = data.daily_reminder_limit;
-    return (
-        <fieldset className="reminder-recipients">
-            <legend>{t("deliveryTimes")}</legend>
-            {rows.map((row, index) => (
-                <div className="recipient-row" key={row.id}>
-                    <label className="field" htmlFor={`${prefix}-${row.id}`}>
-                        {t("deliveryTime", { index: index + 1 })}
-                        <input
-                            id={`${prefix}-${row.id}`}
-                            type="time"
-                            name="times"
-                            value={row.value}
-                            onChange={(event) =>
-                                setRows(
-                                    rows.map((item) =>
-                                        item.id === row.id
-                                            ? {
-                                                  ...item,
-                                                  value: event.target.value,
-                                              }
-                                            : item,
-                                    ),
-                                )
-                            }
-                        />
-                    </label>
-                    {rows.length > 1 && (
-                        <button
-                            type="button"
-                            className="button secondary"
-                            aria-label={t("removeDeliveryTime", {
-                                index: index + 1,
-                            })}
-                            onClick={() => {
-                                const neighbour =
-                                    rows[index + 1] ?? rows[index - 1];
-                                if (neighbour) focusRow(neighbour.id);
-                                setRows(
-                                    rows.filter((item) => item.id !== row.id),
-                                );
-                            }}
-                        >
-                            <span aria-hidden="true">&times;</span>
-                        </button>
-                    )}
-                </div>
-            ))}
-            <button
-                type="button"
-                className="button secondary"
-                disabled={limit != null && rows.length >= limit}
-                onClick={() => {
-                    const id = Math.max(-1, ...rows.map((row) => row.id)) + 1;
-                    focusRow(id);
-                    setRows([
-                        ...rows,
-                        {
-                            id,
-                            value: "",
-                        },
-                    ]);
-                }}
-            >
-                {t("addTime")}
-            </button>
-            {limit != null && (
-                <span className="fine">
-                    {" "}
-                    {t("quotaCount", {
-                        count: rows.filter((row) => row.value).length,
-                        limit,
-                    })}
-                </span>
-            )}
-        </fieldset>
-    );
-}
-function RecipientFields({ data }: { data: ReminderSchedule }) {
+function ReminderView({ answer, region }: { answer: Answer; region: Region }) {
     const t = useTranslations("Reminders");
-    if (!data.addresses)
-        return (
-            <p className="recipient-count">
-                {t("recipientCountOnly", {
-                    count: data.recipient_count,
-                    limit: data.recipient_limit,
-                })}
-            </p>
-        );
-    return <RecipientRows data={data} addresses={data.addresses} />;
-}
-function RecipientRows({
-    data,
-    addresses,
-}: {
-    data: ReminderSchedule;
-    addresses: NonNullable<ReminderSchedule["addresses"]>;
-}) {
-    const t = useTranslations("Reminders");
-    const [rows, setRows] = useState(() =>
-        (addresses.recipients.length ? addresses.recipients : [""]).map(
-            (value, id) => ({
-                id,
-                value,
-            }),
-        ),
-    );
-    const { prefix, focusRow } = useRowFocus(rows);
-    const [includeMembers, setIncludeMembers] = useState(
-        data.include_workspace_members,
-    );
-    // A hint only: the server decides the limit and which addresses count.
-    const count = new Set(
-        [
-            ...rows.map((row) => row.value.trim()).filter(Boolean),
-            ...(includeMembers ? addresses.workspace_recipients : []),
-        ].map((email) => email.toLowerCase()),
-    ).size;
     return (
-        <fieldset className="reminder-recipients">
-            <legend>{t("emailRecipients")}</legend>
-            <span className="recipient-count fine" aria-live="polite">
-                {t("quotaCount", { count, limit: data.recipient_limit })}
-            </span>
-            <p className="fine">{t("groupPrivacy")}</p>
-            {count > data.recipient_limit && (
-                <Notice>
-                    {t(
-                        data.recipient_limit_exceeded
-                            ? "recipientLimitExceeded"
-                            : "recipientLimit",
-                        {
-                            limit: data.recipient_limit,
-                        },
-                    )}
-                </Notice>
-            )}
-            <CheckboxField
-                label={t("includeWorkspaceMembers")}
-                name="include_workspace_members"
-                checked={includeMembers}
-                onChange={setIncludeMembers}
-            />
-            <p className="fine">{t("membershipSync")}</p>
-            <details className="reminder-members">
-                <summary>
-                    {t("workspaceMembers", {
-                        count: addresses.workspace_recipients.length,
-                    })}
-                </summary>
-                {addresses.workspace_recipients.length ? (
-                    <ul>
-                        {addresses.workspace_recipients.map((email) => (
-                            <li key={email}>{email}</li>
-                        ))}
-                    </ul>
-                ) : (
-                    <p className="fine">{t("noWorkspaceMembers")}</p>
-                )}
-            </details>
-            <p className="recipient-label">{t("otherAddresses")}</p>
-            {rows.map((row, index) => (
-                <div className="recipient-row" key={row.id}>
-                    <label className="field" htmlFor={`${prefix}-${row.id}`}>
-                        {t("emailAddress", { index: index + 1 })}
-                        <input
-                            id={`${prefix}-${row.id}`}
-                            name="recipients"
-                            type="email"
-                            autoCapitalize="none"
-                            autoCorrect="off"
-                            value={row.value}
-                            onChange={(event) =>
-                                setRows(
-                                    rows.map((item) =>
-                                        item.id === row.id
-                                            ? {
-                                                  ...item,
-                                                  value: event.target.value,
-                                              }
-                                            : item,
-                                    ),
-                                )
-                            }
-                        />
-                    </label>
-                    {rows.length > 1 && (
-                        <button
-                            className="button secondary"
-                            type="button"
-                            aria-label={t("removeEmailAddress", {
-                                index: index + 1,
-                            })}
-                            onClick={() => {
-                                const neighbour =
-                                    rows[index + 1] ?? rows[index - 1];
-                                if (neighbour) focusRow(neighbour.id);
-                                setRows(
-                                    rows.filter((item) => item.id !== row.id),
-                                );
-                            }}
-                        >
-                            <span aria-hidden="true">&times;</span>
-                        </button>
-                    )}
-                </div>
-            ))}
-            <button
-                className="button secondary"
-                type="button"
-                disabled={
-                    count >= data.recipient_limit ||
-                    rows.length >= data.recipient_limit
-                }
-                onClick={() => {
-                    const id = Math.max(-1, ...rows.map((row) => row.id)) + 1;
-                    focusRow(id);
-                    setRows([
-                        ...rows,
-                        {
-                            id,
-                            value: "",
-                        },
-                    ]);
+        <ActionForm
+            submit={t("saveReminders")}
+            permitted={false}
+            onSubmit={() => Promise.resolve()}
+        >
+            <ReminderFields
+                answer={answer}
+                region={region}
+                fields={{
+                    enabled: answer.enabled,
+                    times: rowsOf(answer.times),
+                    language: answer.language,
                 }}
+                change={READ_ONLY}
             >
-                {t("addAddress")}
-            </button>
-        </fieldset>
+                <RecipientCount answer={answer} />
+            </ReminderFields>
+        </ActionForm>
     );
 }
+
 type ReminderProps = {
     scope: RegionScope;
     region: Region;
@@ -337,266 +109,326 @@ export function Reminders(props: ReminderProps) {
     return <ReminderSettings key={props.scope.region_id} {...props} />;
 }
 
-function entered(form: FormData, name: string) {
-    return formTexts(form, name)
-        .map((value) => value.trim())
-        .filter(Boolean);
+function DeliveryRecipients({
+    delivery,
+    addresses,
+}: {
+    delivery: Delivery;
+    addresses: boolean;
+}) {
+    const t = useTranslations("Reminders");
+    if (addresses && delivery.recipient_roles)
+        return delivery.recipient_roles.map(({ address, role }, index) => (
+            <div key={index}>
+                <span>{address}</span>{" "}
+                <span className="field-hint">{t(`roles.${role}`)}</span>
+            </div>
+        ));
+    if (addresses && delivery.recipients)
+        return delivery.recipients.map((email, index) => (
+            <div key={index}>{email}</div>
+        ));
+    return t("deliveryRecipientCount", { count: delivery.recipient_count });
+}
+
+function DeliveryHistory({
+    deliveries,
+    timezone,
+    addresses,
+}: {
+    deliveries: Delivery[];
+    timezone: string;
+    addresses: boolean;
+}) {
+    const t = useTranslations("Reminders");
+    const format = useFormat();
+    const label = useLabel();
+    const time = (value: string | null | undefined) =>
+        format.time(value, timezone);
+    return (
+        <details className="panel">
+            <summary>{t("recentDeliveries")}</summary>
+            {deliveries.length ? (
+                <ScrollRegion label={t("recentForecastEmailDeliveries")}>
+                    <table>
+                        <caption className="sr-only">
+                            {t("recentForecastEmailDeliveries")}
+                        </caption>
+                        <thead>
+                            <tr>
+                                <th>{t("scheduled")}</th>
+                                <th>{t("emailRecipients")}</th>
+                                <th>{t("status")}</th>
+                                <th>{t("collected")}</th>
+                                <th>{t("dataAge")}</th>
+                                <th>{t("sent")}</th>
+                                <th>{t("details")}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {deliveries.map((row) => (
+                                <tr key={row.id}>
+                                    <td>{time(row.scheduled_for)}</td>
+                                    <td className="delivery-recipients">
+                                        <DeliveryRecipients
+                                            delivery={row}
+                                            addresses={addresses}
+                                        />
+                                    </td>
+                                    <td>
+                                        <StatusTag
+                                            group="NotificationDeliveryStatus"
+                                            value={row.status}
+                                        />
+                                        {row.forecast_status && (
+                                            <div className="fine">
+                                                {label(
+                                                    "PreparedMessageKind",
+                                                    row.forecast_status,
+                                                )}
+                                            </div>
+                                        )}
+                                    </td>
+                                    <td>{time(row.collected_at)}</td>
+                                    <td>
+                                        {row.source_age_seconds == null
+                                            ? MISSING
+                                            : t("sourceAge", {
+                                                  hours: Math.floor(
+                                                      row.source_age_seconds /
+                                                          3600,
+                                                  ),
+                                                  minutes: Math.floor(
+                                                      (row.source_age_seconds %
+                                                          3600) /
+                                                          60,
+                                                  ),
+                                              })}
+                                        {row.stale && (
+                                            <StatusTag
+                                                group="Freshness"
+                                                value="stale"
+                                            />
+                                        )}
+                                    </td>
+                                    <td>{time(row.sent_at)}</td>
+                                    <td>
+                                        {row.late ? t("lateDelivery") : ""}
+                                        {row.last_error
+                                            ? label(
+                                                  "NotificationDeliveryError",
+                                                  row.last_error,
+                                              )
+                                            : MISSING}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </ScrollRegion>
+            ) : (
+                <Empty title={t("noDeliveriesYet")}>
+                    {t("scheduledDeliveriesAppearHere")}
+                </Empty>
+            )}
+        </details>
+    );
+}
+
+function OutcomeLine({
+    outcome,
+    kept,
+    line,
+}: {
+    outcome: Outcome;
+    kept: boolean;
+    line: RefObject<HTMLParagraphElement | null>;
+}) {
+    const t = useTranslations("Reminders");
+    const common = useTranslations("Common");
+    if (outcome === "none") return null;
+    return (
+        <p
+            className={`${styles.outcome} ${styles.focusable}`}
+            tabIndex={-1}
+            ref={line}
+        >
+            {outcome === "saved" ? common("saved") : t(`outcomes.${outcome}`)}
+            {kept &&
+                outcome !== "saved" &&
+                outcome !== "lost" &&
+                ` ${t("editsKept", { outcome })}`}
+        </p>
+    );
 }
 
 function ReminderSettings({ scope, region }: ReminderProps) {
     const t = useTranslations("Reminders");
-    const refresh = useRefresh();
-    const format = useFormat();
-    const label = useLabel();
     const headingId = useId();
-    const time = (value: string | null | undefined) =>
-        format.time(value, region.timezone);
-
     const resource = useApiQuery(PATH, { path: scope });
-    const [form, setForm] = useState({ generation: 0, stale: false });
+    const refresh = useRefresh();
+    const canManage = useCanManageWorkspace();
+    const [panel, setPanel] = useState(START);
+    const heading = useRef<HTMLHeadingElement>(null);
+    const line = useRef<HTMLParagraphElement>(null);
+    const focused = useRef<EventTarget | null>(null);
+    const answer = resource.data;
+    const carried = !!answer?.addresses;
+    const access = !canManage || resource.denied ? false : answer && carried;
+    const was = useRef<boolean | undefined>(undefined);
+    const lose = useEffectEvent(() => {
+        setPanel((now) => ({ ...now, draft: EMPTY, dropped: [] }));
+        resource.discard();
+    });
+    useEffect(() => {
+        if (access) was.current = true;
+        else if (
+            access === false &&
+            (was.current || (was.current === undefined && carried))
+        ) {
+            lose();
+            was.current = false;
+        }
+    }, [access, carried]);
+    useEffect(() => {
+        if (
+            focused.current instanceof Node &&
+            !focused.current.isConnected &&
+            document.activeElement === document.body
+        )
+            heading.current?.focus();
+    });
+    const desk: Desk = {
+        panel,
+        change: setPanel,
+        finish: ({ outcome, path }, sent) => {
+            resource.discard();
+            let own = false;
+            flushSync(() =>
+                setPanel((now) => {
+                    // A new object: React skips an identical state, and the discarded read must leave in this commit.
+                    if (now.draft !== sent) return { ...now };
+                    own = true;
+                    focused.current = null;
+                    return {
+                        draft:
+                            path === "conflict" || path === "unknown"
+                                ? { ...now.draft, base: undefined }
+                                : EMPTY,
+                        outcome,
+                        dropped: [],
+                    };
+                }),
+            );
+            if (own) line.current?.focus();
+            if (path === "refusal") {
+                if (own) was.current = false;
+                void refresh.tenants();
+            }
+            if (path === "saved")
+                void refresh.workspace(scope.tenant_id, {
+                    path: PATH,
+                    options: { path: scope },
+                });
+        },
+    };
     return (
-        <Resource resource={resource} loading={t("loadingEmailReminders")}>
-            {(data) => (
-                <>
-                    <section className="panel" aria-labelledby={headingId}>
-                        <div className="section-heading">
-                            <div>
-                                <h2 id={headingId}>{t("emailReminders")}</h2>
-                            </div>
-                            <StatusTag
-                                group="ReminderState"
-                                value={data.state}
-                            />
-                        </div>
-                        <p className="fine" role="status">
-                            {data.deliveries[0] ? (
-                                <ReminderOutcome
-                                    outcome={data.deliveries[0]}
-                                    timezone={region.timezone}
-                                />
-                            ) : (
-                                t("noEmailYet")
-                            )}
-                        </p>
-                        {form.stale && (
-                            <AsyncButton
-                                variant="secondary"
-                                onClick={async () => {
-                                    try {
-                                        await resource.reload();
-                                    } catch {
-                                        // RefreshFailed reports it and the offer stays.
-                                        return;
-                                    }
-                                    setForm((current) => ({
-                                        generation: current.generation + 1,
-                                        stale: false,
-                                    }));
-                                }}
-                            >
-                                {t("reloadReminders")}
-                            </AsyncButton>
-                        )}
-                        <ActionForm
-                            key={form.generation}
-                            submit={t("saveReminders")}
-                            onSubmit={async (values) => {
-                                const language = formText(values, "language");
-                                try {
-                                    resource.replace(
-                                        await api.put(PATH, {
-                                            path: scope,
-                                            body: {
-                                                enabled:
-                                                    values.get("enabled") ===
-                                                    "on",
-                                                recipients: entered(
-                                                    values,
-                                                    "recipients",
-                                                ),
-                                                include_workspace_members:
-                                                    values.get(
-                                                        "include_workspace_members",
-                                                    ) === "on",
-                                                language: isLanguage(language)
-                                                    ? language
-                                                    : "en",
-                                                times: entered(values, "times"),
-                                                expected_revision:
-                                                    data.revision,
-                                            },
-                                        }),
-                                    );
-                                } catch (error) {
-                                    if (
-                                        error instanceof ApiError &&
-                                        error.code ===
-                                            "reminder_schedule_changed"
-                                    )
-                                        setForm((current) => ({
-                                            ...current,
-                                            stale: true,
-                                        }));
-                                    throw error;
-                                }
-                                setForm((current) => ({
-                                    ...current,
-                                    stale: false,
-                                }));
-                                await refresh.workspace(scope.tenant_id);
-                            }}
+        <div
+            className={styles.panel}
+            onFocus={(event) => {
+                focused.current = event.target;
+            }}
+        >
+            <section className="panel" aria-labelledby={headingId}>
+                <div className="section-heading">
+                    <div>
+                        <h2
+                            id={headingId}
+                            className={styles.focusable}
+                            tabIndex={-1}
+                            ref={heading}
                         >
-                            <Fragment key={JSON.stringify(data)}>
-                                <CheckboxField
-                                    label={t(
-                                        "enableForecastEmailsForThisPlant",
-                                    )}
-                                    name="enabled"
-                                    defaultChecked={data.enabled}
-                                />
-                                {region.status !== "approved" && (
-                                    <Notice>{t("approvalRequired")}</Notice>
-                                )}
-                                <DeliveryTimes data={data} />
-                                <RecipientFields data={data} />
-                                <Select
-                                    label={t("emailLanguage")}
-                                    name="language"
-                                    defaultValue={data.language}
-                                    required
-                                >
-                                    <option value="en">English</option>
-                                    <option value="tr">Türkçe</option>
-                                </Select>
-                                <details>
-                                    <summary>{t("reminderDetails")}</summary>
-                                    <p className="fine">
-                                        {t("reminderPolicy", {
-                                            limit:
-                                                data.daily_reminder_limit ==
-                                                null
-                                                    ? "?"
-                                                    : format.number(
-                                                          data.daily_reminder_limit,
-                                                      ),
-                                        })}
-                                    </p>
-                                </details>
-                            </Fragment>
-                        </ActionForm>
-                    </section>
-                    <details className="panel">
-                        <summary>{t("recentDeliveries")}</summary>
-                        {data.deliveries.length ? (
-                            <ScrollRegion
-                                label={t("recentForecastEmailDeliveries")}
-                            >
-                                <table>
-                                    <caption className="sr-only">
-                                        {t("recentForecastEmailDeliveries")}
-                                    </caption>
-                                    <thead>
-                                        <tr>
-                                            <th>{t("scheduled")}</th>
-                                            <th>{t("emailRecipients")}</th>
-                                            <th>{t("status")}</th>
-                                            <th>{t("collected")}</th>
-                                            <th>{t("dataAge")}</th>
-                                            <th>{t("sent")}</th>
-                                            <th>{t("details")}</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {data.deliveries.map((row) => (
-                                            <tr key={row.id}>
-                                                <td>
-                                                    {time(row.scheduled_for)}
-                                                </td>
-                                                <td className="delivery-recipients">
-                                                    {row.recipients
-                                                        ? row.recipients.map(
-                                                              (email) => (
-                                                                  <div
-                                                                      key={
-                                                                          email
-                                                                      }
-                                                                  >
-                                                                      {email}
-                                                                  </div>
-                                                              ),
-                                                          )
-                                                        : t(
-                                                              "deliveryRecipientCount",
-                                                              {
-                                                                  count: row.recipient_count,
-                                                              },
-                                                          )}
-                                                </td>
-                                                <td>
-                                                    <StatusTag
-                                                        group="NotificationDeliveryStatus"
-                                                        value={row.status}
-                                                    />
-                                                    {row.forecast_status && (
-                                                        <div className="fine">
-                                                            {label(
-                                                                "PreparedMessageKind",
-                                                                row.forecast_status,
-                                                            )}
-                                                        </div>
-                                                    )}
-                                                </td>
-                                                <td>
-                                                    {time(row.collected_at)}
-                                                </td>
-                                                <td>
-                                                    {row.source_age_seconds ==
-                                                    null
-                                                        ? MISSING
-                                                        : t("sourceAge", {
-                                                              hours: Math.floor(
-                                                                  row.source_age_seconds /
-                                                                      3600,
-                                                              ),
-                                                              minutes:
-                                                                  Math.floor(
-                                                                      (row.source_age_seconds %
-                                                                          3600) /
-                                                                          60,
-                                                                  ),
-                                                          })}
-                                                    {row.stale && (
-                                                        <StatusTag
-                                                            group="Freshness"
-                                                            value="stale"
-                                                        />
-                                                    )}
-                                                </td>
-                                                <td>{time(row.sent_at)}</td>
-                                                <td>
-                                                    {row.late
-                                                        ? t("lateDelivery")
-                                                        : ""}
-                                                    {row.last_error
-                                                        ? label(
-                                                              "NotificationDeliveryError",
-                                                              row.last_error,
-                                                          )
-                                                        : MISSING}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </ScrollRegion>
-                        ) : (
-                            <Empty title={t("noDeliveriesYet")}>
-                                {t("scheduledDeliveriesAppearHere")}
-                            </Empty>
-                        )}
-                    </details>
-                </>
+                            {t("emailReminders")}
+                        </h2>
+                    </div>
+                    {answer && (
+                        <StatusTag group="ReminderState" value={answer.state} />
+                    )}
+                </div>
+                <div aria-live="polite">
+                    <OutcomeLine
+                        outcome={panel.outcome}
+                        kept={edited(panel.draft)}
+                        line={line}
+                    />
+                    {access &&
+                        panel.dropped.map(({ address, role }, index) => (
+                            <p key={index} className="fine">
+                                {t("choiceRemoved", {
+                                    address,
+                                    role: role
+                                        ? t(`roles.${role}`)
+                                        : t("defaultRole"),
+                                })}
+                            </p>
+                        ))}
+                </div>
+                <Resource
+                    resource={resource}
+                    loading={t("loadingEmailReminders")}
+                >
+                    {(answer) => (
+                        <ReminderPanel
+                            answer={answer}
+                            desk={desk}
+                            scope={scope}
+                            region={region}
+                        />
+                    )}
+                </Resource>
+            </section>
+            {answer && (
+                <DeliveryHistory
+                    deliveries={answer.deliveries}
+                    timezone={region.timezone}
+                    addresses={access === true}
+                />
             )}
-        </Resource>
+        </div>
+    );
+}
+
+function ReminderPanel({
+    answer,
+    desk,
+    scope,
+    region,
+}: ReminderProps & { answer: Answer; desk: Desk }) {
+    const t = useTranslations("Reminders");
+    const addresses = useCanManageWorkspace() ? answer.addresses : null;
+    return (
+        <>
+            <p className="fine" role="status">
+                {answer.deliveries[0] ? (
+                    <ReminderOutcome
+                        outcome={answer.deliveries[0]}
+                        timezone={region.timezone}
+                    />
+                ) : (
+                    t("noEmailYet")
+                )}
+            </p>
+            {addresses ? (
+                <ReminderEditor
+                    answer={answer}
+                    addresses={addresses}
+                    desk={desk}
+                    scope={scope}
+                    region={region}
+                />
+            ) : (
+                <ReminderView answer={answer} region={region} />
+            )}
+        </>
     );
 }

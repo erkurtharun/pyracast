@@ -507,19 +507,75 @@ test("a customer manages one plant site through the real API", async ({
         page.getByLabel("Collection time 2", { exact: true }),
     ).toHaveValue("16:00");
     await page.getByRole("button", { name: "Email reminders" }).click();
+    const reminders = page.getByRole("region", {
+        name: "Email reminders",
+        exact: true,
+    });
+    const savedReminders = page
+        .getByRole("heading", { name: "Who sees what", exact: true })
+        .locator("xpath=..");
+    const reviewDialog = page.getByRole("dialog", {
+        name: "Show these addresses to every recipient?",
+        exact: true,
+    });
+    async function saveShownReminders(hidden: string) {
+        const previewed = page.waitForResponse(
+            (response) =>
+                response.request().method() === "POST" &&
+                response.url().endsWith("/reminders/preview/"),
+        );
+        await page
+            .getByRole("button", { name: "Save reminders", exact: true })
+            .click();
+        const preview = await previewed;
+        expect(preview.status()).toBe(200);
+        const { disclosure } = (await preview.json()) as { disclosure: string };
+        await expect(reviewDialog).toBeVisible();
+        await expect(
+            reviewDialog.getByText(hidden, { exact: true }),
+        ).toBeVisible();
+        await expect(
+            reviewDialog.getByText("No address will appear in To or Copy.", {
+                exact: true,
+            }),
+        ).toBeVisible();
+        const saved = page.waitForResponse(
+            (response) =>
+                response.request().method() === "PUT" &&
+                response.url().endsWith("/reminders/"),
+        );
+        const reread = page.waitForResponse(
+            (response) =>
+                response.request().method() === "GET" &&
+                response.url().endsWith("/reminders/"),
+        );
+        await reviewDialog
+            .getByRole("button", { name: "Save and show addresses" })
+            .click();
+        const write = await saved;
+        expect(write.status()).toBe(200);
+        expect(write.request().postDataJSON()).toMatchObject({ disclosure });
+        expect((await reread).status()).toBe(200);
+        await expect(reviewDialog).toHaveCount(0);
+        await expect(
+            reminders.getByText("Saved successfully.", { exact: true }),
+        ).toBeVisible();
+    }
     await page.getByLabel("Enable forecast emails for this plant").check();
     await page.getByLabel("Delivery time 1", { exact: true }).fill("10:00");
     await page
         .getByLabel("Email address 1", { exact: true })
         .fill("member@example.com");
-    await page.getByRole("button", { name: "Save reminders" }).click();
+    await saveShownReminders("Hidden (Bcc): 1 recipient");
     await expect(
         page.getByLabel("Email address 1", { exact: true }),
     ).toHaveValue("member@example.com");
     await expect(
         page.getByLabel("Delivery time 1", { exact: true }),
     ).toHaveValue("10:00");
-    await expect(page.getByText("Sending", { exact: true })).toBeVisible();
+    await expect(reminders.getByText("Sending", { exact: true })).toBeVisible();
+    await expect(savedReminders).toContainText("1 / 5");
+    await expect(savedReminders).toContainText("Hidden (Bcc): 1 recipient");
     await page
         .getByLabel("Email address 1", { exact: true })
         .fill("forecast-one@example.test");
@@ -527,13 +583,21 @@ test("a customer manages one plant site through the real API", async ({
     await page
         .getByLabel("Email address 2", { exact: true })
         .fill("forecast-two@example.test");
-    const remindersSaved = page.waitForResponse(
-        (response) =>
-            response.request().method() === "PUT" &&
-            response.url().endsWith("/reminders/"),
-    );
-    await page.getByRole("button", { name: "Save reminders" }).click();
-    expect((await remindersSaved).ok()).toBeTruthy();
+    await saveShownReminders("Hidden (Bcc): 2 recipients");
+    await expect(
+        page.getByLabel("Email address 1", { exact: true }),
+    ).toHaveValue("forecast-one@example.test");
+    await expect(
+        page.getByLabel("Email address 2", { exact: true }),
+    ).toHaveValue("forecast-two@example.test");
+    await expect(savedReminders).toContainText("2 / 5");
+    await expect(savedReminders).toContainText("Hidden (Bcc): 2 recipients");
+    await expect(
+        savedReminders.getByText(
+            "All recipients are hidden: the email shows no recipient address.",
+            { exact: true },
+        ),
+    ).toBeVisible();
     await page.reload();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page

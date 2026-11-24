@@ -30,12 +30,6 @@ export function formText(data: FormData, name: string) {
     return typeof value === "string" ? value : "";
 }
 
-export function formTexts(data: FormData, name: string) {
-    return data
-        .getAll(name)
-        .map((value) => (typeof value === "string" ? value : ""));
-}
-
 // Shows the server's refusal of each named field on that field.
 export function FieldErrors({
     value,

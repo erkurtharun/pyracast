@@ -33,9 +33,19 @@ async function reminders(page: Page, state: string) {
                 revision: 3,
                 language: "en",
                 include_workspace_members: false,
+                hide_recipients: true,
                 addresses: {
                     recipients: [user.email],
                     workspace_recipients: [],
+                    members: [],
+                    added: [
+                        {
+                            address: user.email,
+                            role: null,
+                            eligible: true,
+                            memberships: [],
+                        },
+                    ],
                 },
                 recipient_limit: 5,
                 recipient_count: 1,

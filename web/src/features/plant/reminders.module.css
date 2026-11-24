@@ -1,0 +1,11 @@
+.focusable:focus-visible {
+    outline: 3px solid var(--amber);
+    outline-offset: 3px;
+}
+.outcome {
+    margin: 0 0 var(--space-2);
+    font-weight: 600;
+}
+.panel {
+    display: contents;
+}
