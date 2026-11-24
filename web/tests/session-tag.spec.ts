@@ -134,7 +134,7 @@ test.afterEach(() => {
 });
 
 test("U1: a save in flight while another session takes over is neither repeated nor applied", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     answer(changed, () => json(session("b", 2)));
     const refused = await api
         .post("/api/tenants/{tenant_id}/sites/", site)
@@ -147,7 +147,7 @@ test("U1: a save in flight while another session takes over is neither repeated 
 
     calls = [];
     startDocument();
-    adoptSession(session("b", 2));
+    await adoptSession(session("b", 2));
     const { gate, release } = held();
     const { arrived, arrive } = arrival();
     answer(async () => {
@@ -157,7 +157,7 @@ test("U1: a save in flight while another session takes over is neither repeated 
     });
     const saving = api.post("/api/tenants/{tenant_id}/sites/", site);
     await arrived;
-    adoptSession(session("c", 3));
+    await adoptSession(session("c", 3));
     release();
     const late = await saving.catch((failure) => failure);
     expect(late).toBeInstanceOf(ApiError);
@@ -177,7 +177,7 @@ test("U2: the same account signed in again owns none of the earlier session's ca
 });
 
 test("U3: a sign-out another document announced leaves this tab not current until it reads", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     expect(isCurrent(sessionState().session)).toBe(true);
     stored.set(observedTagKey, "");
     expect(isCurrent(sessionState().session)).toBe(false);
@@ -191,7 +191,7 @@ test("U3: a sign-out another document announced leaves this tab not current unti
 });
 
 test("U4: a sign-in prepared before another tab signed in leaves this tab on the session the browser holds", async () => {
-    adoptSession(signedOut);
+    await adoptSession(signedOut);
     answer(changed, () => json(session("a")));
     const refused = await authRequest("auth/login", "POST", {
         email: "user-2@example.test",
@@ -207,8 +207,8 @@ test("U4: a sign-in prepared before another tab signed in leaves this tab on the
 });
 
 test("a document whose session was replaced sends nothing tagged before its reload, only session reads", async () => {
-    adoptSession(session("a"));
-    adoptSession(session("b", 2));
+    await adoptSession(session("a"));
+    await adoptSession(session("b", 2));
     answer(() => json(session("b", 2)));
     const refused = await api
         .get("/api/tenants/{tenant_id}/members/", { path: { tenant_id: 1 } })
@@ -223,7 +223,7 @@ test("a document whose session was replaced sends nothing tagged before its relo
 });
 
 test("U5: a deletion answered after the session changed is not delivered to its caller", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     const { gate, release } = held();
     answer(async () => {
         await gate;
@@ -237,7 +237,7 @@ test("U5: a deletion answered after the session changed is not delivered to its 
         .then(() => {
             delivered = true;
         });
-    adoptSession(session("b", 2));
+    await adoptSession(session("b", 2));
     release();
     const error = await removal.catch((failure) => failure);
     expect(error).toMatchObject({ code: "session_changed" });
@@ -245,7 +245,7 @@ test("U5: a deletion answered after the session changed is not delivered to its 
 });
 
 test("V1: a request that waited behind another one or for its retry is not sent once the document shows another session", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     const { gate, release } = held();
     const { arrived, arrive } = arrival();
     answer(
@@ -260,7 +260,7 @@ test("V1: a request that waited behind another one or for its retry is not sent 
     const read = authRequest("account/providers", "GET");
     const signingOut = authRequest("auth/session", "DELETE");
     await arrived;
-    adoptSession(session("b", 2));
+    await adoptSession(session("b", 2));
     release();
     await read.catch(() => undefined);
     const error = await signingOut.catch((failure) => failure);
@@ -269,7 +269,7 @@ test("V1: a request that waited behind another one or for its retry is not sent 
 
     calls = [];
     startDocument();
-    adoptSession(session("c", 3));
+    await adoptSession(session("c", 3));
     answer(
         () => json(errorBody("session_busy", "Busy.", { retry_after: 0 }), 429),
         changed,
@@ -278,7 +278,7 @@ test("V1: a request that waited behind another one or for its retry is not sent 
     const retried = api
         .post("/api/tenants/{tenant_id}/sites/", site)
         .catch((failure) => failure);
-    adoptSession(session("d", 4));
+    await adoptSession(session("d", 4));
     expect(await retried).toMatchObject({ code: "session_changed" });
     expect(sent()).toEqual(["POST /api/tenants/1/sites/ c"]);
 });
@@ -292,7 +292,7 @@ const notSent = {
 };
 
 test("a read waiting for its busy retry sends nothing after the sign-out was confirmed", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     const { gate, release } = held();
     const reply = async (call: Call) => {
         if (call.method === "DELETE") return signedOutAnswer();
@@ -318,7 +318,7 @@ test("a read waiting for its busy retry sends nothing after the sign-out was con
 
 for (const outcome of ["refused", "confirmed"] as const) {
     test(`a save waiting for its busy retry while this tab signs out is told it was not sent; the sign-out is ${outcome}`, async () => {
-        adoptSession(session("a"));
+        await adoptSession(session("a"));
         const { gate, release } = held();
         const { arrived, arrive } = arrival();
         answer(
@@ -365,7 +365,7 @@ for (const outcome of ["refused", "confirmed"] as const) {
 }
 
 test("a sign-out answered 200 with a signed-out body fails and keeps the document until allauth's signed-out answer", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     answer(
         () => json({ status: 401, meta: { is_authenticated: false } }),
         signedOutAnswer,
@@ -389,7 +389,7 @@ test("a sign-out answered 200 with a signed-out body fails and keeps the documen
 });
 
 test("a save whose connection failed may have been applied", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     answer(() => {
         throw new TypeError("Failed to fetch");
     });
@@ -401,7 +401,7 @@ test("a save whose connection failed may have been applied", async () => {
 });
 
 test("a read begun during this tab's sign-out is refused as not sent before the sign-out is answered", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     const { gate, release } = held();
     const { arrived, arrive } = arrival();
     answer(
@@ -424,7 +424,7 @@ test("a read begun during this tab's sign-out is refused as not sent before the 
 });
 
 test("a read refused after the document adopted another session during this tab's sign-out is told the session changed", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     const { gate, release } = held();
     const { arrived, arrive } = arrival();
     answer(changed, async () => {
@@ -462,7 +462,7 @@ test("a read refused after the document adopted another session during this tab'
 });
 
 test("a request prepared after this tab's confirmed sign-out is told it was not sent", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     answer(signedOutAnswer);
     await signOut();
     const saving = await api
@@ -477,7 +477,7 @@ test("a request prepared after this tab's confirmed sign-out is told it was not 
 });
 
 test("a document retired by its own sign-out keeps telling a waiting request it was not sent after reading another session", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     const { gate, release } = held();
     answer(
         async () => {
@@ -503,7 +503,7 @@ test("a document retired by its own sign-out keeps telling a waiting request it 
 });
 
 test("an answer that arrives after this tab's confirmed sign-out is withheld as a changed session, not as unsent", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     const { gate, release } = held();
     answer(async () => {
         await gate;
@@ -522,7 +522,7 @@ test("an answer that arrives after this tab's confirmed sign-out is withheld as 
 });
 
 test("V2: a sign-out is never sent a second time for another account", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     answer(changed, () => json(session("b", 2)));
     const error = await signOut().catch((failure) => failure);
     expect(error).toMatchObject({ code: "session_changed" });
@@ -534,20 +534,20 @@ test("V2: a sign-out is never sent a second time for another account", async () 
 });
 
 test("V3: tabs store only the tags their reads observed, so crossing reads converge", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     answer(
         () => json(session("b", 2)),
         () => json(session("a")),
     );
     await loadSession();
     expect(stored.get(observedTagKey)).toBe("b");
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     expect(stored.get(observedTagKey)).toBe("a");
     expect([...stored.values()]).toEqual(["a"]);
 });
 
 test("V4: a refused sign-out changes no observed tag", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     answer(() => json(errorBody("csrf_failed", "The page expired."), 403));
     const error = await signOut().catch((failure) => failure);
     expect(error).toMatchObject({ status: 403, code: "csrf_failed" });
@@ -563,7 +563,7 @@ test("V5: the first session read of a new document announces the session it find
 });
 
 test("a read under a key another tab's confirmation replaced does not end this tab's session", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     answer(
         () => json(signedOut),
         () => json(session("a")),
@@ -577,7 +577,7 @@ test("a read under a key another tab's confirmation replaced does not end this t
 });
 
 test("a request refused for a renewed key of the same session is sent once more", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     answer(
         changed,
         () => json({ ...session("a"), csrf_token: "renewed" }),
@@ -593,7 +593,7 @@ test("a request refused for a renewed key of the same session is sent once more"
 });
 
 test("a request refused twice for a changed session is not sent a third time", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     answer(changed, () => json(session("a")), changed);
     const error = await api.get("/api/tenants/").catch((failure) => failure);
     expect(error).toMatchObject({ status: 409, code: "session_changed" });
@@ -601,7 +601,7 @@ test("a request refused twice for a changed session is not sent a third time", a
 });
 
 test("a read started before another tab changed the session is not reused after the change", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     const { gate, release } = held();
     answer(
         async () => {
@@ -622,7 +622,7 @@ test("a read started before another tab changed the session is not reused after 
 });
 
 test("a read that settles after a newer one does not adopt its answer", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     const { gate, release } = held();
     const reads = [
         async () => {
@@ -670,7 +670,7 @@ function recorded(promise: Promise<unknown>) {
 }
 
 test("a read that settles after another tab changed the session adopts the answer of a read sent after the change", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     const { gate, release } = held();
     answer(
         async () => {
@@ -691,7 +691,7 @@ test("a read that settles after another tab changed the session adopts the answe
 
 for (const later of ["answers", "fails"] as const) {
     test(`a read that settles while a read sent after another tab's change is in flight adopts nothing; the later read ${later}`, async () => {
-        adoptSession(session("a"));
+        await adoptSession(session("a"));
         const first = held();
         const second = held();
         const { arrived, arrive } = arrival();
@@ -735,7 +735,7 @@ for (const later of ["answers", "fails"] as const) {
 }
 
 test("a session adopted from a write's answer is kept over a read that started before the write", async () => {
-    adoptSession(session("a"));
+    await adoptSession(session("a"));
     const first = held();
     const second = held();
     const turkish = { ...session("a"), language: "tr" };
@@ -755,7 +755,7 @@ test("a session adopted from a write's answer is kept over a read that started b
         body: { language: "tr" },
     });
     first.release();
-    adoptSession(await language);
+    await adoptSession(await language);
     second.release();
     expect((await earlier).language).toBe("tr");
     expect(sessionState().session?.language).toBe("tr");
