@@ -14,6 +14,15 @@ import { CollectionStatus } from "./collection-status";
 
 type Schedule = components["schemas"]["CollectionScheduleOutput"];
 
+function sentTimes(times: readonly string[]) {
+    return [...times].sort(
+        (a, b) => Number(a.replace(":", "")) - Number(b.replace(":", "")),
+    );
+}
+
+const sameTimes = (a: readonly string[], b: readonly string[]) =>
+    sentTimes(a).join() === sentTimes(b).join();
+
 export function CollectionSchedule({
     scope,
     region,
@@ -67,6 +76,7 @@ function ScheduleEditor({
                 <p>{t("chooseTimes")}</p>
                 <ActionForm
                     submit={t("saveCollectionSchedule")}
+                    unsaved={!sameTimes(times, data.times)}
                     onSubmit={async (form) => {
                         const enabled = form.get("enabled") === "on";
                         if (
@@ -86,23 +96,16 @@ function ScheduleEditor({
                             throw new DisplayError(
                                 t("addAtLeastOneCollectionTime"),
                             );
-                        const compareTimes = (a: string, b: string) =>
-                            Number(a.replace(":", "")) -
-                            Number(b.replace(":", ""));
-                        const sorted = [...times].sort(compareTimes);
                         if (
                             enabled === data.enabled &&
-                            JSON.stringify(sorted) ===
-                                JSON.stringify(
-                                    [...data.times].sort(compareTimes),
-                                )
+                            sameTimes(times, data.times)
                         )
                             return;
                         await api.put(
                             "/api/tenants/{tenant_id}/regions/{region_id}/collection-schedule/",
                             {
                                 path: scope,
-                                body: { enabled, times: sorted },
+                                body: { enabled, times: sentTimes(times) },
                             },
                         );
                         onSaved();

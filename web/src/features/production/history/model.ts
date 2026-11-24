@@ -17,6 +17,8 @@ export type Draft = {
     key: string;
     energy: string;
     quality: Quality;
+    // The values the editor opened with, never a refreshed row.
+    opened: { energy: string; quality: Quality };
     expectedRevision: number | null;
     attempt?: Write;
 };

@@ -8,6 +8,7 @@ import { cadence, useApiQuery } from "@/lib/api/query";
 import { productionExport } from "@/lib/exports";
 import { plantDay } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
+import { useLeaveGuard } from "@/lib/leave-guard";
 import { CsvDownload } from "@/ui/csv-download";
 import { useExportPlant } from "@/ui/export-plant";
 import {
@@ -36,6 +37,7 @@ import {
     canAct,
     controls,
     dropped,
+    editorUnsaved,
     initialScreen,
     locked,
     reduceScreen,
@@ -56,6 +58,8 @@ export function ProductionHistory({
     day: requestedDay,
     baseDay,
     onDay,
+    onKeepDay,
+    onUnsaved,
     onSaved,
 }: {
     scope: PlantScope;
@@ -64,6 +68,8 @@ export function ProductionHistory({
     day?: string;
     baseDay: string | undefined;
     onDay: (day: string) => void;
+    onKeepDay: (day: string) => void;
+    onUnsaved: (unsaved: boolean) => void;
     onSaved: () => Promise<unknown>;
 }) {
     const t = useTranslations("ProductionHistory");
@@ -125,14 +131,13 @@ export function ProductionHistory({
     }
     const history = reading.data;
     const derived = controls(screen, history?.intervals);
-    const drafting = draft !== null;
+    const unsaved = draft !== null || editorUnsaved(editor);
+    useLeaveGuard(unsaved);
     useEffect(() => {
-        if (!drafting) return;
-        // A full page load drops the unsent draft, so the browser asks before leaving.
-        const keep = (event: BeforeUnloadEvent) => event.preventDefault();
-        window.addEventListener("beforeunload", keep);
-        return () => window.removeEventListener("beforeunload", keep);
-    }, [drafting]);
+        if (!unsaved) return;
+        onUnsaved(true);
+        return () => onUnsaved(false);
+    }, [onUnsaved, unsaved]);
     useEffect(() => {
         if (editor.status !== "closed" || !history || !pendingFocus.current)
             return;
@@ -551,7 +556,7 @@ export function ProductionHistory({
                     onEvent={apply}
                     onEdit={editStaged}
                     onRemove={unstage}
-                    onReturn={() => onDay(draft.day)}
+                    onReturn={() => onKeepDay(draft.day)}
                     onDiscard={() => {
                         if (request({ type: "discard" }))
                             finish(proposals("discarded"));

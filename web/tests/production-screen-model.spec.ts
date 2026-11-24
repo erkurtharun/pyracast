@@ -10,6 +10,7 @@ import {
 import {
     controls,
     dropped,
+    editorUnsaved,
     initialScreen,
     locked,
     reconcileEditor,
@@ -978,6 +979,7 @@ test("rows of a day reconcile the editor by the viewer's access", () => {
         key,
         energy: "2",
         quality: "valid",
+        opened: { energy: "2", quality: "valid" },
         expectedRevision: null,
     };
     const closed: Editor = { status: "closed" };
@@ -1328,4 +1330,83 @@ test("a reason of nothing but the outer whitespace the server strips is missing"
         { type: "send", rows: dayRows(DAY) },
     );
     expect(sent.screen.draft?.send).toEqual({ status: "reason_missing" });
+});
+
+test("an editor counts as unsaved while its values differ from those it opened with or a write of it runs or is unconfirmed", () => {
+    const eight = row(DAY, 8, { can_edit: true, can_revert: true });
+    const open = (rows: Interval[]) =>
+        [
+            { type: "dayShown", day: DAY },
+            { type: "open", row: eight },
+            { type: "rowsLoaded", day: DAY, history: history(rows) },
+        ] satisfies ScreenEvent[];
+    const opened = (open([eight]) as ScreenEvent[]).reduce(
+        reduceScreen,
+        initialScreen(OTHER, "direct"),
+    );
+    expect(editorUnsaved(opened.editor)).toBe(false);
+    const refreshed = reduceScreen(opened, {
+        type: "rowsLoaded",
+        day: DAY,
+        history: history([
+            {
+                ...eight,
+                effective: {
+                    energy_mwh: 0.7,
+                    quality: "valid",
+                    source: "meter",
+                    source_kind: "manual",
+                    provisional: false,
+                    aggregated: false,
+                },
+            },
+        ]),
+    });
+    expect(editorUnsaved(refreshed.editor)).toBe(false);
+    const orphaned = reduceScreen(opened, {
+        type: "rowsLoaded",
+        day: DAY,
+        history: history([{ ...eight, can_edit: false }]),
+    });
+    expect(orphaned.editor.status).toBe("orphaned");
+    expect(editorUnsaved(orphaned.editor)).toBe(false);
+    const changed = reduceScreen(opened, { type: "change", energy: "0,5" });
+    expect(editorUnsaved(changed.editor)).toBe(true);
+    expect(
+        editorUnsaved(
+            reduceScreen(changed, { type: "change", energy: "1" }).editor,
+        ),
+    ).toBe(false);
+    expect(
+        editorUnsaved(
+            reduceScreen(opened, { type: "change", quality: "outage" }).editor,
+        ),
+    ).toBe(true);
+    const reverting = reduceScreen(opened, {
+        type: "save",
+        row: eight,
+        action: "revert",
+    });
+    expect(reverting.editor.status).toBe("saving");
+    expect(editorUnsaved(reverting.editor)).toBe(true);
+    const lost = reduceScreen(reverting, {
+        type: "saveFailed",
+        error: lostAnswer(),
+        implausible: false,
+    });
+    expect(editorUnsaved(lost.editor)).toBe(true);
+    expect(
+        editorUnsaved(
+            reduceScreen(
+                reduceScreen(lost, {
+                    type: "save",
+                    row: eight,
+                    action: "revert",
+                }),
+                {
+                    type: "saved",
+                },
+            ).editor,
+        ),
+    ).toBe(false);
 });

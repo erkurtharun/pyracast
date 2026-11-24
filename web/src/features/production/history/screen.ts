@@ -126,11 +126,12 @@ function away(screen: Screen) {
 }
 
 function withAttempt(draft: Draft, attempt: Write | null | undefined): Draft {
-    const { key, energy, quality, expectedRevision } = draft;
+    const { key, energy, quality, opened, expectedRevision } = draft;
     return {
         key,
         energy,
         quality,
+        opened,
         expectedRevision,
         ...(attempt && { attempt }),
     };
@@ -205,8 +206,7 @@ export function repeatsOrphan(screen: Screen) {
 }
 
 function opened(row: Interval, item: StagedChange | undefined): Draft {
-    return {
-        key: intervalKey(row),
+    const values = {
         energy:
             item?.action === "set"
                 ? item.energy.toString()
@@ -215,8 +215,23 @@ function opened(row: Interval, item: StagedChange | undefined): Draft {
             item?.action === "set"
                 ? item.quality
                 : qualityOf(row.observation?.quality),
+    };
+    return {
+        key: intervalKey(row),
+        ...values,
+        opened: values,
         expectedRevision: row.revision_id,
     };
+}
+
+export function editorUnsaved(editor: Editor) {
+    return (
+        editor.status !== "closed" &&
+        (editor.energy !== editor.opened.energy ||
+            editor.quality !== editor.opened.quality ||
+            writing(editor) ||
+            !!editor.attempt)
+    );
 }
 
 function editingOn(editor: Editor, row: Interval) {

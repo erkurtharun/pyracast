@@ -1,9 +1,9 @@
 "use client";
 import { useLocale, useTranslations } from "next-intl";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { cadence, useApiList, useRefresh } from "@/lib/api/query";
 import { useFormat } from "@/lib/format/use-format";
+import { useNavigate } from "@/lib/leave-guard";
 import { routes } from "@/lib/routes";
 import { PlantIcon } from "./plant-icon";
 import { PlantOnboarding } from "./plant-onboarding";
@@ -21,7 +21,7 @@ export function Portfolio() {
     const locale = useLocale();
     const format = useFormat();
     const label = useLabel();
-    const router = useRouter();
+    const navigate = useNavigate();
     const refresh = useRefresh();
     const { tenant } = useWorkspace();
     usePageTitle(`${t("plants")} · ${tenant.name}`);
@@ -36,7 +36,7 @@ export function Portfolio() {
     );
     const rows = sites.data?.results ?? [];
     const offerCreate = canManage && !creating && !!sites.data;
-    const open = (site: number) => router.push(routes.plant(tenant.id, site));
+    const open = (site: number) => navigate(routes.plant(tenant.id, site));
     const filtered = rows.filter(
         (site) =>
             (status === "all" || site.status === status) &&
@@ -223,7 +223,7 @@ export function Portfolio() {
                     <div className="portfolio-footer">
                         <button
                             className="text-button"
-                            onClick={() => router.push(routes.trash(tenant.id))}
+                            onClick={() => navigate(routes.trash(tenant.id))}
                         >
                             {t("recycleBin")}
                         </button>

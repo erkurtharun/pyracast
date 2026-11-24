@@ -7,6 +7,7 @@ import type { components } from "@/lib/schema";
 import { displayMessage, UnconfirmedError } from "@/lib/api/errors";
 import { useFormat } from "@/lib/format/use-format";
 import { useAttempt } from "@/lib/idempotency";
+import { useLeaveGuard } from "@/lib/leave-guard";
 import { parseProduction, type ProductionFile } from "@/lib/production";
 import {
     ActionForm,
@@ -20,6 +21,7 @@ import { ScrollRegion } from "@/ui/scroll-region";
 type Preview = components["schemas"]["ProductionPreviewOutput"];
 type Selection =
     | { status: "empty" }
+    | { status: "reading" }
     | { status: "invalid"; error: string }
     | ({ status: "ready"; fileName: string; sha256: string } & ProductionFile)
     | ({
@@ -88,12 +90,19 @@ export function ProductionImport({
     }, [previewRequest]);
     const ready =
         selection.status === "ready" || selection.status === "preview";
+    useLeaveGuard(
+        selection.status === "reading" ||
+            selection.status === "preview" ||
+            (selection.status === "ready" && !result),
+    );
     async function selectFile(file?: File) {
         const current = ++sequence.current;
-        setSelection({ status: "empty" });
         setResult(undefined);
         setPreviewRequest({ status: "idle" });
-        if (!file) return;
+        if (!file) {
+            setSelection({ status: "empty" });
+            return;
+        }
         if (file.size > 2 * 1024 * 1024) {
             setSelection({
                 status: "invalid",
@@ -101,6 +110,7 @@ export function ProductionImport({
             });
             return;
         }
+        setSelection({ status: "reading" });
         try {
             const parsed = parseProduction(await file.text(), csvTexts);
             const sha256 = await fileSha256(file);

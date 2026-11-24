@@ -1860,24 +1860,7 @@ test("a lost approval whose repeat is throttled keeps its notice beside the thro
 });
 
 // Holds every script that reads the texts of `namespace` until `release`.
-async function holdScript(page: Page, namespace: string) {
-    let reach!: () => void;
-    const reached = new Promise<void>((resolve) => (reach = resolve));
-    let release!: () => void;
-    const released = new Promise<void>((resolve) => (release = resolve));
-    await page.route("**/_next/static/**/*.js", async (route) => {
-        const response = await route.fetch();
-        const body = await response.text();
-        if (body.includes(`("${namespace}")`)) {
-            reach();
-            await released;
-        }
-        await route.fulfill({ response, body });
-    });
-    return { reached, release: () => release() };
-}
-
-test("a lost import whose Confirm a view change on its way disables is told without the advice", async ({
+test("a lost import asks before the comparison loads its document, and after Stay its Confirm keeps the advice and applies once", async ({
     page,
 }) => {
     await page.clock.setFixedTime(now);
@@ -1888,16 +1871,21 @@ test("a lost import whose Confirm a view change on its way disables is told with
     const { importer, confirm } = await prepareImport(page);
     await confirm.click();
     await expectUnconfirmed(importer, true);
-    const comparison = await holdScript(page, "ForecastPerformance");
+    const asked = new Promise<string>((resolve) =>
+        page.once("dialog", (dialog) => {
+            resolve(dialog.type());
+            void dialog.dismiss();
+        }),
+    );
     await page.getByRole("button", { name: "Comparison", exact: true }).click();
-    await comparison.reached;
-    await expect(confirm).toBeDisabled();
-    await expectUnconfirmed(importer, false);
-    comparison.release();
-    await expect(
-        page.getByRole("heading", { name: "Production comparison" }),
-    ).toBeVisible();
-    expect(server.requests).toHaveLength(1);
+    expect(await asked).toBe("beforeunload");
+    await expect(confirm).toBeEnabled();
+    await expectUnconfirmed(importer, true);
+    await confirm.click();
+    await expect(importer.getByText(labels.en.imported)).toBeVisible();
+    expect(server.requests).toHaveLength(2);
+    expect(server.requests[1]).toEqual(server.requests[0]);
+    expect(server.applied()).toBe(4);
 });
 
 test("a lost outage proposal whose reason changed without an input event is sent as a new proposal, told without the advice while it runs", async ({
