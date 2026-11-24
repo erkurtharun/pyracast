@@ -12,6 +12,7 @@ import {
 import { ApiError, NotSentError } from "./api/errors";
 import { authRequest, authUrl, type AuthResult } from "./auth-api";
 import { browserErrors } from "@/i18n/browser";
+import type { CopyState } from "./saved/store";
 
 export type Session = components["schemas"]["SessionOutput"];
 export type SessionUser = components["schemas"]["SessionUserOutput"];
@@ -47,6 +48,12 @@ type ShownOwner = {
     signOut?: "keepInvitation" | "clearInvitation";
 };
 type PreviousEnd = { notice?: "ended" | "changed"; clearInvitation: boolean };
+// The store of saved figures loads only where this flag is set or cannot be read.
+const savedFlagKey = "pyracast.saved";
+// A sign-out removal that did not finish in time; the next document carries it out.
+const savedRemovalKey = "pyracast.savedRemoval";
+const savedSignOutLimitMs = 2_000;
+type SavedStore = typeof import("./saved/store");
 
 let state: SessionState = {
     ended: false,
@@ -66,6 +73,8 @@ let adopted: { mark: Mark; session: Session } | undefined;
 let confirming: Promise<Tag> | undefined;
 let signingOut = false;
 let clearTabInvitation = () => {};
+let savedStore: Promise<SavedStore> | undefined;
+let savedWork: Promise<unknown> = Promise.resolve();
 const listeners = new Set<() => void>();
 
 export function sessionState() {
@@ -226,6 +235,88 @@ export function isCurrent(session: Session | undefined) {
     return observed === null || observed === tagOf(session);
 }
 
+function readStored(key: string): string | null | undefined {
+    try {
+        return window.localStorage.getItem(key);
+    } catch {
+        return undefined;
+    }
+}
+
+function writeStored(key: string, value: string | null) {
+    try {
+        if (value === null) window.localStorage.removeItem(key);
+        else window.localStorage.setItem(key, value);
+    } catch {
+        return;
+    }
+}
+
+function savedCopyFlagged() {
+    return readStored(savedFlagKey) !== null;
+}
+
+function forgetSavedCopy() {
+    writeStored(savedFlagKey, null);
+    writeStored(savedRemovalKey, null);
+}
+
+// The copy's operations run one after another, in the order this document asked for them.
+function withSavedStore<T>(
+    work: (store: SavedStore) => Promise<T>,
+): Promise<T | undefined> {
+    const next = savedWork.then(async () => {
+        savedStore ??= import("./saved/store");
+        return work(await savedStore);
+    });
+    savedWork = next.catch(() => undefined);
+    return next.catch(() => {
+        savedStore = undefined;
+        return undefined;
+    });
+}
+
+export function startSavedCopy() {
+    const marked = typeof readStored(savedRemovalKey) === "string";
+    if (!marked && !savedCopyFlagged()) return;
+    void withSavedStore(async (store) => {
+        const outcome = await store.start(marked);
+        if (outcome === "deleted") forgetSavedCopy();
+        if (outcome === "removed") writeStored(savedRemovalKey, null);
+    });
+}
+
+function adoptSavedCopy({ user, language, session_tag }: Session) {
+    if (!user || !savedCopyFlagged()) return;
+    void withSavedStore(async (store) => {
+        const outcome = await store.adopt(user.id, session_tag ?? "", language);
+        if (outcome === "deleted") forgetSavedCopy();
+    });
+}
+
+async function removeSavedFigures() {
+    if (!savedCopyFlagged()) return;
+    const removal = withSavedStore((store) => store.removeFigures());
+    let timer = 0;
+    const limit = new Promise<false>((resolve) => {
+        timer = window.setTimeout(() => resolve(false), savedSignOutLimitMs);
+    });
+    const removed = await Promise.race([removal, limit]);
+    window.clearTimeout(timer);
+    if (removed) return;
+    writeStored(savedRemovalKey, "1");
+    void removal.then((late) => {
+        if (late) writeStored(savedRemovalKey, null);
+    });
+}
+
+export async function savedCopyState(): Promise<CopyState> {
+    if (!savedCopyFlagged()) return "off";
+    return (
+        (await withSavedStore((store) => store.copyState())) ?? "unavailable"
+    );
+}
+
 export function adoptSession(session: Session, sentAt?: number) {
     const owner = sessionOwner(session) ?? null;
     if (documentOwner === undefined) {
@@ -249,6 +340,7 @@ export function adoptSession(session: Session, sentAt?: number) {
     if (sentAt !== undefined) confirm(sentAt);
     setCsrfToken(session.csrf_token);
     observe(session.session_tag ?? "");
+    adoptSavedCopy(session);
     generation += 1;
     adopted = { mark: mark(), session };
     notify();
@@ -350,6 +442,7 @@ export async function signOut({ keepInvitation = false } = {}) {
     }
     signingOut = true;
     try {
+        if (shown) await removeSavedFigures();
         const ended = await authRequest(signOutPath, "DELETE");
         if (!signedOutBy(ended))
             throw new ApiError(browserErrors()("invalidResponse"));
