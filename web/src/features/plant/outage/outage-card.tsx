@@ -9,7 +9,13 @@ import { ActionForm, CheckboxField, Field, formText } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
 import type { Outage, OutageChange, OutageControls, Workflow } from "./model";
-import { plantInstant, ProposalReason, useHeldFocus } from "./outage-editor";
+import {
+    plantInstant,
+    ProposalReason,
+    repeatsWith,
+    useHeldFocus,
+    type Repeats,
+} from "./outage-editor";
 import { StaleChanges } from "./stale-changes";
 
 type Submit = (change: OutageChange) => Promise<void>;
@@ -44,6 +50,7 @@ export function OutageCard({
     onClose,
     onDiscard,
     onSubmit,
+    attempt,
 }: {
     outage: Outage;
     tenantId: number;
@@ -61,6 +68,7 @@ export function OutageCard({
     onClose: () => void;
     onDiscard: () => void;
     onSubmit: Submit;
+    attempt: Repeats | null | undefined;
 }) {
     const t = useTranslations("Outages");
     const proposals = useTranslations("ChangeRequests");
@@ -150,6 +158,7 @@ export function OutageCard({
                     controls={controls}
                     hold={hold}
                     onSubmit={onSubmit}
+                    attempt={attempt}
                     onClose={onClose}
                 />
             )}
@@ -180,6 +189,7 @@ export function OutageCard({
                             controls={controls}
                             hold={hold}
                             onSubmit={onSubmit}
+                            attempt={attempt}
                             onDiscard={onDiscard}
                         />
                     )}
@@ -196,6 +206,7 @@ type FormProps = {
     controls: OutageControls;
     hold: string | null;
     onSubmit: Submit;
+    attempt: Repeats | null | undefined;
 };
 
 function ResolveOutageForm({
@@ -205,6 +216,7 @@ function ResolveOutageForm({
     controls,
     hold,
     onSubmit,
+    attempt,
     onClose,
 }: FormProps & { onClose: () => void }) {
     const t = useTranslations("Outages");
@@ -214,6 +226,18 @@ function ResolveOutageForm({
     const closeButton = useRef<HTMLButtonElement>(null);
     useHeldFocus(hold, container, closeButton);
     const { outage, stale } = workflow;
+    const changeOf = (data: FormData): OutageChange => {
+        const ends = plantInstant(data, "ends_at", timezone, t);
+        if (!ends) throw new DisplayError(t("chooseEndTime"));
+        if (Date.parse(ends) <= Date.parse(outage.starts_at))
+            throw new DisplayError(t("resolutionAfterStart"));
+        return {
+            action: "resolve",
+            outage,
+            ends_at: ends,
+            reason: formText(data, "reason"),
+        };
+    };
     return (
         <div ref={container}>
             {stale && (
@@ -230,18 +254,8 @@ function ResolveOutageForm({
                 pending={!controls.acts}
                 success={null}
                 submit={direct ? t("saveResolution") : proposals("send")}
-                onSubmit={async (data) => {
-                    const ends = plantInstant(data, "ends_at", timezone, t);
-                    if (!ends) throw new DisplayError(t("chooseEndTime"));
-                    if (Date.parse(ends) <= Date.parse(outage.starts_at))
-                        throw new DisplayError(t("resolutionAfterStart"));
-                    await onSubmit({
-                        action: "resolve",
-                        outage,
-                        ends_at: ends,
-                        reason: formText(data, "reason"),
-                    });
-                }}
+                attempt={attempt && { repeats: repeatsWith(attempt, changeOf) }}
+                onSubmit={(data) => onSubmit(changeOf(data))}
             >
                 {!direct && <ProposalReason />}
                 <Field
@@ -274,11 +288,17 @@ function CancelOutageForm({
     controls,
     hold,
     onSubmit,
+    attempt,
     onDiscard,
 }: FormProps & { onDiscard: () => void }) {
     const t = useTranslations("Outages");
     const proposals = useTranslations("ChangeRequests");
     const { outage, stale } = workflow;
+    const changeOf = (data: FormData): OutageChange => ({
+        action: "cancel",
+        outage,
+        reason: formText(data, "reason"),
+    });
     return (
         <>
             {stale && (
@@ -295,13 +315,8 @@ function CancelOutageForm({
                 pending={!controls.acts}
                 success={null}
                 submit={direct ? t("cancelOutage") : proposals("send")}
-                onSubmit={async (data) => {
-                    await onSubmit({
-                        action: "cancel",
-                        outage,
-                        reason: formText(data, "reason"),
-                    });
-                }}
+                attempt={attempt && { repeats: repeatsWith(attempt, changeOf) }}
+                onSubmit={(data) => onSubmit(changeOf(data))}
             >
                 {!direct && <ProposalReason />}
                 <CheckboxField label={t("confirmationIncorrect")} required />

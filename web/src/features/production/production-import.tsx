@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import type { PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import type { components } from "@/lib/schema";
-import { displayMessage } from "@/lib/api/errors";
+import { displayMessage, UnconfirmedError } from "@/lib/api/errors";
 import { useFormat } from "@/lib/format/use-format";
+import { useAttempt } from "@/lib/idempotency";
 import { parseProduction, type ProductionFile } from "@/lib/production";
 import {
     ActionForm,
@@ -28,6 +29,23 @@ type Selection =
           preview: Preview;
       } & ProductionFile);
 type ImportResult = components["schemas"]["ObservationImportOutput"];
+type Previewed = Extract<Selection, { status: "preview" }>;
+
+function importBody(
+    selection: Previewed,
+    configuration: number,
+    implausible: boolean,
+) {
+    return {
+        configuration_id: configuration,
+        unit: selection.unit,
+        changes: selection.preview.changes,
+        origin: "csv_import" as const,
+        file_name: selection.fileName.slice(0, 255),
+        file_sha256: selection.sha256,
+        confirm_implausible: implausible,
+    };
+}
 
 async function fileSha256(file: File) {
     const digest = await crypto.subtle.digest(
@@ -43,23 +61,26 @@ export function ProductionImport({
     scope,
     configuration,
     timezone,
-    onSaved,
+    onChanged,
 }: {
     scope: PlantScope;
     configuration: number;
     timezone: string;
-    onSaved: () => void;
+    onChanged: () => void;
 }) {
     const t = useTranslations("ProductionImport");
+    const common = useTranslations("Common");
     const csvTexts = useTranslations("ProductionCsv");
     const format = useFormat();
     const errorMessage = useErrorMessage();
+    const attempt = useAttempt<ReturnType<typeof importBody>>();
     const sequence = useRef(0);
     const [selection, setSelection] = useState<Selection>({ status: "empty" });
     const [result, setResult] = useState<ImportResult>();
     const [confirming, setConfirming] = useState(false);
     const [previewRequest, setPreviewRequest] = useState<
-        { status: "idle" | "pending" } | { status: "failed"; error: string }
+        | { status: "idle" | "pending" }
+        | { status: "failed"; error: string; retry: boolean }
     >({ status: "idle" });
     const previewError = useRef<HTMLDivElement>(null);
     useEffect(() => {
@@ -150,6 +171,7 @@ export function ProductionImport({
                                 error: t(
                                     "choose_and_validate_a_csv_before_importing",
                                 ),
+                                retry: false,
                             });
                             return;
                         }
@@ -180,6 +202,7 @@ export function ProductionImport({
                                 setPreviewRequest({
                                     status: "failed",
                                     error: errorMessage(error),
+                                    retry: true,
                                 });
                         }
                     })()
@@ -196,6 +219,14 @@ export function ProductionImport({
                             ref={previewError}
                         >
                             {previewRequest.error}
+                            {previewRequest.retry && (
+                                <button
+                                    className="button secondary"
+                                    type="submit"
+                                >
+                                    {common("retry")}
+                                </button>
+                            )}
                         </div>
                     )}
                     <div className="form-grid">
@@ -298,32 +329,44 @@ export function ProductionImport({
                             submit={t("confirm_import", {
                                 count: selection.preview.changes.length,
                             })}
-                            onSubmit={async () => {
+                            attempt={
+                                attempt.outstanding && {
+                                    repeats: (data) =>
+                                        attempt.repeats(
+                                            importBody(
+                                                selection,
+                                                configuration,
+                                                data.has("confirm_implausible"),
+                                            ),
+                                        ),
+                                }
+                            }
+                            onSubmit={async (data) => {
                                 if (confirming) return;
                                 const current = ++sequence.current;
+                                const body = importBody(
+                                    selection,
+                                    configuration,
+                                    data.has("confirm_implausible"),
+                                );
+                                const sending = attempt.next(body);
                                 setConfirming(true);
                                 try {
-                                    const response = await api.post(
-                                        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/changes/",
-                                        {
-                                            path: scope,
-                                            body: {
-                                                configuration_id: configuration,
-                                                unit: selection.unit,
-                                                changes:
-                                                    selection.preview.changes,
-                                                origin: "csv_import",
-                                                file_name:
-                                                    selection.fileName.slice(
-                                                        0,
-                                                        255,
-                                                    ),
-                                                file_sha256: selection.sha256,
-                                                confirm_implausible:
-                                                    implausible,
-                                            },
-                                        },
-                                    );
+                                    const response = await api
+                                        .post(
+                                            "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/changes/",
+                                            { path: scope, body },
+                                        )
+                                        .catch((error: unknown) => {
+                                            attempt.settle(sending, error);
+                                            if (
+                                                error instanceof
+                                                UnconfirmedError
+                                            )
+                                                onChanged();
+                                            throw error;
+                                        });
+                                    attempt.settle(sending);
                                     if (current === sequence.current) {
                                         setResult(response);
                                         setSelection({
@@ -334,7 +377,7 @@ export function ProductionImport({
                                             observations:
                                                 selection.observations,
                                         });
-                                        onSaved();
+                                        onChanged();
                                     }
                                 } finally {
                                     setConfirming(false);

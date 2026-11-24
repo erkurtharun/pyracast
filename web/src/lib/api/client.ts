@@ -1,4 +1,5 @@
 import type { paths } from "../schema";
+import { readFailure } from "./errors";
 import { send, type Method } from "./lane";
 
 type Verb = "get" | "post" | "put" | "patch" | "delete";
@@ -87,12 +88,19 @@ export function apiUrl<P extends PathFor<"get">>(
     return buildUrl(path, options);
 }
 
+// POSTs that change nothing: a lost answer is a failed read, not an unconfirmed change.
+const READS: ReadonlySet<string> = new Set<PathFor<"post">>([
+    "/api/invitations/preview/",
+    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/preview/",
+    "/api/tenants/{tenant_id}/regions/{region_id}/reminders/preview/",
+]);
+
 function verb<V extends Verb>(method: Method) {
     return <P extends PathFor<V>>(
         path: P,
         ...[options]: Rest<RequestOptions<P, V>>
     ): Promise<Answer<P, V>> => {
-        return send({
+        const answer = send<Answer<P, V>>({
             method,
             url: buildUrl(path, options),
             // Customer endpoints accept JSON bodies only, so a body-less POST sends {}.
@@ -100,6 +108,11 @@ function verb<V extends Verb>(method: Method) {
                 (options as Loose | undefined)?.body ??
                 (method === "POST" ? {} : undefined),
         });
+        return READS.has(path)
+            ? answer.catch((error: unknown) => {
+                  throw readFailure(error);
+              })
+            : answer;
     };
 }
 

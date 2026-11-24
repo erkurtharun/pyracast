@@ -5,6 +5,7 @@ import {
     useContext,
     useEffect,
     useId,
+    useLayoutEffect,
     useRef,
     useState,
     type ChangeEventHandler,
@@ -12,8 +13,9 @@ import {
     type ReactNode,
     type RefObject,
 } from "react";
-import { ApiError, displayMessage } from "@/lib/api/errors";
+import { ApiError, displayMessage, UnconfirmedError } from "@/lib/api/errors";
 import { useAnnounce } from "./live-region";
+import { Notice } from "./ui";
 import { useCanManageWorkspace } from "./workspace-access";
 
 type Variant = "primary" | "secondary" | "danger";
@@ -44,6 +46,74 @@ export function FieldErrors({
 export function useErrorMessage() {
     const t = useTranslations("Common");
     return (error: unknown) => displayMessage(error, t("unexpected"));
+}
+
+export function useWriteErrorMessage() {
+    const common = useTranslations("Common");
+    const t = useTranslations("Errors");
+    return (
+        error: unknown,
+        { fallback = common("unexpected") }: { fallback?: string } = {},
+    ) =>
+        error instanceof UnconfirmedError
+            ? t("unconfirmed")
+            : displayMessage(error, fallback);
+}
+
+function useErrorTitle() {
+    const t = useTranslations("Errors");
+    return (error: unknown, title: string) =>
+        error instanceof UnconfirmedError ? t("unconfirmedTitle") : title;
+}
+
+export function UnconfirmedTitle({ error }: { error: unknown }) {
+    const t = useTranslations("Errors");
+    return error instanceof UnconfirmedError ? (
+        <strong>{t("unconfirmedTitle")}</strong>
+    ) : null;
+}
+
+// The notice of a write whose answer was lost, for as long as its owner keeps that write; `repeatable` only while
+// the next send is that very request and can be sent.
+export function UnconfirmedNotice({
+    repeatable,
+    lead,
+}: {
+    repeatable: boolean;
+    lead?: string;
+}) {
+    const t = useTranslations("Errors");
+    return (
+        <Notice error>
+            <strong>{t("unconfirmedTitle")}</strong>
+            <p>
+                {lead && `${lead} `}
+                {t(repeatable ? "unconfirmedRepeatable" : "unconfirmed")}
+            </p>
+        </Notice>
+    );
+}
+
+export function WriteFailure({
+    error,
+    lead,
+    children,
+}: {
+    error: unknown;
+    lead?: string;
+    children?: ReactNode;
+}) {
+    const message = useWriteErrorMessage()(error);
+    return (
+        <Notice error>
+            <UnconfirmedTitle error={error} />
+            <p>
+                {lead && `${lead} `}
+                {message}
+                {children}
+            </p>
+        </Notice>
+    );
 }
 
 function describedBy(...ids: (string | false | undefined)[]) {
@@ -297,7 +367,7 @@ function FormAlert({
     entries = [],
     onSelect,
 }: {
-    alertRef: RefObject<HTMLDivElement | null>;
+    alertRef?: RefObject<HTMLDivElement | null>;
     title: string;
     message: string;
     entries?: FieldEntry[];
@@ -340,7 +410,7 @@ type FormState =
     | { status: "idle" | "pending" | "success" }
     | {
           status: "error";
-          message: string;
+          error: unknown;
           fields: Record<string, string>;
           entries: FieldEntry[];
       };
@@ -355,11 +425,12 @@ export function ActionForm({
     success,
     variant = "primary",
     onEdit,
+    attempt,
 }: {
     children: ReactNode;
     submit: string;
     onSubmit: (data: FormData) => Promise<void>;
-    onEdit?: () => void;
+    onEdit?: (data: FormData) => void;
     permitted?: boolean;
     // An owner that tracks its own request says here whether it is still unanswered, so a form mounted again
     // while it runs shows it and cannot send it twice.
@@ -367,33 +438,67 @@ export function ActionForm({
     errorTitle?: string;
     success?: string | null;
     variant?: Variant;
+    // The owner's write whose answer was lost, while it keeps it: whether a submission of `data` sends it again.
+    attempt?: { repeats: (data: FormData) => boolean } | null;
 }) {
     const t = useTranslations("Common");
-    const errorMessage = useErrorMessage();
+    const errors = useTranslations("Errors");
+    const writeErrorMessage = useWriteErrorMessage();
+    const errorHeading = useErrorTitle();
     const canManage = useCanManageWorkspace();
     const canSubmit = permitted ?? canManage;
     const [state, setState] = useState<FormState>({ status: "idle" });
+    // Whether the form as it now stands, valid and submittable, would send the owner's attempt.
+    const [sendsRepeat, setSendsRepeat] = useState(false);
     const busy = pending ?? state.status === "pending";
     const running = useRef(false);
     const errorRef = useRef<HTMLDivElement>(null);
     const formRef = useRef<HTMLFormElement>(null);
+    const submitRef = useRef<HTMLButtonElement>(null);
     useEffect(() => {
         if (state.status === "error") errorRef.current?.focus();
     }, [state]);
+    // An enclosing fieldset can disable the submit control without this form knowing.
+    const submittable = () => {
+        const button = submitRef.current;
+        return !!button && !button.matches(":disabled");
+    };
+    // Read after every commit, since a field mounted or removed by its owner fires no change.
+    const measure = () => {
+        const form = formRef.current;
+        setSendsRepeat(
+            !!form &&
+                !!attempt &&
+                submittable() &&
+                form.checkValidity() &&
+                attempt.repeats(new FormData(form)),
+        );
+    };
+    useLayoutEffect(measure);
+    const repeats = !!attempt && canSubmit && !busy && sendsRepeat;
+    // The owner's attempt tells its own lost answer; every other answer is told beside it.
+    const answer =
+        state.status === "error" &&
+        !(attempt && state.error instanceof UnconfirmedError)
+            ? state
+            : null;
     return (
         <form
             ref={formRef}
             className={canSubmit ? undefined : "readonly-form"}
-            onChange={() => {
-                onEdit?.();
+            onChange={(event) => {
+                onEdit?.(new FormData(event.currentTarget));
                 if (state.status === "success") setState({ status: "idle" });
+                measure();
             }}
             onSubmit={(event) =>
                 void (async () => {
                     event.preventDefault();
-                    if (!canSubmit || busy || running.current) return;
+                    if (!canSubmit || busy || running.current || !submittable())
+                        return;
                     running.current = true;
                     const data = new FormData(event.currentTarget);
+                    measure();
                     setState({ status: "pending" });
                     try {
                         await onSubmit(data);
@@ -403,7 +508,7 @@ export function ActionForm({
                             error instanceof ApiError ? error.fields : {};
                         setState({
                             status: "error",
-                            message: errorMessage(error),
+                            error,
                             fields,
                             entries: fieldEntries(formRef.current, fields),
                         });
@@ -413,12 +518,15 @@ export function ActionForm({
                 })()
             }
         >
-            {state.status === "error" && (
+            {answer && (
                 <FormAlert
                     alertRef={errorRef}
-                    title={errorTitle ?? t("saveFailed")}
-                    message={state.message}
-                    entries={state.entries}
+                    title={errorHeading(
+                        answer.error,
+                        errorTitle ?? t("saveFailed"),
+                    )}
+                    message={writeErrorMessage(answer.error)}
+                    entries={answer.entries}
                     onSelect={(name) => {
                         const field = formRef.current?.elements.namedItem(name);
                         const control =
@@ -427,12 +535,22 @@ export function ActionForm({
                     }}
                 />
             )}
-            <FormErrors value={state.status === "error" ? state.fields : {}}>
+            {attempt && (
+                <FormAlert
+                    alertRef={answer ? undefined : errorRef}
+                    title={errors("unconfirmedTitle")}
+                    message={errors(
+                        repeats ? "unconfirmedRepeatable" : "unconfirmed",
+                    )}
+                />
+            )}
+            <FormErrors value={answer ? answer.fields : {}}>
                 <fieldset disabled={!canSubmit || busy}>
                     {children}
                     {canSubmit && (
                         <div className="form-footer">
                             <button
+                                ref={submitRef}
                                 className={buttonClass(variant)}
                                 type="submit"
                             >
@@ -471,11 +589,12 @@ export function AsyncButton({
     disabled?: boolean;
 }) {
     const t = useTranslations("Common");
-    const errorMessage = useErrorMessage();
+    const writeErrorMessage = useWriteErrorMessage();
+    const errorHeading = useErrorTitle();
     const announce = useAnnounce();
     const canManage = useCanManageWorkspace();
     const [state, setState] = useState<
-        { status: "idle" | "pending" } | { status: "error"; message: string }
+        { status: "idle" | "pending" } | { status: "error"; error: unknown }
     >({ status: "idle" });
     const running = useRef(false);
     const alertRef = useRef<HTMLDivElement>(null);
@@ -488,8 +607,11 @@ export function AsyncButton({
             {state.status === "error" && (
                 <FormAlert
                     alertRef={alertRef}
-                    title={errorTitle ?? t("actionFailed")}
-                    message={state.message}
+                    title={errorHeading(
+                        state.error,
+                        errorTitle ?? t("actionFailed"),
+                    )}
+                    message={writeErrorMessage(state.error)}
                 />
             )}
             <button
@@ -507,10 +629,7 @@ export function AsyncButton({
                             setState({ status: "idle" });
                             if (success) announce(success);
                         } catch (error) {
-                            setState({
-                                status: "error",
-                                message: errorMessage(error),
-                            });
+                            setState({ status: "error", error });
                         } finally {
                             running.current = false;
                         }

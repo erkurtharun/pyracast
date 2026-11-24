@@ -7,6 +7,7 @@ let {
     adoptSession,
     api,
     ApiError,
+    UnconfirmedError,
     authRequest,
     loadSession,
     sessionState,
@@ -18,6 +19,7 @@ type Call = {
     url: string;
     token: string | null;
     body?: string;
+    redirect?: RequestRedirect;
 };
 type Answer = Response | Promise<Response>;
 
@@ -38,6 +40,7 @@ function answer(...answers: ((call: Call) => Answer)[]) {
             url: input instanceof Request ? input.url : String(input),
             token: new Headers(init?.headers).get("X-CSRFToken"),
             body: typeof init?.body === "string" ? init.body : undefined,
+            redirect: init?.redirect,
         };
         const next = answers[calls.length];
         calls.push(call);
@@ -86,6 +89,7 @@ test.beforeEach(() => {
         adoptSession,
         api,
         ApiError,
+        UnconfirmedError,
         authRequest,
         loadSession,
         sessionState,
@@ -147,20 +151,279 @@ test("a busy workspace never replays a non-idempotent POST", async () => {
     expect(calls).toHaveLength(1);
 });
 
+const unconfirmed =
+    "The server did not confirm the change. It may have been saved; check before you send it again.";
+const restoring = () =>
+    api
+        .post("/api/tenants/{tenant_id}/regions/{region_id}/restore/", {
+            path: { tenant_id: 1, region_id: 11 },
+        })
+        .catch((failure: unknown) => failure);
+const reading = () =>
+    api.get("/api/tenants/").catch((failure: unknown) => failure);
+
 test("a failed connection reports an unconfirmed change once", async () => {
     answer(() => {
         throw new TypeError("Failed to fetch");
     });
-    const error = await api
-        .post("/api/tenants/{tenant_id}/regions/{region_id}/restore/", {
-            path: { tenant_id: 1, region_id: 11 },
-        })
-        .catch((failure) => failure);
-    expect(error).toBeInstanceOf(ApiError);
-    expect(error.message).toBe(
-        "The server did not confirm the change. Reload to check whether it was saved.",
-    );
+    const error = await restoring();
+    expect(error).toBeInstanceOf(UnconfirmedError);
+    expect(error).toMatchObject({ status: 0, message: unconfirmed });
     expect(calls).toHaveLength(1);
+});
+
+for (const [name, preview] of [
+    [
+        "reminder",
+        () =>
+            api.post(
+                "/api/tenants/{tenant_id}/regions/{region_id}/reminders/preview/",
+                {
+                    path: { tenant_id: 1, region_id: 11 },
+                    body: {
+                        enabled: true,
+                        include_workspace_members: true,
+                        language: "en",
+                        recipients: [],
+                        times: ["06:00"],
+                        expected_revision: 1,
+                    },
+                },
+            ),
+    ],
+    [
+        "CSV",
+        () =>
+            api.post(
+                "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/preview/",
+                {
+                    path: { tenant_id: 1, region_id: 11, plant_id: 21 },
+                    body: {
+                        configuration_id: 31,
+                        unit: "MWh",
+                        observations: [],
+                    },
+                },
+            ),
+    ],
+    [
+        "invitation",
+        () =>
+            api.post("/api/invitations/preview/", {
+                body: { token: "invite-secret" },
+            }),
+    ],
+] as const)
+    test(`a ${name} preview whose answer was lost failed as a read`, async () => {
+        const cut = () =>
+            new Response("{", {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+            });
+        answer(
+            () => {
+                throw new TypeError("Failed to fetch");
+            },
+            cut,
+            () => new Response("Bad Gateway", { status: 502 }),
+        );
+        const failures = [];
+        for (let sent = 0; sent < 3; sent++)
+            failures.push(await preview().catch((failure: unknown) => failure));
+        for (const failure of failures) {
+            expect(failure).toBeInstanceOf(ApiError);
+            expect(failure).not.toBeInstanceOf(UnconfirmedError);
+        }
+        expect(failures.map((failure) => (failure as Error).message)).toEqual([
+            "Could not reach the server. Check your connection and try again.",
+            "The server returned an invalid response. Please try again.",
+            "Request failed (502). Please try again.",
+        ]);
+    });
+
+test("a change whose successful answer cannot be read is unconfirmed, a read with it is invalid", async () => {
+    const cut = () =>
+        new Response("{", {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+        });
+    answer(cut, cut);
+    const change = await restoring();
+    expect(change).toBeInstanceOf(UnconfirmedError);
+    expect(change).toMatchObject({ status: 200, message: unconfirmed });
+    const read = await reading();
+    expect(read).toBeInstanceOf(ApiError);
+    expect(read).not.toBeInstanceOf(UnconfirmedError);
+    expect(read).toMatchObject({
+        status: 200,
+        message: "The server returned an invalid response. Please try again.",
+    });
+    expect(calls).toHaveLength(2);
+});
+
+test("a change answered without content or with JSON succeeds, and so does a read", async () => {
+    const page = { results: [], count: 0, next: null, previous: null };
+    answer(
+        () => new Response(null, { status: 204 }),
+        () => json({ id: 11 }, 201),
+        () => json(page),
+    );
+    expect(await restoring()).toBeNull();
+    expect(await restoring()).toEqual({ id: 11 });
+    expect(await reading()).toEqual(page);
+});
+
+for (const status of [502, 504, 520, 521, 522, 523, 524])
+    test(`a change answered by the gateway with a bare ${status} is unconfirmed, a read with it failed`, async () => {
+        const gateway = () =>
+            new Response("Bad Gateway", {
+                status,
+                headers: { "Content-Type": "text/plain" },
+            });
+        answer(gateway, gateway);
+        const change = await restoring();
+        expect(change).toBeInstanceOf(UnconfirmedError);
+        expect(change).toMatchObject({ status, message: unconfirmed });
+        const read = await reading();
+        expect(read).toBeInstanceOf(ApiError);
+        expect(read).not.toBeInstanceOf(UnconfirmedError);
+        expect(read).toMatchObject({
+            status,
+            message: `Request failed (${status}). Please try again.`,
+        });
+        expect(calls).toHaveLength(2);
+    });
+
+test("a change answered with an unreadable error that no gateway sends stays failed", async () => {
+    answer(
+        () =>
+            new Response("<html>Server error</html>", {
+                status: 500,
+                headers: { "Content-Type": "text/html" },
+            }),
+    );
+    const failure = await restoring();
+    expect(failure).toBeInstanceOf(ApiError);
+    expect(failure).not.toBeInstanceOf(UnconfirmedError);
+    expect(failure).toMatchObject({
+        status: 500,
+        message: "Request failed (500). Please try again.",
+    });
+});
+
+// The bytes src/pyracast/maintenance.py sends for an API route, which the gateway also sends for its 502.
+const maintenanceBodies = {
+    en: {
+        body: '{"code": "maintenance", "message": "Pyracast is being updated. Try again in a minute; your data is safe.", "retry_after": 60}',
+        message:
+            "Pyracast is being updated. Try again in a minute; your data is safe.",
+    },
+    tr: {
+        body: '{"code": "maintenance", "message": "Pyracast g\\u00fcncelleniyor. Bir dakika sonra yeniden deneyin; verileriniz g\\u00fcvende.", "retry_after": 60}',
+        message:
+            "Pyracast güncelleniyor. Bir dakika sonra yeniden deneyin; verileriniz güvende.",
+    },
+};
+
+for (const [language, { body, message }] of Object.entries(maintenanceBodies))
+    test(`a change answered with the maintenance refusal is unconfirmed, a read keeps the refusal with its retry (${language})`, async () => {
+        const maintenance = () =>
+            new Response(body, {
+                status: 503,
+                headers: {
+                    "Content-Type": "application/json",
+                    "Cache-Control": "no-store",
+                    "Retry-After": "60",
+                },
+            });
+        answer(maintenance, maintenance);
+        const change = await restoring();
+        expect(change).toBeInstanceOf(UnconfirmedError);
+        expect(change).toMatchObject({ status: 503, message: unconfirmed });
+        const read = await reading();
+        expect(read).toBeInstanceOf(ApiError);
+        expect(read).not.toBeInstanceOf(UnconfirmedError);
+        expect(read).toMatchObject({
+            status: 503,
+            code: "maintenance",
+            message,
+            retryAfter: 60,
+        });
+        expect(calls).toHaveLength(2);
+    });
+
+test("a change refused with any other code of the application stays refused", async () => {
+    const refusals = [
+        json(errorBody("busy", "Busy.", { retry_after: 1 }), 503),
+        json(errorBody("database_conflict", "Collided."), 503),
+        json(errorBody("server_error", "Failed.", { request_id: "r-1" }), 500),
+        json(errorBody("server_error", "Failed."), 502),
+    ];
+    answer(...refusals.map((refusal) => () => refusal));
+    for (const code of [
+        "busy",
+        "database_conflict",
+        "server_error",
+        "server_error",
+    ]) {
+        const failure = await restoring();
+        expect(failure).toBeInstanceOf(ApiError);
+        expect(failure).not.toBeInstanceOf(UnconfirmedError);
+        expect(failure).toMatchObject({ code });
+    }
+});
+
+test("a redirected change is unconfirmed and a redirected read failed, neither follows the redirect", async () => {
+    const redirected = (call: Call) => {
+        if (call.redirect === "error")
+            throw new TypeError("Failed to fetch: unexpected redirect");
+        return json({ id: 11 });
+    };
+    answer(redirected, redirected);
+    const change = await restoring();
+    expect(change).toBeInstanceOf(UnconfirmedError);
+    expect(change).toMatchObject({ status: 0, message: unconfirmed });
+    const read = await reading();
+    expect(read).toBeInstanceOf(ApiError);
+    expect(read).not.toBeInstanceOf(UnconfirmedError);
+    expect(read).toMatchObject({
+        message:
+            "Could not reach the server. Check your connection and try again.",
+    });
+    expect(calls.map((call) => call.redirect)).toEqual(["error", "error"]);
+});
+
+test("a change whose body cannot be written is not sent and not reported as unconfirmed", async () => {
+    answer(() => json({ id: 7 }, 201));
+    const failure = await api
+        .post("/api/tenants/{tenant_id}/sites/", {
+            ...site,
+            body: { ...site.body, dc_capacity_mw: 5n as unknown as number },
+        })
+        .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(TypeError);
+    expect(calls).toHaveLength(0);
+});
+
+test("a change refused before it left this tab is not unconfirmed", async () => {
+    adoptSession(signedIn("token"));
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    answer(async () => {
+        await held;
+        return json({ status: 401, meta: { is_authenticated: false } }, 401);
+    });
+    const ending = signOut().catch(() => undefined);
+    const refusal = await restoring();
+    release();
+    await ending;
+    expect(refusal).toBeInstanceOf(ApiError);
+    expect(refusal).not.toBeInstanceOf(UnconfirmedError);
+    expect(calls.map((call) => call.url)).toEqual([
+        "/api/auth/browser/v1/auth/session",
+    ]);
 });
 
 test("a read without an answer is localized", async () => {
