@@ -156,7 +156,6 @@
     },
     "Dashboard": {
         "retry": "Try again",
-        "openingAdmin": "Opening administration…",
         "skipContent": "Skip to content",
         "workspace": "Workspace",
         "noWorkspaces": "No workspaces",

@@ -156,7 +156,6 @@
     },
     "Dashboard": {
         "retry": "Tekrar dene",
-        "openingAdmin": "Yönetim paneli açılıyor…",
         "skipContent": "İçeriğe geç",
         "workspace": "Çalışma alanı",
         "noWorkspaces": "Çalışma alanı yok",

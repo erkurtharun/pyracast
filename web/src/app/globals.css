@@ -1673,6 +1673,11 @@ pre,
 .auth-card .brand {
     margin-bottom: var(--space-8-5);
 }
+.auth-card .launch-brand {
+    margin: 0;
+    font: inherit;
+    letter-spacing: normal;
+}
 .auth-card h1 {
     font-size: 28px;
     margin-bottom: var(--space-2);
