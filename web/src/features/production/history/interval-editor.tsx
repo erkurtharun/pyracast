@@ -3,7 +3,8 @@ import { useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useFormat } from "@/lib/format/use-format";
 import { QUALITIES, qualityOf } from "@/lib/production";
-import { ControlField, WriteFailure } from "@/ui/form";
+import { UnconfirmedError } from "@/lib/api/errors";
+import { ControlField, UnconfirmedNotice, WriteFailure } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import { useLabel } from "@/ui/vocabulary";
 import type { Draft, Editor, Interval } from "./model";
@@ -127,20 +128,20 @@ export function IntervalEditor({
                             })}
                 </button>
             )}
-            {editor.status === "failed" && (
-                <>
-                    {editor.issue === "invalid_energy" ? (
-                        <Notice error>{t("invalid_energy")}</Notice>
-                    ) : (
-                        <WriteFailure
-                            error={editor.issue.error}
-                            repeatable={
-                                canManage && !saving && repeatsAttempt(editor)
-                            }
-                        />
-                    )}
-                    {editor.issue !== "invalid_energy" &&
-                        editor.issue.implausible && (
+            {editor.attempt && (
+                <UnconfirmedNotice
+                    repeatable={canManage && !saving && repeatsAttempt(editor)}
+                />
+            )}
+            {editor.status === "failed" &&
+                (editor.issue === "invalid_energy" ? (
+                    <Notice error>{t("invalid_energy")}</Notice>
+                ) : (
+                    <>
+                        {!(editor.issue.error instanceof UnconfirmedError) && (
+                            <WriteFailure error={editor.issue.error} />
+                        )}
+                        {editor.issue.implausible && (
                             <button
                                 className="button"
                                 type="button"
@@ -149,14 +150,17 @@ export function IntervalEditor({
                                 {t("save_implausible")}
                             </button>
                         )}
-                    <button
-                        className="button secondary"
-                        type="button"
-                        onClick={onReload}
-                    >
-                        {t("reload_values")}
-                    </button>
-                </>
+                    </>
+                ))}
+            {(editor.status === "failed" ||
+                (editor.status === "editing" && editor.attempt)) && (
+                <button
+                    className="button secondary"
+                    type="button"
+                    onClick={onReload}
+                >
+                    {t("reload_values")}
+                </button>
             )}
         </form>
     );

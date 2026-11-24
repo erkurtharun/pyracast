@@ -15,6 +15,7 @@ import {
     reconcileEditor,
     reduceScreen,
     repeatsAttempt,
+    repeatsOrphan,
     type Screen,
     type ScreenEvent,
 } from "../src/features/production/history/screen";
@@ -1074,7 +1075,7 @@ test("a direct write whose answer was lost is sent again as it was while the edi
     });
     const edited = apply(reread, { type: "change", energy: "0,7" });
     expect(edited.screen.editor).toMatchObject({
-        status: "failed",
+        status: "editing",
         energy: "0,7",
         attempt,
     });
@@ -1203,9 +1204,9 @@ test("a reload keeps a write whose answer was lost with its revision and its not
         }),
     };
     expect(read.screen.editor).toMatchObject({
-        status: "failed",
+        status: "editing",
+        reloaded: true,
         expectedRevision: 5,
-        issue: { error: expect.any(UnconfirmedError) },
         attempt: { change: { expected_revision_id: 3, energy: 0.5 } },
     });
     const again = apply(read, { type: "save", row: rows[1]!, action: "set" });
@@ -1265,4 +1266,66 @@ test("a write whose answer was lost keeps its outcome and its request once its i
     });
     const member = { ...gone, access: "propose" as const };
     expect(reduceScreen(member, { type: "repeat" })).toBe(member);
+});
+
+test("a failed reload keeps the write whose answer was lost beside the read's failure, and a reload after it returns to editing with that write", () => {
+    const lost = lostSet(3);
+    const attempt = (lost.screen.editor as Draft).attempt;
+    const reloading = apply(lost, { type: "reload" });
+    const failed = apply(reloading, {
+        type: "reloadFailed",
+        key: editorKey(reloading),
+        error: new ApiError("Offline."),
+    });
+    expect(failed.screen.editor).toMatchObject({
+        status: "failed",
+        attempt,
+        issue: { error: expect.objectContaining({ message: "Offline." }) },
+    });
+    const rows = adminRows(DAY).map((row) => ({ ...row, revision_id: 5 }));
+    const read = reduceScreen(apply(failed, { type: "reload" }).screen, {
+        type: "rowsLoaded",
+        day: DAY,
+        history: history(rows),
+    });
+    expect(read.editor).toMatchObject({
+        status: "editing",
+        expectedRevision: 5,
+        attempt,
+    });
+    expect(read.editor).not.toHaveProperty("issue");
+});
+
+test("an access or day change keeps an editor whose write's outcome is unknown, and only a direct writer can send it again", () => {
+    const lost = lostSet(3);
+    const attempt = (lost.screen.editor as Draft).attempt;
+    const demoted = apply(lost, { type: "accessChanged", access: "propose" });
+    expect(demoted.screen.editor).toMatchObject({
+        status: "orphaned",
+        cause: "unavailable",
+        pendingWrite: false,
+        attempt,
+    });
+    expect(dropped(lost.screen, demoted.screen)).toBe(false);
+    expect(repeatsOrphan(demoted.screen)).toBe(false);
+    const promoted = apply(demoted, {
+        type: "accessChanged",
+        access: "direct",
+    });
+    expect(repeatsOrphan(promoted.screen)).toBe(true);
+    expect(shown(lost, OTHER, adminRows(OTHER)).screen.editor).toMatchObject({
+        status: "orphaned",
+        cause: "day_left",
+        pendingWrite: false,
+        attempt,
+    });
+});
+
+test("a reason of nothing but the outer whitespace the server strips is missing", () => {
+    const sent = apply(
+        staged,
+        { type: "reason", text: "\u0085\u001f " },
+        { type: "send", rows: dayRows(DAY) },
+    );
+    expect(sent.screen.draft?.send).toEqual({ status: "reason_missing" });
 });

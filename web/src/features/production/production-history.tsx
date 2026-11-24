@@ -10,9 +10,14 @@ import { plantDay } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
 import { CsvDownload } from "@/ui/csv-download";
 import { useExportPlant } from "@/ui/export-plant";
-import { CheckboxField, ControlField, WriteFailure } from "@/ui/form";
+import {
+    CheckboxField,
+    ControlField,
+    UnconfirmedNotice,
+    WriteFailure,
+} from "@/ui/form";
 import { Notice, ReadFailed } from "@/ui/ui";
-import { useCodeLabel, useReceipt } from "@/ui/vocabulary";
+import { useCodeLabel, useLabel, useReceipt } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import { ProductionDayNav } from "./history/day-nav";
 import { IntervalEditor } from "./history/interval-editor";
@@ -34,6 +39,7 @@ import {
     initialScreen,
     locked,
     reduceScreen,
+    repeatsAttempt,
     repeatsOrphan,
     type Access,
     type ScreenEvent,
@@ -64,6 +70,7 @@ export function ProductionHistory({
     const format = useFormat();
     const receipt = useReceipt();
     const reason = useCodeLabel("ProductionHistory.reasons");
+    const label = useLabel();
     const canManage = useCanManageWorkspace();
     const proposals = useTranslations("ChangeRequests");
     const plant = useExportPlant();
@@ -177,6 +184,14 @@ export function ProductionHistory({
         draft && !derived.away ? draft.items.map((item) => item.key) : [],
     );
     const saving = locked(editor);
+    // An orphaned editor's repeat sends its retained write, which can differ from the entry it shows.
+    const retained = (write: Write) =>
+        write.action === "revert"
+            ? t("remove_correction")
+            : t("save_value", {
+                  energy: format.number(write.change.energy ?? 0, 6),
+                  quality: label("ObservationQuality", write.change.quality),
+              });
     const orphanRepeats = repeatsOrphan(screen);
 
     // Applies an event decided on the shown state; null when the screen refuses it.
@@ -310,9 +325,15 @@ export function ProductionHistory({
     ) =>
         orphan.cause !== "day_left" || orphan.pendingWrite
             ? orphaned[orphan.cause]
-            : orphan.error instanceof UnconfirmedError
+            : orphan.attempt
               ? ""
               : t("interval_day_left_unsaved");
+    // The answer an orphaned editor last got, unless it is the lost one its attempt tells.
+    const orphanAnswer =
+        editor.status === "orphaned" &&
+        !(editor.error instanceof UnconfirmedError)
+            ? editor.error
+            : undefined;
     const refreshButton = (
         <button
             className="button secondary production-refresh"
@@ -358,13 +379,24 @@ export function ProductionHistory({
             )}
             {editor.status === "orphaned" && (
                 <div className="production-row-editor">
-                    {editor.error === undefined ? (
-                        <Notice error>{orphanNotice(editor)}</Notice>
-                    ) : (
-                        <WriteFailure
-                            error={editor.error}
+                    {editor.attempt ? (
+                        <UnconfirmedNotice
                             lead={orphanNotice(editor)}
-                            repeatable={orphanRepeats}
+                            repeatable={orphanRepeats && repeatsAttempt(editor)}
+                        />
+                    ) : (
+                        orphanAnswer === undefined && (
+                            <Notice error>{orphanNotice(editor)}</Notice>
+                        )
+                    )}
+                    {orphanAnswer !== undefined && (
+                        <WriteFailure
+                            error={orphanAnswer}
+                            lead={
+                                editor.attempt
+                                    ? undefined
+                                    : orphanNotice(editor)
+                            }
                         />
                     )}
                     <ControlField
@@ -387,9 +419,7 @@ export function ProductionHistory({
                                 >
                                     {saving
                                         ? t("saving")
-                                        : editor.attempt.action === "revert"
-                                          ? t("remove_correction")
-                                          : t("save")}
+                                        : retained(editor.attempt)}
                                 </button>
                             )}
                         <button

@@ -414,6 +414,70 @@ export async function serveHalfHourCorrection(
     };
 }
 
+// A half hour at 08:00 beside another operator's half-hour correction at 08:30; once that correction is removed the
+// day reads as one hourly interval. A repeat of an applied change is a replay.
+export async function serveSplitSlot(page: Page, next: () => Answering) {
+    let split = true;
+    const requests: unknown[] = [];
+    const applied = new Set<string>();
+    await page.route("**/api/**/production/?*", (route) => {
+        const date = new URL(route.request().url()).searchParams.get(
+            "start_date",
+        )!;
+        const at = (time: string) => `${date}T${time}:00+03:00`;
+        return route.fulfill({
+            json: nativeProductionHistory(
+                date,
+                "Europe/Istanbul",
+                split
+                    ? [
+                          {
+                              starts_at: at("08:00"),
+                              ends_at: at("08:30"),
+                              effective: reading,
+                          },
+                          {
+                              starts_at: at("08:30"),
+                              ends_at: at("09:00"),
+                              effective: { ...reading, energy_mwh: 0.4 },
+                              revision_id: 1,
+                              can_revert: true,
+                          },
+                      ]
+                    : [
+                          {
+                              starts_at: at("08:00"),
+                              ends_at: at("09:00"),
+                              effective: reading,
+                              revision_id: 2,
+                          },
+                      ],
+            ),
+        });
+    });
+    await page.route("**/production/changes/", (route) => {
+        const body = route.request().postDataJSON() as unknown;
+        requests.push(body);
+        const answering = next();
+        const early = refusedEarly(route, answering);
+        if (early) return early;
+        applied.add(JSON.stringify(body));
+        return fulfil(route, answering, {
+            created: 1,
+            existing: 0,
+            count: 1,
+            ids: [3],
+        });
+    });
+    return {
+        requests,
+        applied: () => applied.size,
+        merge() {
+            split = false;
+        },
+    };
+}
+
 type Observation = {
     starts_at: string;
     ends_at: string;
@@ -430,23 +494,27 @@ type Head = {
 };
 type Warning = Schemas["ProductionPreviewWarningOutput"];
 
-// Heads in the file's unit; a confirmed batch applies whole, is replayed whole or is refused whole.
+// Heads in the file's unit, valid meter readings unless named; a confirmed batch applies whole, is replayed whole or
+// is refused whole.
 export async function serveImport(
     page: Page,
     next: () => Answering,
-    heads: Record<string, number>,
+    heads: Record<
+        string,
+        number | { energy: number; quality?: string; source?: string }
+    >,
     warnings: Warning[] = [],
 ) {
     let ids = 0;
     const current = new Map<string, Head>(
-        Object.entries(heads).map(([start, energy]) => [
+        Object.entries(heads).map(([start, head]) => [
             start,
             {
                 id: ++ids,
                 supersedes: null,
-                energy,
                 quality: "valid",
                 source: "meter",
+                ...(typeof head === "number" ? { energy: head } : head),
             },
         ]),
     );

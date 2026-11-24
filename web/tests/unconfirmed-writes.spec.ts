@@ -1,4 +1,4 @@
-import type { Locator } from "@playwright/test";
+import type { Locator, Route } from "@playwright/test";
 import { expect, test, type Page } from "./support/test";
 import { errorBody } from "./support/errors";
 import {
@@ -25,6 +25,7 @@ import {
     serveOutageWrites,
     serveProduction,
     serveProposals,
+    serveSplitSlot,
     signIn,
     type Answering,
 } from "./support/plant-screens";
@@ -66,8 +67,8 @@ const labels = {
         importCsv: "Import CSV",
         csv: "Production CSV",
         preview: "Preview import",
-        confirm: "Confirm import (3)",
-        imported: "Import complete: 2 created, 1 already present, 3 total.",
+        confirm: "Confirm import (5)",
+        imported: "Import complete: 4 created, 1 already present, 5 total.",
         report: "Report outage",
         title: "Incident title",
         saveOutage: "Save outage",
@@ -102,9 +103,9 @@ const labels = {
         importCsv: "CSV aktar",
         csv: "Üretim CSV dosyası",
         preview: "Aktarımı önizle",
-        confirm: "Aktarımı onayla (3)",
+        confirm: "Aktarımı onayla (5)",
         imported:
-            "İçe aktarma tamamlandı: 2 yeni kayıt, 1 mevcut kayıt, toplam 3 kayıt.",
+            "İçe aktarma tamamlandı: 4 yeni kayıt, 1 mevcut kayıt, toplam 5 kayıt.",
         report: "Kesinti bildir",
         title: "Olay başlığı",
         saveOutage: "Kesintiyi kaydet",
@@ -223,12 +224,17 @@ const csv = [
     "2026-11-09T08:00:00+03:00,2026-11-09T08:30:00+03:00,250,valid,meter",
     "2026-11-09T08:30:00+03:00,2026-11-09T09:00:00+03:00,500,valid,meter",
     "2026-11-09T09:00:00+03:00,2026-11-09T09:30:00+03:00,250,valid,meter",
+    "2026-11-09T09:30:00+03:00,2026-11-09T10:00:00+03:00,250,valid,meter",
+    "2026-11-09T10:00:00+03:00,2026-11-09T10:30:00+03:00,250,valid,meter",
 ].join("\n");
 
-// 08:00 has no reading, 08:30 has another one the import replaces, 09:00 already has the imported one.
+// 08:00 has no reading, 08:30 has another one the import replaces, 09:00 already has the imported one, and 09:30 and
+// 10:00 have its energy with another quality or source, which the import replaces.
 const importHeads = {
     "2026-11-09T08:30:00+03:00": 1000,
     "2026-11-09T09:00:00+03:00": 250,
+    "2026-11-09T09:30:00+03:00": { energy: 250, quality: "outage" },
+    "2026-11-09T10:00:00+03:00": { energy: 250, source: "scada" },
 };
 
 async function prepareImport(page: Page, language: Language = "en") {
@@ -383,7 +389,7 @@ for (const language of ["en", "tr"] as const) {
         expect(server.requests).toHaveLength(3);
         expect(server.requests[1]).toEqual(server.requests[0]);
         expect(server.requests[2]).toEqual(server.requests[0]);
-        expect(server.applied()).toBe(2);
+        expect(server.applied()).toBe(4);
     });
 
     test(`a review decision lost before and after it was applied is told with the advice until the detail shows it decided (${language})`, async ({
@@ -622,9 +628,15 @@ for (const early of ["busy", "throttled"] as const)
         await send.click();
         await expectUnconfirmed(draft, true);
         await send.click();
-        await expect(draft.getByRole("alert")).toContainText(
-            early === "busy" ? "The session is busy." : "Too many requests.",
-        );
+        await expect(
+            draft.getByRole("alert").filter({
+                hasText:
+                    early === "busy"
+                        ? "The session is busy."
+                        : "Too many requests.",
+            }),
+        ).toHaveCount(1);
+        await expectUnconfirmed(draft, true);
         await send.click();
         await expect(page.getByText(labels.en.sent)).toBeVisible();
         release();
@@ -649,7 +661,10 @@ test("an outage edit lost after it was applied and then throttled ends as saved 
     await save.click();
     await expectUnconfirmed(form, true);
     await save.click();
-    await expect(form.getByRole("alert")).toContainText("Too many requests.");
+    await expect(
+        form.getByRole("alert").filter({ hasText: "Too many requests." }),
+    ).toHaveCount(1);
+    await expectUnconfirmed(form, true);
     await save.click();
     await expect(save).toHaveCount(0);
     expect(server.writes.map((write) => write.body.expected_revision)).toEqual([
@@ -693,10 +708,12 @@ test("a lost proposal, another one refused and the first again send the first on
     await reason.fill("Meter read on site, checked twice");
     await expectUnconfirmed(draft, false);
     await send.click();
-    await expect(draft.getByRole("alert")).toContainText(
-        "The request is invalid.",
-    );
+    await expect(
+        draft.getByRole("alert").filter({ hasText: "The request is invalid." }),
+    ).toHaveCount(1);
+    await expectUnconfirmed(draft, false);
     await reason.fill("Meter read on site");
+    await expectUnconfirmed(draft, true);
     await send.click();
     await expect(page.getByText(labels.en.sent)).toBeVisible();
     const [first, refused, again] = server.requests;
@@ -1084,25 +1101,73 @@ test("a member's lost outage proposal is told without the advice once a promotio
     expect(server.created()).toBe(1);
 });
 
-test("a lost outage proposal whose reason only gained outer spaces is sent again with its key and stores one proposal", async ({
-    page,
-}) => {
-    await page.clock.setFixedTime(now);
-    await signIn(page, { role: "viewer" });
-    const server = await serveOutageProposals(page, answers("abort"));
-    await openPlant(page, "Outages");
-    const { form, reason, send } = await proposeOutage(page);
-    await send.click();
-    await expectUnconfirmed(form, true);
-    await reason.fill(" Meter checked  ");
-    await expectUnconfirmed(form, true);
-    await send.click();
-    await expect(page.getByText(labels.en.sent)).toBeVisible();
-    expect(server.requests).toHaveLength(2);
-    expect(server.requests[1]).toEqual(server.requests[0]);
-    expect(server.requests[0]?.reason).toBe("Meter checked");
-    expect(server.created()).toBe(1);
-});
+// Outer whitespace the server strips from a text: ordinary spaces, and characters a browser's trim keeps.
+const outerSpace = {
+    spaces: (text: string) => ` ${text}  `,
+    "a next line": (text: string) => `${text}\u0085`,
+    separators: (text: string) => `\u001f${text}\u001c`,
+};
+
+for (const [name, padded] of Object.entries(outerSpace)) {
+    test(`a lost outage proposal whose reason only gained outer ${name} is sent again with its key and stores one proposal`, async ({
+        page,
+    }) => {
+        await page.clock.setFixedTime(now);
+        await signIn(page, { role: "viewer" });
+        const server = await serveOutageProposals(page, answers("abort"));
+        await openPlant(page, "Outages");
+        const { form, reason, send } = await proposeOutage(page);
+        await send.click();
+        await expectUnconfirmed(form, true);
+        await reason.fill(padded("Meter checked"));
+        await expectUnconfirmed(form, true);
+        await send.click();
+        await expect(page.getByText(labels.en.sent)).toBeVisible();
+        expect(server.requests).toHaveLength(2);
+        expect(server.requests[1]).toEqual(server.requests[0]);
+        expect(server.requests[0]?.reason).toBe("Meter checked");
+        expect(server.created()).toBe(1);
+    });
+
+    test(`a lost outage report whose title only gained outer ${name} is saved again with its key and makes one outage`, async ({
+        page,
+    }) => {
+        await page.clock.setFixedTime(now);
+        await signIn(page);
+        const server = await serveOutageWrites(page, answers("abort"));
+        await openPlant(page, "Outages");
+        const { form, save } = await reportOutage(page);
+        await save.click();
+        await expectUnconfirmed(form, true);
+        await form.getByLabel(labels.en.title).fill(padded("Grid fault"));
+        await expectUnconfirmed(form, true);
+        await save.click();
+        await expect(save).toHaveCount(0);
+        expect(server.writes).toHaveLength(2);
+        expect(server.writes[1]).toEqual(server.writes[0]);
+        expect(server.writes[0]?.body.title).toBe("Grid fault");
+        expect(server.applied()).toBe(1);
+    });
+
+    test(`a lost proposal whose reason only gained outer ${name} is sent again with its key and stores one request`, async ({
+        page,
+    }) => {
+        await page.clock.setFixedTime(now);
+        await signIn(page, { role: "viewer" });
+        const server = await serveProposals(page, answers("drop"));
+        await openPlant(page, "Production");
+        const { draft, reason, send } = await stageProposal(page);
+        await send.click();
+        await expectUnconfirmed(draft, true);
+        await reason.fill(padded("Meter read on site"));
+        await expectUnconfirmed(draft, true);
+        await send.click();
+        await expect(page.getByText(labels.en.sent)).toBeVisible();
+        expect(server.requests).toHaveLength(2);
+        expect(server.requests[1]).toEqual(server.requests[0]);
+        expect(server.created()).toBe(1);
+    });
+}
 
 test("a lost outage proposal is told without the advice once the plant's configuration changed, and Send stores a new proposal under it", async ({
     page,
@@ -1166,7 +1231,9 @@ test("an outage edit lost after it was applied, another edit refused as stale an
     await expect(
         page.getByText("Someone changed this outage after you opened it."),
     ).toBeVisible();
+    await expectUnconfirmed(form, false);
     await title.fill("Inverter tripped");
+    await expectUnconfirmed(form, true);
     await save.click();
     await expect(save).toHaveCount(0);
     expect(server.writes.map((write) => write.body.expected_revision)).toEqual([
@@ -1237,7 +1304,7 @@ test("unchecking the capacity confirmation of a lost import removes the advice w
     expect(server.requests).toHaveLength(2);
     expect(server.requests[1]).toEqual(server.requests[0]);
     expect(server.requests[0]).toMatchObject({ confirm_implausible: true });
-    expect(server.applied()).toBe(2);
+    expect(server.applied()).toBe(4);
 });
 
 test("a direct change lost after it took its interval out of the default view keeps the editor and its advice in view", async ({
@@ -1344,7 +1411,10 @@ test("a lost direct change whose repeat is throttled keeps Save enabled and appl
     await save.click();
     await expectUnconfirmed(editor, true);
     await save.click();
-    await expect(editor.getByRole("alert")).toContainText("Too many requests.");
+    await expect(
+        editor.getByRole("alert").filter({ hasText: "Too many requests." }),
+    ).toHaveCount(1);
+    await expectUnconfirmed(editor, true);
     await expect(save).toBeEnabled();
     await save.click();
     await expect(editor).toHaveCount(0);
@@ -1473,7 +1543,7 @@ test("a lost rejection is told once by its form, follows its reason, and is told
     await expectUnconfirmed(detail, true);
     await reason.fill("The meter reading is wrong.");
     await expectUnconfirmed(detail, false);
-    await reason.fill("The meter reading is wrong");
+    await reason.fill("The meter reading is wrong\u0085");
     await expectUnconfirmed(detail, true);
     Object.assign(request, { status: "approved", can_review: false });
     await refresh.click();
@@ -1544,4 +1614,313 @@ test("a reminder preview whose answer was lost says the request failed, not that
     await expect(main).not.toContainText(texts.en.title);
     await expect(main).not.toContainText(texts.en.general);
     expect(previews).toBe(1);
+});
+
+test("an edit of a resolved outage lost after it was applied is advised and saved again with its revision after the plant's configuration changed, without a further revision", async ({
+    page,
+}) => {
+    await page.clock.install({ time: now });
+    await signIn(page);
+    let configuration = plant.current_configuration;
+    await page.route("**/api/tenants/1/sites/", (route) =>
+        route.request().method() === "GET"
+            ? route.fulfill({
+                  json: paged([
+                      {
+                          ...region,
+                          plant: {
+                              ...plant,
+                              current_configuration: configuration,
+                          },
+                          reminder: null,
+                      },
+                  ]),
+              })
+            : route.fallback(),
+    );
+    const server = await serveOutageWrites(page, answers("abort"), [
+        {
+            ...activeOutage,
+            status: "resolved",
+            ends_at: "2026-11-09T10:00:00Z",
+        },
+    ]);
+    await openPlant(page, "Outages");
+    const { form, save } = await editOutage(page);
+    await save.click();
+    await expectUnconfirmed(form, true);
+    configuration = { ...configuration, id: 32, revision: 2 };
+    const reread = page.waitForResponse((response) =>
+        response.url().endsWith("/api/tenants/1/sites/"),
+    );
+    await readAgainOnFocus(page);
+    await reread;
+    await expectUnconfirmed(form, true);
+    await save.click();
+    await expect(save).toHaveCount(0);
+    expect(server.writes.map((write) => write.body.expected_revision)).toEqual([
+        1, 1,
+    ]);
+    expect(server.applied()).toBe(1);
+    expect(server.outages()[0]).toMatchObject({
+        revision: 2,
+        title: "Inverter tripped",
+    });
+});
+
+test("an orphaned direct change names the write its repeat sends while it shows a newer entry, and sends that write", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    const server = await serveSplitSlot(page, answers("drop"));
+    await openPlant(page, "Production");
+    const { editor, save } = await editEight(page);
+    const release = await holdReads(page, productionReads);
+    await save.click();
+    await expectUnconfirmed(editor, true);
+    await editor.getByRole("textbox").first().fill("1,50");
+    await expectUnconfirmed(editor, false);
+    server.merge();
+    release();
+    const orphan = page.locator(".production-row-editor");
+    await expect(orphan).toContainText(
+        "This interval changed and is no longer available.",
+    );
+    await expect(orphan.getByRole("textbox")).toHaveValue("1,50");
+    await expectUnconfirmed(orphan, false);
+    await orphan
+        .getByRole("button", { name: "Save 0.5 MWh (Valid)", exact: true })
+        .click();
+    await expect(orphan).toHaveCount(0);
+    expect(server.requests).toHaveLength(2);
+    expect(server.requests[1]).toEqual(server.requests[0]);
+    expect(server.applied()).toBe(1);
+});
+
+test("Reload current values that finds the interval's bounds changed keeps the lost change's notice, and its repeat applies it once", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    const server = await serveSplitSlot(page, answers("drop"));
+    await openPlant(page, "Production");
+    const { editor, save } = await editEight(page);
+    const reread = page.waitForResponse((response) =>
+        productionReads.test(response.url()),
+    );
+    await save.click();
+    await reread;
+    await expectUnconfirmed(editor, true);
+    server.merge();
+    await editor
+        .getByRole("button", { name: "Reload current values", exact: true })
+        .click();
+    const orphan = page.locator(".production-row-editor");
+    await expect(orphan).toContainText(
+        "This interval changed and is no longer available.",
+    );
+    await expectUnconfirmed(orphan, true);
+    await orphan
+        .getByRole("button", { name: "Save 0.5 MWh (Valid)", exact: true })
+        .click();
+    await expect(orphan).toHaveCount(0);
+    expect(server.requests).toHaveLength(2);
+    expect(server.requests[1]).toEqual(server.requests[0]);
+    expect(server.applied()).toBe(1);
+});
+
+test("a failed Reload current values after a lost direct change is told beside its notice, and a later reload keeps the notice alone", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    const server = await serveDirectProduction(page, answers("drop"));
+    await openPlant(page, "Production");
+    const { editor, save } = await editEight(page);
+    const reread = page.waitForResponse((response) =>
+        productionReads.test(response.url()),
+    );
+    await save.click();
+    await reread;
+    await expectUnconfirmed(editor, true);
+    const failing = (route: Route) =>
+        route.fulfill({
+            status: 500,
+            json: errorBody("server_error", "The server failed."),
+        });
+    await page.route(productionReads, failing);
+    const reload = editor.getByRole("button", {
+        name: "Reload current values",
+        exact: true,
+    });
+    await reload.click();
+    await expect(editor).toContainText("The server failed.");
+    await expectUnconfirmed(editor, true);
+    await page.unroute(productionReads, failing);
+    await reload.click();
+    await expect(editor).not.toContainText("The server failed.");
+    await expectUnconfirmed(editor, true);
+    await save.click();
+    await expect(editor).toHaveCount(0);
+    expect(server.requests).toHaveLength(2);
+    expect(server.requests[1]).toEqual(server.requests[0]);
+    expect(server.applied()).toBe(1);
+});
+
+test("an orphaned direct change whose outcome is unknown keeps its notice once the person can only propose, without sending it", async ({
+    page,
+}) => {
+    await page.clock.install({ time: now });
+    const session = await signIn(page);
+    const server = await serveSplitSlot(page, answers("drop"));
+    await openPlant(page, "Production");
+    const { save } = await editEight(page);
+    const reread = page.waitForResponse((response) =>
+        productionReads.test(response.url()),
+    );
+    await save.click();
+    await reread;
+    server.merge();
+    await readAgainOnFocus(page);
+    const orphan = page.locator(".production-row-editor");
+    const repeat = orphan.getByRole("button", {
+        name: "Save 0.5 MWh (Valid)",
+        exact: true,
+    });
+    await expect(repeat).toBeVisible();
+    await expectUnconfirmed(orphan, true);
+    session.changeRole("viewer");
+    await readAgainOnFocus(page);
+    await expect(repeat).toHaveCount(0);
+    await expect(orphan).toContainText(
+        "This interval changed and is no longer available.",
+    );
+    await expectUnconfirmed(orphan, false);
+    expect(server.requests).toHaveLength(1);
+});
+
+test("a lost rejection keeps its reason and its notice while its request cannot be read, and Reject then applies it once", async ({
+    page,
+}) => {
+    const { applied, detail, refresh } = await reviewRequest(
+        page,
+        answers("drop"),
+    );
+    const reason = detail.getByLabel("Reason for rejection");
+    const reject = detail.getByRole("button", { name: "Reject", exact: true });
+    await reason.fill("The meter reading is wrong");
+    await reject.click();
+    await expectUnconfirmed(detail, true);
+    let gone = true;
+    await page.route(/change-requests\/1\/$/, (route) =>
+        gone
+            ? route.fulfill({
+                  status: 404,
+                  json: errorBody("not_found", "Not found."),
+              })
+            : route.fallback(),
+    );
+    await refresh.click();
+    await expect(detail).toContainText("Not found.");
+    await expect(reason).toHaveCount(0);
+    await expectUnconfirmed(detail, false);
+    gone = false;
+    await refresh.click();
+    await expect(reason).toHaveValue("The meter reading is wrong");
+    await expectUnconfirmed(detail, true);
+    await reject.click();
+    await expect(reject).toHaveCount(0);
+    expect(applied()).toBe(1);
+});
+
+test("a lost approval whose repeat is throttled keeps its notice beside the throttle and through Refresh details, and Approve applies it once", async ({
+    page,
+}) => {
+    const { decisions, applied, detail, approve, refresh } =
+        await reviewRequest(page, answers("drop", "throttled"));
+    await approve.click();
+    await expectUnconfirmed(detail, true);
+    await approve.click();
+    await expect(
+        detail.getByRole("alert").filter({ hasText: "Too many requests." }),
+    ).toHaveCount(1);
+    await expectUnconfirmed(detail, true);
+    const read = page.waitForResponse((response) =>
+        response.url().endsWith("/change-requests/1/"),
+    );
+    await refresh.click();
+    await read;
+    await expect(detail).not.toContainText("Too many requests.");
+    await expectUnconfirmed(detail, true);
+    await approve.click();
+    await expect(approve).toHaveCount(0);
+    expect(decisions).toHaveLength(3);
+    expect(applied()).toBe(1);
+});
+
+// Holds every script that reads the texts of `namespace` until `release`.
+async function holdScript(page: Page, namespace: string) {
+    let reach!: () => void;
+    const reached = new Promise<void>((resolve) => (reach = resolve));
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/_next/static/**/*.js", async (route) => {
+        const response = await route.fetch();
+        const body = await response.text();
+        if (body.includes(`("${namespace}")`)) {
+            reach();
+            await released;
+        }
+        await route.fulfill({ response, body });
+    });
+    return { reached, release: () => release() };
+}
+
+test("a lost import whose Confirm a view change on its way disables is told without the advice", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    await serveProduction(page, [{ can_edit: true }]);
+    const server = await serveImport(page, answers("drop"), importHeads);
+    await openPlant(page, "Production");
+    const { importer, confirm } = await prepareImport(page);
+    await confirm.click();
+    await expectUnconfirmed(importer, true);
+    const comparison = await holdScript(page, "ForecastPerformance");
+    await page.getByRole("button", { name: "Comparison", exact: true }).click();
+    await comparison.reached;
+    await expect(confirm).toBeDisabled();
+    await expectUnconfirmed(importer, false);
+    comparison.release();
+    await expect(
+        page.getByRole("heading", { name: "Production comparison" }),
+    ).toBeVisible();
+    expect(server.requests).toHaveLength(1);
+});
+
+test("a lost outage proposal whose reason changed without an input event is sent as a new proposal, told without the advice while it runs", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page, { role: "viewer" });
+    const server = await serveOutageProposals(page, answers("drop"));
+    const writes = await holdWrites(page, "**/change-requests/incidents/");
+    await openPlant(page, "Outages");
+    const { form, reason, send } = await proposeOutage(page);
+    await send.click();
+    await expectUnconfirmed(form, true);
+    await reason.evaluate((field: HTMLTextAreaElement) => {
+        field.value = "Meter replaced";
+    });
+    writes.hold();
+    await send.click();
+    await expectUnconfirmed(form, false);
+    writes.release();
+    await expect(page.getByText(labels.en.sent)).toBeVisible();
+    const [first, second] = server.requests;
+    expect(second?.idempotency_key).not.toBe(first?.idempotency_key);
+    expect(second).toMatchObject({ reason: "Meter replaced" });
+    expect(server.created()).toBe(1);
 });

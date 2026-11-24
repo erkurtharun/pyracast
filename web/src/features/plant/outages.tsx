@@ -162,9 +162,11 @@ export function Outages({
             apply({ type: "sent", receipt });
         }
     }
-    const repeats = (change: OutageChange) =>
-        workflow?.attempt?.payload ===
-        attemptPayload(change, direct, configured);
+    const lost = workflow?.attempt;
+    const attempt =
+        lost &&
+        ((change: OutageChange) =>
+            lost.payload === attemptPayload(change, direct, configured));
     const ceilings = (outage?: Outage): Ceilings | undefined =>
         configuration &&
         (!outage ||
@@ -220,7 +222,7 @@ export function Outages({
             onClose={() => apply({ type: "close" })}
             onDiscard={() => apply({ type: "discard" })}
             onSubmit={submit}
-            repeats={repeats}
+            attempt={attempt}
         />
     );
     return (
@@ -277,7 +279,7 @@ export function Outages({
                     controls={derived}
                     hold={hold}
                     onSubmit={submit}
-                    repeats={repeats}
+                    attempt={attempt}
                     onClose={() => apply({ type: "close" })}
                 />
             )}

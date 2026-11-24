@@ -32,8 +32,7 @@ export type Editor =
     // An editor its reload returned to editing says so until it is changed.
     | ({ status: "editing"; reloaded?: true } & Draft)
     | ({ status: "saving"; write: Write } & Draft)
-    // A reload keeps the notice of a write whose answer was lost.
-    | ({ status: "reloading"; lost?: WriteIssue } & Draft)
+    | ({ status: "reloading" } & Draft)
     | ({ status: "failed"; issue: EditorIssue } & Draft)
     // A write still running when its interval became unavailable keeps the controls locked until it ends.
     | ({

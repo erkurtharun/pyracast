@@ -1,5 +1,4 @@
-import { UnconfirmedError } from "@/lib/api/errors";
-import { outstandingAfter } from "@/lib/idempotency";
+import { outstandingAfter, serverTrim } from "@/lib/idempotency";
 import type { Quality } from "@/lib/production";
 import { qualityOf } from "@/lib/production";
 import {
@@ -185,14 +184,6 @@ export function repeatsAttempt(editor: Draft) {
     return !!attempt && contentOf(editor, attempt.action) === attempt.payload;
 }
 
-function unconfirmed(editor: Editor) {
-    return (
-        editor.status === "failed" &&
-        editor.issue !== "invalid_energy" &&
-        editor.issue.error instanceof UnconfirmedError
-    );
-}
-
 // The failure of the write that is still outstanding, which a reload or an orphaned editor keeps.
 function outstandingIssue(editor: Editor) {
     return editor.status === "failed" &&
@@ -235,19 +226,22 @@ function editingOn(editor: Editor, row: Interval) {
         : null;
 }
 
-// An editor whose day or access ends closes, unless its write still runs.
+// An editor whose day or access ends closes, unless its write still runs or its outcome is still unknown.
 function release(editor: Editor, cause: "day_left" | "unavailable"): Editor {
     if (editor.status === "closed") return editor;
     const write = runningWrite(editor);
-    return write
-        ? {
-              ...values(editor),
-              status: "orphaned",
-              cause,
-              pendingWrite: true,
-              write,
-          }
-        : CLOSED;
+    if (!write && !editor.attempt) return CLOSED;
+    const error =
+        outstandingIssue(editor)?.error ??
+        (editor.status === "orphaned" ? editor.error : undefined);
+    return {
+        ...values(editor),
+        status: "orphaned",
+        cause,
+        pendingWrite: !!write,
+        ...(write && { write }),
+        ...(error !== undefined && { error }),
+    };
 }
 
 function forget(send: ProposalSend, key: string): ProposalSend {
@@ -293,10 +287,12 @@ export function reconcileEditor(
         };
     }
     if (editor.status !== "reloading") return editor;
-    const current = { ...values(editor), expectedRevision: row.revision_id };
-    return editor.lost
-        ? { ...current, status: "failed", issue: editor.lost }
-        : { ...current, status: "editing", reloaded: true };
+    return {
+        ...values(editor),
+        expectedRevision: row.revision_id,
+        status: "editing",
+        reloaded: true,
+    };
 }
 
 // Whether an access change dropped what the person had prepared: the draft, or an open editor with its values.
@@ -334,13 +330,7 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
                 ...(event.energy !== undefined && { energy: event.energy }),
                 ...(event.quality !== undefined && { quality: event.quality }),
             };
-            return {
-                ...screen,
-                editor:
-                    editor.status === "failed" && unconfirmed(editor)
-                        ? { ...changed, status: "failed", issue: editor.issue }
-                        : { ...changed, status: "editing" },
-            };
+            return { ...screen, editor: { ...changed, status: "editing" } };
         }
         case "cancel":
             if (editor.status === "closed" || locked(editor)) return screen;
@@ -423,7 +413,7 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
                 draft: {
                     ...draft,
                     // A new value each time, so a repeated refusal focuses the reason again.
-                    send: draft.reason.trim()
+                    send: serverTrim(draft.reason)
                         ? { status: "sending" }
                         : { status: "reason_missing" },
                 },
@@ -532,14 +522,9 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
         case "reload": {
             if (editor.status !== "editing" && editor.status !== "failed")
                 return screen;
-            const lost = outstandingIssue(editor);
             return {
                 ...screen,
-                editor: {
-                    ...values(editor),
-                    status: "reloading",
-                    ...(lost && { lost }),
-                },
+                editor: { ...values(editor), status: "reloading" },
             };
         }
         case "reloadFailed":

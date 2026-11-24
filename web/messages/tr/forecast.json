@@ -418,6 +418,7 @@
         "refresh_failed": "Kayıtlı üretim yenilenemedi. {error}",
         "propose_interval": "{interval} aralığı için düzeltme öner",
         "remove_correction": "Düzeltmeyi kaldır",
+        "save_value": "{energy} MWh ({quality}) kaydet",
         "remove_correction_interval": "{interval} için düzeltmeyi kaldır"
     },
     "ProductionImport": {

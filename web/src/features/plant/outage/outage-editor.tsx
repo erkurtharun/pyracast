@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { DisplayError } from "@/lib/api/errors";
 import { fromPlantInput, toPlantInput } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
+import { serverTrim } from "@/lib/idempotency";
 import type { components } from "@/lib/schema";
 import { ActionForm, Field, Select, TextAreaField, formText } from "@/ui/form";
 import { Notice } from "@/ui/ui";
@@ -101,7 +102,7 @@ export function OutageEditor({
     controls,
     hold,
     onSubmit,
-    repeats,
+    attempt,
     onClose,
 }: {
     outage?: Outage;
@@ -113,7 +114,7 @@ export function OutageEditor({
     // Why this editor cannot send any more; it can still be closed.
     hold: string | null;
     onSubmit: (change: OutageChange) => Promise<void>;
-    repeats: Repeats;
+    attempt: Repeats | null | undefined;
     onClose: () => void;
 }) {
     const t = useTranslations("Outages");
@@ -156,8 +157,8 @@ export function OutageEditor({
             throw new DisplayError(t("capacityRequired"));
         const values = {
             kind,
-            title: formText(data, "title").trim(),
-            notes: formText(data, "notes").trim(),
+            title: serverTrim(formText(data, "title")),
+            notes: serverTrim(formText(data, "notes")),
             starts_at: starts,
             ends_at: ends,
             ...capacities,
@@ -190,7 +191,7 @@ export function OutageEditor({
                             : t("saveOutage")
                         : proposals("send")
                 }
-                repeatable={repeatsWith(repeats, changeOf)}
+                attempt={attempt && { repeats: repeatsWith(attempt, changeOf) }}
                 onSubmit={(data) => onSubmit(changeOf(data))}
             >
                 {!direct && <ProposalReason />}

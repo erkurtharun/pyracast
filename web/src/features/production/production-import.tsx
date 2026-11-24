@@ -73,7 +73,7 @@ export function ProductionImport({
     const csvTexts = useTranslations("ProductionCsv");
     const format = useFormat();
     const errorMessage = useErrorMessage();
-    const attempt = useAttempt();
+    const attempt = useAttempt<ReturnType<typeof importBody>>();
     const sequence = useRef(0);
     const [selection, setSelection] = useState<Selection>({ status: "empty" });
     const [result, setResult] = useState<ImportResult>();
@@ -329,14 +329,17 @@ export function ProductionImport({
                             submit={t("confirm_import", {
                                 count: selection.preview.changes.length,
                             })}
-                            repeatable={(data) =>
-                                attempt.repeats(
-                                    importBody(
-                                        selection,
-                                        configuration,
-                                        data.has("confirm_implausible"),
-                                    ),
-                                )
+                            attempt={
+                                attempt.outstanding && {
+                                    repeats: (data) =>
+                                        attempt.repeats(
+                                            importBody(
+                                                selection,
+                                                configuration,
+                                                data.has("confirm_implausible"),
+                                            ),
+                                        ),
+                                }
                             }
                             onSubmit={async (data) => {
                                 if (confirming) return;

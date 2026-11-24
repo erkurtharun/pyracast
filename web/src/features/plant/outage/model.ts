@@ -1,7 +1,7 @@
 import type { PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/errors";
-import { outstandingAfter } from "@/lib/idempotency";
+import { outstandingAfter, serverTrim } from "@/lib/idempotency";
 import type { components } from "@/lib/schema";
 
 export type Outage = components["schemas"]["IncidentOutput"];
@@ -290,7 +290,7 @@ export function reduceOutages(
 function contentOf(change: OutageChange) {
     return {
         action: change.action,
-        reason: change.reason.trim(),
+        reason: serverTrim(change.reason),
         ...(change.action === "create"
             ? {}
             : { incident_id: change.outage.id }),
@@ -310,6 +310,16 @@ function proposalBody(change: OutageChange) {
     };
 }
 
+// The configuration the server validates a change against: the plant's current one for a new or ongoing outage,
+// the outage's own once it has an end, none for a resolution or a cancellation.
+function configurationOf(change: OutageChange, current: number | null) {
+    if (change.action === "create") return current;
+    if (change.action !== "update") return null;
+    return change.values.ends_at == null
+        ? current
+        : change.outage.declared_configuration_id;
+}
+
 // The request the input asks for under the viewer's access and the plant's configuration, whatever revision it meets.
 export function attemptPayload(
     change: OutageChange,
@@ -319,7 +329,7 @@ export function attemptPayload(
     const { reason, ...content } = contentOf(change);
     return JSON.stringify({
         direct,
-        configuration,
+        configuration: configurationOf(change, configuration),
         ...content,
         ...(direct ? {} : { reason }),
     });

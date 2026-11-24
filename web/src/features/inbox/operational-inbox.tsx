@@ -5,7 +5,7 @@ import type { Tenant } from "@/lib/api";
 import { api, buildUrl } from "@/lib/api/client";
 import { ApiError, DisplayError, UnconfirmedError } from "@/lib/api/errors";
 import { cadence, useApiQuery, useRefresh } from "@/lib/api/query";
-import { useAttempt } from "@/lib/idempotency";
+import { serverTrim, useAttempt } from "@/lib/idempotency";
 import { MISSING } from "@/lib/format/number";
 import { useFormat } from "@/lib/format/use-format";
 import { qualityOf } from "@/lib/production";
@@ -14,6 +14,7 @@ import {
     ActionForm,
     AsyncButton,
     TextAreaField,
+    UnconfirmedNotice,
     WriteFailure,
     formText,
 } from "@/ui/form";
@@ -42,6 +43,7 @@ type Summary = components["schemas"]["ChangeRequestSummaryOutput"];
 type Scope = "pending" | "history" | "mine";
 type Reading = components["schemas"]["ProductionValueOutput"];
 type Decision = "approve" | "reject" | "withdraw" | "seen";
+type DecisionBody = { review_fingerprint: string } | { reason: string } | null;
 
 export function OwnPendingRequests({
     tenantId,
@@ -386,7 +388,9 @@ function RequestDetail({
     const [refusedFingerprint, setRefusedFingerprint] = useState<string | null>(
         null,
     );
-    const attempt = useAttempt();
+    const attempt = useAttempt<{ action: Decision; body: DecisionBody }>();
+    // The rejection reason as typed, kept while the rejection form is not shown.
+    const [rejection, setRejection] = useState("");
     const heading = useRef<HTMLHeadingElement>(null);
     const receipt = useRef(false);
     const item = resource.data;
@@ -413,7 +417,7 @@ function RequestDetail({
     }, [item, tenantId, id, onChanged]);
     async function act(
         action: Decision,
-        body: { review_fingerprint: string } | { reason: string } | null,
+        body: DecisionBody,
         run: () => Promise<unknown>,
     ) {
         if (state.status === "pending") return;
@@ -451,6 +455,14 @@ function RequestDetail({
         !reviewBlocked &&
         !resource.error;
     const rejectable = !!item?.can_review && item.status === "pending";
+    const lost = attempt.outstanding;
+    // The rejection form tells its own outcome while it is shown; the detail tells every other one.
+    const told = (action: Decision) => action !== "reject" || !rejectable;
+    const rejects = (data: FormData) =>
+        attempt.repeats({
+            action: "reject",
+            body: { reason: serverTrim(formText(data, "reason")) },
+        });
     return (
         <section
             id={`request-${id}`}
@@ -463,31 +475,23 @@ function RequestDetail({
             {resource.loading && <p role="status">{t("loading")}</p>}
             {resource.error && <Notice error>{resource.error}</Notice>}
             {state.status === "error" &&
-                (state.action !== "reject" || !rejectable) && (
-                    <WriteFailure
-                        error={state.error}
-                        repeatable={
-                            state.action === "approve" &&
-                            approvable &&
-                            attempt.repeats({
-                                action: "approve",
-                                body: approval,
-                            })
-                        }
-                    />
-                )}
+                !(state.error instanceof UnconfirmedError) &&
+                told(state.action) && <WriteFailure error={state.error} />}
+            {lost && told(lost.action) && (
+                <UnconfirmedNotice
+                    repeatable={
+                        lost.action === "approve" &&
+                        approvable &&
+                        attempt.repeats({ action: "approve", body: approval })
+                    }
+                />
+            )}
             <button
                 className="button secondary"
                 disabled={pending}
                 onClick={() => {
                     const seen = refusedFingerprint;
-                    // Only an answer to a decision ends the notice that its outcome is unknown.
-                    setState((current) =>
-                        current.status === "error" &&
-                        current.error instanceof UnconfirmedError
-                            ? current
-                            : { status: "idle" },
-                    );
+                    setState({ status: "idle" });
                     void resource.reload().then(
                         () =>
                             setRefusedFingerprint((held) =>
@@ -561,22 +565,18 @@ function RequestDetail({
                             <ActionForm
                                 permitted={!pending}
                                 submit={t("reject")}
-                                repeatable={(data) =>
-                                    attempt.repeats({
-                                        action: "reject",
-                                        body: {
-                                            reason: formText(
-                                                data,
-                                                "reason",
-                                            ).trim(),
-                                        },
-                                    })
+                                attempt={
+                                    lost?.action === "reject"
+                                        ? { repeats: rejects }
+                                        : null
+                                }
+                                onEdit={(data) =>
+                                    setRejection(formText(data, "reason"))
                                 }
                                 onSubmit={async (data) => {
-                                    const reason = formText(
-                                        data,
-                                        "reason",
-                                    ).trim();
+                                    const reason = serverTrim(
+                                        formText(data, "reason"),
+                                    );
                                     if (!reason)
                                         throw new DisplayError(
                                             t("rejectReason"),
@@ -592,6 +592,7 @@ function RequestDetail({
                                 <TextAreaField
                                     label={t("rejectReason")}
                                     name="reason"
+                                    defaultValue={rejection}
                                     maxLength={500}
                                     required
                                 />

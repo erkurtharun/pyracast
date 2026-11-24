@@ -6,8 +6,8 @@ import { api } from "@/lib/api/client";
 import { ApiError, UnconfirmedError } from "@/lib/api/errors";
 import type { Vocabulary } from "@/lib/vocabulary";
 import { useFormat } from "@/lib/format/use-format";
-import { useAttempt } from "@/lib/idempotency";
-import { ControlField, WriteFailure } from "@/ui/form";
+import { serverTrim, useAttempt } from "@/lib/idempotency";
+import { ControlField, UnconfirmedNotice, WriteFailure } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import { useLabel } from "@/ui/vocabulary";
 import type { Interval } from "./model";
@@ -18,6 +18,13 @@ import {
     type StagedChange,
 } from "./proposal";
 import type { Controls, Proposal, Screen, ScreenEvent } from "./screen";
+
+type ProposalBody = {
+    configuration_id: number;
+    unit: "MWh";
+    changes: ReturnType<typeof proposalChanges>;
+    reason: string;
+};
 
 export function ProposalDraft({
     scope,
@@ -55,7 +62,7 @@ export function ProposalDraft({
     const t = useTranslations("ChangeRequests");
     const format = useFormat();
     const label = useLabel();
-    const attempt = useAttempt();
+    const attempt = useAttempt<ProposalBody>();
     const headingId = useId();
     const heldId = useId();
     const heading = useRef<HTMLHeadingElement>(null);
@@ -79,11 +86,11 @@ export function ProposalDraft({
         if (send.status === "reason_missing") reasonRef.current?.focus();
     }, [send]);
 
-    const bodyOf = ({ items, reason }: Proposal) => ({
+    const bodyOf = ({ items, reason }: Proposal): ProposalBody => ({
         configuration_id: configuration,
-        unit: "MWh" as const,
+        unit: "MWh",
         changes: proposalChanges(items),
-        reason: reason.trim(),
+        reason: serverTrim(reason),
     });
 
     async function submit() {
@@ -223,16 +230,19 @@ export function ProposalDraft({
                         />
                     )}
                 </ControlField>
-                {send.status === "failed" && (
-                    <WriteFailure
-                        error={send.error}
+                {send.status === "failed" &&
+                    !(send.error instanceof UnconfirmedError) && (
+                        <WriteFailure error={send.error}>
+                            {send.fields.general.length > 0 &&
+                                ` ${send.fields.general.join(" ")}`}
+                        </WriteFailure>
+                    )}
+                {attempt.outstanding && (
+                    <UnconfirmedNotice
                         repeatable={
                             controls.send && attempt.repeats(bodyOf(draft))
                         }
-                    >
-                        {send.fields.general.length > 0 &&
-                            ` ${send.fields.general.join(" ")}`}
-                    </WriteFailure>
+                    />
                 )}
                 {held && (
                     <p className="field-error" id={heldId} role="status">

@@ -1248,3 +1248,38 @@ test("an outage request is named by its trimmed reason, the viewer's access and 
         attemptPayload(update(3), false, 31),
     );
 });
+
+test("an outage request is named by the configuration the server checks it against and by its reason as the server strips it", () => {
+    const update = (ends_at: string | null): OutageChange => ({
+        action: "update",
+        outage: outage(4, { ends_at, declared_configuration_id: 31 }),
+        values: { ...valuesOf(outage(4)), ends_at },
+        reason: "",
+    });
+    const ended = "2026-11-09T10:00:00Z";
+    expect(attemptPayload(update(ended), true, 32)).toBe(
+        attemptPayload(update(ended), true, 31),
+    );
+    expect(attemptPayload(update(null), true, 32)).not.toBe(
+        attemptPayload(update(null), true, 31),
+    );
+    const resolve: OutageChange = {
+        action: "resolve",
+        outage: outage(4),
+        ends_at: ended,
+        reason: "Restarted",
+    };
+    expect(attemptPayload(resolve, false, 32)).toBe(
+        attemptPayload(resolve, false, 31),
+    );
+    const create = (reason: string): OutageChange => ({
+        action: "create",
+        values: valuesOf(outage(4)),
+        reason,
+    });
+    const named = attemptPayload(create("Meter checked"), false, 31);
+    expect(
+        attemptPayload(create("\u0085Meter checked\u001f　"), false, 31),
+    ).toBe(named);
+    expect(attemptPayload(create("Meter checked﻿"), false, 31)).not.toBe(named);
+});

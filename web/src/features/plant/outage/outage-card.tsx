@@ -50,7 +50,7 @@ export function OutageCard({
     onClose,
     onDiscard,
     onSubmit,
-    repeats,
+    attempt,
 }: {
     outage: Outage;
     tenantId: number;
@@ -68,7 +68,7 @@ export function OutageCard({
     onClose: () => void;
     onDiscard: () => void;
     onSubmit: Submit;
-    repeats: Repeats;
+    attempt: Repeats | null | undefined;
 }) {
     const t = useTranslations("Outages");
     const proposals = useTranslations("ChangeRequests");
@@ -158,7 +158,7 @@ export function OutageCard({
                     controls={controls}
                     hold={hold}
                     onSubmit={onSubmit}
-                    repeats={repeats}
+                    attempt={attempt}
                     onClose={onClose}
                 />
             )}
@@ -189,7 +189,7 @@ export function OutageCard({
                             controls={controls}
                             hold={hold}
                             onSubmit={onSubmit}
-                            repeats={repeats}
+                            attempt={attempt}
                             onDiscard={onDiscard}
                         />
                     )}
@@ -206,7 +206,7 @@ type FormProps = {
     controls: OutageControls;
     hold: string | null;
     onSubmit: Submit;
-    repeats: Repeats;
+    attempt: Repeats | null | undefined;
 };
 
 function ResolveOutageForm({
@@ -216,7 +216,7 @@ function ResolveOutageForm({
     controls,
     hold,
     onSubmit,
-    repeats,
+    attempt,
     onClose,
 }: FormProps & { onClose: () => void }) {
     const t = useTranslations("Outages");
@@ -254,7 +254,7 @@ function ResolveOutageForm({
                 pending={!controls.acts}
                 success={null}
                 submit={direct ? t("saveResolution") : proposals("send")}
-                repeatable={repeatsWith(repeats, changeOf)}
+                attempt={attempt && { repeats: repeatsWith(attempt, changeOf) }}
                 onSubmit={(data) => onSubmit(changeOf(data))}
             >
                 {!direct && <ProposalReason />}
@@ -288,7 +288,7 @@ function CancelOutageForm({
     controls,
     hold,
     onSubmit,
-    repeats,
+    attempt,
     onDiscard,
 }: FormProps & { onDiscard: () => void }) {
     const t = useTranslations("Outages");
@@ -315,7 +315,7 @@ function CancelOutageForm({
                 pending={!controls.acts}
                 success={null}
                 submit={direct ? t("cancelOutage") : proposals("send")}
-                repeatable={repeatsWith(repeats, changeOf)}
+                attempt={attempt && { repeats: repeatsWith(attempt, changeOf) }}
                 onSubmit={(data) => onSubmit(changeOf(data))}
             >
                 {!direct && <ProposalReason />}
