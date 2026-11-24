@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 from django.utils.translation import gettext
@@ -7,6 +8,7 @@ from pyracast.accounts.models import Language
 from pyracast.api.serializers import InputSerializer
 from pyracast.connections.models import MAX_DAILY_QUOTA
 from pyracast.notifications.models import (
+    MAX_RECIPIENT_LIMIT,
     NotificationDeliveryError,
     NotificationDeliveryStatus,
     PreparedMessageKind,
@@ -14,7 +16,6 @@ from pyracast.notifications.models import (
     ReminderState,
 )
 from pyracast.notifications.operations import (
-    MAX_RECIPIENT_LIMIT,
     RECIPIENT_MAX_LENGTH,
     AddressChoice,
     MemberChoice,
@@ -34,6 +35,16 @@ from pyracast.notifications.overview import (
 from pyracast.notifications.recipients import recipient_key
 
 DISCLOSURE = r"^[0-9a-f]{64}$"
+
+
+class DisclosureField(serializers.RegexField):
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(DISCLOSURE, trim_whitespace=False, **kwargs)
+
+    def to_internal_value(self, data: Any) -> str:
+        if not isinstance(data, str) or re.fullmatch(DISCLOSURE, data) is None:
+            self.fail("invalid")
+        return data
 
 
 class AddressRoleInput(InputSerializer):
@@ -81,7 +92,7 @@ class ReminderInput(InputSerializer):
     member_roles = serializers.ListField(
         child=MemberRoleInput(), required=False, max_length=MAX_RECIPIENT_LIMIT
     )
-    disclosure = serializers.RegexField(DISCLOSURE, required=False)
+    disclosure = DisclosureField(required=False)
 
     def validate_recipients(self, value: list[str]) -> list[str]:
         for address in value:

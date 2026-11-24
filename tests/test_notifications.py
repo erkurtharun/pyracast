@@ -997,6 +997,9 @@ def test_notification_settings_database_constraints() -> None:
     with pytest.raises(IntegrityError), transaction.atomic():
         NotificationSettings.objects.filter(pk=1).update(max_recipients=0)
     with pytest.raises(IntegrityError), transaction.atomic():
+        NotificationSettings.objects.filter(pk=1).update(max_recipients=101)
+    NotificationSettings.objects.filter(pk=1).update(max_recipients=100)
+    with pytest.raises(IntegrityError), transaction.atomic():
         NotificationSettings.objects.create(pk=2)
 
 

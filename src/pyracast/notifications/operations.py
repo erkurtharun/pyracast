@@ -51,8 +51,6 @@ from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditAction, Region, RegionStatus, active_region
 
 RECIPIENT_MAX_LENGTH = 254
-# The largest per-plant recipient limit the console accepts (a smallint column).
-MAX_RECIPIENT_LIMIT = 32767
 
 
 def validate_recipient(address: str) -> None:

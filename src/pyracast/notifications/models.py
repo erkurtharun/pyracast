@@ -2,7 +2,7 @@ import uuid
 
 from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils.translation import gettext_lazy
 
@@ -12,12 +12,15 @@ from pyracast.db import TIME_ITEMS, choices_check, json_shape_check, lease_check
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.regions.models import Region
 
+# The recipients a mail server must accept for one message (RFC 5321, section 4.5.3.1.8).
+MAX_RECIPIENT_LIMIT = 100
+
 
 class NotificationSettings(models.Model):
     id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
     max_recipients = models.PositiveSmallIntegerField(
         default=5,
-        validators=[MinValueValidator(1)],
+        validators=[MinValueValidator(1), MaxValueValidator(MAX_RECIPIENT_LIMIT)],
         help_text=(
             "Global recipient limit per plant reminder schedule. Lowering it pauses reminders "
             "at plants exceeding the limit until their recipient lists are revised."
@@ -30,7 +33,8 @@ class NotificationSettings(models.Model):
         constraints = (
             models.CheckConstraint(condition=models.Q(pk=1), name="%(class)s_id_chk"),
             models.CheckConstraint(
-                condition=models.Q(max_recipients__gte=1), name="%(class)s_max_recipients_chk"
+                condition=models.Q(max_recipients__gte=1, max_recipients__lte=MAX_RECIPIENT_LIMIT),
+                name="%(class)s_max_recipients_chk",
             ),
         )
 

@@ -15,7 +15,7 @@ from django.test.utils import CaptureQueriesContext
 from pyracast.accounts.models import Membership, WorkspaceRole
 from pyracast.connections.models import ProviderAccount
 from pyracast.notifications.models import NotificationSettings, ReminderSchedule
-from pyracast.notifications.operations import MAX_RECIPIENT_LIMIT, configure_reminders
+from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.overview import plants_at_recipient_limit
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.models import Region
@@ -151,7 +151,7 @@ def test_the_administrator_reads_the_addresses() -> None:
     ("changes", "field"),
     [
         (
-            {"recipients": [f"r{index}@example.com" for index in range(MAX_RECIPIENT_LIMIT + 1)]},
+            {"recipients": [f"r{index}@example.com" for index in range(101)]},
             "recipients",
         ),
         ({"times": [f"{hour:02d}:00" for hour in range(11)]}, "times"),
@@ -170,15 +170,15 @@ def test_reminder_input_is_bounded(changes: dict[str, Any], field: str) -> None:
 
 def test_a_list_saved_under_a_higher_limit_can_be_paused_unchanged() -> None:
     system = approved()
-    NotificationSettings.objects.update_or_create(pk=1, defaults={"max_recipients": 150})
-    saved = [f"r{index}@example.com" for index in range(101)]
+    NotificationSettings.objects.update_or_create(pk=1, defaults={"max_recipients": 100})
+    saved = [f"r{index}@example.com" for index in range(100)]
     save(system, recipients=saved)
     NotificationSettings.objects.filter(pk=1).update(max_recipients=5)
 
     response = put(system, enabled=False, recipients=saved)
 
     assert response.status_code == 200
-    assert (response.json()["enabled"], response.json()["recipient_count"]) == (False, 101)
+    assert (response.json()["enabled"], response.json()["recipient_count"]) == (False, 100)
 
 
 def test_the_workspace_member_choice_is_required() -> None:
