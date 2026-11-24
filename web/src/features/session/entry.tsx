@@ -1,14 +1,18 @@
 "use client";
-import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { useApiList } from "@/lib/api/query";
 import { appQuery, routes } from "@/lib/routes";
 import { useSessionState } from "@/lib/session-client";
-import { RequireUser } from "./require-user";
 import { storedInvitation } from "@/features/workspace/workspace-invitation";
+import { chooseWorkspace } from "@/features/workspace/workspace-choice";
+import { LaunchCard } from "./app-root";
+import { RequireUser } from "./require-user";
 
 const consoleRoot = "/admin/";
-const unprintable = /\\|(?! )[\p{C}\p{Z}]/u;
+const unprintable = /\|(?! )[\p{C}\p{Z}]/u;
+
+type Target = { href: string; document?: boolean };
 
 // The server validates the return address too; this check keeps a crafted link on this
 // origin and inside the console after the browser has normalised it.
@@ -27,7 +31,7 @@ function consoleDestination(next: string | null) {
         : consoleRoot;
 }
 
-function destination(canAdmin: boolean) {
+function destination(canAdmin: boolean): Target | undefined {
     const { search } = window.location;
     const params = new URLSearchParams(search);
     // A signed-in browser completes every provider return on the account page.
@@ -39,7 +43,7 @@ function destination(canAdmin: boolean) {
             href: consoleDestination(params.get("next")),
             document: true,
         };
-    return { href: routes.workspaces() };
+    return undefined;
 }
 
 export function Entry() {
@@ -51,19 +55,38 @@ export function Entry() {
 }
 
 function EntryResolver() {
-    const t = useTranslations("Dashboard");
-    const router = useRouter();
     const canAdmin = Boolean(useSessionState().session?.user?.can_admin);
-    useEffect(() => {
-        const target = destination(canAdmin);
-        if ("document" in target) window.location.replace(target.href);
-        else router.replace(target.href);
-    }, [canAdmin, router]);
+    const target = destination(canAdmin);
+    return target ? <Navigate {...target} /> : <WorkspaceEntry />;
+}
+
+// The shell reads the same list under the same key, so it shows the workspace without reading again.
+function WorkspaceEntry() {
+    const tenants = useApiList("/api/tenants/", {});
+    if (!tenants.data)
+        return (
+            <LaunchCard
+                failure={
+                    tenants.error
+                        ? { error: tenants.error, retry: tenants.retry }
+                        : undefined
+                }
+            />
+        );
+    const tenant = chooseWorkspace(tenants.data.results);
     return (
-        <main className="auth-page">
-            <p role="status">
-                {canAdmin ? t("openingAdmin") : t("loadingWorkspaces")}
-            </p>
-        </main>
+        <Navigate
+            href={tenant ? routes.portfolio(tenant.id) : routes.workspaces()}
+        />
     );
+}
+
+// The router keeps this screen, the launch card, until the navigation commits.
+function Navigate({ href, document }: Target) {
+    const router = useRouter();
+    useEffect(() => {
+        if (document) window.location.replace(href);
+        else router.replace(href);
+    }, [document, href, router]);
+    return <LaunchCard />;
 }
