@@ -152,3 +152,46 @@ test("configuration scripts are linted as JavaScript modules", async () => {
         ),
     ).toEqual(["no-unused-vars"]);
 });
+
+test("a browser case cannot reach the real date past the shared clock", async () => {
+    const refused = async (source: string[]) => {
+        const [result] = await eslint.lintText(source.join("\n") + "\n", {
+            filePath: path.join(web, "tests/browser-workers.spec.ts"),
+        });
+        return result!.messages
+            .filter((message) => message.ruleId === "pyracast/browser-clock")
+            .map((message) => message.line);
+    };
+    expect(
+        await refused([
+            'import { test } from "@playwright/test";',
+            'test("probe", async ({ page }) => {',
+            '    await page.goto("/");',
+            "});",
+            'test.describe("group", () => {',
+            '    test("probe", async ({ context }) => {',
+            "        await context.newPage();",
+            "    });",
+            "});",
+            'test("node probe", () => {});',
+        ]),
+    ).toEqual([2, 6]);
+    expect(
+        await refused([
+            'import { test, instant } from "./support/test";',
+            'test("probe", async ({ page, browser }) => {',
+            "    await page.clock.install();",
+            "    await page.clock.install({});",
+            "    await page.clock.install({ time: instant });",
+            "    await page.clock.setFixedTime(Date.now());",
+            "    const today = new Date();",
+            "    const fixed = new Date(instant.getTime() + 1);",
+            "    await page.evaluate(() => Date.now() - new Date().getTime());",
+            "    await browser.newContext();",
+            "    await browser.newPage();",
+            "    await browser.newContext({ javaScriptEnabled: false });",
+            "    void today, fixed, performance.now();",
+            "});",
+        ]),
+    ).toEqual([3, 4, 6, 7, 10, 11]);
+});
