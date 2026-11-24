@@ -1516,8 +1516,9 @@ for (const cached of [true, false])
         page,
     }) => {
         let role: "admin" | "viewer" = cached ? "admin" : "viewer";
+        const count = cached ? 4 : 3;
         await page.clock.install();
-        await reminderApi(page, {
+        const { answerLater } = await reminderApi(page, {
             recipients: [OUTSIDE],
             members: TEAM,
             includeMembers: true,
@@ -1537,16 +1538,41 @@ for (const cached of [true, false])
             await page
                 .getByRole("button", { name: "Location", exact: true })
                 .click();
+            await expect(typedFields(page)).toHaveCount(0);
             role = "viewer";
             await tenantsAgain(page);
+            await expect(
+                line(page, "Member · changes require approval"),
+            ).toBeVisible();
+            await saveElsewhere(page, {
+                ...SAVED,
+                recipients: [OUTSIDE, THIRD],
+            });
             opened = reads.length;
-            await page
-                .getByRole("button", { name: "Email reminders", exact: true })
-                .click();
-        } else await openReminders(page);
-        await expect.poll(() => reads.length - opened).toBe(2);
-        await reads.at(-1)!.response();
-        await expect(line(page, COUNT_ONLY(3))).toBeVisible();
+            const stale = answerLater("GET");
+            try {
+                await page
+                    .getByRole("button", {
+                        name: "Email reminders",
+                        exact: true,
+                    })
+                    .click();
+                const held = await stale.request;
+                await expect.poll(() => reads.length - opened).toBe(2);
+                await reads.at(-1)!.response();
+                await expect(line(page, COUNT_ONLY(count))).toBeVisible();
+                const late = answerTo(page, held);
+                stale.release();
+                await late;
+            } finally {
+                stale.release();
+            }
+        } else {
+            await openReminders(page);
+            await expect.poll(() => reads.length).toBe(2);
+            await reads.at(-1)!.response();
+        }
+        await expect(line(page, COUNT_ONLY(count))).toBeVisible();
         const switched = nextRequest(
             page,
             (method, url) =>
@@ -1558,7 +1584,7 @@ for (const cached of [true, false])
         await (await read).response();
         await expect(
             page.getByText(
-                "En fazla 5 alıcıdan 3 alıcı. Adresleri bu uygulamada yalnızca çalışma alanı yöneticisi görür.",
+                `En fazla 5 alıcıdan ${count} alıcı. Adresleri bu uygulamada yalnızca çalışma alanı yöneticisi görür.`,
                 { exact: true },
             ),
         ).toBeVisible();
