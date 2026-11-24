@@ -30,8 +30,8 @@ import { Empty, Notice, RefreshFailed } from "@/ui/ui";
 import { WorkspaceAccess } from "@/ui/workspace-access";
 import { RecentDeletionProvider } from "@/features/trash/recent-deletion";
 import { InstallApp } from "./install-app";
+import { chooseWorkspace, rememberWorkspace } from "./workspace-choice";
 
-const rememberedKey = "pyracast.workspace";
 const Workspace = createContext<{
     tenant?: Tenant;
     user: SessionUser;
@@ -56,22 +56,6 @@ export function useOptionalWorkspace() {
 
 export function useNavigating() {
     return useWorkspaceContext().navigating;
-}
-
-function remembered() {
-    try {
-        return Number(window.localStorage.getItem(rememberedKey));
-    } catch {
-        return undefined;
-    }
-}
-
-function remember(tenant: number) {
-    try {
-        window.localStorage.setItem(rememberedKey, String(tenant));
-    } catch {
-        // Browser privacy settings can disable local storage.
-    }
 }
 
 function switchTarget(screen: Screen, tenant: Tenant) {
@@ -117,10 +101,10 @@ export function WorkspaceShell({
     const rows = tenants.data?.results ?? [];
     const tenant =
         tenantId === undefined
-            ? (rows.find((row) => row.id === remembered()) ?? rows[0])
+            ? chooseWorkspace(rows)
             : rows.find((row) => row.id === tenantId);
     useEffect(() => {
-        if (tenantId !== undefined && tenant) remember(tenant.id);
+        if (tenantId !== undefined && tenant) rememberWorkspace(tenant.id);
     }, [tenantId, tenant]);
     const canManage = tenant?.role === "admin";
     const inboxCount =
