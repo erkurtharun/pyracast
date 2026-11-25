@@ -1,49 +1,54 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect } from "react";
+import { confirmedSince } from "./api/writes";
 
-const dirty = new Set<object>();
+const entries = new Set<() => boolean>();
 // Set by the first question and never cleared: Next may have left a soft change suspended behind it.
 let asked = false;
 
+function holding() {
+    for (const holds of entries) if (holds()) return true;
+    return false;
+}
+
 function keep(event: BeforeUnloadEvent) {
+    if (!holding()) return;
     event.preventDefault();
     asked = true;
 }
 
 export function reloadGuardedTraversal(event: PopStateEvent) {
-    if (!dirty.size && !asked) return;
+    if (!holding() && !asked) return;
     event.stopImmediatePropagation();
     location.reload();
 }
 
 function listen() {
-    if (dirty.size) window.addEventListener("beforeunload", keep);
+    if (entries.size) window.addEventListener("beforeunload", keep);
     else window.removeEventListener("beforeunload", keep);
 }
 
-function register(entry: object) {
-    dirty.add(entry);
+function register(holds: () => boolean) {
+    entries.add(holds);
     listen();
-}
-
-function release(entry: object) {
-    dirty.delete(entry);
-    listen();
+    return () => {
+        entries.delete(holds);
+        listen();
+    };
 }
 
 export function useLeaveGuard(unsaved: boolean) {
-    const entry = useRef<object | null>(null);
     useEffect(() => {
-        if (!unsaved) return;
-        const own = {};
-        entry.current = own;
-        register(own);
-        return () => release(own);
+        if (unsaved) return register(() => true);
     }, [unsaved]);
-    return useCallback(() => {
-        if (entry.current) release(entry.current);
-    }, []);
+}
+
+// Holds until a write started after `since` is confirmed; after a refused or lost answer, until `since` is null.
+export function useSubmissionGuard(since: number | null) {
+    useEffect(() => {
+        if (since !== null) return register(() => !confirmedSince(since));
+    }, [since]);
 }
 
 type Mode = "push" | "replace";
@@ -52,7 +57,7 @@ export function useNavigate() {
     const router = useRouter();
     return useCallback(
         (href: string, mode: Mode = "push") => {
-            if (dirty.size || asked) {
+            if (holding() || asked) {
                 if (mode === "push") location.assign(href);
                 else location.replace(href);
                 return false;
