@@ -48,6 +48,22 @@ function schedule(overrides: Partial<Schedule>): Schedule {
     };
 }
 
+type Job = Schedule["recent_jobs"][number];
+
+function job(overrides: Partial<Job>): Job {
+    return {
+        id: 1,
+        endpoint: "forecasts",
+        status: "retry",
+        scheduled_for: "2026-01-01T13:00:00Z",
+        available_at: "2026-01-01T15:00:00Z",
+        retry_until: null,
+        attempts: 1,
+        last_error: "provider_throttled",
+        ...overrides,
+    };
+}
+
 async function openCollection(
     page: Page,
     language: Language,
@@ -96,22 +112,54 @@ async function openCollection(
     });
 }
 
-test("a collecting plant shows its state, next collection and requests of the day", async ({
-    page,
-}) => {
-    const status = await openCollection(page, "en", schedule({}));
+const collecting = {
+    en: {
+        state: "Updating automatically",
+        next: "Next planned update",
+        time: "Jan 2, 2026, 12:00 AM",
+        absent: [
+            "Forecast data requests today (UTC)",
+            "Recent update jobs",
+            "Update details",
+            /is updated daily at/,
+            /· 1 attempt/,
+        ],
+    },
+    tr: {
+        state: "Otomatik güncelleniyor",
+        next: "Planlanan sonraki güncelleme",
+        time: "2 Oca 2026 00:00",
+        absent: [
+            "Bugünkü tahmin verisi istekleri (UTC)",
+            "Son güncelleme işleri",
+            "Güncelleme ayrıntıları",
+            /her gün .* saatinde güncellenir/,
+            /· 1 deneme/,
+        ],
+    },
+};
 
-    await expect(
-        status.getByText("Updating automatically", { exact: true }),
-    ).toBeVisible();
-    await expect(
-        status.getByText("Next planned update").locator(".."),
-    ).toContainText("Jan 2, 2026, 12:00 AM");
-    await expect(
-        status.getByText("Forecast data requests today (UTC)").locator(".."),
-    ).toContainText("2");
-    await expect(status.getByRole("status")).toHaveCount(0);
-});
+for (const language of ["en", "tr"] as const)
+    test(`a collecting plant shows its state and next planned update without request counts, job log or daily satellite line (${language})`, async ({
+        page,
+    }) => {
+        const status = await openCollection(
+            page,
+            language,
+            schedule({ recent_jobs: [job({})] }),
+        );
+        const names = collecting[language];
+
+        await expect(
+            status.getByText(names.state, { exact: true }),
+        ).toBeVisible();
+        await expect(status.getByText(names.next).locator("..")).toContainText(
+            names.time,
+        );
+        await expect(status.getByRole("status")).toHaveCount(0);
+        for (const text of names.absent)
+            await expect(page.getByText(text)).toHaveCount(0);
+    });
 
 const lastUpdate = {
     en: {
@@ -190,9 +238,9 @@ const inactive = [
         language: "tr",
         state: "provider_attention",
         reason: "provider_unavailable",
-        label: "Gecikiyor",
-        sentence: "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek.",
-        next: "2 Oca 2026",
+        label: "Güncellenmiyor",
+        sentence: "Tahminler şu anda güncellenmiyor.",
+        next: null,
     },
     {
         language: "en",
@@ -211,15 +259,6 @@ const inactive = [
         sentence:
             "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: info@pyracast.app",
         next: "Planlanmadı",
-    },
-    {
-        language: "en",
-        state: "collecting",
-        reason: "quota_too_low",
-        label: "Updating automatically",
-        sentence:
-            "This plant has no forecast update times. Write to Pyracast: info@pyracast.app",
-        next: "Jan 2, 2026, 12:00 AM",
     },
 ] as const;
 
@@ -244,15 +283,50 @@ for (const item of inactive)
             status.getByText(item.label, { exact: true }),
         ).toBeVisible();
         await expect(status.getByRole("status")).toHaveText(item.sentence);
+        const next = status.getByText(collecting[item.language].next);
+        if (item.next === null) {
+            await expect(next).toHaveCount(0);
+            await expect(
+                status.getByText(collecting[item.language].time),
+            ).toHaveCount(0);
+            return;
+        }
+        await expect(next.locator("..")).toContainText(item.next);
+    });
+
+const quota = {
+    en: {
+        time: "Update time 1",
+        sentence:
+            "No new forecast data is arriving for this plant. Write to Pyracast: info@pyracast.app",
+    },
+    tr: {
+        time: "Güncelleme saati 1",
+        sentence:
+            "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: info@pyracast.app",
+    },
+};
+
+for (const language of ["en", "tr"] as const)
+    test(`a plant whose quota allows no forecast update keeps its saved times and says no new forecast data is arriving (${language})`, async ({
+        page,
+    }) => {
+        const status = await openCollection(
+            page,
+            language,
+            schedule({
+                inactive_reason: "quota_too_low",
+                times: ["16:00"],
+                max_forecast_times: 0,
+            }),
+        );
+
         await expect(
-            status
-                .getByText(
-                    item.language === "tr"
-                        ? "Planlanan sonraki güncelleme"
-                        : "Next planned update",
-                )
-                .locator(".."),
-        ).toContainText(item.next);
+            page.getByLabel(quota[language].time, { exact: true }),
+        ).toHaveValue("16:00");
+        await expect(status.getByRole("status")).toHaveText(
+            quota[language].sentence,
+        );
     });
 
 const plantStates = [
@@ -328,37 +402,26 @@ for (const item of plantStates)
         ).toHaveCount(item.resubmit ? 1 : 0);
     });
 
-type Job = Schedule["recent_jobs"][number];
-
-function job(overrides: Partial<Job>): Job {
-    return {
-        id: 1,
-        endpoint: "forecasts",
-        status: "retry",
-        scheduled_for: "2026-01-01T13:00:00Z",
-        available_at: "2026-01-01T15:00:00Z",
-        retry_until: null,
-        attempts: 1,
-        last_error: "provider_throttled",
-        ...overrides,
-    };
-}
-
-for (const [cause, last, label, sentence] of [
+for (const [cause, jobs] of [
     [
         "a timed pause",
-        job({ status: "retry", last_error: "provider_allowance_exhausted" }),
-        "Delayed",
-        "Forecast update delayed. Pyracast will try again.",
+        [job({ status: "retry", last_error: "provider_allowance_exhausted" })],
     ],
     [
-        "a rejected connection",
-        job({ status: "failed", last_error: "provider_authentication_failed" }),
-        "Not updating",
-        "No new forecast data is arriving for this plant. Write to Pyracast: info@pyracast.app",
+        "a rejected key",
+        [
+            job({
+                status: "failed",
+                last_error: "provider_authentication_failed",
+            }),
+        ],
+    ],
+    [
+        "no failed update of this plant",
+        [job({ status: "succeeded", last_error: "" })],
     ],
 ] as const)
-    test(`a plant whose updates wait after ${cause} says what happens next`, async ({
+    test(`a plant whose provider account refuses requests says only that forecasts are not updated and shows no planned update: ${cause}`, async ({
         page,
     }) => {
         const status = await openCollection(
@@ -367,50 +430,16 @@ for (const [cause, last, label, sentence] of [
             schedule({
                 state: "provider_attention",
                 inactive_reason: "provider_unavailable",
-                recent_jobs: [last],
+                recent_jobs: [...jobs],
             }),
         );
 
-        await expect(status.getByText(label, { exact: true })).toBeVisible();
-        await expect(status.getByRole("status")).toHaveText(sentence);
-    });
-
-for (const [status, error, shown] of [
-    ["failed", "publication_failure", "Forecast update failed."],
-    ["stale", "history_budget_reserved", null],
-    [
-        "retry",
-        "publication_failure",
-        "Forecast update delayed. Pyracast will try again.",
-    ],
-] as const)
-    test(`an update log row promises another attempt only while one is planned: ${status} after ${error}`, async ({
-        page,
-    }) => {
-        await openCollection(
-            page,
-            "en",
-            schedule({
-                recent_jobs: [
-                    job({
-                        endpoint:
-                            status === "stale"
-                                ? "estimated_actuals"
-                                : "forecasts",
-                        status,
-                        last_error: error,
-                    }),
-                ],
-            }),
+        await expect(
+            status.getByText("Not updating", { exact: true }),
+        ).toBeVisible();
+        await expect(status.getByRole("status")).toHaveText(
+            "Forecasts are not being updated right now.",
         );
-        await page.getByText("Recent update jobs", { exact: true }).click();
-        const row = page
-            .locator("details.panel")
-            .filter({ hasText: "Recent update jobs" })
-            .locator("li");
-        await expect(row).toHaveCount(1);
-        if (shown) await expect(row).toContainText(` · ${shown}`);
-        else await expect(row).toHaveText(/ · 1 attempt$/);
-        if (status !== "retry")
-            await expect(row).not.toContainText("Pyracast will try again");
+        await expect(status.getByText("Next planned update")).toHaveCount(0);
+        await expect(status.getByText("Jan 2, 2026, 12:00 AM")).toHaveCount(0);
     });
