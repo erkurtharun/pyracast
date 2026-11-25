@@ -898,35 +898,7 @@ test("region collection schedule validates and saves distinct local times", asyn
         history_retry_minutes: 30,
         max_forecast_times: 9,
         effective_from: "2026-01-01T00:00:00Z",
-        recent_jobs: [
-            {
-                id: 1,
-                endpoint: "forecasts",
-                status: "failed",
-                scheduled_for: "2026-01-01T07:00:00Z",
-                available_at: "2026-01-01T07:00:00Z",
-                attempts: 1,
-                last_error: "provider_failure",
-            },
-            {
-                id: 2,
-                endpoint: "estimated_actuals",
-                status: "succeeded",
-                scheduled_for: "2026-01-01T07:00:00Z",
-                available_at: "2026-01-01T07:00:00Z",
-                attempts: 2,
-                last_error: "quota_exhausted",
-            },
-            {
-                id: 3,
-                endpoint: "estimated_actuals",
-                status: "succeeded",
-                scheduled_for: "2026-01-01T00:00:00Z",
-                available_at: "2026-01-01T00:00:00Z",
-                attempts: 1,
-                last_error: "history_incomplete",
-            },
-        ],
+        recent_jobs: [],
     };
     await page.route("**/collection-schedule/", async (route) => {
         if (route.request().method() === "PUT") {
@@ -949,35 +921,13 @@ test("region collection schedule validates and saves distinct local times", asyn
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Forecast update times" }).click();
     await expect(
-        page.getByText(
-            "Production calculated from satellite data is updated daily at 03:00. Turning off automatic updates stops it too.",
-        ),
-    ).toBeVisible();
-    await expect(page.getByText(/in plant time/)).toHaveCount(0);
-    expect(reads).toBe(1);
-    await page.getByText("Update details", { exact: true }).click();
-    await expect(
-        page.getByText(
-            /Retries for production calculated from satellite data keep enough requests/,
-        ),
-    ).toBeVisible();
-    await expect(
         page.getByText("Last update", { exact: true }).locator(".."),
     ).toContainText("Not yet");
     await expect(
         page.getByText("Next planned update").locator(".."),
     ).toContainText("Jan 1, 2026, 10:00 AM");
-    await page.getByText("Recent update jobs", { exact: true }).click();
-    await expect(page.getByText(/Forecast update failed\./)).toBeVisible();
-    await expect(
-        page.getByText(/Production calculated from satellite data · Done/),
-    ).toBeVisible();
-    await expect(
-        page.getByText(
-            /Production calculated from satellite data · Partly updated/,
-        ),
-    ).toBeVisible();
-    await expect(page.getByText(/Forecast update delayed/)).toHaveCount(0);
+    await expect(page.getByText(/in plant time/)).toHaveCount(0);
+    expect(reads).toBe(1);
     for (const accountDetail of [
         "Requests used",
         "Usage details",

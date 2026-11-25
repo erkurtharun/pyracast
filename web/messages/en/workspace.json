@@ -289,21 +289,14 @@
         "enableDataCollection": "Update forecasts automatically",
         "remove": "Remove",
         "addTime": "Add time",
-        "collectionDetails": "Update details",
         "collectionStatus": "Update status",
         "lastSuccess": "Last update",
         "nextCollection": "Next planned update",
         "notYet": "Not yet",
         "notScheduled": "Not planned",
-        "recentCollectionJobs": "Recent update jobs",
-        "partiallyCollected": "Partly updated",
         "collectionTimes": "Update times",
         "collectionTime": "Update time {index, number}",
-        "removeTime": "Remove update time {index, number}",
-        "dailyHistory": "Production calculated from satellite data is updated daily at {time}. Turning off automatic updates stops it too.",
-        "jobSummary": "{endpoint} · {status} · {time} · {attempts, plural, one {# attempt} other {# attempts}}",
-        "historyHelp": "Retries for production calculated from satellite data keep enough requests for the planned forecast updates. Checks and retries can use more requests. The forecast email requests no new data. Production calculated from satellite data is not metered; EPİAŞ production is kept separately.",
-        "requestsToday": "Forecast data requests today (UTC)"
+        "removeTime": "Remove update time {index, number}"
     },
     "RecycleBin": {
         "deletePlant": "Delete plant",
