@@ -19,7 +19,7 @@ async function requestReset(page: Page, email: string) {
     await page.getByRole("button", { name: "Send email code" }).click();
     await expect(
         page.getByText(
-            `If an account uses ${email}, we sent a code to it. Enter the code and choose a new password.`,
+            `If an account uses ${email}, an email code was sent to it. Enter the code and choose a new password.`,
             { exact: true },
         ),
     ).toBeVisible();
@@ -69,9 +69,7 @@ test("a new company signs up and verifies its email, leaves and loses a password
         page.getByRole("heading", { name: "Verify your email" }),
     ).toBeVisible();
     await expect(
-        page.getByText(
-            `We sent a code to ${email}. Enter it here to confirm the address.`,
-        ),
+        page.getByText(`Enter the email code sent to ${email}.`),
     ).toBeVisible();
     await page
         .getByLabel("Email code")
