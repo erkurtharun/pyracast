@@ -1,4 +1,5 @@
 import json
+import re
 from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -9,8 +10,10 @@ import pytest
 from deploy import check_image_scans
 from deploy.check_image_scans import SERVICES, ScanException, load_exceptions, review_findings
 from deploy.check_image_scans import check_image_scans as check
+from tests.support.workflows import ci_jobs, step, step_index
 
 ROOT = Path(__file__).resolve().parents[1]
+FIXED_LIBZSTD1 = "1.5.7+dfsg-1+deb13u1"
 TODAY = date(2026, 11, 21)
 FINDING = {
     "VulnerabilityID": "CVE-2026-116587",
@@ -106,6 +109,48 @@ def test_trivy_hides_no_finding_and_the_checker_reads_exceptions_from_the_mounte
     assert not (ROOT / ".trivyignore").exists()
     assert '-v "$root/deploy:/source/deploy:ro"' in script
     assert check_image_scans.EXCEPTIONS.resolve() == ROOT / "deploy" / "image-scan-exceptions.json"
+
+
+@pytest.mark.parametrize(
+    ("dockerfile", "stage"), [("Dockerfile", "runtime-python"), ("web/Dockerfile", "runtime-node")]
+)
+def test_the_runtime_image_lays_debians_fixed_libzstd1_over_the_base(
+    dockerfile: str, stage: str
+) -> None:
+    text = (ROOT / dockerfile).read_text(encoding="utf-8")
+    (body,) = re.findall(rf"^FROM \S+ AS {stage}\n(.*?)(?=^FROM |\Z)", text, re.M | re.S)
+    commands = [
+        "apt-get upgrade",
+        "zstd_version=$(dpkg-query --show --showformat='${Version}' libzstd1)",
+        f'if dpkg --compare-versions "$zstd_version" lt {FIXED_LIBZSTD1}; then',
+        "exit 1; fi",
+        'apt-get download "libzstd1=$zstd_version"',
+        "dpkg-deb --extract libzstd1_*_amd64.deb /runtime",
+        "dpkg-deb --info libzstd1_*_amd64.deb md5sums"
+        " > /runtime/var/lib/dpkg/status.d/libzstd1.md5sums",
+        "dpkg-query --status libzstd1 > /runtime/var/lib/dpkg/status.d/libzstd1",
+    ]
+    positions = [body.index(command) for command in commands]
+
+    assert body.count("RUN ") == 1
+    assert positions == sorted(positions)
+    assert f"COPY --from={stage} /runtime/ /" in text
+
+
+def test_ci_reads_the_fixed_libzstd1_from_the_built_backend_and_web_images_before_the_scan() -> (
+    None
+):
+    deployment = ci_jobs()["deployment"]
+    read = step(deployment, "Read Debian's fixed libzstd1 from the backend and web images")
+    position = deployment["steps"].index(read)
+
+    assert "for image in pyracast-backend:ci pyracast-web:ci; do" in read["run"]
+    assert f'dpkg --compare-versions "$version" ge {FIXED_LIBZSTD1}' in read["run"]
+    assert 'sha256sum "$files/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.7"' in read["run"]
+    assert '"${digests[0]}" == "${digests[1]}"' in read["run"]
+    assert "'libzstd.so.1 libzstd.so.1.5.7'" in read["run"]
+    assert step_index(deployment, "deploy/oci-images.sh load") < position
+    assert position < step_index(deployment, "deploy/scan-images.sh")
 
 
 def test_complete_clean_reports_have_no_findings(reports: Path) -> None:
