@@ -810,6 +810,12 @@ for (const [name, target] of Object.entries(targets))
         const server = await serveDirectProduction(page, answers(), [
             { pending_request_id: 7 },
         ]);
+        await page.route("**/change-requests/7/", (route) =>
+            route.fulfill({
+                status: 404,
+                json: errorBody("not_found", "Not found."),
+            }),
+        );
         await openPlant(page, "Production");
         await editValue(page, "0,5");
         const url = page.url();
