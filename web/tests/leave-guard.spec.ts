@@ -153,7 +153,7 @@ test("a changed plant settings form asks until it is saved", async ({
     await page.getByLabel("Plant name").fill("New name");
     expect(await asks(page)).toBe(true);
     await page.getByRole("button", { name: "Save technical details" }).click();
-    await expect(page.getByText("Saved successfully.")).toBeVisible();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
     expect(await asks(page)).toBe(false);
 });
 
@@ -261,7 +261,7 @@ test("an outage form asks until it is closed, and a resolution time until it is 
     await page.getByLabel("End", { exact: true }).fill("2026-11-10T13:00");
     expect(await asks(page)).toBe(true);
     await page.getByRole("button", { name: "End outage" }).click();
-    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
+    await expect(page.getByText("Ended", { exact: true })).toBeVisible();
     expect(await asks(page)).toBe(false);
 });
 
@@ -286,7 +286,7 @@ test("a form whose submission is running asks until it is answered", async ({
     ).toBeVisible();
     expect(await asks(page)).toBe(true);
     release();
-    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
+    await expect(page.getByText("Ended", { exact: true })).toBeVisible();
     expect(await asks(page)).toBe(false);
 });
 
@@ -333,8 +333,8 @@ test("a resolution whose save was answered while its follow-up reads run asks no
     await page.getByLabel("End", { exact: true }).fill("2026-11-10T13:00");
     await markDocument(page);
     reads.hold();
-    await page.getByRole("button", { name: "End outage" }).click();
-    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "End outage", exact: true }).click();
+    await expect(page.getByText("Ended", { exact: true })).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Saving…", exact: true }),
     ).toBeVisible();
@@ -387,7 +387,7 @@ test("a resolution whose save is unanswered loads another plant tab as a documen
     await openPlant(page, "Outages");
     await page.getByRole("button", { name: "End outage", exact: true }).click();
     await page.getByLabel("End", { exact: true }).fill("2026-11-10T13:00");
-    await page.getByRole("button", { name: "End outage" }).click();
+    await page.getByRole("button", { name: "End outage", exact: true }).click();
     await expect(
         page.getByRole("button", { name: "Saving…", exact: true }),
     ).toBeVisible();
@@ -395,7 +395,7 @@ test("a resolution whose save is unanswered loads another plant tab as a documen
         page.getByRole("button", { name: "Forecast", exact: true }).click(),
     );
     release();
-    await expect(page.getByText("Change not confirmed")).toBeVisible();
+    await expect(page.getByText("Outcome unknown")).toBeVisible();
     expect(await asks(page)).toBe(true);
 });
 
@@ -461,7 +461,7 @@ test("swapped collection times save nothing and ask no more once saved", async (
     await page.getByLabel("Update time 2", { exact: true }).fill("09:00");
     expect(await asks(page)).toBe(true);
     await page.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByText("Saved successfully.")).toBeVisible();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
     expect(await asks(page)).toBe(false);
     expect(puts).toBe(0);
 });
@@ -494,7 +494,7 @@ test("a saved schedule whose next read is held asks nothing, and saving it again
         exact: true,
     });
     await save.click();
-    const confirmed = page.getByText("Saved successfully.");
+    const confirmed = page.getByText("Saved.", { exact: true });
     await expect(confirmed).toBeVisible();
     expect(await asks(page)).toBe(false);
     const time = page.getByLabel("Update time 1", { exact: true });
@@ -564,7 +564,7 @@ test("the plant wizard asks while it holds entered figures across its steps unti
 }) => {
     await mockApi(page);
     await page.goto("/app/");
-    await page.getByRole("button", { name: "Add a plant" }).click();
+    await page.getByRole("button", { name: "Add plant", exact: true }).click();
     expect(await asks(page)).toBe(false);
     await page.getByLabel("Plant name", { exact: true }).fill("West plant");
     await page.getByLabel("Latitude (°)").fill("37");
@@ -600,7 +600,7 @@ test("a plant the wizard created opens in the page without a question", async ({
     await mockApi(page, { empty: true });
     const sites = await holdSites(page);
     await page.goto("/app/");
-    await page.getByRole("button", { name: "Add a plant" }).click();
+    await page.getByRole("button", { name: "Add plant", exact: true }).click();
     await page.getByLabel("Plant name", { exact: true }).fill("West plant");
     await page.getByLabel("Latitude (°)").fill("37");
     await page.getByLabel("Longitude (°)").fill("31");
@@ -664,7 +664,7 @@ test("a plant the wizard restored opens in the page without a question", async (
     });
     const sites = await holdSites(page);
     await page.goto("/app/");
-    await page.getByRole("button", { name: "Add a plant" }).click();
+    await page.getByRole("button", { name: "Add plant", exact: true }).click();
     await page.getByLabel("Plant name", { exact: true }).fill("Again");
     await page.getByLabel("Latitude (°)").fill(String(region.latitude));
     await page.getByLabel("Longitude (°)").fill(String(region.longitude));
@@ -805,9 +805,7 @@ test("an unchanged Remove correction asks while it runs and while its answer is 
     expect(await asks(page)).toBe(true);
     holding = false;
     release();
-    await expect(editor.getByRole("alert")).toContainText(
-        "Change not confirmed",
-    );
+    await expect(editor.getByRole("alert")).toContainText("Outcome unknown");
     expect(await asks(page)).toBe(true);
     await revert.click();
     await expect(editor).toHaveCount(0);
@@ -826,11 +824,11 @@ test("a staged proposal asks until it is discarded", async ({ page }) => {
     const editor = page.locator(".production-row-editor");
     await editor.getByRole("textbox").first().fill("0,5");
     await editor
-        .getByRole("button", { name: "Add to request", exact: true })
+        .getByRole("button", { name: "Add to change request", exact: true })
         .click();
     expect(await asks(page)).toBe(true);
     await page
-        .getByRole("button", { name: "Discard request", exact: true })
+        .getByRole("button", { name: "Discard change request", exact: true })
         .click();
     expect(await asks(page)).toBe(false);
 });
@@ -1213,7 +1211,7 @@ async function stageEight(page: Page) {
     const editor = page.locator(".production-row-editor");
     await editor.getByRole("textbox").first().fill("0,5");
     await editor
-        .getByRole("button", { name: "Add to request", exact: true })
+        .getByRole("button", { name: "Add to change request", exact: true })
         .click();
 }
 
@@ -1232,7 +1230,7 @@ for (const staged of [true, false])
         if (staged) await stageEight(page);
         await changeConfiguration();
         await expect(
-            page.getByRole("region", { name: "Correction request" }),
+            page.getByRole("region", { name: "Change request" }),
         ).toHaveCount(0);
         await expect(suggest).toBeEnabled();
         await expect(page.getByText(discardedNotice)).toHaveCount(
@@ -1279,7 +1277,7 @@ for (const typed of [false, true])
             .getByRole("button", { name: /^Remove correction for 08:00/ })
             .click();
         await expect(editor.getByRole("alert")).toContainText(
-            "Change not confirmed",
+            "Outcome unknown",
         );
         if (typed) await editorValue(page).fill("0,6");
         await changeConfiguration();

@@ -259,7 +259,6 @@ export function Outages({
                     <Notice>{unavailable}</Notice>
                 )}
             </div>
-            {!direct && <p className="fine">{proposals("approvalHelp")}</p>}
             {editing && (
                 <OutageEditor
                     key={editing.kind === "create" ? "new" : editing.outage.id}

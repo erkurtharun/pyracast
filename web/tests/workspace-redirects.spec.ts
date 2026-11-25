@@ -64,7 +64,7 @@ test("a click on Inbox while a role change withdraws the members page opens the 
     role = "viewer";
     await page.clock.runFor(120_001);
     await expect(
-        page.getByText("Member · changes require approval", { exact: true }),
+        page.locator(".workspace-readonly", { hasText: /^Member$/ }),
     ).toBeVisible();
     releaseInbox();
     await expect(page).toHaveURL("/app/w/1/inbox/");

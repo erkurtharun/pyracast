@@ -29,7 +29,7 @@ const UNKNOWN = "It is not known whether it was saved.";
 const KEPT = (text: string) => `${text} Your edits are kept.`;
 const LOST =
     "Could not be saved. You are no longer the workspace administrator.";
-const SAVED_LINE = "Saved successfully.";
+const SAVED_LINE = "Saved.";
 const LOADING = "Loading forecast email settings…";
 const UNAVAILABLE = "The service is unavailable.";
 const NO_ADDRESS_SHOWN = "No address will appear in To or Cc.";
@@ -1551,7 +1551,7 @@ for (const cached of [true, false])
             role = "viewer";
             await tenantsAgain(page);
             await expect(
-                line(page, "Member · changes require approval"),
+                page.locator(".workspace-readonly", { hasText: /^Member$/ }),
             ).toBeVisible();
             await saveElsewhere(page, {
                 ...SAVED,
@@ -2608,7 +2608,11 @@ test("the forecast email history shows its columns, the data time of a stale lat
     const late = history.locator("tbody tr").first();
     const data = late.locator("td:nth-child(4)");
     await expect(data).toContainText("Jan 1, 2026, 9:30 AM");
-    await expect(data.getByText("Stale", { exact: true })).toBeVisible();
+    await expect(
+        data.getByText("Newer forecast data was not available.", {
+            exact: true,
+        }),
+    ).toBeVisible();
     await expect(late.locator("td:nth-child(6)")).toHaveText("—");
     await expect(history).not.toContainText("Late delivery");
     await expect(history).not.toContainText("1h 30m");

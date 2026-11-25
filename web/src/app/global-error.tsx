@@ -22,10 +22,8 @@ export default function GlobalError({
                 <main className="auth-page">
                     <section className="panel narrow">
                         <h1>{en.AppError.title}</h1>
-                        <p>{en.AppError.description}</p>
                         <p lang="tr">
-                            <strong>{tr.AppError.title}.</strong>{" "}
-                            {tr.AppError.description}
+                            <strong>{tr.AppError.title}</strong>
                         </p>
                         <button
                             className="button"

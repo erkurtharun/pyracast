@@ -208,7 +208,7 @@ const selectionChanges = [
         kind: "an activation",
         before: "candidate",
         after: "active",
-        tag: "Active",
+        tag: "In use",
         exports: 2,
         endpoint: "**/plants/21/calibrations/40/activate/",
         act: (page: Page) => activate(page, 40),
@@ -217,7 +217,7 @@ const selectionChanges = [
         kind: "a reset",
         before: "active",
         after: "candidate",
-        tag: "Candidate",
+        tag: "Calculated",
         exports: 1,
         endpoint: "**/plants/21/calibration/reset/",
         act: async (page: Page) => {
@@ -374,7 +374,7 @@ test("the calibration exports wait for the runs reloaded after a request", async
     holding = false;
     release();
     await expect(page.getByRole("row", { name: /#41/ })).toContainText(
-        "Waiting",
+        "Queued",
     );
     const download = page.waitForEvent("download");
     await page
@@ -415,16 +415,19 @@ test("after a reset the opened run shows and exports its reloaded selection", as
         .getByRole("button", { name: "View details" })
         .click();
     const detail = page.locator(".calibration-detail");
-    await expect(detail.locator(".tags")).toContainText("Active");
+    await expect(detail.locator(".tags")).toContainText("In use");
     await page.getByRole("button", { name: "Reset to baseline" }).click();
     await page.getByRole("button", { name: "Reset to baseline" }).click();
-    await expect(page.getByRole("row", { name: /#40/ })).toContainText(
-        "Candidate",
-    );
-    await expect(detail.locator(".tags")).toContainText("Candidate");
+    await expect(
+        page.getByRole("row", { name: /#40/ }).getByRole("cell").nth(3),
+    ).toHaveText("Calculated");
+    await expect(detail.locator(".tags > *")).toHaveText([
+        "Calculated",
+        "Calculated",
+    ]);
     await expect(
         detail.getByText(
-            "This calibration cannot be activated: active calibration changed.",
+            "This calibration cannot be activated: the calibration in use changed.",
         ),
     ).toBeVisible();
     const download = page.waitForEvent("download");
@@ -590,7 +593,7 @@ test("superseded runs are labelled in Turkish", async ({ page, baseURL }) => {
         .getByRole("button", { name: "Kalibrasyon", exact: true })
         .click();
     const row = page.getByRole("row", { name: /#40/ });
-    await expect(row).toContainText("Yerini yenisi aldı");
+    await expect(row).toContainText("Eskidi");
     await expect(row).not.toContainText("superseded");
 });
 
@@ -672,7 +675,7 @@ test("a release in progress leaves an activation unconfirmed instead of refused"
     await activate(page, 40);
     await expect(
         page.getByText(
-            "The server did not confirm the change. It may have been saved; check before you send it again.",
+            "It is not known whether it was saved. Check before you send it again.",
             { exact: true },
         ),
     ).toBeVisible();
@@ -838,10 +841,10 @@ test("an older automation response cannot undo an enabled setting", async ({
 });
 
 const states = [
-    ["active", { tag: "Active", review: false }],
-    ["candidate", { tag: "Candidate", review: true }],
-    ["previous_configuration", { tag: "Earlier configuration", review: false }],
-    ["not_ready", { tag: "Not ready", review: false }],
+    ["active", { tag: "In use", review: false }],
+    ["candidate", { tag: "Calculated", review: true }],
+    ["previous_configuration", { tag: "Outdated", review: false }],
+    ["not_ready", { tag: "Not usable", review: false }],
 ] as const;
 
 for (const [state, expected] of states)
@@ -931,23 +934,23 @@ test("the calibration in force names its run, time and who selected it", async (
 const blockers = [
     [
         "configuration_changed",
-        "configuration changed. It was made for another plant configuration",
+        "the technical details changed. It was made for another plant configuration",
     ],
     [
         "production_source_changed",
-        "production source changed. The production source changed after it was trained.",
+        "the actual production changed. The production source changed after it was trained.",
     ],
     [
         "outage_history_changed",
-        "outage history changed. The outage history inside its window changed after it was trained.",
+        "the outages changed. The outage history inside its window changed after it was trained.",
     ],
     [
         "incumbent_changed",
-        "active calibration changed. The active calibration changed after it was compared.",
+        "the calibration in use changed. The active calibration changed after it was compared.",
     ],
     [
         "calibration_not_activatable",
-        "not activatable. It did not finish with a held-out evaluation that allows activation.",
+        "it cannot be used. It did not finish with a held-out evaluation that allows activation.",
     ],
 ] as const;
 

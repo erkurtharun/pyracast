@@ -925,13 +925,13 @@ export async function reviewRequest(
         en: {
             inbox: "Inbox",
             details: "Review details",
-            approve: "Approve and apply",
+            approve: "Approve",
             refresh: "Refresh details",
         },
         tr: {
             inbox: "Gelen kutusu",
             details: "Ayrıntıları incele",
-            approve: "Onayla ve uygula",
+            approve: "Onayla",
             refresh: "Ayrıntıları yenile",
         },
     }[language];
@@ -999,7 +999,10 @@ export async function reviewRequest(
         .getByRole("button", { name: labels.details, exact: true })
         .click();
     const detail = page.locator(".inbox-detail");
-    const approve = detail.getByRole("button", { name: labels.approve });
+    const approve = detail.getByRole("button", {
+        name: labels.approve,
+        exact: true,
+    });
     // A case's own route on the detail must not catch the detail's first read.
     await expect(approve).toBeEnabled();
     return {

@@ -185,7 +185,7 @@ test("failed public language selection offers a retry in the session language be
     });
     await page.goto("/app/?language=tr&signup=1");
     await expect(page.getByRole("main").getByRole("alert")).toHaveText(
-        "Language could not be saved. Please try again.",
+        "The language could not be saved. Try again.",
     );
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
@@ -222,7 +222,7 @@ test("focus reads wait while the language hand-off is pending or failed", async 
     await focus();
     release();
     await expect(page.getByRole("main").getByRole("alert")).toHaveText(
-        "Language could not be saved. Please try again.",
+        "The language could not be saved. Try again.",
     );
     await focus();
     await page.getByRole("button", { name: "Try again" }).click();
@@ -324,13 +324,30 @@ test("a failed save keeps the current language and offers an accessible error", 
     await page.goto("/app/");
     await page.getByLabel("Language", { exact: true }).selectOption("tr");
     await expect(page.getByRole("main").getByRole("alert")).toHaveText(
-        "Language could not be saved. Please try again.",
+        "The language could not be saved. Try again.",
     );
     await expect(page.getByLabel("Language", { exact: true })).toHaveValue(
         "en",
     );
     await expect(page.getByLabel("Language", { exact: true })).toBeEnabled();
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
+});
+
+test("a language save whose answer was lost says its outcome is not known", async ({
+    page,
+}) => {
+    await mockLanguage(page, "en", true);
+    await page.route("**/api/session/language/", (route) =>
+        route.fulfill({ status: 502, body: "lost" }),
+    );
+    await page.goto("/app/");
+    await page.getByLabel("Language", { exact: true }).selectOption("tr");
+    await expect(page.getByRole("main").getByRole("alert")).toHaveText(
+        "It is not known whether it was saved. Check before you send it again.",
+    );
+    await expect(page.getByLabel("Language", { exact: true })).toHaveValue(
+        "en",
+    );
 });
 
 test("Turkish mobile navigation remains accessible without horizontal overflow", async ({
@@ -468,7 +485,7 @@ test("Turkish plant search and capacity formatting follow the selected language"
     await page.goto("/app/");
     await page.getByRole("searchbox", { name: "Santral ara" }).fill("ışık");
     await expect(page.getByRole("heading", { name: "IŞIK GES" })).toBeVisible();
-    await expect(page.getByText("1.235 MW DC", { exact: false })).toBeVisible();
+    await expect(page.getByText("1.235 MWp", { exact: true })).toBeVisible();
 });
 
 test("coded forecast errors are explained in the selected language", async ({

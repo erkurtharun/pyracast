@@ -115,7 +115,7 @@ function outagePage(results: Mock<OutageRow>[], reason: string | null = null) {
 
 function draft(page: Page) {
     return page.getByRole("region", {
-        name: "Correction request",
+        name: "Change request",
         exact: true,
     });
 }
@@ -127,11 +127,11 @@ async function stage(page: Page, start: string, energy: string) {
     const editor = page.locator(".production-row-editor");
     await editor.getByRole("textbox").first().fill(energy);
     await editor
-        .getByRole("button", { name: "Add to request", exact: true })
+        .getByRole("button", { name: "Add to change request", exact: true })
         .click();
 }
 
-test("the correction reason is named by its label and described by the approval help", async ({
+test("the correction reason is named by its label and carries no help text", async ({
     page,
 }) => {
     await member(page);
@@ -161,14 +161,12 @@ test("the correction reason is named by its label and described by the approval 
             .locator(".production-row-editor")
             .getByRole("textbox", { name: "Reason for correction" }),
     ).toHaveCount(0);
-    await page.getByRole("button", { name: "Add to request" }).click();
+    await page.getByRole("button", { name: "Add to change request" }).click();
     const reason = draft(page).getByRole("textbox", {
         name: "Reason for correction",
         exact: true,
     });
-    await expect(reason).toHaveAccessibleDescription(
-        "A workspace administrator reviews this submission before it changes live data.",
-    );
+    await expect(reason).toHaveAccessibleDescription("");
 });
 
 test("member submits a native production correction, sent again after a refusal under its own key, and no live write", async ({
@@ -291,7 +289,7 @@ test("member submits a native production correction, sent again after a refusal 
     await openPlant(page, "Production");
     await page.getByRole("button", { name: /^Suggest correction for/ }).click();
     await page
-        .getByRole("button", { name: /^Request provider reading for/ })
+        .getByRole("button", { name: /^Remove entered value for/ })
         .click();
     await draft(page)
         .getByLabel("Reason for correction")
@@ -392,7 +390,7 @@ test("member outage reports remain proposals and use explicit action envelopes",
     });
     await openPlant(page, "Outages");
     await page
-        .getByRole("button", { name: "Submit outage", exact: true })
+        .getByRole("button", { name: "Report outage", exact: true })
         .click();
     const editor = page.getByRole("region", {
         name: "Report outage",
@@ -421,7 +419,7 @@ test("member outage reports remain proposals and use explicit action envelopes",
             },
         });
     await page
-        .getByRole("button", { name: "Suggest changes", exact: true })
+        .getByRole("button", { name: "Edit outage", exact: true })
         .click();
     await page.getByLabel("Title").fill("Corrected title");
     await page
@@ -435,9 +433,7 @@ test("member outage reports remain proposals and use explicit action envelopes",
             expected_revision: 2,
             values: { title: "Corrected title" },
         });
-    await page
-        .getByRole("button", { name: "Submit resolution", exact: true })
-        .click();
+    await page.getByRole("button", { name: "End outage", exact: true }).click();
     await page
         .getByRole("button", { name: "Send for approval", exact: true })
         .click();
@@ -449,7 +445,7 @@ test("member outage reports remain proposals and use explicit action envelopes",
             expected_revision: 2,
             ends_at: expect.any(String),
         });
-    await page.getByText("Request cancellation", { exact: true }).click();
+    await page.getByText("Mark as entered in error", { exact: true }).click();
     await page.getByRole("checkbox").check();
     await page
         .getByRole("button", { name: "Send for approval", exact: true })
@@ -547,46 +543,41 @@ test("mobile admin reviews current context, refreshes a conflict and approves ex
     });
     await page.goto("/app/");
     await page
-        .getByRole("button", { name: "Inbox, 1 update", exact: true })
+        .getByRole("button", { name: "Inbox, 1 to review", exact: true })
         .click();
     await page
         .getByRole("button", { name: "Review details", exact: true })
         .click();
     await expect(page.getByText(/Former member/)).toBeVisible();
+    await expect(page.getByText("Configuration 31")).toHaveCount(0);
     await expect(
         page.locator(".proposal-energy").filter({ hasText: "0.75 MWh" }),
     ).toBeVisible();
     const detail = page.locator(".inbox-detail");
     await expect(
-        detail.getByText(/The remaining portion will be missing/),
+        detail.getByText(/The rest of that hour will have no value/),
     ).toBeVisible();
-    await detail
-        .getByText("Automatic source intervals", { exact: true })
-        .click();
+    await detail.getByText("EPİAŞ values", { exact: true }).click();
     await expect(detail.locator("details li")).toHaveText(
         /09:00 AM GMT\+3: 1 MWh/,
     );
     await expect(detail.getByText("0.5 MWh", { exact: true })).toHaveCount(0);
-    await detail
-        .getByRole("button", { name: "Approve and apply", exact: true })
-        .click();
+    await detail.getByRole("button", { name: "Approve", exact: true }).click();
     await expect(
-        detail.getByRole("button", { name: "Approve and apply" }),
+        detail.getByRole("button", { name: "Approve" }),
     ).toBeDisabled();
     await page
         .getByRole("button", { name: "Refresh list", exact: true })
         .click();
     await expect(
-        detail.getByRole("button", { name: "Approve and apply" }),
+        detail.getByRole("button", { name: "Approve" }),
     ).toBeDisabled();
     await detail
         .getByRole("button", { name: "Refresh details", exact: true })
         .click();
+    await expect(detail.getByRole("button", { name: "Approve" })).toBeEnabled();
     await expect(
-        detail.getByRole("button", { name: "Approve and apply" }),
-    ).toBeEnabled();
-    await expect(
-        page.getByRole("button", { name: "Inbox, 1 update", exact: true }),
+        page.getByRole("button", { name: "Inbox, 1 to review", exact: true }),
     ).toBeVisible();
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({
@@ -597,7 +588,7 @@ test("mobile admin reviews current context, refreshes a conflict and approves ex
     expect(
         await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(320);
-    await detail.getByRole("button", { name: "Approve and apply" }).click();
+    await detail.getByRole("button", { name: "Approve" }).click();
     await expect(
         page.getByRole("button", { name: "Inbox", exact: true }),
     ).toBeVisible();
@@ -611,9 +602,71 @@ test("mobile admin reviews current context, refreshes a conflict and approves ex
         .getByRole("button", { name: "Review details", exact: true })
         .click();
     await expect(
-        page.getByRole("heading", { name: "At decision", exact: true }),
+        page.getByRole("heading", { name: "Value at decision", exact: true }),
     ).toBeVisible();
 });
+
+for (const [replacement, lines, absent] of [
+    [
+        { ...reading, energy_mwh: 0, source_kind: "settlement_injection" },
+        ["Use EPİAŞ value (0 MWh)"],
+        ["Remove entered value", "The interval will have no value."],
+    ],
+    [
+        null,
+        ["Remove entered value", "The interval will have no value."],
+        [/Use EPİAŞ value/],
+    ],
+] as const)
+    test(`a revert in the inbox says what the interval will hold: ${replacement ? "the EPİAŞ value" : "no value"}`, async ({
+        page,
+    }) => {
+        await mockApi(page);
+        const item = {
+            ...proposal(),
+            production_items: [
+                {
+                    ...proposal().production_items[0],
+                    action: "revert",
+                    expected_revision_id: 4,
+                    proposed: replacement,
+                    energy_mwh: null,
+                },
+            ],
+        };
+        await page.route("**/api/tenants/", (route) =>
+            route.fulfill({
+                json: paged([
+                    {
+                        id: 1,
+                        name: "Workspace",
+                        role: "admin",
+                        pending_review_count: 1,
+                        unread_outcome_count: 0,
+                    },
+                ]),
+            }),
+        );
+        await page.route("**/change-requests/?*", (route) =>
+            route.fulfill({ json: paged([item]) }),
+        );
+        await page.route("**/change-requests/1/", (route) =>
+            route.fulfill({ json: item }),
+        );
+        await page.goto("/app/w/1/inbox/");
+        await page
+            .getByRole("button", { name: "Review details", exact: true })
+            .click();
+        const row = page.locator(".inbox-detail .proposal-comparison");
+        for (const line of lines)
+            await expect(row.getByText(line, { exact: true })).toBeVisible();
+        for (const line of absent)
+            await expect(
+                typeof line === "string"
+                    ? row.getByText(line, { exact: true })
+                    : row.getByText(line),
+            ).toHaveCount(0);
+    });
 
 test("Turkish member can withdraw and an opened outcome is marked read at 320px", async ({
     page,
@@ -680,7 +733,7 @@ test("Turkish member can withdraw and an opened outcome is marked read at 320px"
     await page.goto("/app/");
     await page
         .getByRole("button", {
-            name: "Gelen kutusu, 1 güncelleme",
+            name: "Gelen kutusu, 1 okunmamış",
             exact: true,
         })
         .click();
@@ -688,24 +741,30 @@ test("Turkish member can withdraw and an opened outcome is marked read at 320px"
         .getByRole("button", { name: "Ayrıntıları incele", exact: true })
         .first()
         .click();
-    await expect(
-        page.getByRole("button", { name: "Onayla ve uygula" }),
-    ).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Onayla" })).toHaveCount(0);
     await expect(
         page.getByRole("button", { name: "Listeyi yenile", exact: true }),
     ).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Ayrıntıları yenile", exact: true }),
     ).toBeVisible();
+    for (const removed of [
+        "Yapılandırma 31",
+        "Başvuruyu değiştirmek için geri çekip yeniden gönderin.",
+    ])
+        await expect(page.getByText(removed)).toHaveCount(0);
     await page
-        .getByRole("button", { name: "Başvuruyu geri çek", exact: true })
+        .getByRole("button", {
+            name: "Değişiklik talebini geri çek",
+            exact: true,
+        })
         .click();
     await expect(
         page.getByRole("status").filter({ hasText: /^Geri çekildi$/ }),
     ).toBeVisible();
     await expect(
         page.getByRole("button", {
-            name: "Gelen kutusu, 1 güncelleme",
+            name: "Gelen kutusu, 1 okunmamış",
             exact: true,
         }),
     ).toBeVisible();
@@ -783,7 +842,7 @@ test("opening one's own decided request marks it read once", async ({
     });
     await page.goto("/app/");
     await page
-        .getByRole("button", { name: "Inbox, 1 update", exact: true })
+        .getByRole("button", { name: "Inbox, 1 unread", exact: true })
         .click();
     const card = page.locator(".inbox-card").filter({ hasText: "Rejected" });
     await card.getByRole("button", { name: "Review details" }).click();
@@ -795,10 +854,8 @@ test("opening one's own decided request marks it read once", async ({
     await expect(
         card.getByRole("heading", { name: "Review details" }),
     ).toBeFocused();
-    await expect(card.getByText("Unread outcome")).toHaveCount(0);
-    await card
-        .getByRole("button", { name: "Close details", exact: true })
-        .click();
+    await expect(card.getByText("Unread", { exact: true })).toHaveCount(0);
+    await card.getByRole("button", { name: "Close", exact: true }).click();
     await card.getByRole("button", { name: "Review details" }).click();
     await expect(card.getByText("Meter reading differs")).toBeVisible();
     expect(posts).toBe(1);
@@ -821,7 +878,7 @@ test("a failed read receipt keeps the decided request readable", async ({
         card.getByRole("button", { name: "Mark as read", exact: true }),
     ).toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Inbox, 1 update", exact: true }),
+        page.getByRole("button", { name: "Inbox, 1 unread", exact: true }),
     ).toBeVisible();
     expect(posts).toBe(1);
 });
@@ -906,12 +963,12 @@ test("inbox loads bounded pages and requires an explicit rejection reason", asyn
         .click();
     await expect(
         page.getByText(
-            "Approving this ongoing outage immediately affects live forecasts and reminder emails.",
+            "Approving this ongoing outage changes the forecasts and the forecast email at once.",
         ),
     ).toBeVisible();
     const detail = page.locator(".inbox-detail");
     await expect(
-        detail.getByRole("button", { name: "Approve and apply", exact: true }),
+        detail.getByRole("button", { name: "Approve", exact: true }),
     ).toBeDisabled();
     await detail.getByRole("button", { name: "Reject", exact: true }).click();
     expect(rejection).toBeUndefined();
@@ -977,18 +1034,18 @@ test("workspace and current role changes clear review controls and previous tena
     );
     await page.goto("/app/");
     await page
-        .getByRole("button", { name: "Inbox, 1 update", exact: true })
+        .getByRole("button", { name: "Inbox, 1 to review", exact: true })
         .click();
     await page
         .getByRole("button", { name: "Review details", exact: true })
         .click();
     await expect(
-        page.getByRole("button", { name: "Approve and apply", exact: true }),
+        page.getByRole("button", { name: "Approve", exact: true }),
     ).toBeVisible();
     role = "viewer";
     await page.clock.runFor(120_001);
     await expect(
-        page.getByRole("button", { name: "Approve and apply", exact: true }),
+        page.getByRole("button", { name: "Approve", exact: true }),
     ).toHaveCount(0);
     await expect(
         page.getByRole("button", { name: "History", exact: true }),
@@ -999,7 +1056,7 @@ test("workspace and current role changes clear review controls and previous tena
         .selectOption("2");
     await expect(page.getByText("East array", { exact: true })).toHaveCount(0);
     await expect(
-        page.getByText("No submissions here.", { exact: true }),
+        page.getByText("No change requests.", { exact: true }),
     ).toBeVisible();
 });
 
@@ -1058,7 +1115,7 @@ for (const removal of ["decision", "concurrent"] as const) {
                 .getByRole("button", { name: "Review details", exact: true })
                 .click();
             await page
-                .getByRole("button", { name: "Approve and apply", exact: true })
+                .getByRole("button", { name: "Approve", exact: true })
                 .click();
             await expect(
                 page.getByText("First page plant", { exact: true }),
@@ -1127,41 +1184,53 @@ test("a poll that was already reading cannot bring a decided request back to the
     holding = true;
     await page.clock.runFor(30_000);
     await held;
-    await page
-        .getByRole("button", { name: "Approve and apply", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Approve", exact: true }).click();
     await expect(
         page.getByRole("status").filter({ hasText: /^Approved$/ }),
     ).toBeVisible();
     release();
     await expect(
-        page.getByText("No submissions here.", { exact: true }),
+        page.getByText("No change requests.", { exact: true }),
     ).toBeVisible();
     await expect(page.locator(".inbox-card")).toHaveCount(0);
 });
 
-test("the inbox label counts several updates in the plural", async ({
-    page,
-}) => {
-    await mockApi(page);
-    await page.route("**/api/tenants/", (route) =>
-        route.fulfill({
-            json: paged([
-                {
-                    id: 1,
-                    name: "Workspace",
-                    role: "admin",
-                    pending_review_count: 1,
-                    unread_outcome_count: 1,
-                },
-            ]),
-        }),
-    );
-    await page.goto("/app/");
-    await expect(
-        page.getByRole("button", { name: "Inbox, 2 updates", exact: true }),
-    ).toBeVisible();
-});
+for (const [pending, unread, language, name] of [
+    [2, 0, "en", "Inbox, 2 to review"],
+    [0, 3, "en", "Inbox, 3 unread"],
+    [1, 2, "en", "Inbox, 2 unread, 1 to review"],
+    [1, 2, "tr", "Gelen kutusu, 2 okunmamış, 1 onay bekleyen"],
+] as const)
+    test(`the inbox label names ${pending} pending reviews and ${unread} unread outcomes separately in ${language}`, async ({
+        page,
+    }) => {
+        const account = await mockApi(page);
+        await page.route("**/api/session/", (route) =>
+            route.fulfill({
+                json: { ...sessionIdentity(account.current), language },
+            }),
+        );
+        await page.route("**/api/tenants/", (route) =>
+            route.fulfill({
+                json: paged([
+                    {
+                        id: 1,
+                        name: "Workspace",
+                        role: "admin",
+                        pending_review_count: pending,
+                        unread_outcome_count: unread,
+                    },
+                ]),
+            }),
+        );
+        await page.goto("/app/");
+        await expect(
+            page.getByRole("button", { name, exact: true }),
+        ).toBeVisible();
+        await expect(page.locator(".inbox-badge")).toHaveText(
+            String(pending + unread),
+        );
+    });
 
 async function routeUnavailableRows(
     page: Page,
@@ -1295,7 +1364,7 @@ test("review cards show the period, item count and outage title", async ({
     await expect(
         cards.nth(0).locator('time[datetime="2026-11-09T06:00:00Z"]'),
     ).toHaveCount(1);
-    await expect(cards.nth(1)).toContainText("New outage: Grid unavailable");
+    await expect(cards.nth(1)).toContainText("Report outage: Grid unavailable");
     await expect(cards.nth(1)).toContainText("Ongoing");
     await expect(
         cards.nth(1).locator('time[datetime="2026-11-09T08:00:00Z"]'),
@@ -1403,7 +1472,7 @@ test("a member stages several intervals of one day and sends them as one request
     await expect(
         page
             .getByRole("status")
-            .filter({ hasText: /^Added 08:00.08:30 to the request\.$/ }),
+            .filter({ hasText: /^Added 08:00.08:30 to the change request\.$/ }),
     ).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Suggest correction for 08:00" }),
@@ -1413,7 +1482,7 @@ test("a member stages several intervals of one day and sends them as one request
         .getByRole("button", { name: "Suggest correction for 09:00" })
         .click();
     await page
-        .getByRole("button", { name: /^Request provider reading for 09:00/ })
+        .getByRole("button", { name: /^Remove entered value for 09:00/ })
         .click();
     await stage(page, "09:30", "0,8");
     const staged = draft(page);
@@ -1422,30 +1491,30 @@ test("a member stages several intervals of one day and sends them as one request
         page.getByRole("button", { name: "Previous day" }),
     ).toBeDisabled();
     await expect(staged).toContainText(
-        "Send or discard this request before choosing another day.",
+        "Send or discard this change request before you choose another day.",
     );
 
     await staged
-        .getByRole("button", { name: /^Remove staged correction for 09:30/ })
+        .getByRole("button", { name: /^Remove the correction for 09:30/ })
         .click();
     await expect(staged.getByRole("listitem")).toHaveCount(3);
     await expect(
         page.getByRole("status").filter({
-            hasText: /^Removed 09:30.10:00 from the request\.$/,
+            hasText: /^Removed 09:30.10:00 from the change request\.$/,
         }),
     ).toBeVisible();
     await staged
-        .getByRole("button", { name: /^Edit staged correction for 08:30/ })
+        .getByRole("button", { name: /^Edit the correction for 08:30/ })
         .click();
     const editor = page.locator(".production-row-editor");
     await expect(editor.getByRole("textbox").first()).toHaveValue("0.6");
     await editor.getByRole("textbox").first().fill("0,65");
     await editor
-        .getByRole("button", { name: "Update in request", exact: true })
+        .getByRole("button", { name: "Update in change request", exact: true })
         .click();
     await expect(
         page.getByRole("status").filter({
-            hasText: /^Updated 08:30.09:00 in the request\.$/,
+            hasText: /^Updated 08:30.09:00 in the change request\.$/,
         }),
     ).toBeVisible();
     await staged.getByLabel("Reason for correction").fill("Meter read on site");
@@ -1547,11 +1616,11 @@ test("a refused request keeps the draft and names the concerned interval", async
         "changed after you added it",
     );
     await staged
-        .getByRole("button", { name: /^Edit staged correction for 08:30/ })
+        .getByRole("button", { name: /^Edit the correction for 08:30/ })
         .click();
     await page
         .locator(".production-row-editor")
-        .getByRole("button", { name: "Update in request", exact: true })
+        .getByRole("button", { name: "Update in change request", exact: true })
         .click();
     await expect(second).not.toContainText("changed after you added it");
 
@@ -1599,9 +1668,9 @@ test("a member sees which intervals wait for approval and opens the request", as
     await openPlant(page, "Production");
     const rows = page.locator(".production-table tbody tr");
     const marker = rows.nth(0).getByRole("link", {
-        name: /^Waiting for approval: view the request for 08:00/,
+        name: /^Waiting for approval: view the change request for 08:00/,
     });
-    await expect(marker).toHaveText("Waiting for approval – view");
+    await expect(marker).toHaveText("Waiting for approval · View");
     await expect(marker).toHaveAttribute("href", "/app/w/1/inbox/?request=7");
     await expect(
         rows.nth(0).getByRole("button", { name: /^Suggest correction for/ }),
@@ -1613,12 +1682,12 @@ test("a member sees which intervals wait for approval and opens the request", as
 
     await marker.click();
     await expect(page).toHaveURL(/\/app\/w\/1\/inbox\/\?request=7$/);
-    const linked = page.getByRole("region", { name: "Linked submission" });
+    const linked = page.getByRole("region", { name: "Change request" });
     await expect(
         linked.getByRole("heading", { name: "Review details" }),
     ).toBeFocused();
     await expect(
-        linked.getByRole("button", { name: "Withdraw submission" }),
+        linked.getByRole("button", { name: "Withdraw change request" }),
     ).toBeVisible();
 });
 
@@ -1629,7 +1698,7 @@ test("a waiting marker opened in a new tab leaves the page where it is", async (
     await serveDays(page, () => [{ pending_request_id: 7 }, {}]);
     await openPlant(page, "Production");
     const marker = page.getByRole("link", {
-        name: /^Waiting for approval: view the request for 08:00/,
+        name: /^Waiting for approval: view the change request for 08:00/,
     });
     await expect(marker).toBeVisible();
     const before = page.url();
@@ -1651,9 +1720,9 @@ function proposalControls(page: Page, title: string) {
         has: page.getByRole("heading", { name: title }),
     });
     return [
-        card.getByRole("button", { name: "Suggest changes", exact: true }),
-        card.getByRole("button", { name: "Submit resolution", exact: true }),
-        card.getByText("Request cancellation", { exact: true }),
+        card.getByRole("button", { name: "Edit outage", exact: true }),
+        card.getByRole("button", { name: "End outage", exact: true }),
+        card.getByText("Mark as entered in error", { exact: true }),
     ] as const;
 }
 
@@ -1670,7 +1739,7 @@ test("a member sees which outages wait for approval", async ({ page }) => {
     await openPlant(page, "Outages");
     await expect(
         page.getByRole("link", {
-            name: "Waiting for approval: view the request for Inverter offline",
+            name: "Waiting for approval: view the change request for Inverter offline",
         }),
     ).toHaveAttribute("href", "/app/w/1/inbox/?request=9");
     for (const control of proposalControls(page, "Inverter offline"))
@@ -1719,7 +1788,7 @@ for (const [reason, explanation] of [
         await openPlant(page, "Outages");
         await expect(page.getByText(explanation)).toBeVisible();
         await expect(
-            page.getByRole("button", { name: "Submit outage", exact: true }),
+            page.getByRole("button", { name: "Report outage", exact: true }),
         ).toHaveCount(0);
         await expect(
             page.getByRole("heading", { name: "Inverter offline" }),
@@ -1747,7 +1816,7 @@ test("the sent notice of an outage proposal clears on the next action", async ({
     );
     await openPlant(page, "Outages");
     await page
-        .getByRole("button", { name: "Suggest changes", exact: true })
+        .getByRole("button", { name: "Edit outage", exact: true })
         .click();
     await page.getByLabel("Title").fill("Corrected title");
     await page
@@ -1756,9 +1825,7 @@ test("the sent notice of an outage proposal clears on the next action", async ({
     const sent = page.getByText(/^Sent for approval\./);
     await expect(sent).toBeVisible();
 
-    await page
-        .getByRole("button", { name: "Submit resolution", exact: true })
-        .click();
+    await page.getByRole("button", { name: "End outage", exact: true }).click();
     await expect(sent).toHaveCount(0);
 });
 
@@ -1786,7 +1853,7 @@ test("an administrator who edits directly sees no proposal draft", async ({
     await page.getByRole("button", { name: /^Edit 08:00/ }).click();
     const editor = page.locator(".production-row-editor");
     await expect(
-        editor.getByRole("button", { name: "Add to request" }),
+        editor.getByRole("button", { name: "Add to change request" }),
     ).toHaveCount(0);
     await editor.getByRole("textbox").first().fill("0,5");
     await editor.getByRole("button", { name: "Save", exact: true }).click();
@@ -1838,7 +1905,7 @@ test("a staged interval that comes to wait for the member's own request is named
     const rows = page.locator(".production-table tbody tr");
     await expect(
         rows.nth(0).getByRole("link", {
-            name: /^Waiting for approval: view the request for 08:00/,
+            name: /^Waiting for approval: view the change request for 08:00/,
         }),
     ).toBeVisible();
     await expect(
@@ -1846,10 +1913,10 @@ test("a staged interval that comes to wait for the member's own request is named
     ).toHaveCount(0);
     const item = draft(page).getByRole("listitem");
     await expect(item).toContainText(
-        "A request of yours for this interval already waits for approval. Remove it here, or withdraw that request first.",
+        "A change request of yours for this interval already waits for approval. Remove it here, or withdraw that change request first.",
     );
     await expect(
-        item.getByRole("button", { name: /^Edit staged correction for 08:00/ }),
+        item.getByRole("button", { name: /^Edit the correction for 08:00/ }),
     ).toBeDisabled();
 });
 
@@ -1870,7 +1937,7 @@ test("editing a staged interval outside daylight shows its row and discarding cl
     await expect(night).toHaveCount(0);
     const staged = draft(page);
     const edit = staged.getByRole("button", {
-        name: /^Edit staged correction for 08:00/,
+        name: /^Edit the correction for 08:00/,
     });
 
     await edit.click();
@@ -1883,9 +1950,9 @@ test("editing a staged interval outside daylight shows its row and discarding cl
     await edit.click();
     await expect(editor).toHaveCount(1);
     await staged
-        .getByRole("button", { name: "Discard request", exact: true })
+        .getByRole("button", { name: "Discard change request", exact: true })
         .click();
-    await expect(page.getByText("Correction request discarded.")).toBeVisible();
+    await expect(page.getByText("Change request discarded.")).toBeVisible();
     await expect(editor).toHaveCount(0);
     await expect(fullDay).toBeEnabled();
     await expect(night).toBeEnabled();
@@ -1966,10 +2033,10 @@ test("a reason of only spaces is refused at its field in Turkish", async ({
     const editor = page.locator(".production-row-editor");
     await editor.getByRole("textbox").first().fill("0,5");
     await editor
-        .getByRole("button", { name: "Talebe ekle", exact: true })
+        .getByRole("button", { name: "Değişiklik talebine ekle", exact: true })
         .click();
     const staged = page.getByRole("region", {
-        name: "Düzeltme talebi",
+        name: "Değişiklik talebi",
         exact: true,
     });
     const reason = staged.getByLabel("Düzeltme gerekçesi");
@@ -2009,7 +2076,7 @@ test("Back with a staged draft asks before the earlier day loads, and after Stay
     await page.goBack();
     expect(await asked).toBe("beforeunload");
     await expect(day).toHaveValue("2026-11-08");
-    await expect(staged).not.toContainText("This request is for");
+    await expect(staged).not.toContainText("This change request is for");
     await expect(
         staged.getByRole("button", { name: "Send for approval", exact: true }),
     ).toBeEnabled();
@@ -2036,7 +2103,7 @@ for (const route of ["answers", "fails"] as const)
         await showDay(page, "2026-11-09");
         await expect(day).toHaveValue("2026-11-09");
         await expect(staged).toContainText(
-            "This request is for 2026-11-08. Return to that day to send it, or discard it.",
+            "This change request is for 2026-11-08. Return to that day to send it, or discard it.",
         );
         await expect(send).toBeDisabled();
         const routerRequests: string[] = [];
@@ -2066,7 +2133,7 @@ for (const route of ["answers", "fails"] as const)
             .click();
         await expect(day).toHaveValue("2026-11-08");
         await expect(page).toHaveURL(/date=2026-11-08/);
-        await expect(staged).not.toContainText("This request is for");
+        await expect(staged).not.toContainText("This change request is for");
         await expect(staged.getByRole("listitem")).toHaveCount(1);
         await expect(send).toBeEnabled();
         expect(routerRequests).toEqual([]);
@@ -2091,7 +2158,7 @@ test("a draft stays with its day when a link shows another day", async ({
     await showDay(page, "2026-11-07");
     await expect(day).toHaveValue("2026-11-07");
     await expect(staged).toContainText(
-        "This request is for 2026-11-09. Return to that day to send it, or discard it.",
+        "This change request is for 2026-11-09. Return to that day to send it, or discard it.",
     );
     await expect(
         staged.getByRole("button", { name: "Send for approval", exact: true }),
@@ -2101,9 +2168,9 @@ test("a draft stays with its day when a link shows another day", async ({
     ).toBeDisabled();
 
     await staged
-        .getByRole("button", { name: "Discard request", exact: true })
+        .getByRole("button", { name: "Discard change request", exact: true })
         .click();
-    await expect(page.getByText("Correction request discarded.")).toBeVisible();
+    await expect(page.getByText("Change request discarded.")).toBeVisible();
     await expect(staged).toHaveCount(0);
     await expect(day).toHaveValue("2026-11-07");
     await expect(
@@ -2251,14 +2318,14 @@ test("a draft holding an interval that comes to wait for the member's own reques
         exact: true,
     });
     await expect(staged.getByRole("listitem").nth(0)).toContainText(
-        "A request of yours for this interval already waits for approval.",
+        "A change request of yours for this interval already waits for approval.",
     );
     await expect(send).toBeDisabled();
     await expect(send).toHaveAccessibleDescription(
-        "Intervals that already wait for a request of yours cannot be sent again. Remove them to send this request.",
+        "Intervals in a change request of yours that waits for approval cannot be sent again. Remove them to send this change request.",
     );
     await staged
-        .getByRole("button", { name: /^Remove staged correction for 08:00/ })
+        .getByRole("button", { name: /^Remove the correction for 08:00/ })
         .click();
     await expect(send).toBeEnabled();
     await send.click();
@@ -2308,9 +2375,9 @@ test("while a request is being sent nothing can be staged, edited or removed", a
     ).toBeDisabled();
     await expect(other).toBeDisabled();
     for (const name of [
-        /^Edit staged correction for 08:00/,
-        /^Remove staged correction for 08:00/,
-        /^Discard request$/,
+        /^Edit the correction for 08:00/,
+        /^Remove the correction for 08:00/,
+        /^Discard change request$/,
     ])
         await expect(staged.getByRole("button", { name })).toBeDisabled();
     await expect(staged.getByLabel("Reason for correction")).toBeDisabled();
@@ -2335,7 +2402,10 @@ test("an open editor whose interval comes to wait for the member's own request s
         .click();
     const editor = page.locator(".production-row-editor");
     await expect(
-        editor.getByRole("button", { name: "Add to request", exact: true }),
+        editor.getByRole("button", {
+            name: "Add to change request",
+            exact: true,
+        }),
     ).toBeVisible();
 
     pending = 7;
@@ -2344,13 +2414,16 @@ test("an open editor whose interval comes to wait for the member's own request s
         "A request of yours for this interval now waits for approval. Your attempted value is preserved below. Cancel to choose another interval.",
     );
     await expect(
-        editor.getByRole("button", { name: "Add to request", exact: true }),
+        editor.getByRole("button", {
+            name: "Add to change request",
+            exact: true,
+        }),
     ).toHaveCount(0);
     await editor.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(editor).toHaveCount(0);
     await expect(
         page.getByRole("link", {
-            name: /^Waiting for approval: view the request for 08:00/,
+            name: /^Waiting for approval: view the change request for 08:00/,
         }),
     ).toBeVisible();
     await expect(

@@ -400,7 +400,7 @@ test("a launch with an invitation stored in the tab opens the invitation", async
     });
     await page.goto("/app/");
     await expect(
-        page.getByRole("heading", { name: "Join workspace" }),
+        page.getByRole("heading", { name: "Invitation", exact: true }),
     ).toBeVisible();
     await expect(page).toHaveURL("/app/invitation/");
     expect(tenants).toEqual([]);
@@ -445,7 +445,7 @@ test("a start address opened with a cached workspace list chooses from the list 
         "sent GET /api/tenants/1/sites/",
     ]);
     await expect(
-        page.getByText("This workspace is not available to your account."),
+        page.getByText("You do not have access to this workspace."),
     ).toHaveCount(0);
 });
 

@@ -16,8 +16,7 @@ export const secondUser = {
 export const secondAccount = { user: secondUser, tag: "tag-b" };
 
 export const expiredNotice = "You were signed out. Sign in again.";
-export const changedNotice =
-    "The session changed in another tab. The page now shows the current session.";
+export const changedNotice = "You signed in or out in another tab.";
 
 export function sessionAnswer(account: Account, expiresAt: string | null) {
     return {
@@ -248,7 +247,7 @@ const invitee = {
 } as const;
 
 export const resentNotice =
-    "A new invitation link is being sent to late@example.test.";
+    "A new invitation is being sent to late@example.test.";
 
 export function liveRegion(page: Page) {
     return page.locator("[data-live-region]");

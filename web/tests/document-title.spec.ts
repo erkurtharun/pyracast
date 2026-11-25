@@ -104,8 +104,8 @@ for (const [address, title] of [
     ["/app/w/1/members/", `Members · ${workspace}`],
     ["/app/w/1/inbox/", "Inbox"],
     ["/app/w/1/trash/", "Recycle bin"],
-    ["/app/account/", "Account settings"],
-    ["/app/invitation/#token=invite-secret", "Join workspace"],
+    ["/app/account/", "Account"],
+    ["/app/invitation/#token=invite-secret", "Invitation"],
 ] as const)
     test(`${address} is titled ${title}`, async ({ page }) => {
         await mockApi(page);

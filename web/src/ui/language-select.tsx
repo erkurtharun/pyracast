@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { api } from "@/lib/api/client";
+import { answerLost } from "@/lib/api/errors";
 import { reloadPage } from "@/lib/on-demand";
 import {
     adoptSession,
@@ -16,15 +17,19 @@ import { isLanguage, type Language } from "@/i18n/language";
 
 export function LanguageSelect() {
     const t = useTranslations("Language");
+    const errors = useTranslations("Errors");
     const locale = useLocale();
     const id = useId();
     const chosen = useSessionState().session?.language;
     const catalogues = useCatalogues();
     const [state, setState] = useState<
         | { status: "idle" | "saving" | "unavailable" }
-        | { status: "error"; target: Language }
+        | { status: "error" | "unknown"; target: Language }
     >({ status: "idle" });
-    if (state.status === "error" && state.target === locale)
+    if (
+        (state.status === "error" || state.status === "unknown") &&
+        state.target === locale
+    )
         setState({ status: "idle" });
     const mounted = useRef(false);
     useEffect(() => {
@@ -98,13 +103,18 @@ export function LanguageSelect() {
                                     await loadSession();
                                 if (mounted.current)
                                     setState({ status: "idle" });
-                            } catch {
+                            } catch (error) {
                                 if (!mounted.current) return;
                                 setState(
                                     sessionOwner(sessionState().session) !==
                                         owner
                                         ? { status: "idle" }
-                                        : { status: "error", target: language },
+                                        : {
+                                              status: answerLost(error)
+                                                  ? "unknown"
+                                                  : "error",
+                                              target: language,
+                                          },
                                 );
                             }
                         })()
@@ -122,6 +132,9 @@ export function LanguageSelect() {
                 <span role="status">{t("saving")}</span>
             )}
             {state.status === "error" && <p role="alert">{t("failed")}</p>}
+            {state.status === "unknown" && (
+                <p role="alert">{errors("unconfirmed")}</p>
+            )}
             {unavailable && (
                 <>
                     <p role="alert">{t("unavailable")}</p>

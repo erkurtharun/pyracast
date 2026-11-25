@@ -7,7 +7,6 @@ type Outcome = Pick<
     components["schemas"]["ReminderDeliveryOutput"],
     "scheduled_for" | "status" | "last_error"
 >;
-type ReminderSummary = components["schemas"]["ReminderSummaryOutput"];
 
 export function ReminderOutcome({
     outcome,
@@ -28,29 +27,5 @@ export function ReminderOutcome({
             {outcome.last_error &&
                 ` ${label("NotificationDeliveryError", outcome.last_error)}`}
         </>
-    );
-}
-export function ReminderLine({
-    reminder,
-    timezone,
-}: {
-    reminder: ReminderSummary;
-    timezone: string;
-}) {
-    const t = useTranslations("Reminders");
-    const label = useLabel();
-    return (
-        <p className="fine">
-            {t("dailyEmail", { state: label("ReminderState", reminder.state) })}
-            {reminder.last_delivery && (
-                <>
-                    {" · "}
-                    <ReminderOutcome
-                        outcome={reminder.last_delivery}
-                        timezone={timezone}
-                    />
-                </>
-            )}
-        </p>
     );
 }

@@ -263,19 +263,23 @@ export function TextAreaField({
     );
 }
 
-export function ControlField(
-    props:
-        | { label: ReactNode; hint?: undefined; children: ReactNode }
-        | {
-              label: ReactNode;
-              hint: string;
-              error?: string;
-              children: (describedBy: string) => ReactNode;
-          },
-) {
+type PlainControl = { label: ReactNode; children: ReactNode };
+type DescribedControl = {
+    label: ReactNode;
+    hint?: string;
+    error?: string;
+    children: (describedBy: string | undefined) => ReactNode;
+};
+
+function described(
+    props: PlainControl | DescribedControl,
+): props is DescribedControl {
+    return typeof props.children === "function";
+}
+
+export function ControlField(props: PlainControl | DescribedControl) {
     const id = useId();
-    const hintId = `${id}-hint`;
-    if (props.hint === undefined)
+    if (!described(props))
         return (
             <label className="field">
                 {props.label}
@@ -287,8 +291,10 @@ export function ControlField(
             <label className="field-control">
                 {props.label}
                 {props.children(
-                    describedBy(!!props.error && `${id}-error`, hintId) ??
-                        hintId,
+                    describedBy(
+                        !!props.error && `${id}-error`,
+                        !!props.hint && `${id}-hint`,
+                    ),
                 )}
             </label>
             <Messages id={id} hint={props.hint} error={props.error} />

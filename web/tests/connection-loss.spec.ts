@@ -14,7 +14,9 @@ import {
 test.use({ timezoneId: "Europe/Istanbul" });
 
 const refreshFailed = (page: Page) =>
-    page.getByRole("alert").filter({ hasText: "Could not refresh; showing" });
+    page
+        .getByRole("alert")
+        .filter({ hasText: "Could not refresh. Last loaded:" });
 
 function outageSection(page: Page) {
     return page.locator("section", {
@@ -67,11 +69,11 @@ test("after the connection drops, the production screen and the shell say so at 
     const reconnect = await loseConnection(page);
     const production = savedProductionFailed(page);
     await page.clock.runFor(30_000);
-    await expect(production).toContainText("Could not reach the server.");
+    await expect(production).toContainText("Pyracast could not be reached.");
     await expect(refreshFailed(page)).toHaveCount(0);
     await page.clock.runFor(90_000);
     await expect(refreshFailed(page).first()).toContainText(
-        "Could not reach the server.",
+        "Pyracast could not be reached.",
     );
     await reconnect();
     await expect(refreshFailed(page)).toHaveCount(0);
@@ -94,7 +96,7 @@ test("an open production editor keeps the value typed before the connection drop
     const reconnect = await loseConnection(page);
     await page.clock.runFor(120_000);
     await expect(refreshFailed(page).first()).toContainText(
-        "Could not reach the server.",
+        "Pyracast could not be reached.",
     );
     await expect(value).toHaveValue("0,5");
     await reconnect();
@@ -126,7 +128,7 @@ test("without a poll the outage list reports a dropped connection at focus and o
     await page.clock.runFor(5 * 60_000);
     await expect(notice).toHaveCount(0);
     await focusWindow(page);
-    await expect(notice).toContainText("Could not reach the server.");
+    await expect(notice).toContainText("Pyracast could not be reached.");
     const reads = outageReads;
     const failed = page.waitForEvent("requestfailed", (request) =>
         request.url().endsWith("/plants/21/outages/"),
@@ -179,7 +181,7 @@ test("plants hidden by a refusal stay hidden through a later lost read until a r
     await retry.click();
     const lost = page
         .getByRole("alert")
-        .filter({ hasText: "Could not reach the server." });
+        .filter({ hasText: "Pyracast could not be reached." });
     await expect(lost).toBeVisible();
     await expect(card).toHaveCount(0);
     outcome = "ok";
@@ -352,8 +354,8 @@ test("a language change while reads fail keeps the earlier outages with the time
     await expect(
         page
             .getByRole("alert")
-            .filter({ hasText: "Yenilenemedi; 15:00 itibarıyla" }),
-    ).toContainText("Sunucuya ulaşılamadı.");
+            .filter({ hasText: "Yenilenemedi. Son yükleme: 15:00." }),
+    ).toContainText("Pyracast'e ulaşılamadı.");
     await expect(outage(page)).toBeVisible();
     await expect(page.locator('input[name="title"]')).toHaveValue("Grid fault");
 });
@@ -392,7 +394,7 @@ test("a first inbox read that failed offers Retry, which reads it again", async 
     await page.goto("/app/");
     await page.getByRole("button", { name: "Inbox", exact: true }).click();
     await retryFailedRead(page);
-    await expect(page.getByText("No submissions here.")).toBeVisible();
+    await expect(page.getByText("No change requests.")).toBeVisible();
 });
 
 const pendingInboxRead = (url: string) =>
@@ -435,7 +437,9 @@ test("Refresh list while the first inbox read runs sends no second request, and 
             hasText: "You cannot read this workspace's submissions.",
         }),
     ).toBeVisible();
-    await expect(page.getByText("Could not reach the server.")).toHaveCount(0);
+    await expect(page.getByText("Pyracast could not be reached.")).toHaveCount(
+        0,
+    );
     expect(reads).toBe(1);
 });
 
@@ -444,7 +448,7 @@ test("Refresh list reads an idle inbox list again", async ({ page }) => {
     await signIn(page);
     await page.goto("/app/");
     await page.getByRole("button", { name: "Inbox", exact: true }).click();
-    await expect(page.getByText("No submissions here.")).toBeVisible();
+    await expect(page.getByText("No change requests.")).toBeVisible();
     const read = page.waitForRequest((request) =>
         pendingInboxRead(request.url()),
     );

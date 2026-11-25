@@ -101,7 +101,9 @@ test("a collecting plant shows its state, next collection and requests of the da
 }) => {
     const status = await openCollection(page, "en", schedule({}));
 
-    await expect(status.getByText("Collecting", { exact: true })).toBeVisible();
+    await expect(
+        status.getByText("Updating automatically", { exact: true }),
+    ).toBeVisible();
     await expect(
         status.getByText("Next planned update").locator(".."),
     ).toContainText("Jan 2, 2026, 12:00 AM");
@@ -172,52 +174,51 @@ const inactive = [
         language: "en",
         state: "paused",
         reason: "schedule_disabled",
-        label: "Paused",
-        sentence: "Data collection is turned off for this plant.",
+        label: "Not updating",
+        sentence: "Automatic forecast updates are turned off for this plant.",
         next: "Not planned",
     },
     {
         language: "tr",
         state: "paused",
         reason: "schedule_disabled",
-        label: "Duraklatıldı",
-        sentence: "Bu santral için veri toplama kapalı.",
+        label: "Güncellenmiyor",
+        sentence: "Bu santral için tahminlerin otomatik güncellenmesi kapalı.",
         next: "Planlanmadı",
     },
     {
         language: "tr",
         state: "provider_attention",
         reason: "provider_unavailable",
-        label: "Sağlayıcı bekleniyor",
-        sentence:
-            "Sağlayıcı şu anda istek kabul etmiyor; veri toplama kendiliğinden sürecek.",
+        label: "Gecikiyor",
+        sentence: "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek.",
         next: "2 Oca 2026",
     },
     {
         language: "en",
         state: "paused",
         reason: "not_validated",
-        label: "Paused",
+        label: "Not updating",
         sentence:
-            "Collection starts once the provider connection is validated.",
+            "No new forecast data is arriving for this plant. Write to Pyracast: info@pyracast.app",
         next: "Not planned",
     },
     {
         language: "tr",
         state: "paused",
         reason: "binding_not_current",
-        label: "Duraklatıldı",
+        label: "Güncellenmiyor",
         sentence:
-            "Sağlayıcı bağlantısı yeniden doğrulandığında veri toplama sürer.",
+            "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: info@pyracast.app",
         next: "Planlanmadı",
     },
     {
         language: "en",
         state: "collecting",
         reason: "quota_too_low",
-        label: "Collecting",
+        label: "Updating automatically",
         sentence:
-            "The provider allowance leaves no request for forecasts; only the daily history is collected.",
+            "This plant has no forecast update times. Write to Pyracast: info@pyracast.app",
         next: "Jan 2, 2026, 12:00 AM",
     },
 ] as const;
@@ -259,7 +260,7 @@ const plantStates = [
         status: "pending",
         state: "waiting_for_approval",
         reason: "not_approved",
-        label: "Waiting for approval",
+        label: "Waiting for approval by Pyracast",
         sentence: "Waiting for approval by Pyracast.",
         resubmit: false,
     },
@@ -267,7 +268,7 @@ const plantStates = [
         status: "suspended",
         state: "paused",
         reason: "not_approved",
-        label: "Paused",
+        label: "Not updating",
         sentence:
             "Forecasts for this plant are stopped. Write to Pyracast: info@pyracast.app",
         resubmit: false,
@@ -276,7 +277,7 @@ const plantStates = [
         status: "rejected",
         state: "paused",
         reason: "not_approved",
-        label: "Paused",
+        label: "Not updating",
         sentence: "Pyracast did not approve this plant.",
         resubmit: true,
     },
@@ -284,16 +285,16 @@ const plantStates = [
         status: "approved",
         state: "paused",
         reason: "not_validated",
-        label: "Paused",
+        label: "Not updating",
         sentence:
-            "Collection starts once the provider connection is validated.",
+            "No new forecast data is arriving for this plant. Write to Pyracast: info@pyracast.app",
         resubmit: false,
     },
     {
         status: "approved",
         state: "collecting",
         reason: null,
-        label: "Collecting",
+        label: "Updating automatically",
         sentence: null,
         resubmit: false,
     },
@@ -325,4 +326,91 @@ for (const item of plantStates)
         await expect(
             notices.getByRole("button", { name: "Send for approval again" }),
         ).toHaveCount(item.resubmit ? 1 : 0);
+    });
+
+type Job = Schedule["recent_jobs"][number];
+
+function job(overrides: Partial<Job>): Job {
+    return {
+        id: 1,
+        endpoint: "forecasts",
+        status: "retry",
+        scheduled_for: "2026-01-01T13:00:00Z",
+        available_at: "2026-01-01T15:00:00Z",
+        retry_until: null,
+        attempts: 1,
+        last_error: "provider_throttled",
+        ...overrides,
+    };
+}
+
+for (const [cause, last, label, sentence] of [
+    [
+        "a timed pause",
+        job({ status: "retry", last_error: "provider_allowance_exhausted" }),
+        "Delayed",
+        "Forecast update delayed. Pyracast will try again.",
+    ],
+    [
+        "a rejected connection",
+        job({ status: "failed", last_error: "provider_authentication_failed" }),
+        "Not updating",
+        "No new forecast data is arriving for this plant. Write to Pyracast: info@pyracast.app",
+    ],
+] as const)
+    test(`a plant whose updates wait after ${cause} says what happens next`, async ({
+        page,
+    }) => {
+        const status = await openCollection(
+            page,
+            "en",
+            schedule({
+                state: "provider_attention",
+                inactive_reason: "provider_unavailable",
+                recent_jobs: [last],
+            }),
+        );
+
+        await expect(status.getByText(label, { exact: true })).toBeVisible();
+        await expect(status.getByRole("status")).toHaveText(sentence);
+    });
+
+for (const [status, error, shown] of [
+    ["failed", "publication_failure", "Forecast update failed."],
+    ["stale", "history_budget_reserved", null],
+    [
+        "retry",
+        "publication_failure",
+        "Forecast update delayed. Pyracast will try again.",
+    ],
+] as const)
+    test(`an update log row promises another attempt only while one is planned: ${status} after ${error}`, async ({
+        page,
+    }) => {
+        await openCollection(
+            page,
+            "en",
+            schedule({
+                recent_jobs: [
+                    job({
+                        endpoint:
+                            status === "stale"
+                                ? "estimated_actuals"
+                                : "forecasts",
+                        status,
+                        last_error: error,
+                    }),
+                ],
+            }),
+        );
+        await page.getByText("Recent update jobs", { exact: true }).click();
+        const row = page
+            .locator("details.panel")
+            .filter({ hasText: "Recent update jobs" })
+            .locator("li");
+        await expect(row).toHaveCount(1);
+        if (shown) await expect(row).toContainText(` · ${shown}`);
+        else await expect(row).toHaveText(/ · 1 attempt$/);
+        if (status !== "retry")
+            await expect(row).not.toContainText("Pyracast will try again");
     });

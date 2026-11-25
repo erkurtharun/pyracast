@@ -348,7 +348,9 @@ for (const section of ["Forecast", "Settings"] as const) {
             }),
         );
         await page.goto("/app/");
-        await page.getByRole("button", { name: "Add a plant" }).click();
+        await page
+            .getByRole("button", { name: "Add plant", exact: true })
+            .click();
         await page.getByLabel("Plant name", { exact: true }).fill("New plant");
         await page.getByLabel("Latitude").fill("36.9");
         await page.getByLabel("Longitude").fill("30.7");
@@ -435,7 +437,7 @@ test("plant submission errors preserve review and every field for retry", async 
         return route.fallback();
     });
     await page.goto("/app/");
-    await page.getByRole("button", { name: "Add a plant" }).click();
+    await page.getByRole("button", { name: "Add plant", exact: true }).click();
     await page.getByLabel("Plant name", { exact: true }).fill("West plant");
     await page.getByLabel("Latitude").fill("37");
     await page.getByLabel("Longitude").fill("31");
@@ -479,7 +481,7 @@ test("an existing location without a plant offers complete setup", async ({
         return route.fulfill({ json: plant });
     });
     await page.goto("/app/");
-    await page.getByRole("button", { name: /Complete setup/ }).click();
+    await page.getByRole("button", { name: /Finish adding plant/ }).click();
     await expect(
         page.getByRole("heading", { name: "Finish adding plant" }),
     ).toBeVisible();
@@ -516,10 +518,10 @@ test("portfolio filters span all pages and a plant section survives refresh", as
     });
     await page.goto("/app/");
     await expect(page.locator(".region-card")).toHaveCount(2);
-    await page.getByLabel("Approval status").selectOption("pending");
+    await page.getByLabel("Status", { exact: true }).selectOption("pending");
     await expect(page.locator(".region-card")).toHaveCount(1);
     await expect(page.locator(".region-card")).toContainText("West plant");
-    await page.getByLabel("Approval status").selectOption("all");
+    await page.getByLabel("Status", { exact: true }).selectOption("all");
     await page.getByLabel("Search plants").fill("East");
     await expect(page.locator(".region-card")).toHaveCount(1);
     await page.locator(".region-card").click();

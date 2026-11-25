@@ -20,16 +20,28 @@ export function CollectionStatus({
     const label = useLabel();
     const moment = (value: string | null, missing: string) =>
         value ? format.time(value, data.timezone) : missing;
+    const blocked =
+        data.state === "provider_attention" &&
+        data.recent_jobs[0]?.last_error === "provider_authentication_failed";
     // The plant workspace banner already says why a plant that is not approved does not collect.
     const reason = region.status === "approved" ? data.inactive_reason : null;
     return (
         <section className="panel" aria-labelledby="collection-status-title">
             <h3 id="collection-status-title">{t("collectionStatus")}</h3>
             <p>
-                <strong>{label("CollectionState", data.state)}</strong>
+                <strong>
+                    {label("CollectionState", blocked ? "paused" : data.state)}
+                </strong>
             </p>
             {reason && (
-                <Notice>{label("CollectionInactiveReason", reason)}</Notice>
+                <Notice>
+                    {blocked
+                        ? label(
+                              "CollectionJobError",
+                              "provider_authentication_failed",
+                          )
+                        : label("CollectionInactiveReason", reason)}
+                </Notice>
             )}
             <div className="stats">
                 <Stat

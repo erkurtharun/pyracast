@@ -40,7 +40,7 @@ test("an invitee sees the workspace, role and inviter before signing in and then
         "You are invited to join Sunfield Energy.",
     );
     await expect(invitation).toContainText("Role: Member");
-    await expect(invitation).toContainText("invited by owner@example.test");
+    await expect(invitation).toContainText("Invited by: owner@example.test");
     await expect(invitation).toContainText(
         "Sign in or create an account with solar@example.test to accept it.",
     );
@@ -50,7 +50,7 @@ test("an invitee sees the workspace, role and inviter before signing in and then
         .fill("Test-only-cobalt-79!");
     await page.locator("form").getByRole("button", { name: "Sign in" }).click();
     await expect(
-        page.getByRole("heading", { name: "Join workspace" }),
+        page.getByRole("heading", { name: "Invitation", exact: true }),
     ).toBeVisible();
     await expect(
         page.getByText("You are invited to join Sunfield Energy."),
@@ -102,7 +102,7 @@ for (const anonymous of [true, false])
         if (anonymous) {
             await page
                 .getByRole("button", {
-                    name: "Cancel invitation",
+                    name: "Withdraw invitation",
                     exact: true,
                 })
                 .click();
@@ -247,7 +247,7 @@ for (const first of ["resend", "cancel"] as const)
             exact: true,
         });
         const cancel = page.getByRole("button", {
-            name: "Cancel invitation: late@example.test",
+            name: "Withdraw invitation: late@example.test",
             exact: true,
         });
         const [started, other] =
@@ -260,7 +260,7 @@ for (const first of ["resend", "cancel"] as const)
         const region = page.locator("[data-live-region]");
         if (first === "resend") {
             await expect(region).toHaveText(
-                "A new invitation link is being sent to late@example.test.",
+                "A new invitation is being sent to late@example.test.",
             );
             await expect(
                 page
@@ -274,7 +274,7 @@ for (const first of ["resend", "cancel"] as const)
                 [4, "pending"],
             ]);
         } else {
-            await expect(region).toHaveText("Invitation cancelled.");
+            await expect(region).toHaveText("Invitation withdrawn.");
             await expect(page.getByText("No open invitations.")).toBeVisible();
             expect(rows).toEqual([]);
         }

@@ -108,9 +108,9 @@ export function WorkspaceShell({
         if (tenantId !== undefined && tenant) rememberWorkspace(tenant.id);
     }, [tenantId, tenant]);
     const canManage = tenant?.role === "admin";
-    const inboxCount =
-        (canManage ? (tenant?.pending_review_count ?? 0) : 0) +
-        (tenant?.unread_outcome_count ?? 0);
+    const pendingCount = canManage ? (tenant?.pending_review_count ?? 0) : 0;
+    const unreadCount = tenant?.unread_outcome_count ?? 0;
+    const inboxCount = pendingCount + unreadCount;
     const [navigating, startNavigation] = useTransition();
     const go = (target: string) =>
         startNavigation(() => {
@@ -204,7 +204,10 @@ export function WorkspaceShell({
                             {...entry(screen === "inbox")}
                             aria-label={
                                 inboxCount
-                                    ? t("inboxCount", { count: inboxCount })
+                                    ? t("inboxCount", {
+                                          unread: unreadCount,
+                                          pending: pendingCount,
+                                      })
                                     : t("inbox")
                             }
                             onClick={() => go(routes.inbox(tenant.id))}

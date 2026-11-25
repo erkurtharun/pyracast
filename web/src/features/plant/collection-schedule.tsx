@@ -13,6 +13,26 @@ import { useLabel } from "@/ui/vocabulary";
 import { CollectionStatus } from "./collection-status";
 
 type Schedule = components["schemas"]["CollectionScheduleOutput"];
+type Job = Schedule["recent_jobs"][number];
+type JobError = components["schemas"]["CollectionJobErrorEnum"];
+
+const retried = new Set<JobError>([
+    "provider_allowance_exhausted",
+    "provider_throttled",
+    "provider_server_error",
+    "provider_unreachable",
+    "history_budget_reserved",
+    "quota_exhausted",
+    "lock_contention",
+    "publication_failure",
+]);
+const attempting = new Set<Job["status"]>(["pending", "running", "retry"]);
+
+function shownError({ status, last_error }: Job): JobError | null {
+    if (!last_error || status === "succeeded") return null;
+    if (!retried.has(last_error) || attempting.has(status)) return last_error;
+    return status === "failed" ? "attempts_exhausted" : null;
+}
 
 function sentTimes(times: readonly string[]) {
     return [...times].sort(
@@ -184,31 +204,35 @@ function ScheduleEditor({
                 <details className="panel">
                     <summary>{t("recentCollectionJobs")}</summary>
                     <ul>
-                        {data.recent_jobs.map((job) => (
-                            <li key={job.id}>
-                                {t("jobSummary", {
-                                    endpoint: label(
-                                        "CollectionEndpoint",
-                                        job.endpoint,
-                                    ),
-                                    status:
-                                        job.last_error === "history_incomplete"
-                                            ? t("partiallyCollected")
-                                            : label(
-                                                  "CollectionJobStatus",
-                                                  job.status,
-                                              ),
-                                    time: format.time(
-                                        job.scheduled_for,
-                                        data.timezone,
-                                    ),
-                                    attempts: job.attempts,
-                                })}
-                                {job.last_error && job.status !== "succeeded"
-                                    ? ` · ${label("CollectionJobError", job.last_error)}`
-                                    : ""}
-                            </li>
-                        ))}
+                        {data.recent_jobs.map((job) => {
+                            const error = shownError(job);
+                            return (
+                                <li key={job.id}>
+                                    {t("jobSummary", {
+                                        endpoint: label(
+                                            "CollectionEndpoint",
+                                            job.endpoint,
+                                        ),
+                                        status:
+                                            job.last_error ===
+                                            "history_incomplete"
+                                                ? t("partiallyCollected")
+                                                : label(
+                                                      "CollectionJobStatus",
+                                                      job.status,
+                                                  ),
+                                        time: format.time(
+                                            job.scheduled_for,
+                                            data.timezone,
+                                        ),
+                                        attempts: job.attempts,
+                                    })}
+                                    {error
+                                        ? ` · ${label("CollectionJobError", error)}`
+                                        : ""}
+                                </li>
+                            );
+                        })}
                     </ul>
                 </details>
             )}
