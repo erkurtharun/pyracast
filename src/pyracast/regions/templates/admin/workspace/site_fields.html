@@ -15,16 +15,13 @@
   <datalist id="timezone-options">{% for zone in timezones %}<option value="{{ zone }}">{% endfor %}</datalist>
 </fieldset>
 <fieldset class="group">
-  <legend>{% translate "Capacity and metering" %}</legend>
+  <legend>{% translate "Technical details" %}</legend>
   <div class="field-grid">
     {% include "admin/workspace/field.html" with field=form.dc_capacity_mw %}
     {% include "admin/workspace/field.html" with field=form.inverter_capacity_mw %}
     {% include "admin/workspace/field.html" with field=form.export_limit_mw %}
     {% include "admin/workspace/field.html" with field=form.measurement_basis %}
   </div>
-</fieldset>
-<fieldset class="group">
-  <legend>{% translate "Mounting" %}</legend>
   {% include "admin/workspace/field.html" with field=form.mounting_type %}
   <div class="subgroup" data-fixed-mounting>
     <p class="subgroup-title">{% translate "Fixed mounting" %}</p>

@@ -1308,18 +1308,36 @@ export interface components {
         ComparisonEnum: "archived_forecast" | "historical_model";
         ConfigurationOutput: {
             readonly id: number;
+            /** Technical details revision */
             readonly revision: number;
-            /** Format: double */
+            /**
+             * Panel capacity (MWp)
+             * Format: double
+             */
             readonly dc_capacity_mw: number;
-            /** Format: double */
+            /**
+             * Inverter capacity (MW AC)
+             * Format: double
+             */
             readonly inverter_capacity_mw: number | null;
-            /** Format: double */
+            /**
+             * Grid export limit (MW)
+             * Format: double
+             */
             readonly export_limit_mw: number | null;
+            /** Meter point */
             readonly measurement_basis: components["schemas"]["MeasurementBasisEnum"];
+            /** Mounting */
             readonly mounting_type: components["schemas"]["MountingTypeEnum"];
-            /** Format: double */
+            /**
+             * Panel tilt (°)
+             * Format: double
+             */
             readonly surface_tilt_degrees: number | null;
-            /** Format: double */
+            /**
+             * Panel azimuth (°)
+             * Format: double
+             */
             readonly surface_azimuth_degrees: number | null;
             /** Format: date-time */
             readonly created_at: string;
@@ -2174,7 +2192,7 @@ export interface components {
             readonly decision_reason: string;
         };
         /**
-         * @description * `pending` - Awaiting review
+         * @description * `pending` - In review
          *     * `approved` - Approved
          *     * `rejected` - Rejected
          *     * `withdrawn` - Withdrawn
@@ -2619,7 +2637,7 @@ export interface components {
         PlantEditBlockEnum: "suspended" | "connection_unavailable";
         /**
          * @description * `submission_saved` - Submission saved
-         *     * `configuration_created` - Configuration created
+         *     * `configuration_created` - Technical details revision created
          *     * `plant_renamed` - Plant renamed
          *     * `observations_imported` - Observations imported
          *     * `production_changed` - Production changed

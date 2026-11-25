@@ -729,7 +729,7 @@ def test_workspace_console_pages_render_in_turkish_without_mail_or_provider_call
         f"{base}invitations/new/": "Davet gönder",
         f"{base}members/{viewer.pk}/removal/": "Çal\u0131şma alan\u0131ndan ç\u0131kar",
         f"{base}plants/new/": "Santral ekle",
-        f"/admin/plants/{region.pk}/details/": "Santral bilgilerini düzenle",
+        f"/admin/plants/{region.pk}/details/": "<h1>Santrali düzenle</h1>",
     }
     for path, text in expectations.items():
         response = client.get(path, HTTP_ACCEPT_LANGUAGE="tr")

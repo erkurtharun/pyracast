@@ -264,7 +264,7 @@ def test_details_of_an_approved_plant_are_saved_as_a_new_configuration() -> None
         operator,
     )
     assert Region.objects.get(pk=system.region.pk).status == RegionStatus.APPROVED
-    assert "Plant details saved." in client.get(response["Location"]).content.decode()
+    assert "Plant saved." in client.get(response["Location"]).content.decode()
     unchanged = client.post(url, details(client, system.region, dc_capacity_mw="140"))
     assert unchanged.status_code == 302
     assert "Nothing changed." in client.get(unchanged["Location"]).content.decode()

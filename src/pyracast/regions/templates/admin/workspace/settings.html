@@ -19,7 +19,7 @@
       <div class="field{% if settings_form.max_recipients.errors %} field--error{% endif %}">
         {{ settings_form.max_recipients.as_field_group }}
       </div>
-      <p class="callout">{% translate "Lowering the limit pauses the forecast email of plants whose saved recipient list is over it. The lists are kept, and the forecast email resumes once a list is shortened or the limit is raised." %}</p>
+      <p class="callout">{% translate "Lowering the limit pauses the forecast email of plants whose saved recipient list is over it. The lists are kept. Once a list is shortened or the limit is raised, the next forecast emails are sent at their scheduled times." %}</p>
       {% if newly_paused %}
         <div class="callout callout--warn">
           <p>{% translate "This limit pauses the forecast email of these plants:" %}</p>

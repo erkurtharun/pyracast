@@ -17,7 +17,7 @@
       <details><summary>{% translate "Selected reference configuration" %}</summary>
         <dl class="facts">
           <div><dt>{% translate "Resource ID" %}</dt><dd>{{ binding.site_id }}</dd></div>
-          <div><dt>{% translate "Time zone" %}</dt><dd>{{ region.timezone }}</dd></div>
+          <div><dt>{% translate "Plant time zone" %}</dt><dd>{{ region.timezone }}</dd></div>
           <div><dt>{% translate "Location" %}</dt><dd>{{ region.latitude }}, {{ region.longitude }}</dd></div>
           <div><dt>{% translate "Reference capacity" %}</dt><dd>{{ binding.capacity_kw }} kW AC / {% if binding.dc_capacity_kw != None %}{{ binding.dc_capacity_kw }} kW DC{% else %}{% translate "DC capacity not declared" %}{% endif %}</dd></div>
           <div><dt>{% translate "Azimuth / losses" %}</dt><dd>{{ binding.azimuth_degrees }}° / {{ binding.losses_percent }}%</dd></div>
@@ -32,7 +32,7 @@
         <p class="hint">{% translate "JSON or CSV, up to 7 MiB." %}</p>
       </div>
       <details class="upload-options"><summary>{% translate "File interpretation options" %}</summary>
-        <p class="hint">{% translate "Use these only if the file does not declare its timezone or interval. An existing timestamp offset is preserved." %}</p>
+        <p class="hint">{% translate "Use these only if the file does not declare its time zone or interval. An existing timestamp offset is preserved." %}</p>
         <div class="field-grid"><div class="field">{{ form.source_timezone.label_tag }}{{ form.source_timezone }}</div><div class="field">{{ form.period.label_tag }}{{ form.period }}</div></div>
       </details>
       <div class="form-actions"><button type="submit" name="action" value="preview" class="btn btn--primary" data-preview-button>{% translate "Preview file" %}</button></div>

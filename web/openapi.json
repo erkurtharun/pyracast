@@ -6940,24 +6940,28 @@
                     },
                     "revision": {
                         "type": "integer",
-                        "readOnly": true
+                        "readOnly": true,
+                        "title": "Technical details revision"
                     },
                     "dc_capacity_mw": {
                         "type": "number",
                         "format": "double",
-                        "readOnly": true
+                        "readOnly": true,
+                        "title": "Panel capacity (MWp)"
                     },
                     "inverter_capacity_mw": {
                         "type": "number",
                         "format": "double",
                         "readOnly": true,
-                        "nullable": true
+                        "nullable": true,
+                        "title": "Inverter capacity (MW AC)"
                     },
                     "export_limit_mw": {
                         "type": "number",
                         "format": "double",
                         "readOnly": true,
-                        "nullable": true
+                        "nullable": true,
+                        "title": "Grid export limit (MW)"
                     },
                     "measurement_basis": {
                         "allOf": [
@@ -6965,7 +6969,8 @@
                                 "$ref": "#/components/schemas/MeasurementBasisEnum"
                             }
                         ],
-                        "readOnly": true
+                        "readOnly": true,
+                        "title": "Meter point"
                     },
                     "mounting_type": {
                         "allOf": [
@@ -6973,19 +6978,22 @@
                                 "$ref": "#/components/schemas/MountingTypeEnum"
                             }
                         ],
-                        "readOnly": true
+                        "readOnly": true,
+                        "title": "Mounting"
                     },
                     "surface_tilt_degrees": {
                         "type": "number",
                         "format": "double",
                         "readOnly": true,
-                        "nullable": true
+                        "nullable": true,
+                        "title": "Panel tilt (°)"
                     },
                     "surface_azimuth_degrees": {
                         "type": "number",
                         "format": "double",
                         "readOnly": true,
-                        "nullable": true
+                        "nullable": true,
+                        "title": "Panel azimuth (°)"
                     },
                     "created_at": {
                         "type": "string",
@@ -8812,7 +8820,7 @@
             "LocationChangeStatusEnum": {
                 "enum": ["pending", "approved", "rejected", "withdrawn"],
                 "type": "string",
-                "description": "* `pending` - Awaiting review\n* `approved` - Approved\n* `rejected` - Rejected\n* `withdrawn` - Withdrawn"
+                "description": "* `pending` - In review\n* `approved` - Approved\n* `rejected` - Rejected\n* `withdrawn` - Withdrawn"
             },
             "LocationRefusal": {
                 "description": "A refusal that can name the plant already at the requested location.",
@@ -9781,7 +9789,7 @@
                     "calibration_automatic_skipped"
                 ],
                 "type": "string",
-                "description": "* `submission_saved` - Submission saved\n* `configuration_created` - Configuration created\n* `plant_renamed` - Plant renamed\n* `observations_imported` - Observations imported\n* `production_changed` - Production changed\n* `epias_connected` - EPIAS connected\n* `epias_disconnected` - EPIAS disconnected\n* `calibration_requested` - Calibration requested\n* `calibration_scheduled` - Calibration scheduled\n* `calibration_completed` - Calibration completed\n* `calibration_activated` - Calibration activated\n* `calibration_automatically_activated` - Calibration automatically activated\n* `calibration_reset` - Calibration reset\n* `calibration_automation_enabled` - Automatic calibration enabled\n* `calibration_automation_disabled` - Automatic calibration disabled\n* `calibration_automatic_skipped` - Automatic calibration skipped"
+                "description": "* `submission_saved` - Submission saved\n* `configuration_created` - Technical details revision created\n* `plant_renamed` - Plant renamed\n* `observations_imported` - Observations imported\n* `production_changed` - Production changed\n* `epias_connected` - EPIAS connected\n* `epias_disconnected` - EPIAS disconnected\n* `calibration_requested` - Calibration requested\n* `calibration_scheduled` - Calibration scheduled\n* `calibration_completed` - Calibration completed\n* `calibration_activated` - Calibration activated\n* `calibration_automatically_activated` - Calibration automatically activated\n* `calibration_reset` - Calibration reset\n* `calibration_automation_enabled` - Automatic calibration enabled\n* `calibration_automation_disabled` - Automatic calibration disabled\n* `calibration_automatic_skipped` - Automatic calibration skipped"
             },
             "PlantForecastOutput": {
                 "type": "object",

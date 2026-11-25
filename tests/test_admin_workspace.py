@@ -625,7 +625,8 @@ def test_setup_page_says_when_a_plant_declares_no_values_yet() -> None:
     Plant.objects.create(region=system.region, name="Bare plant")
     client, _ = verified_admin()
     page = client.get(reverse("admin:workspace_plant", args=(system.region.pk,))).content
-    assert b"<h3>Bare plant</h3>" in page
+    assert b"<h1>Bare plant</h1>" in page
+    assert b"<h3>Technical details</h3>" in page
     assert b"No saved technical details or customer submission." in page
     assert b'<span class="badge">In review</span>' not in page
 

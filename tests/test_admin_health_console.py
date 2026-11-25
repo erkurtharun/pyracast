@@ -62,6 +62,8 @@ TURKISH = {
     "Showing 1\u20135 of 5": "5 kay\u0131ttan 1\u20135 gösteriliyor",
     "Show all work": "Tüm işleri göster",
     "All work.": "Tüm işler.",
+    "Show recent and open work": "Yak\u0131n zamandaki ve aç\u0131k işleri göster",
+    "Work of the last 24 hours and all open work.": "Son 24 saatin işleri ve tüm aç\u0131k işler.",
 }
 
 
@@ -389,6 +391,7 @@ def test_operations_lists_show_the_last_24_hours_until_all_work_is_asked_for(
     content = recent.content.decode()
     assert text(language, "Showing 1\u20132 of 2") in content
     assert text(language, "Show all work") in content
+    assert text(language, "Work of the last 24 hours and all open work.") not in content
     assert 'href="/admin/operations/?window=all"' in content
 
     everything = client.get("/admin/operations/?window=all&collections_page=1")
@@ -397,6 +400,7 @@ def test_operations_lists_show_the_last_24_hours_until_all_work_is_asked_for(
     content = everything.content.decode()
     assert text(language, "Showing 1\u20135 of 5") in content
     assert text(language, "All work.") in content
+    assert text(language, "Show recent and open work") in content
     assert 'href="/admin/operations/"' in content
 
 

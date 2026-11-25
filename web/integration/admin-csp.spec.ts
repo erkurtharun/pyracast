@@ -61,14 +61,14 @@ test("an MFA administrator reviews plants and operations on desktop and mobile u
     ).toBeVisible();
     await checkPage(page, testInfo, "admin-plants-desktop");
     await page
-        .getByLabel("Plant, location or company")
+        .getByLabel("Plant, location or workspace")
         .fill("No matching plant");
     await page.getByRole("button", { name: "Search", exact: true }).click();
     await expect(
         page.getByText("No plants match these filters."),
     ).toBeVisible();
     await page.getByRole("link", { name: "Clear", exact: true }).click();
-    await page.getByLabel("Plant, location or company").fill("Review solar");
+    await page.getByLabel("Plant, location or workspace").fill("Review solar");
     await page
         .getByLabel("Review status", { exact: true })
         .selectOption("pending");

@@ -156,7 +156,9 @@ PRESENTATION: Mapping[str, Presentation] = {
     "failed_outbound_mail": Presentation(
         gettext_lazy("Failed account and invitation emails"),
         gettext_lazy(
-            "Review the recorded error; the person or the workspace administrator can ask again."
+            "Review the recorded error. The person can request an account email again. The "
+            "workspace administrator can send an invitation again; while the workspace has "
+            "none, Pyracast sends it."
         ),
         OUTBOUND,
         "review",
@@ -164,8 +166,9 @@ PRESENTATION: Mapping[str, Presentation] = {
     "uncertain_outbound_mail": Presentation(
         gettext_lazy("Account and invitation emails with an unknown outcome"),
         gettext_lazy(
-            "They may have arrived and are never resent; the person or the workspace "
-            "administrator can ask again."
+            "They may have arrived and are never resent. The person can request an account "
+            "email again. The workspace administrator can send an invitation again; while the "
+            "workspace has none, Pyracast sends it."
         ),
         OUTBOUND,
         "review",

@@ -123,7 +123,7 @@ class WorkspaceForm(WorkspaceNameForm):
         required=False,
         label=gettext_lazy("Workspace administrator email (optional)"),
         help_text=gettext_lazy(
-            "Pyracast sends this address an invitation as workspace administrator. Without an "
+            "Pyracast invites this address to become the workspace administrator. Without an "
             "address, the workspace has none until you invite one."
         ),
     )
@@ -192,7 +192,6 @@ class InvitationForm(forms.Form):
             ),
         ),
         label=gettext_lazy("Role"),
-        help_text=gettext_lazy("Offered while the workspace has no workspace administrator."),
     )
     language = forms.ChoiceField(
         choices=Language.choices, label=gettext_lazy("Invitation language")

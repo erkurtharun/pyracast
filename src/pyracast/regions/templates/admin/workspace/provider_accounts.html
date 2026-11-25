@@ -12,14 +12,14 @@
           <thead><tr>
             <th scope="col">{% translate "Account" %}</th>
             <th scope="col" class="cell-fit">{% translate "Plants" %}</th>
-            <th scope="col" class="cell-fit">{% translate "Requests today" %}</th>
+            <th scope="col" class="cell-fit">{% translate "Requests today (UTC)" %}</th>
             <th scope="col" class="cell-fit">{% translate "Left today" %}</th>
             <th scope="col">{% translate "State" %}</th>
           </tr></thead>
           <tbody>{% for row in accounts %}<tr>
             <th scope="row" data-label="{% translate "Account" %}"><a class="row-title" href="{% url 'admin:workspace_provider_account' row.account.pk %}">{{ row.account.get_provider_display }} · {{ row.account.external_account_id }}</a></th>
             <td data-label="{% translate "Plants" %}">{{ row.plants }}</td>
-            <td data-label="{% translate "Requests today" %}">{{ row.used_today }} / {{ row.account.daily_quota }}</td>
+            <td data-label="{% translate "Requests today (UTC)" %}">{{ row.used_today }} / {{ row.account.daily_quota }}</td>
             <td data-label="{% translate "Left today" %}">{{ row.remaining_today }}</td>
             <td data-label="{% translate "State" %}">{% if not row.account.enabled %}<span class="badge badge--not-configured">{% translate "Disabled" %}</span>{% elif row.key_rejected %}<span class="badge badge--failed">{% translate "Key rejected" %}</span>{% elif row.delayed %}<span class="badge badge--provider-delay">{% translate "Provider delay" %}</span>{% else %}<span class="badge badge--healthy">{% translate "Ready" %}</span>{% endif %}</td>
           </tr>{% endfor %}</tbody>

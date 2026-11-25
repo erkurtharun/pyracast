@@ -114,7 +114,7 @@ def region_records(region_id: int) -> list[tuple[StrOrPromise, str]]:
             (gettext_lazy("Plant events"), "plants_plantevent"),
             (gettext_lazy("Collection jobs"), "forecasts_collectionjob"),
             (gettext_lazy("Request attempts"), "forecasts_requestattempt"),
-            (gettext_lazy("Forecast emails"), "notifications_notificationdelivery"),
+            (gettext_lazy("Forecast email history"), "notifications_notificationdelivery"),
             (gettext_lazy("Provider bindings"), "connections_sitebinding"),
         )
     ]

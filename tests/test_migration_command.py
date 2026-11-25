@@ -66,6 +66,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0006_expire_invitations_with_the_previous_link",
             "0007_invitation_token_minted_at_send",
             "0008_invitation_revocation_reason_and_acceptor",
+            "0009_workspace_administrator_names",
         ),
         "change_requests": (
             "0002_change_vocabulary_checks",
@@ -118,7 +119,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0006_submission_updated_at",
             "0007_plant_parameters_revision",
             "0008_calibration_run_available_at",
-            "0009_meter_point_names",
+            "0009_technical_details_names",
         ),
         "regions": (
             "0002_audit_event_details",

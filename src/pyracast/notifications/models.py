@@ -4,6 +4,7 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.utils.text import capfirst
 from django.utils.translation import gettext_lazy
 
 from pyracast.accounts.models import Language, Membership
@@ -21,15 +22,17 @@ class NotificationSettings(models.Model):
     max_recipients = models.PositiveSmallIntegerField(
         default=5,
         validators=[MinValueValidator(1), MaxValueValidator(MAX_RECIPIENT_LIMIT)],
-        help_text=(
-            "Recipient limit of each plant's forecast email. Lowering it pauses the forecast "
-            "email of plants over the limit until their recipient lists are shortened."
+        verbose_name=gettext_lazy("Recipients per plant"),
+        help_text=gettext_lazy(
+            "Lowering the limit pauses the forecast email of plants whose saved recipient list "
+            "is over it. The lists are kept. Once a list is shortened or the limit is raised, "
+            "the next forecast emails are sent at their scheduled times."
         ),
     )
 
     class Meta:
-        verbose_name = "forecast email settings"
-        verbose_name_plural = "forecast email settings"
+        verbose_name = gettext_lazy("forecast email settings")
+        verbose_name_plural = gettext_lazy("forecast email settings")
         constraints = (
             models.CheckConstraint(condition=models.Q(pk=1), name="%(class)s_id_chk"),
             models.CheckConstraint(
@@ -39,7 +42,7 @@ class NotificationSettings(models.Model):
         )
 
     def __str__(self) -> str:
-        return "Email reminder settings"
+        return capfirst(str(self._meta.verbose_name))
 
 
 class RecipientRole(models.TextChoices):
@@ -74,7 +77,7 @@ class ReminderSchedule(models.Model):
         )
 
     def __str__(self) -> str:
-        return f"Reminders of region {self.region_id}"
+        return f"Forecast email of region {self.region_id}"
 
 
 class Cardinality(models.Func):
@@ -308,7 +311,7 @@ class NotificationDelivery(models.Model):
         )
 
     def __str__(self) -> str:
-        return f"Delivery {self.pk} of schedule {self.schedule_id}: {self.status}"
+        return f"Forecast email {self.pk} of schedule {self.schedule_id}: {self.status}"
 
 
 class DeliveryRecipient(models.Model):

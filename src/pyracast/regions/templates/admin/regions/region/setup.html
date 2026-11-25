@@ -84,7 +84,7 @@
   {% endif %}
 
   <section class="panel" aria-labelledby="details-title">
-    <div class="panel-head"><h2 id="details-title">{% translate "Plant details" %}</h2>{% if plants %}<a class="btn btn--quiet" href="{% url 'admin:workspace_plant_details' region.pk %}">{% translate "Edit details" %}</a>{% endif %}</div>
+    <div class="panel-head"><h2 id="details-title">{% translate "Plant" %}</h2>{% if plants %}<a class="btn btn--quiet" href="{% url 'admin:workspace_plant_details' region.pk %}">{% translate "Edit plant" %}</a>{% endif %}</div>
     <dl class="facts">
       <div><dt>{% translate "Workspace" %}</dt><dd>{{ region.tenant.name }}</dd></div>
       <div><dt>{% translate "Location" %}</dt><dd>{{ region.name }} · {{ region.latitude }}°, {{ region.longitude }}°</dd></div>
@@ -92,7 +92,7 @@
       <div><dt>{% translate "Location revision" %}</dt><dd>{{ region.revision }}</dd></div>
     </dl>
     {% for plant, record, submitted in declarations %}
-      <h3>{{ plant.name }}{% if submitted %} <span class="badge">{% translate "In review" %}</span>{% endif %}</h3>
+      <h3>{% translate "Technical details" %}{% if submitted %} <span class="badge">{% translate "In review" %}</span>{% endif %}</h3>
       {% if record %}
         <dl class="facts">
           <div><dt>{% translate "Panel capacity (MWp)" %}</dt><dd>{{ record.dc_capacity_mw }}</dd></div>
@@ -292,7 +292,7 @@
         </ul>{% else %}<p class="empty">{% translate "No collection jobs yet." %}</p>{% endif %}
       </div>
       <div>
-        <h3>{% translate "Forecast emails" %}</h3>
+        <h3>{% translate "Forecast email history" %}</h3>
         {% if recent_deliveries %}<ul class="rows rows--tight">
           {% for delivery in recent_deliveries %}<li class="row row--block">
             <p><span class="badge badge--{{ delivery.status|slugify }}">{{ delivery.status_label }}</span> <time class="row-meta" datetime="{{ delivery.scheduled_for|date:'c' }}">{{ delivery.scheduled_for|date:"j M Y, H:i T" }}</time></p>

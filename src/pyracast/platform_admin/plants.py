@@ -297,12 +297,12 @@ def plant_details_page(
             messages.success(
                 request,
                 _(
-                    "Plant details saved. The plant is back in review with its corrected "
+                    "Plant saved. The plant is back in review with its corrected "
                     "location. Set up its provider connection again."
                 ),
             )
         elif parameters_changed:
-            messages.success(request, _("Plant details saved."))
+            messages.success(request, _("Plant saved."))
         else:
             messages.info(request, _("Nothing changed."))
         return redirect("admin:workspace_plant", region_id=region.pk)
@@ -311,7 +311,7 @@ def plant_details_page(
         site,
         request,
         "plant_details",
-        _("Edit plant details"),
+        _("Edit plant"),
         {
             "region": region,
             "plant": plant,

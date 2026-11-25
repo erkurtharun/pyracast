@@ -53,4 +53,18 @@ class Migration(migrations.Migration):
                 max_length=20,
             ),
         ),
+        migrations.AlterField(
+            model_name="regionlocationchangerequest",
+            name="status",
+            field=models.CharField(
+                choices=[
+                    ("pending", "In review"),
+                    ("approved", "Approved"),
+                    ("rejected", "Rejected"),
+                    ("withdrawn", "Withdrawn"),
+                ],
+                default="pending",
+                max_length=20,
+            ),
+        ),
     ]

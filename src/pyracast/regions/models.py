@@ -22,10 +22,10 @@ class RegionStatus(models.TextChoices):
 
 
 class LocationChangeStatus(models.TextChoices):
-    PENDING = "pending", "Awaiting review"
-    APPROVED = "approved", "Approved"
-    REJECTED = "rejected", "Rejected"
-    WITHDRAWN = "withdrawn", "Withdrawn"
+    PENDING = "pending", gettext_lazy("In review")
+    APPROVED = "approved", gettext_lazy("Approved")
+    REJECTED = "rejected", gettext_lazy("Rejected")
+    WITHDRAWN = "withdrawn", gettext_lazy("Withdrawn")
 
 
 class AuditAction(models.TextChoices):

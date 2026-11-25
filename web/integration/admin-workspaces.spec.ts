@@ -102,9 +102,9 @@ test("a platform administrator creates a workspace, adds a plant and manages mem
             .filter({ hasText: "Plant Browser console plant created." }),
     ).toBeVisible();
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.getByRole("link", { name: "Edit details" }).click();
+    await page.getByRole("link", { name: "Edit plant" }).click();
     await expect(
-        page.getByRole("heading", { name: "Edit plant details", exact: true }),
+        page.getByRole("heading", { name: "Edit plant", exact: true }),
     ).toBeVisible();
     await checkPage(page, testInfo, "console-plant-details-desktop");
 
@@ -119,7 +119,9 @@ test("a platform administrator creates a workspace, adds a plant and manages mem
         }),
     ).toBeVisible();
     const member = process.env.BROWSER_REMOVABLE_MEMBER!;
-    await page.getByRole("link", { name: `Remove from workspace ${member}` }).click();
+    await page
+        .getByRole("link", { name: `Remove from workspace ${member}` })
+        .click();
     await page.setViewportSize({ width: 320, height: 800 });
     await checkPage(page, testInfo, "console-member-removal-mobile");
     await page.getByRole("button", { name: "Remove from workspace" }).click();
