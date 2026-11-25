@@ -339,50 +339,6 @@
             "curtailed": "Üretim kısıldı",
             "invalid": "Geçersiz değer"
         },
-        "CollectionEndpoint": {
-            "forecasts": "Tahmin",
-            "estimated_actuals": "Uydu verisinden hesaplanan üretim",
-            "historical_import": "İçe aktarılan, uydu verisinden hesaplanan üretim",
-            "scaled_forecasts": "Tahmin",
-            "scaled_estimated_actuals": "Uydu verisinden hesaplanan üretim"
-        },
-        "CollectionJobStatus": {
-            "pending": "Sırada",
-            "running": "Devam ediyor",
-            "retry": "Yeniden denenecek",
-            "succeeded": "Tamamlandı",
-            "failed": "Tamamlanamadı",
-            "stale": "Artık gerekmiyor"
-        },
-        "CollectionJobError": {
-            "history_window_closed": "Bu gün için uydu verisi yok.",
-            "attempts_exhausted": "Tahmin güncellenemedi.",
-            "forecast_superseded": "Daha sonraki bir güncelleme yerini aldı.",
-            "binding_not_current": "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: {contact}",
-            "schedule_disabled": "Tahminlerin otomatik güncellenmesi kapalı.",
-            "slot_not_configured": "Bu saat artık tahmin güncelleme saatleri arasında değil.",
-            "schedule_changed": "Tahmin güncelleme saatleri değiştiği için yerine yenisi planlandı.",
-            "history_incomplete": "Bazı saatlerin verisi eksik.",
-            "history_already_archived": "Bu günün uydu verisi zaten alınmıştı.",
-            "provider_authentication_failed": "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: {contact}",
-            "provider_allowance_exhausted": "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek.",
-            "provider_access_denied": "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: {contact}",
-            "provider_site_not_found": "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: {contact}",
-            "provider_throttled": "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek.",
-            "provider_server_error": "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek.",
-            "provider_unreachable": "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek.",
-            "provider_invalid_response": "Tahmin güncellenemedi.",
-            "provider_configuration_invalid": "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: {contact}",
-            "account_unavailable": "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: {contact}",
-            "history_budget_reserved": "Uydu verisi güncellemesi gecikti. Pyracast yeniden deneyecek.",
-            "quota_exhausted": "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek.",
-            "provider_failure": "Tahmin güncellenemedi.",
-            "provider_unexpected_failure": "Tahmin güncellenemedi.",
-            "invalid_source_kind": "Tahmin güncellenemedi.",
-            "calculation_failure": "Tahmin hesaplanamadı.",
-            "lock_contention": "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek.",
-            "publication_failure": "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek."
-        },
         "NotificationDeliveryStatus": {
             "pending": "Hazırlanıyor",
             "retry": "Yeniden denenecek",
@@ -474,7 +430,7 @@
             "collecting": "Otomatik güncelleniyor",
             "waiting_for_approval": "Pyracast onayı bekleniyor",
             "paused": "Güncellenmiyor",
-            "provider_attention": "Gecikiyor"
+            "provider_attention": "Güncellenmiyor"
         },
         "CollectionInactiveReason": {
             "not_approved": "Pyracast santrali onayladığında tahminler başlar.",
@@ -482,7 +438,7 @@
             "binding_not_current": "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: {contact}",
             "schedule_disabled": "Bu santral için tahminlerin otomatik güncellenmesi kapalı.",
             "quota_too_low": "Bu santralin tahmin güncelleme saati yok. Pyracast'e yazın: {contact}",
-            "provider_unavailable": "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek."
+            "provider_unavailable": "Tahminler şu anda güncellenmiyor."
         },
         "SiteAttention": {
             "setup_incomplete": "Santralin eklenmesi tamamlanmadı.",
