@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import cast
+from typing import Literal, cast
 
-from django.conf import settings
-from django.utils.translation import gettext as _
+# A collection runs at least daily; two hours cover one still retrying and the 25-hour day.
+STALE_AFTER = timedelta(hours=26)
 
 
 @dataclass(frozen=True)
@@ -14,7 +14,6 @@ class ReportInterval:
     outage_energy: float | None
     complete: bool
     outage_complete: bool
-    source_kind: str = "forecast"
 
 
 @dataclass(frozen=True)
@@ -29,7 +28,6 @@ class ReportDay:
     has_outage: bool
     intervals: tuple[ReportInterval, ...]
     outage_status: str | None = None
-    source_kind: str = "forecast"
 
 
 @dataclass(frozen=True)
@@ -41,8 +39,33 @@ class ForecastReport:
     days: tuple[ReportDay, ...]
     unit: str
     electrical: bool
-    warnings: tuple[str, ...]
-    url: str
+    stale: bool
+
+
+@dataclass(frozen=True)
+class Figure:
+    value: float | None
+    without_outage: float | None
+    gap: Literal["", "incomplete", "missing"]
+    outage: Literal["", "included", "excluded", "unknown"]
+
+
+def figure(day: ReportDay) -> Figure:
+    if day.total is None:
+        return Figure(None, None, "incomplete" if day.coverage else "missing", "")
+    if not day.has_outage:
+        return Figure(day.total, None, "", "")
+    if day.outage_status == "unknown_impact":
+        return Figure(day.total, None, "", "unknown")
+    if day.outage_total is None:
+        return Figure(day.total, None, "", "excluded")
+    return Figure(day.outage_total, day.total, "", "included")
+
+
+def interval_value(item: ReportInterval, shown: Figure) -> float | None:
+    if shown.outage == "included":
+        return item.outage_energy if item.outage_complete else None
+    return item.energy if item.complete else None
 
 
 def report_summary(payload: dict[str, object] | None) -> dict[str, object]:
@@ -110,35 +133,9 @@ def _intervals(
                 outage_energy=_energy(other, "mwh"),
                 complete=row.get("complete") is True if electrical else energy is not None,
                 outage_complete=other.get("complete") is True,
-                source_kind=_interval_source(row, normal, begin, end),
             )
         )
     return tuple(rows)
-
-
-def _interval_source(
-    row: dict[str, object], normal: dict[str, object], begin: datetime, end: datetime
-) -> str:
-    provenance = cast(dict[str, object], normal.get("provenance", {}))
-    kinds = set(cast(list[str], row.get("source_kinds", [])))
-    if not kinds:
-        kinds = {
-            cast(str, segment.get("source_kind", "forecast"))
-            for segment in cast(list[dict[str, object]], provenance.get("source_segments", []))
-            if begin < datetime.fromisoformat(cast(str, segment["end"]))
-            and end > datetime.fromisoformat(cast(str, segment["start"]))
-        }
-    if len(kinds) > 1:
-        return "mixed"
-    return next(iter(kinds), cast(str, provenance.get("source_kind", "forecast")))
-
-
-def source_label(source_kind: str) -> str:
-    return {
-        "forecast": _("Forecast"),
-        "estimated_actuals": _("Estimated actuals"),
-        "mixed": _("Estimated + forecast"),
-    }[source_kind]
 
 
 def _day(
@@ -151,7 +148,6 @@ def _day(
 ) -> ReportDay:
     unit = "mwh" if electrical else "kwh_m2"
     summary, alternative = report_summary(normal), report_summary(outage)
-    provenance = cast(dict[str, object], normal.get("provenance", {})) if normal else {}
     return ReportDay(
         day=day,
         total=cast(float | None, summary.get(f"energy_{unit}")),
@@ -163,7 +159,6 @@ def _day(
         has_outage=outage is not None,
         intervals=_intervals(normal, outage, electrical=electrical),
         outage_status=outage_status,
-        source_kind=cast(str, provenance.get("source_kind", "forecast")),
     )
 
 
@@ -172,47 +167,24 @@ def present_report(
     results: list[dict[str, object] | None],
     *,
     prepared_at: datetime,
-    fallback: bool,
+    missed_collection: bool,
 ) -> ForecastReport:
+    """The shown time is tomorrow's forecast collection; today's composed sources never enter it."""
     electrical = context["plant_id"] is not None
-    days = []
+    days = [
+        _day(
+            date.fromisoformat(cast(str, row["date"])),
+            cast(dict[str, object] | None, row["normal"]) if electrical else irradiance,
+            cast(dict[str, object] | None, row["outage"]) if electrical else None,
+            electrical=electrical,
+            outage_status=cast(str | None, row.get("outage_status")),
+        )
+        for row, irradiance in zip(
+            cast(list[dict[str, object]], context["days"]), results, strict=True
+        )
+    ]
     collected = context["collected_at"]
-    source_times = [datetime.fromisoformat(cast(str, collected))] if collected else []
-    for row, irradiance in zip(
-        cast(list[dict[str, object]], context["days"]), results, strict=True
-    ):
-        normal = cast(dict[str, object] | None, row["normal"]) if electrical else irradiance
-        provenance = cast(dict[str, object], normal.get("provenance", {})) if normal else {}
-        for field in ("collected_at", "oldest_collected_at"):
-            if timestamp := provenance.get(field):
-                source_times.append(datetime.fromisoformat(cast(str, timestamp)))
-        source_times.extend(
-            datetime.fromisoformat(cast(str, source["collected_at"]))
-            for source in cast(list[dict[str, object]], provenance.get("source_snapshots", []))
-        )
-        days.append(
-            _day(
-                date.fromisoformat(cast(str, row["date"])),
-                normal,
-                cast(dict[str, object] | None, row["outage"]) if electrical else None,
-                electrical=electrical,
-                outage_status=cast(str | None, row.get("outage_status")),
-            )
-        )
-    collected_at = max(source_times) if source_times else None
-    warnings = []
-    if not electrical:
-        warnings.append(_("Irradiance estimate, not plant electricity."))
-    if source_times and prepared_at - min(source_times) > timedelta(hours=24):
-        warnings.append(_("Forecast data is over 24 hours old."))
-    if collected_at and fallback:
-        warnings.append(_("Using the last saved forecast."))
-    if any(day.has_outage for day in days):
-        warnings.append(_("The outage scenario follows the recorded outage times and limits."))
-    if any(day.outage_status == "unknown_impact" for day in days):
-        warnings.append(
-            _("Outage impact is unknown. Update the outage capacity to get an estimate.")
-        )
+    collected_at = datetime.fromisoformat(cast(str, collected)) if collected else None
     return ForecastReport(
         plant_name=cast(str, context["plant_name"]),
         timezone=cast(str, context["timezone"]),
@@ -221,6 +193,6 @@ def present_report(
         days=tuple(days),
         unit="MWh" if electrical else "kWh/m²",
         electrical=electrical,
-        warnings=tuple(warnings),
-        url=f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/",
+        stale=collected_at is not None
+        and (missed_collection or prepared_at - collected_at > STALE_AFTER),
     )

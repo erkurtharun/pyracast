@@ -76,16 +76,15 @@ def test_saved_delivery_pins_vintage_recipient_and_never_fetches() -> None:
     message = mail.outbox[0]
     assert isinstance(message, EmailMultiAlternatives)
     assert message.bcc == ["default@example.com"]
-    assert "Irradiance estimate, not plant electricity." in message.body
-    assert "kWh/m²" in message.body
-    assert "10 Nov 2026" in message.body
-    assert "11 Nov 2026" in message.body
-    assert "Partial:" in message.body
+    assert "solar irradiance forecast (GHI), not electricity generation" in message.body
+    assert "Today (Tue 10 Nov 2026): Data is missing for some hours" in message.body
+    assert "Tomorrow (Wed 11 Nov 2026): Data is missing for some hours" in message.body
+    assert message.subject.endswith("forecast for Wed 11 Nov is incomplete")
     sheet = attached_sheet(message)
     for day in (10, 11):
         row = next(cell.row for cell in sheet["A"] if cell.value == datetime(2026, 11, day))
-        assert isinstance(sheet.cell(row, 3).value, float)
-        assert "Partial estimate" in str(sheet.cell(row + 1, 1).value)
+        assert sheet.cell(row, 2).value is None
+    assert sheet["A12"].value == "Tue 10 Nov 2026: data is missing for some hours; no daily total."
     assert len(message.alternatives) == len(message.attachments) == 1
     assert RequestAttempt.objects.count() == requests
     assert CollectionJob.objects.count() == jobs + 1
@@ -225,7 +224,8 @@ def test_override_and_no_saved_forecast_are_explicit() -> None:
     assert delivery.status == "pending"
     assert candidates(delivery) == ["override@example.com"]
     assert process_notification(delivery.pk, SLOT)
-    assert "Tomorrow's forecast is unavailable" in mail.outbox[0].body
+    assert mail.outbox[0].subject.endswith(": no forecast for Wed 11 Nov")
+    assert not mail.outbox[0].attachments
     saved(system)
     assert enqueue_due(SLOT) == ids
     assert not process_notification(delivery.pk, SLOT)
@@ -414,7 +414,7 @@ def test_full_summary_preserves_units_and_escapes_html() -> None:
     summary = ForecastResult.objects.get(snapshot=snapshot).daily_payloads["2026-11-11"]["daylight"]
     sheet = attached_sheet(message)
     row = next(cell.row for cell in sheet["A"] if cell.value == datetime(2026, 11, 11))
-    assert sheet.cell(row, 3).value == pytest.approx(summary["energy_kwh_m2"])
+    assert sheet.cell(row, 2).value == pytest.approx(summary["energy_kwh_m2"])
     html = message.alternatives[0][0]
     assert isinstance(html, str)
     assert "<script>" not in html
@@ -427,7 +427,7 @@ def test_stale_source_and_missed_schedule_are_visible() -> None:
     saved(system, NOW - timedelta(days=2))
     ids = enqueue_due(SLOT)
     assert process_notification(ids[0], SLOT)
-    assert "Forecast data is over 24 hours old." in mail.outbox[0].body
+    assert "Newer forecast data was not available." in mail.outbox[0].body
     next_slot = SLOT + timedelta(days=1)
     missed_ids = enqueue_due(next_slot + timedelta(hours=3))
     missed = NotificationDelivery.objects.get(pk=missed_ids[-1])
