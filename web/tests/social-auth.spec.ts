@@ -1114,7 +1114,7 @@ async function holdDocumentNavigations(page: Page, path: RegExp) {
     await page.route(path, (route) => {
         if (!route.request().isNavigationRequest()) return route.fallback();
         requested.push(new URL(route.request().url()).pathname);
-        return route.abort();
+        return route.abort("aborted");
     });
     return requested;
 }
@@ -1197,7 +1197,8 @@ test("a provider return replaces its address with the one the sign-in started at
         /\/app\/w\/1\/plants\/11\/forecast\//,
     );
     await continueWithGoogle(page);
-    await expect(page).toHaveURL(datedForecast);
-    expect(sent.length).toBeGreaterThan(0);
+    await expect
+        .poll(() => sent)
+        .toEqual(["/app/w/1/plants/11/forecast/"]);
     expect(await storedReturn(page)).toBeNull();
 });
