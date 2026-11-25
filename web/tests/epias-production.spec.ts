@@ -1544,9 +1544,60 @@ for (const [language, texts] of [
                     energy: 1.5,
                     quality: "outage",
                     source: "UEVM",
+                    quality_label: true,
+                    source_label: "settlement",
                 },
             ]);
     });
+
+test("a file in the screen's language or with earlier column names is read while the other language's column names cannot be loaded", async ({
+    page,
+}) => {
+    await productionApi(page);
+    const turkish = "**/_next/static/**/*.js";
+    await page.route(turkish, async (route) => {
+        const response = await route.fetch();
+        const body = await response.text();
+        if (body.includes("Tahminlerde kalibrasyon kullanma"))
+            return route.abort("internetdisconnected");
+        return route.fulfill({ response, body });
+    });
+    await openProduction(page);
+    await page.getByRole("button", { name: "Import CSV", exact: true }).click();
+    const file = page.getByLabel("CSV file", { exact: true });
+    const half = "2026-11-09T08:00:00+03:00,2026-11-09T08:30:00+03:00,0.25";
+    const choose = (name: string, text: string) =>
+        file.setInputFiles({
+            name,
+            mimeType: "text/csv",
+            buffer: Buffer.from(text),
+        });
+    for (const [name, text] of [
+        [
+            "earlier.csv",
+            `starts_at,ends_at,energy_mwh,quality,source\n${half},valid,meter`,
+        ],
+        [
+            "english.csv",
+            `Start,End,Actual (MWh),Status,Source\n${half},Normal,Entered`,
+        ],
+    ] as const) {
+        await choose(name, text);
+        await expect(page.getByText(`${name} · 1 row read`)).toBeVisible();
+    }
+    const turkishFile = `Başlangıç,Bitiş,Gerçekleşen (MWh),Durum,Kaynak\n${half},Normal,Girilen`;
+    await choose("turkish.csv", turkishFile);
+    await expect(
+        page.getByText(
+            "The column names of the other language could not be loaded. Try again.",
+        ),
+    ).toBeVisible();
+    await page.unroute(turkish);
+    await choose("turkish-again.csv", turkishFile);
+    await expect(
+        page.getByText("turkish-again.csv · 1 row read"),
+    ).toBeVisible();
+});
 
 test("Turkish production at 320px keeps native corrections, decimal commas and import review usable", async ({
     page,

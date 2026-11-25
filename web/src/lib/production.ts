@@ -2,7 +2,7 @@ import Papa from "papaparse";
 import type core from "../../messages/en/core.json";
 import { loadCatalogue } from "@/i18n/catalogue";
 import type { english } from "@/i18n/en";
-import { languages } from "@/i18n/language";
+import { isLanguage, languages } from "@/i18n/language";
 import { DisplayError } from "@/lib/api/errors";
 import type { components } from "./schema";
 export const QUALITIES = ["valid", "outage", "curtailed", "invalid"] as const;
@@ -36,6 +36,8 @@ type Observation = {
     energy: number;
     quality: Quality;
     source: string;
+    quality_label: boolean;
+    source_label: ProductionSource | null;
 };
 type Unit = "MWh" | "kWh";
 export type ProductionFile = { unit: Unit; observations: Observation[] };
@@ -49,10 +51,18 @@ const REQUIRED: readonly Role[] = [
     "status",
     "source",
 ];
+const SOURCES: readonly ProductionSource[] = [
+    "settlement",
+    "provisional",
+    "manual",
+];
+
+type Status = { quality: Quality | "mixed"; label: boolean };
 
 export type ImportWords = {
     columns: ReadonlyMap<string, Column>;
-    statuses: ReadonlyMap<string, Quality | "mixed">;
+    statuses: ReadonlyMap<string, Status>;
+    sources: ReadonlyMap<string, ProductionSource>;
 };
 
 export function importWords(
@@ -67,10 +77,13 @@ export function importWords(
         ["source", { role: "source" }],
         ["timezone", { role: "timezone" }],
     ]);
-    const statuses = new Map<string, Quality | "mixed">([
-        ...QUALITIES.map((quality) => [quality, quality] as const),
-        ["mixed", "mixed"],
-    ]);
+    const statuses = new Map<string, Status>(
+        [...QUALITIES, "mixed" as const].map((quality) => [
+            quality,
+            { quality, label: false },
+        ]),
+    );
+    const sources = new Map<string, ProductionSource>();
     for (const { CsvFile, Enums } of catalogues) {
         const named = CsvFile.columns;
         columns.set(named.start, { role: "start" });
@@ -80,16 +93,15 @@ export function importWords(
         columns.set(named.status, { role: "status" });
         columns.set(named.source, { role: "source" });
         for (const quality of QUALITIES)
-            statuses.set(Enums.ObservationQuality[quality], quality);
-        statuses.set(CsvFile.words.mixed, "mixed");
+            statuses.set(Enums.ObservationQuality[quality], {
+                quality,
+                label: true,
+            });
+        statuses.set(CsvFile.words.mixed, { quality: "mixed", label: true });
+        for (const source of SOURCES)
+            sources.set(CsvFile.words[source], source);
     }
-    return { columns, statuses };
-}
-
-export async function productionWords(): Promise<ImportWords> {
-    return importWords(
-        await Promise.all(languages.map((language) => loadCatalogue(language))),
-    );
+    return { columns, statuses, sources };
 }
 
 const EXAMPLE = ["start", "end", "actual_mwh", "status", "source"] as const;
@@ -102,17 +114,18 @@ export function importExample(file: (key: string) => string, normal: string) {
 }
 
 function fileColumns(fields: readonly string[], words: ImportWords) {
-    const names = new Map<Role, string>();
+    const indexes = new Map<Role, number>();
     let unit: Unit | undefined;
-    for (const field of fields) {
+    for (const [index, field] of fields.entries()) {
         const column = words.columns.get(field);
-        if (!column || names.has(column.role)) return null;
-        names.set(column.role, field);
+        if (!column || indexes.has(column.role)) return null;
+        indexes.set(column.role, index);
         unit ??= column.unit;
     }
-    const name = (role: Role) => names.get(role) ?? "";
-    return unit && REQUIRED.every((role) => names.has(role))
-        ? { unit, name }
+    const index = (role: Role) => indexes.get(role) ?? -1;
+    const name = (role: Role) => fields[index(role)] ?? "";
+    return unit && REQUIRED.every((role) => indexes.has(role))
+        ? { unit, index, name }
         : null;
 }
 
@@ -121,31 +134,80 @@ export type CsvTexts = (
     values?: Record<string, string | number>,
 ) => string;
 
+type FileRecord = { line: number; cells: string[] };
+type FileRecords = { fields: string[]; rows: FileRecord[]; readable: boolean };
+
+function fileRecords(text: string, t: CsvTexts): FileRecords {
+    if (new TextEncoder().encode(text).length > 2 * 1024 * 1024)
+        throw new DisplayError(t("size"));
+    const records: FileRecord[] = [];
+    let readable = true;
+    let line = 1;
+    let start = 0;
+    Papa.parse<string[]>(text, {
+        delimiter: ",",
+        dynamicTyping: false,
+        transform: (value) => value.trim(),
+        step: ({ data, errors, meta }) => {
+            readable &&= errors.length === 0;
+            if (data.some(Boolean)) records.push({ line, cells: data });
+            line +=
+                text.slice(start, meta.cursor).match(/\r\n|\r|\n/g)?.length ??
+                0;
+            start = meta.cursor;
+        },
+    });
+    const [header, ...rows] = records;
+    return { fields: header?.cells ?? [], rows, readable };
+}
+
 export function parseProduction(
     text: string,
     t: CsvTexts,
     words: ImportWords,
 ): ProductionFile {
-    if (new TextEncoder().encode(text).length > 2 * 1024 * 1024)
-        throw new DisplayError(t("size"));
-    const parsed = Papa.parse<Record<string, string>>(text, {
-        header: true,
-        delimiter: ",",
-        dynamicTyping: false,
-        skipEmptyLines: "greedy",
-        transformHeader: (value) => value.trim(),
-        transform: (value) => value.trim(),
-    });
-    const columns = fileColumns(parsed.meta.fields ?? [], words);
+    return productionFile(fileRecords(text, t), t, words);
+}
+
+export async function readProduction(
+    text: string,
+    t: CsvTexts,
+    locale: string,
+): Promise<ProductionFile> {
+    const records = fileRecords(text, t);
+    const language = isLanguage(locale) ? locale : "en";
+    const active = await loadCatalogue(language);
+    let words = importWords([active]);
+    if (!fileColumns(records.fields, words)) {
+        const others = await Promise.all(
+            languages
+                .filter((other) => other !== language)
+                .map((other) => loadCatalogue(other)),
+        ).catch(() => {
+            throw new DisplayError(t("names"));
+        });
+        words = importWords([active, ...others]);
+    }
+    return productionFile(records, t, words);
+}
+
+function productionFile(
+    { fields, rows: records, readable }: FileRecords,
+    t: CsvTexts,
+    words: ImportWords,
+): ProductionFile {
+    const columns = fileColumns(fields, words);
     if (!columns) throw new DisplayError(t("header"));
-    const { name } = columns;
-    const [error] = parsed.errors;
-    if (error) throw new DisplayError(t("parse", { reason: error.message }));
-    if (parsed.data.length < 1 || parsed.data.length > 2000)
+    const { index, name } = columns;
+    if (
+        !readable ||
+        records.some(({ cells }) => cells.length !== fields.length)
+    )
+        throw new DisplayError(t("parse"));
+    if (records.length < 1 || records.length > 2000)
         throw new DisplayError(t("count"));
-    const rows = parsed.data.map((cells, index) => {
-        const row = index + 2;
-        const cell = (role: Role) => cells[name(role)] ?? "";
+    const rows = records.map(({ line: row, cells }) => {
+        const cell = (role: Role) => cells[index(role)] ?? "";
         const starts_at = cell("start"),
             ends_at = cell("end"),
             rawEnergy = cell("energy"),
@@ -170,7 +232,8 @@ export function parseProduction(
                 t("energy", { row, column: name("energy") }),
             );
         const status = words.statuses.get(cell("status"));
-        if (status === "mixed") throw new DisplayError(t("mixed", { row }));
+        if (status?.quality === "mixed")
+            throw new DisplayError(t("mixed", { row }));
         if (!status || !source || source.length > 200)
             throw new DisplayError(
                 t("quality", {
@@ -185,8 +248,10 @@ export function parseProduction(
                 starts_at,
                 ends_at,
                 energy,
-                quality: status,
+                quality: status.quality,
                 source,
+                quality_label: status.label,
+                source_label: words.sources.get(source) ?? null,
             },
         };
     });

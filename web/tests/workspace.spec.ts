@@ -1430,6 +1430,8 @@ test("CSV preserves quoted commas and multiline source fields and rejects missin
             energy: 0,
             quality: "valid",
             source: "Meter, north\nroof",
+            quality_label: false,
+            source_label: null,
         },
     ]);
     expect(() =>
@@ -1653,6 +1655,7 @@ test("forecast performance shows archived metrics, missing days and selected ran
                         error_mwh: null,
                         source_kind: null,
                         provisional_production: false,
+                        provisional_snapshot_ids: [],
                         calibration_in_sample: null,
                     },
                 ],

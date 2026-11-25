@@ -152,7 +152,7 @@ function reportValue(report: unknown, ...path: string[]): CsvCell {
 
 type Run = Schemas["CalibrationSummaryOutput"];
 
-function runColumns(plant: PlantRef): Column<Run>[] {
+function runColumns(plant: PlantRef, inUse: number | null): Column<Run>[] {
     return [
         plantColumn(plant),
         ["number", (run) => run.id],
@@ -166,7 +166,7 @@ function runColumns(plant: PlantRef): Column<Run>[] {
                 value: run.status,
             }),
         ],
-        ["in_use", (run) => run.selection_state === "active"],
+        ["in_use", (run) => run.id === inUse],
         ["preliminary", (run) => run.assessment === "provisional"],
         [
             "realtime",
@@ -180,20 +180,26 @@ export function calibrationsExport(
     plant: PlantRef,
     runs: readonly Run[],
     kind: string,
+    inUse: number | null,
 ): CsvExport {
-    return table(plantFilename(plant.name, kind), runColumns(plant), runs);
+    return table(
+        plantFilename(plant.name, kind),
+        runColumns(plant, inUse),
+        runs,
+    );
 }
 
 export function calibrationExport(
     plant: PlantRef,
     run: Schemas["CalibrationOutput"],
     kind: string,
+    inUse: boolean,
 ): CsvExport {
     const report = (...path: string[]) => reportValue(run.result, ...path);
     return table(
         plantFilename(plant.name, kind),
         [
-            ...runColumns(plant),
+            ...runColumns(plant, inUse ? run.id : null),
             ["calibration_days", () => report("training_days")],
             ["test_days", () => report("holdout_days")],
             ["error_without_mwh", () => report("baseline", "daily_mae_mwh")],
@@ -212,8 +218,12 @@ type Day = Pick<
     | "measured_energy_mwh"
     | "predicted_energy_mwh"
     | "error_mwh"
-    | "provisional_production"
+    | "provisional_snapshot_ids"
 >;
+
+export function usedRealtime(day: Pick<Day, "provisional_snapshot_ids">) {
+    return day.provisional_snapshot_ids.length > 0;
+}
 
 export type PerformanceFileNames = {
     file: string;
@@ -276,7 +286,7 @@ export function performanceExport(
                     : "forecast_difference_mwh",
                 (day) => day.error_mwh,
             ],
-            ["realtime", (day) => day.provisional_production],
+            ["realtime", usedRealtime],
         ],
         performance.days,
     );

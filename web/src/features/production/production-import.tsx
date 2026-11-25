@@ -1,5 +1,5 @@
 "use client";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import type { PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
@@ -10,8 +10,7 @@ import { useAttempt } from "@/lib/idempotency";
 import { useLeaveGuard } from "@/lib/leave-guard";
 import {
     importExample,
-    parseProduction,
-    productionWords,
+    readProduction,
     type ProductionFile,
 } from "@/lib/production";
 import {
@@ -81,6 +80,7 @@ export function ProductionImport({
     const common = useTranslations("Common");
     const csvTexts = useTranslations("ProductionCsv");
     const csvFile = useTranslations("CsvFile");
+    const locale = useLocale();
     const label = useLabel();
     const [header, example] = importExample(
         csvFile,
@@ -127,10 +127,10 @@ export function ProductionImport({
         }
         setSelection({ status: "reading" });
         try {
-            const parsed = parseProduction(
+            const parsed = await readProduction(
                 await file.text(),
                 csvTexts,
-                await productionWords(),
+                locale,
             );
             const sha256 = await fileSha256(file);
             if (current === sequence.current)

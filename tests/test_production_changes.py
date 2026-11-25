@@ -1,8 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from threading import Barrier
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from django.contrib.auth.models import User
@@ -13,9 +12,10 @@ from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.errors import ConflictError
+from pyracast.incidents.operations import finish_incident
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.measurements import latest_measurement_day, select_measurements
-from pyracast.plants.models import ProductionObservation
+from pyracast.plants.models import Plant, ProductionObservation
 from pyracast.plants.operations import revise_plant
 from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.production import production_history
@@ -25,8 +25,9 @@ from pyracast.plants.production_changes import (
     change_production,
     preview_production,
 )
-from tests.support.domain import NOW
+from tests.support.domain import NOW, System
 from tests.support.errors import raises_code
+from tests.support.incident_calibration import incident
 from tests.support.plant_operations import make_plant
 from tests.support.production_changes import edit, provider, write
 from tests.support.provisional_measurements import DAY, acquisition
@@ -100,21 +101,136 @@ def test_as_of_correction_and_revert_preserve_old_measurements(
     assert latest_measurement_day(config, end, NOW + timedelta(minutes=2), 1000) is None
 
 
-def test_a_value_imported_again_under_another_source_keeps_its_saved_revision(
+def _production_api(system: System, plant: Plant) -> tuple[Client, str]:
+    client = Client()
+    client.force_login(system.member)
+    return client, (
+        f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/production/"
+    )
+
+
+def _shown(client: Client, base: str, start: datetime) -> dict[str, Any]:
+    day = {"start_date": DAY.isoformat(), "end_date": DAY.isoformat()}
+    return next(
+        row
+        for row in client.get(base, day).json()["intervals"]
+        if datetime.fromisoformat(row["starts_at"]) == start
+    )
+
+
+def _post(client: Client, path: str, body: dict[str, Any]) -> dict[str, Any]:
+    response = client.post(path, body, content_type="application/json")
+    assert response.status_code == 200, response.json()
+    return cast(dict[str, Any], response.json())
+
+
+def _upload(client: Client, base: str, plant: Plant, row: dict[str, Any]) -> dict[str, Any]:
+    batch = {"configuration_id": plant.current_configuration_id, "unit": "MWh"}
+    preview = _post(client, base + "preview/", batch | {"observations": [row]})
+    return _post(
+        client, base + "changes/", batch | {"changes": preview["changes"], "origin": "csv_import"}
+    )
+
+
+def _file_row(start: datetime, energy: float, **cells: object) -> dict[str, Any]:
+    return {
+        "starts_at": start.isoformat(),
+        "ends_at": (start + timedelta(hours=1)).isoformat(),
+        "energy": energy,
+        **cells,
+    }
+
+
+def test_a_downloaded_row_under_an_outage_uploaded_unchanged_keeps_its_saved_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    start, _ = local_day_bounds(DAY, system.binding.timezone)
-    saved = write(system, plant, [edit(start, 2)])["ids"][0]
-    exported = ProductionChange(
-        start, start + timedelta(hours=1), saved, "set", 2, "valid", "Girilen"
+    day_start, _ = local_day_bounds(DAY, system.binding.timezone)
+    slot = day_start + timedelta(hours=10)
+    saved = write(system, plant, [edit(slot, 2)])["ids"][0]
+    outage = incident(system, plant, slot - timedelta(hours=1), slot + timedelta(hours=2))
+    client, base = _production_api(system, plant)
+    shown = _shown(client, base, slot)["effective"]
+    assert (shown["quality"], shown["source_kind"]) == ("outage", "manual")
+    unchanged = _file_row(
+        slot,
+        shown["energy_mwh"],
+        quality="outage",
+        quality_label=True,
+        source="Entered",
+        source_label="manual",
     )
-    repeated = write(system, plant, [exported])
-    assert (repeated["created"], repeated["existing"], repeated["ids"]) == (0, 1, [saved])
-    assert ProductionObservation.objects.get().source == "meter"
-    corrected = write(system, plant, [replace(exported, energy=3)])["ids"][0]
-    assert ProductionObservation.objects.get(pk=corrected).source == "Girilen"
-    assert ProductionObservation.objects.get(pk=corrected).supersedes_id == saved
+    assert _upload(client, base, plant, unchanged) == {
+        "created": 0,
+        "existing": 1,
+        "count": 1,
+        "ids": [saved],
+    }
+    finish_incident(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        incident_id=outage.pk,
+        expected_revision=outage.revision,
+        cancel=True,
+    )
+    after = _shown(client, base, slot)
+    assert after["effective"]["quality"] == "valid"
+    assert (after["observation"]["id"], after["observation"]["source"]) == (saved, "meter")
+
+
+def test_a_label_keeps_the_saved_text_and_any_other_status_or_source_is_stored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    day_start, _ = local_day_bounds(DAY, system.binding.timezone)
+    slot = day_start + timedelta(hours=10)
+    saved = write(system, plant, [edit(slot, 2)])["ids"][0]
+    client, base = _production_api(system, plant)
+    labelled = _upload(
+        client,
+        base,
+        plant,
+        _file_row(
+            slot, 3, quality="valid", quality_label=True, source="Girilen", source_label="manual"
+        ),
+    )
+    corrected = ProductionObservation.objects.get(pk=labelled["ids"][0])
+    assert (corrected.energy_mwh, corrected.source, corrected.supersedes_id) == (3, "meter", saved)
+    other_kind = _upload(
+        client,
+        base,
+        plant,
+        _file_row(slot, 3, quality="curtailed", source="UEVM", source_label="settlement"),
+    )
+    relabelled = ProductionObservation.objects.get(pk=other_kind["ids"][0])
+    assert (relabelled.quality, relabelled.source) == ("curtailed", "UEVM")
+    legacy = _upload(client, base, plant, _file_row(slot, 3, quality="curtailed", source="meter B"))
+    assert legacy["created"] == 1
+    assert ProductionObservation.objects.get(pk=legacy["ids"][0]).source == "meter B"
+    direct = _post(
+        client,
+        base + "changes/",
+        {
+            "configuration_id": plant.current_configuration_id,
+            "unit": "MWh",
+            "changes": [
+                {
+                    "starts_at": slot.isoformat(),
+                    "ends_at": (slot + timedelta(hours=1)).isoformat(),
+                    "expected_revision_id": legacy["ids"][0],
+                    "action": "set",
+                    "energy": 3,
+                    "quality": "curtailed",
+                    "source": "meter C",
+                }
+            ],
+        },
+    )
+    assert direct["created"] == 1
+    edited = ProductionObservation.objects.get(pk=direct["ids"][0])
+    assert (edited.source, edited.supersedes_id) == ("meter C", legacy["ids"][0])
 
 
 def test_batch_rejects_stale_and_overlap_without_partial_changes(

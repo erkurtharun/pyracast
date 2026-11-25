@@ -242,7 +242,8 @@
         "energy": "Row {row}: write {column} as zero or a positive number.",
         "quality": "Row {row}: write Normal, Outage, Production curtailed or Invalid value in the {status} column and up to 200 characters in the {source} column.",
         "mixed": "Row {row}: the half hours of this hour have different statuses. Correct each half hour separately.",
-        "overlap": "Rows {first} and {second} cover the same time. Remove one of them or correct its time."
+        "overlap": "Rows {first} and {second} cover the same time. Remove one of them or correct its time.",
+        "names": "The column names of the other language could not be loaded. Try again."
     },
     "CsvFile": {
         "columns": {

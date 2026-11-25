@@ -10,6 +10,7 @@ import {
     calibrationExport,
     calibrationsExport,
     forecastExport,
+    type ForecastRow,
     outagesExport,
     performanceExport,
     plantExport,
@@ -238,6 +239,8 @@ for (const [language, outageWord, source] of [
                     energy: 0.5,
                     quality: "valid",
                     source,
+                    quality_label: true,
+                    source_label: "manual",
                 },
                 {
                     starts_at: "2026-11-10T08:30:00+03:00",
@@ -245,6 +248,8 @@ for (const [language, outageWord, source] of [
                     energy: 0.375,
                     quality: "outage",
                     source,
+                    quality_label: true,
+                    source_label: "manual",
                 },
             ]);
         }
@@ -254,21 +259,24 @@ const half = (start: string, end: string) =>
     `2026-01-01T${start}:00+03:00,2026-01-01T${end}:00+03:00`;
 
 test("the production import reads the column names of either language and of earlier files, with the unit in the energy column", () => {
-    for (const [header, row, unit] of [
+    for (const [header, row, unit, label] of [
         [
             "Start,End,Actual (kWh),Status,Source",
             `${half("09:00", "09:30")},250,Production curtailed,Meter`,
             "kWh",
+            true,
         ],
         [
             "Başlangıç,Bitiş,Gerçekleşen (MWh),Durum,Kaynak",
             `${half("09:00", "09:30")},0.25,Üretim kısıldı,Meter`,
             "MWh",
+            true,
         ],
         [
             "Kaynak,Status,Gerçekleşen (kWh),End,starts_at",
             "Meter,curtailed,250,2026-01-01T09:30:00+03:00,2026-01-01T09:00:00+03:00",
             "kWh",
+            false,
         ],
     ] as const) {
         const parsed = parseProduction(`${header}\n${row}`, ...csvTexts());
@@ -280,6 +288,8 @@ test("the production import reads the column names of either language and of ear
                 energy: unit === "kWh" ? 250 : 0.25,
                 quality: "curtailed",
                 source: "Meter",
+                quality_label: label,
+                source_label: null,
             },
         ]);
     }
@@ -344,6 +354,38 @@ test("an overlap names the two rows of the file that cover the same time", () =>
     );
 });
 
+test("row messages name the line where each record starts, past blank lines and text quoted over several lines", () => {
+    const header = "Start,End,Actual (MWh),Status,Source";
+    const overlapping = [
+        header,
+        `${half("10:00", "10:30")},1,Normal,"Meter`,
+        `north"`,
+        "",
+        `${half("09:00", "09:30")},1,Normal,Meter`,
+        "  ",
+        `${half("10:00", "10:30")},2,Normal,Meter`,
+        "",
+    ].join("\r\n");
+    expect(() => parseProduction(overlapping, ...csvTexts())).toThrow(
+        "Rows 2 and 7 cover the same time. Remove one of them or correct its time.",
+    );
+    expect(() => parseProduction(overlapping, ...csvTexts("tr"))).toThrow(
+        "Satır 2 ile satır 7 aynı saati kapsıyor. Birini kaldırın veya saatini düzeltin.",
+    );
+    expect(() =>
+        parseProduction(
+            [
+                header,
+                "",
+                `${half("09:00", "09:30")},1,Normal,"Meter`,
+                `north"`,
+                `${half("10:00", "10:30")},-1,Normal,Meter`,
+            ].join("\n"),
+            ...csvTexts(),
+        ),
+    ).toThrow("Row 5: write Actual (MWh) as zero or a positive number.");
+});
+
 test("an hour of half hours with different statuses is exported as such and refused on import with its way out", () => {
     const row = interval("2026-11-10T05:00:00Z", "2026-11-10T06:00:00Z", 0.75);
     const file = productionExport(
@@ -384,7 +426,7 @@ test("an empty list gives the header and no fabricated row", () => {
     for (const file of [
         productionExport(plant, "2026-11-10", [], "actual-production"),
         outagesExport(plant, [], "outages"),
-        calibrationsExport(plant, [], "calibrations"),
+        calibrationsExport(plant, [], "calibrations", null),
     ])
         expect(lines(file)).toHaveLength(2);
 });
@@ -435,26 +477,40 @@ const run: Schemas["CalibrationOutput"] = {
 test("the calibration list file says which calibration is in use and preliminary as the screen does", () => {
     const inUse: Schemas["CalibrationOutput"] = {
         ...run,
-        selection_state: "active",
+        id: 41,
         assessment: "provisional",
         result: { ...result, provisional_production: true },
     };
-    const list = calibrationsExport(plant, [inUse, run], "calibrations");
+    const chosen: Schemas["CalibrationOutput"] = {
+        ...run,
+        selection_state: "active",
+    };
+    const list = calibrationsExport(
+        plant,
+        [inUse, chosen],
+        "calibrations",
+        inUse.id,
+    );
     expect(list.filename).toBe("pyracast-dogu-array-calibrations.csv");
     expect(lines(list).slice(0, 3)).toEqual([
         '"Plant","No.","Period start","Period end","Status","In use","Preliminary","Real-time (EPİAŞ)","Factor"',
-        '"Doğu: array",40,"2026-01-01","2026-01-30","Calculated","Yes","Yes","Yes",1.1',
+        '"Doğu: array",41,"2026-01-01","2026-01-30","Calculated","Yes","Yes","Yes",1.1',
         '"Doğu: array",40,"2026-01-01","2026-01-30","Calculated","No","No","No",1.1',
     ]);
     expect(lines(list, "tr").slice(0, 3)).toEqual([
         '"Santral","No.","Dönem başlangıcı","Dönem bitişi","Durum","Kullanımda","Ön sonuç","Gerçek zamanlı (EPİAŞ)","Katsayı"',
-        '"Doğu: array",40,"2026-01-01","2026-01-30","Hesaplandı","Evet","Evet","Evet",1.1',
+        '"Doğu: array",41,"2026-01-01","2026-01-30","Hesaplandı","Evet","Evet","Evet",1.1',
         '"Doğu: array",40,"2026-01-01","2026-01-30","Hesaplandı","Hayır","Hayır","Hayır",1.1',
     ]);
+    expect(
+        lines(calibrationsExport(plant, [chosen], "calibrations", null))[1],
+    ).toBe(
+        '"Doğu: array",40,"2026-01-01","2026-01-30","Calculated","No","No","No",1.1',
+    );
 });
 
 test("the calibration file holds the detail's days and daily errors and no calculation record", () => {
-    const detail = calibrationExport(plant, run, "calibration-40");
+    const detail = calibrationExport(plant, run, "calibration-40", false);
     expect(detail.filename).toBe("pyracast-dogu-array-calibration-40.csv");
     expect(lines(detail)).toEqual([
         '"Plant","No.","Period start","Period end","Status","In use","Preliminary","Real-time (EPİAŞ)","Factor","Calibration days","Test days","Error without calibration (MWh)","Error with this calibration (MWh)"',
@@ -465,6 +521,15 @@ test("the calibration file holds the detail's days and daily errors and no calcu
         '"Santral","No.","Dönem başlangıcı","Dönem bitişi","Durum","Kullanımda","Ön sonuç","Gerçek zamanlı (EPİAŞ)","Katsayı","Kalibrasyon günleri","Test günleri","Kalibrasyonsuz hata (MWh)","Bu kalibrasyonla hata (MWh)"',
         '"Doğu: array",40,"2026-01-01","2026-01-30","Hesaplandı","Hayır","Hayır","Hayır",1.1,20,7,2,1.5',
     ]);
+    const chosen = { ...run, selection_state: "active" } as const;
+    expect(
+        [true, false].map(
+            (inUse) =>
+                lines(calibrationExport(plant, chosen, "c", inUse))[1]?.split(
+                    ",",
+                )[5],
+        ),
+    ).toEqual(['"Yes"', '"No"']);
 });
 
 const comparisonDay = {
@@ -475,7 +540,7 @@ const comparisonDay = {
     measured_energy_mwh: 10,
     predicted_energy_mwh: 11,
     error_mwh: 1,
-    provisional_production: true,
+    provisional_snapshot_ids: [7] as number[],
 } as const;
 
 const notCompared = [
@@ -487,7 +552,7 @@ const notCompared = [
         source_kind: null,
         predicted_energy_mwh: null,
         error_mwh: null,
-        provisional_production: false,
+        provisional_snapshot_ids: [] as number[],
     },
     {
         ...comparisonDay,
@@ -498,26 +563,30 @@ const notCompared = [
         measured_energy_mwh: null,
         predicted_energy_mwh: 4,
         error_mwh: null,
-        provisional_production: false,
+        provisional_snapshot_ids: [] as number[],
     },
 ] as const;
 
 test("the comparison file names each day's status and the reason a day was not compared", () => {
-    const file = performanceExport(
-        plant,
-        {
-            start_date: "2026-11-01",
-            end_date: "2026-11-03",
-            comparison: "archived_forecast",
-            days: [comparisonDay, ...notCompared],
-        },
-        {
-            file: "comparison",
-            comparison: "Forecast accuracy",
-            forecast: "Forecast",
-            satellite: "Production calculated from satellite data",
-        },
-    );
+    const archived = (
+        names: Record<"file" | "comparison" | "forecast" | "satellite", string>,
+    ) =>
+        performanceExport(
+            plant,
+            {
+                start_date: "2026-11-01",
+                end_date: "2026-11-03",
+                comparison: "archived_forecast",
+                days: [comparisonDay, ...notCompared],
+            },
+            names,
+        );
+    const file = archived({
+        file: "comparison",
+        comparison: "Forecast accuracy",
+        forecast: "Forecast",
+        satellite: "Production calculated from satellite data",
+    });
     expect(file.filename).toBe(
         "pyracast-dogu-array-2026-11-01-2026-11-03-comparison.csv",
     );
@@ -528,6 +597,48 @@ test("the comparison file names each day's status and the reason a day was not c
         '"Doğu: array","Forecast accuracy","2026-11-03","Not compared","Data is missing for this day","Forecast",,4,,"No"',
         "",
     ]);
+    expect(
+        lines(
+            archived({
+                file: "karsilastirma",
+                comparison: "Tahmin doğruluğu",
+                forecast: "Tahmin",
+                satellite: "Uydu verisinden hesaplanan üretim",
+            }),
+            "tr",
+        ).slice(0, 2),
+    ).toEqual([
+        '"Santral","Karşılaştırma","Tarih","Durum","Neden","Veri","Gerçekleşen (MWh)","Tahmin (MWh)","Tahmin − gerçekleşen (MWh)","Gerçek zamanlı (EPİAŞ)"',
+        '"Doğu: array","Tahmin doğruluğu","2026-11-01","Karşılaştırıldı",,"Uydu verisinden hesaplanan üretim",10,11,1,"Evet"',
+    ]);
+});
+
+test("a compared day says real-time only when it used EPİAŞ real-time values, not by an entered source text", () => {
+    const entered = {
+        ...comparisonDay,
+        source_kind: "forecast",
+        manual_observation_ids: [5],
+        provisional_snapshot_ids: [],
+        provisional_production: true,
+    };
+    const file = performanceExport(
+        plant,
+        {
+            start_date: "2026-11-01",
+            end_date: "2026-11-01",
+            comparison: "archived_forecast",
+            days: [entered],
+        },
+        {
+            file: "comparison",
+            comparison: "Forecast accuracy",
+            forecast: "Forecast",
+            satellite: "",
+        },
+    );
+    expect(lines(file)[1]).toBe(
+        '"Doğu: array","Forecast accuracy","2026-11-01","Compared",,"Forecast",10,11,1,"No"',
+    );
 });
 
 test("the comparison file of expected production uses the expected columns in either language", () => {
@@ -592,8 +703,8 @@ test("every plant file keeps its dates and kind when the plant name is long or h
                 satellite: "",
             },
         ),
-        calibrationsExport(long, [], "kalibrasyonlar"),
-        calibrationExport(long, run, "kalibrasyon-40"),
+        calibrationsExport(long, [], "kalibrasyonlar", null),
+        calibrationExport(long, run, "kalibrasyon-40", false),
         outagesExport(long, [], "kesintiler"),
         plantExport(
             long,
@@ -664,24 +775,48 @@ test("the generation file names its columns as the values table does, without qu
     ]);
 });
 
+const forecastNames = {
+    en: {
+        file: "generation",
+        forecast: "Forecast",
+        satellite: "Production calculated from satellite data",
+    },
+    tr: {
+        file: "uretim",
+        forecast: "Tahmin",
+        satellite: "Uydu verisinden hesaplanan üretim",
+    },
+} as const;
+
+function forecastLines(
+    language: Language,
+    forecast: { date: string; source_kind: string },
+    rows: readonly ForecastRow[],
+    kind: { electrical: boolean; scenario: boolean },
+) {
+    const file = forecastExport(plant, forecast, rows, {
+        ...kind,
+        names: forecastNames[language],
+    });
+    return lines(file, language);
+}
+
 test("the generation file with an outage holds both figures with and without it", () => {
-    const file = forecastExport(
-        plant,
-        { date: "2026-11-12", source_kind: "forecast" },
-        [forecastRow],
-        {
-            electrical: true,
-            scenario: true,
-            names: { file: "generation", forecast: "Forecast", satellite: "" },
-        },
-    );
-    expect(lines(file).slice(0, 2)).toEqual([
+    const outageFile = (language: Language) =>
+        forecastLines(
+            language,
+            { date: "2026-11-12", source_kind: "forecast" },
+            [forecastRow],
+            { electrical: true, scenario: true },
+        ).slice(0, 2);
+    expect(outageFile("en")).toEqual([
         '"Plant","Data","Start","End","Without outage (MWh)","With outage (MWh)","Average power without outage (MW)","Average power with outage (MW)"',
         '"Doğu: array","Forecast","2026-11-12T11:00:00+03:00","2026-11-12T12:00:00+03:00",2,0,2,0',
     ]);
-    expect(lines(file, "tr")[0]).toBe(
+    expect(outageFile("tr")).toEqual([
         '"Santral","Veri","Başlangıç","Bitiş","Kesinti olmadan (MWh)","Kesinti dahil (MWh)","Kesinti olmadan ortalama güç (MW)","Kesinti dahil ortalama güç (MW)"',
-    );
+        '"Doğu: array","Tahmin","2026-11-12T11:00:00+03:00","2026-11-12T12:00:00+03:00",2,0,2,0',
+    ]);
 });
 
 test("the irradiance file holds irradiance in W/m² in either language", () => {
@@ -700,9 +835,17 @@ test("the irradiance file holds irradiance in W/m² in either language", () => {
         '"Santral","Veri","Başlangıç","Bitiş","Işınım (W/m²)"',
         '"Doğu: array","Tahmin","2026-11-12T11:00:00+03:00","2026-11-12T12:00:00+03:00",410',
     ]);
-    expect(lines(file)[0]).toBe(
+    expect(
+        forecastLines(
+            "en",
+            { date: "2026-11-12", source_kind: "forecast" },
+            [forecastRow],
+            { electrical: false, scenario: false },
+        ).slice(0, 2),
+    ).toEqual([
         '"Plant","Data","Start","End","Irradiance (W/m²)"',
-    );
+        '"Doğu: array","Forecast","2026-11-12T11:00:00+03:00","2026-11-12T12:00:00+03:00",410',
+    ]);
 });
 
 test("the generation file names satellite rows and writes an interval of both kinds as forecast", () => {
@@ -750,9 +893,36 @@ test("the generation file names satellite rows and writes an interval of both ki
         '"Forecast"',
         '"Forecast"',
     ]);
-    expect(lines(mixed)[0]).toBe(
-        '"Plant","Data","Start","End","Forecast (MWh)","Average power (MW)"',
+    const electrical = { electrical: true, scenario: false };
+    const mixedDay = { date: "2026-11-12", source_kind: "mixed" };
+    const satelliteDay = {
+        date: "2026-11-11",
+        source_kind: "estimated_actuals",
+    };
+    const both = [row(["estimated_actuals", "forecast"])];
+    expect(forecastLines("en", mixedDay, both, electrical).slice(0, 2)).toEqual(
+        [
+            '"Plant","Data","Start","End","Forecast (MWh)","Average power (MW)"',
+            '"Doğu: array","Forecast","2026-11-12T11:00:00+03:00","2026-11-12T12:00:00+03:00",2,',
+        ],
     );
+    expect(forecastLines("tr", mixedDay, both, electrical).slice(0, 2)).toEqual(
+        [
+            '"Santral","Veri","Başlangıç","Bitiş","Tahmin (MWh)","Ortalama güç (MW)"',
+            '"Doğu: array","Tahmin","2026-11-12T11:00:00+03:00","2026-11-12T12:00:00+03:00",2,',
+        ],
+    );
+    expect(
+        forecastLines(
+            "tr",
+            satelliteDay,
+            [row(["estimated_actuals"])],
+            electrical,
+        ).slice(0, 2),
+    ).toEqual([
+        '"Santral","Veri","Başlangıç","Bitiş","Enerji (MWh)","Ortalama güç (MW)"',
+        '"Doğu: array","Uydu verisinden hesaplanan üretim","2026-11-12T11:00:00+03:00","2026-11-12T12:00:00+03:00",2,',
+    ]);
 });
 
 test("forecast file names keep the date and kind for the longest plant name and name a plant without ASCII letters", () => {

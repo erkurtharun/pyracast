@@ -2358,6 +2358,24 @@ export interface components {
             /** @default valid */
             quality: components["schemas"]["ObservationQualityEnum"];
             source: string;
+            /**
+             * @description The status was written as a downloaded file shows it; equal to that shown status, it keeps the saved status.
+             * @default false
+             */
+            quality_label: boolean;
+            /**
+             * @description The kind of source whose label the source held; equal to the kind a downloaded file shows, it keeps the saved source.
+             *
+             *     * `settlement` - settlement
+             *     * `provisional` - provisional
+             *     * `manual` - manual
+             */
+            source_label?:
+                | (
+                      | components["schemas"]["SourceLabelEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
         };
         OutageScenarioOutput: {
             /** Format: date-time */
@@ -3392,6 +3410,13 @@ export interface components {
          * @enum {string}
          */
         SnapshotSourceKindEnum: "forecast" | "estimated_actuals";
+        /**
+         * @description * `settlement` - settlement
+         *     * `provisional` - provisional
+         *     * `manual` - manual
+         * @enum {string}
+         */
+        SourceLabelEnum: "settlement" | "provisional" | "manual";
         SourceSnapshotOutput: {
             snapshot_id: number;
             /** Format: date-time */

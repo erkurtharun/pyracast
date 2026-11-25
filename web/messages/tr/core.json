@@ -242,7 +242,8 @@
         "energy": "Satır {row}: {column} sütununa sıfır veya pozitif bir sayı yazın.",
         "quality": "Satır {row}: {status} sütununa Normal, Kesinti, Üretim kısıldı veya Geçersiz değer; {source} sütununa en fazla 200 karakter yazın.",
         "mixed": "Satır {row}: bu saatin yarım saatlerinin durumu farklı. Her yarım saati ayrı düzeltin.",
-        "overlap": "Satır {first} ile satır {second} aynı saati kapsıyor. Birini kaldırın veya saatini düzeltin."
+        "overlap": "Satır {first} ile satır {second} aynı saati kapsıyor. Birini kaldırın veya saatini düzeltin.",
+        "names": "Diğer dildeki sütun adları yüklenemedi. Tekrar deneyin."
     },
     "CsvFile": {
         "columns": {

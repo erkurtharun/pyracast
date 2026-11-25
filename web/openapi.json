@@ -9105,6 +9105,23 @@
                     "source": {
                         "type": "string",
                         "maxLength": 200
+                    },
+                    "quality_label": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "The status was written as a downloaded file shows it; equal to that shown status, it keeps the saved status."
+                    },
+                    "source_label": {
+                        "nullable": true,
+                        "description": "The kind of source whose label the source held; equal to the kind a downloaded file shows, it keeps the saved source.\n\n* `settlement` - settlement\n* `provisional` - provisional\n* `manual` - manual",
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/SourceLabelEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
                     }
                 },
                 "required": ["ends_at", "energy", "source", "starts_at"]
@@ -11950,6 +11967,11 @@
                 "enum": ["forecast", "estimated_actuals"],
                 "type": "string",
                 "description": "* `forecast` - Forecast\n* `estimated_actuals` - Estimated actuals"
+            },
+            "SourceLabelEnum": {
+                "enum": ["settlement", "provisional", "manual"],
+                "type": "string",
+                "description": "* `settlement` - settlement\n* `provisional` - provisional\n* `manual` - manual"
             },
             "SourceSnapshotOutput": {
                 "type": "object",

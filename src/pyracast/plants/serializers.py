@@ -43,7 +43,11 @@ from pyracast.plants.parameters import (
     declaration,
 )
 from pyracast.plants.performance import DayReason, SelectionPolicy
-from pyracast.plants.production_changes import PRODUCTION_BATCH_LIMIT, ROW_TIME_INVALID
+from pyracast.plants.production_changes import (
+    PRODUCTION_BATCH_LIMIT,
+    ROW_TIME_INVALID,
+    SOURCE_LABELS,
+)
 
 
 class AwareDateTime(serializers.DateTimeField):
@@ -185,6 +189,18 @@ class ObservationRow(InputSerializer):
         choices=ObservationQuality.choices, default=ObservationQuality.VALID
     )
     source = serializers.CharField(max_length=200)  # type: ignore[assignment]
+    quality_label = serializers.BooleanField(
+        default=False,
+        help_text="The status was written as a downloaded file shows it; equal to that shown "
+        "status, it keeps the saved status.",
+    )
+    source_label = serializers.ChoiceField(
+        choices=SOURCE_LABELS,
+        allow_null=True,
+        default=None,
+        help_text="The kind of source whose label the source held; equal to the kind a "
+        "downloaded file shows, it keeps the saved source.",
+    )
 
 
 class ObservationImport(InputSerializer):

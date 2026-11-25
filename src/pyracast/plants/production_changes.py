@@ -1,5 +1,5 @@
 from bisect import bisect_left, bisect_right
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from itertools import pairwise
 from math import isfinite
@@ -19,7 +19,11 @@ from pyracast.errors import UNEXPECTED, ConflictError, DomainError, ErrorCode
 from pyracast.plants.availability import interval_is_covered, reference_intervals
 from pyracast.plants.events import record_plant_event
 from pyracast.plants.forecasting import power_limit
-from pyracast.plants.measurements import select_measurements, select_provider_measurements
+from pyracast.plants.measurements import (
+    Measurement,
+    select_measurements,
+    select_provider_measurements,
+)
 from pyracast.plants.models import (
     ObservationQuality,
     Plant,
@@ -50,6 +54,7 @@ PLAUSIBLE_CAPACITY_FACTOR = 1.25
 type ProductionUnit = Literal["MWh", "kWh"]
 type ProductionAction = Literal["set", "revert"]
 type ProductionOrigin = Literal["editor", "csv_import", "change_request"]
+SOURCE_LABELS = ("settlement", "provisional", "manual")
 
 
 @dataclass(frozen=True)
@@ -59,6 +64,8 @@ class ObservationInput:
     energy: float
     quality: str = ObservationQuality.VALID
     source: str = "operator"
+    quality_label: bool = False
+    source_label: str | None = None
 
 
 class ObservationImportResult(TypedDict):
@@ -92,13 +99,12 @@ class PreparedChange:
 
     @property
     def unchanged(self) -> bool:
-        # A downloaded file names only the kind of source, so a repeated value keeps its saved one.
         previous = self.previous
         return (
             not self.replayed
             and previous is not None
-            and (previous.energy_mwh, previous.quality, previous.is_reverted)
-            == (self.energy_mwh, self.quality, self.reverted)
+            and (previous.energy_mwh, previous.quality, previous.source, previous.is_reverted)
+            == (self.energy_mwh, self.quality, self.source, self.reverted)
         )
 
     @property
@@ -420,6 +426,28 @@ def _covers(spans: list[tuple[datetime, datetime]], start: datetime, end: dateti
     return False
 
 
+def _as_shown(
+    row: PreparedChange, item: ObservationInput, shown: Measurement | None
+) -> PreparedChange:
+    # A file shows a derived status and only the kind of source, never the saved text.
+    saved = row.previous
+    if (
+        saved is None
+        or saved.is_reverted
+        or shown is None
+        or shown.snapshot is not None
+        or shown.pk != saved.pk
+    ):
+        return row
+    return replace(
+        row,
+        quality=saved.quality
+        if item.quality_label and row.quality == shown.quality
+        else row.quality,
+        source=saved.source if item.source_label == "manual" else row.source,
+    )
+
+
 def preview_production(
     actor: User,
     tenant_id: int,
@@ -445,7 +473,12 @@ def preview_production(
         prepared = prepare_production_changes(configuration, unit, changes, capture_revisions=True)
         start, end = _hour_span(prepared)
         current = select_measurements(configuration, start, end, timezone.now())[0]
-        current_values = {(row.starts_at, row.ends_at): row.energy_mwh for row in current}
+        shown = {(row.starts_at, row.ends_at): row for row in current}
+        current_values = {key: row.energy_mwh for key, row in shown.items()}
+        prepared = [
+            _as_shown(row, item, shown.get((row.starts_at, row.ends_at)))
+            for row, item in zip(prepared, observations, strict=True)
+        ]
         return {
             "changes": [
                 {
@@ -454,8 +487,8 @@ def preview_production(
                     "expected_revision_id": ready.previous.pk if ready.previous else None,
                     "action": row.action,
                     "energy": row.energy,
-                    "quality": row.quality,
-                    "source": row.source,
+                    "quality": ready.quality,
+                    "source": ready.source,
                 }
                 for row, ready in zip(changes, prepared, strict=True)
             ],
