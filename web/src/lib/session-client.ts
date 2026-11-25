@@ -77,6 +77,7 @@ let signingOut = false;
 let clearTabInvitation = () => {};
 let savedStore: Promise<SavedStore> | undefined;
 let savedWork: Promise<unknown> = Promise.resolve();
+let savedAnswered: Promise<unknown> = Promise.resolve();
 let handoffFailed = false;
 const listeners = new Set<() => void>();
 const handoffListeners = new Set<() => void>();
@@ -328,14 +329,20 @@ async function boundedStore<T>(
     work: (store: SavedStore, limit: Deadline) => Promise<T>,
     limit = deadline(savedLimitMs),
 ): Promise<T | undefined> {
+    const answer = Promise.race([
+        withSavedStore((store) => work(store, limit)),
+        limit.reached.then(() => undefined),
+    ]);
+    savedAnswered = Promise.all([savedAnswered, answer]);
     try {
-        return await Promise.race([
-            withSavedStore((store) => work(store, limit)),
-            limit.reached.then(() => undefined),
-        ]);
+        return await answer;
     } finally {
         limit.clear();
     }
+}
+
+export function savedCopyAnswered(): Promise<void> {
+    return savedAnswered.then(() => undefined);
 }
 
 export function startSavedCopy() {
@@ -344,10 +351,8 @@ export function startSavedCopy() {
         return;
     }
     const flag = readStored(savedFlagKey);
-    void boundedStore((store, limit) => store.start(savedRemoval, limit)).then(
-        (outcome) => {
-            if (outcome === "deleted") forgetSavedCopy(flag);
-        },
+    void boundedStore((store, limit) =>
+        store.start(savedRemoval, limit, () => forgetSavedCopy(flag)),
     );
 }
 

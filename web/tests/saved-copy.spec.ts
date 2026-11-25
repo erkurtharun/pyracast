@@ -35,6 +35,7 @@ import {
     readCopy,
     refuseClears,
     seedCopy,
+    storeDeletions,
     watchDeletions,
     watchStoreChunk,
     type Holder,
@@ -721,6 +722,26 @@ test("Try again keeps the saved-figures notice instead of the sign-in form until
     await expect.poll(() => readCopy(page)).toEqual(absent);
 });
 
+test("another person's sign-in over a cleared copy reloads the page only once the copy's deletion is answered, so the flag is forgotten", async ({
+    page,
+}) => {
+    await refusedSignIn(page);
+    const deletion = await blockDeletion(page);
+    let released = false;
+    const reloads: boolean[] = [];
+    await page.route("**/app/", (route) => {
+        if (route.request().isNavigationRequest()) reloads.push(released);
+        return route.fallback();
+    });
+    await tryAgain(page).click();
+    await expect.poll(deletion.asked).toBe(true);
+    released = true;
+    await deletion.release();
+    await expect(plants(page)).toBeVisible();
+    expect(reloads).toEqual([true]);
+    expect(await readCopy(page)).toEqual(absent);
+});
+
 test("a Try again whose session read fails shows that failure and Try again instead of the sign-in form", async ({
     page,
 }) => {
@@ -1194,12 +1215,16 @@ test("the store deletes a held copy at a start once the withdrawal constant is o
     await loadStore(page, false);
     expect(await start()).toBe("kept");
     await expectHeldFigures(page);
+    expect(await storeDeletions(page)).toBe(0);
     await allowClears();
     expect(await start()).toBe("deleted");
     expect((await readCopy(page)).version).toBeUndefined();
+    expect(await storeDeletions(page)).toBe(1);
+    expect(await start()).toBe("deleted");
+    expect(await storeDeletions(page)).toBe(2);
 });
 
-test("the store answers within its limit while another window keeps the copy from being deleted", async ({
+test("the store answers within its limit while another window keeps the copy from being deleted, and reports the deletion once it succeeds", async ({
     page,
 }) => {
     await seedCopy(page);
@@ -1214,6 +1239,10 @@ test("the store answers within its limit while another window keeps the copy fro
     const state = await callStore(page, "copyState");
     await page.clock.runFor(2_000);
     expect(await state()).toBe("unavailable");
+    expect(await storeDeletions(page)).toBe(0);
+    await deletion.release();
+    await expect.poll(() => storeDeletions(page)).toBe(1);
+    expect((await readCopy(page)).version).toBeUndefined();
 });
 
 async function stagedCorrection(page: Page) {

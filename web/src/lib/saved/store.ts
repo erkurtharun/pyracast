@@ -230,10 +230,17 @@ function deleteDatabase(
     });
 }
 
-async function removeCopy(limit: Deadline): Promise<"deleted" | "kept"> {
+async function removeCopy(
+    limit: Deadline,
+    deleted: () => void,
+): Promise<"deleted" | "kept"> {
     const outcome = await transact("readwrite", clearAll, limit);
-    if (outcome === "absent") return "deleted";
-    return outcome === "done" && (await deleteDatabase(limit)) === "deleted"
+    if (outcome === "absent") {
+        deleted();
+        return "deleted";
+    }
+    return outcome === "done" &&
+        (await deleteDatabase(limit, deleted)) === "deleted"
         ? "deleted"
         : "kept";
 }
@@ -280,11 +287,13 @@ export async function removeFigures(
     return outcome === "done" || outcome === "absent";
 }
 
+// `deleted` runs once the copy is confirmed absent or its deletion succeeds, also after the deadline.
 export async function start(
     removal: Removal,
     limit: Deadline,
+    deleted: () => void,
 ): Promise<"deleted" | "kept"> {
-    if (!SAVED_FIGURES) return removeCopy(limit);
+    if (!SAVED_FIGURES) return removeCopy(limit, deleted);
     await removeOutstanding(removal, limit);
     return "kept";
 }
