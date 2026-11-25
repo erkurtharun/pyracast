@@ -5,6 +5,7 @@ import type { Plant, PlantScope } from "@/lib/api";
 import { DisplayError, UnconfirmedError } from "@/lib/api/errors";
 import { useApiList } from "@/lib/api/query";
 import { outagesExport } from "@/lib/exports";
+import { useLeaveGuard } from "@/lib/leave-guard";
 import { CsvDownload } from "@/ui/csv-download";
 import { useExportPlant } from "@/ui/export-plant";
 import { UnconfirmedNotice, type Submitted } from "@/ui/form";
@@ -164,7 +165,8 @@ export function Outages({
             apply({ type: "sent", receipt });
         }
     }
-    const lost = workflow?.attempt;
+    const lost = screen.attempt;
+    useLeaveGuard(!!lost);
     const attempt =
         lost &&
         ((change: OutageChange) =>
@@ -279,7 +281,7 @@ export function Outages({
                     onClose={() => apply({ type: "close" })}
                 />
             )}
-            {carded?.attempt && !resource.data && (
+            {lost && !editing && !(carded && resource.data) && (
                 <UnconfirmedNotice repeatable={false} />
             )}
             <Resource resource={resource} loading={t("loadingOutages")}>

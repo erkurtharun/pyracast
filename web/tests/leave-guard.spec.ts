@@ -417,7 +417,6 @@ test("a resolution whose save is unanswered loads another plant tab as a documen
     expect(await asks(page)).toBe(true);
 });
 
-// Holds every request to `url` until the returned release.
 async function holdRequests(page: Page, url: string) {
     let release = () => {};
     const released = new Promise<void>((resolve) => (release = resolve));
@@ -557,13 +556,50 @@ test("a resolution repeated after its lost answer asks until the repeat is answe
     await saveResolution(page);
     await expect(page.getByText("Change not confirmed")).toBeVisible();
     expect(await asks(page)).toBe(true);
+    const releaseRepeat = await holdRequests(page, "**/outages/51/resolve/");
     reads.arm();
+    const repeated = page.waitForRequest("**/outages/51/resolve/");
     await saveResolution(page);
+    await repeated;
+    await expect(saving(page)).toBeVisible();
+    expect(await asks(page)).toBe(true);
+    releaseRepeat();
     await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
     await expect(saving(page)).toBeVisible();
     await expect.poll(() => asks(page)).toBe(false);
     reads.release();
     await expect(saving(page)).toHaveCount(0);
+});
+
+test("an outage report whose answer was lost keeps asking while another report is saved, its reads run and its form closes", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    await serveOutageWrites(page, answers("drop"));
+    const reads = await holdWorkspaceReads(page);
+    await openPlant(page, "Outages");
+    await page
+        .getByRole("button", { name: "Report outage", exact: true })
+        .click();
+    const form = page.getByRole("region", { name: "Report outage" });
+    const title = form.getByLabel("Title", { exact: true });
+    await title.fill("Grid fault");
+    const save = form.getByRole("button", { name: "Save", exact: true });
+    await save.click();
+    await expect(form.getByText("Change not confirmed")).toBeVisible();
+    await title.fill("Inverter fault");
+    reads.arm();
+    await save.click();
+    await expect(
+        page.getByRole("heading", { name: "Inverter fault", exact: true }),
+    ).toBeVisible();
+    await expect(saving(page)).toBeVisible();
+    expect(await asks(page)).toBe(true);
+    reads.release();
+    await expect(form).toHaveCount(0);
+    await expect(page.getByText("Change not confirmed")).toBeVisible();
+    expect(await asks(page)).toBe(true);
 });
 
 test("an outage edit repeated after its lost answer, whose conflict shows the edit applied, asks no more while its reads run", async ({

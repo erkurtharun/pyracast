@@ -248,7 +248,7 @@ function phase({ screen, live }: Step) {
         live.direct ? "direct:" : "",
         status,
         workflow?.stale ? "+stale" : "",
-        workflow?.attempt ? "+lost" : "",
+        screen.attempt ? "+lost" : "",
         screen.receipt ? "+sent" : "",
         shown.length ? `|${shown.join(",")}` : "",
     ].join("");
@@ -256,6 +256,17 @@ function phase({ screen, live }: Step) {
 
 const start: Step = { screen: INITIAL_OUTAGES, live: member() };
 const directStart: Step = { screen: INITIAL_OUTAGES, live: admin() };
+
+// Other content saved while the first write's answer is still lost.
+const lostFirst = events.lost(events.send(events.openUpdate(directStart)));
+const savedOther = events.answered(
+    run(lostFirst, {
+        type: "send",
+        payload: "second",
+        key: "key-2",
+        change: sentChange(lostFirst),
+    }),
+);
 
 const states = {
     none: start,
@@ -301,6 +312,8 @@ const states = {
     "direct:update4/saved": events.conflictSame(
         events.send(events.lost(events.send(events.openUpdate(directStart)))),
     ),
+    "direct:update4/saved+lost": savedOther,
+    "direct:none+lost": events.sent(savedOther),
     "none|4resolved": {
         screen: INITIAL_OUTAGES,
         live: member(
@@ -641,6 +654,23 @@ const expected: Record<StateName, Record<EventName, string>> = {
         sent: "direct:none",
         demote: "update4/saved=",
     },
+    // A save of other content ends neither the write whose answer was lost nor, with the workflow, its key.
+    "direct:update4/saved+lost": {
+        ...same("direct:update4/saved+lost"),
+        ...unchanged("direct:update4/saved+lost", true),
+        sent: "direct:none+lost",
+        demote: "update4/saved+lost=",
+    },
+    "direct:none+lost": {
+        ...same("direct:none+lost"),
+        ...unchanged("direct:none+lost", true),
+        openCreate: "direct:create/idle+lost",
+        openUpdate: "direct:update4/idle+lost",
+        openResolve: "direct:resolve4/idle+lost",
+        openCancel: "direct:cancel4/idle+lost",
+        openOther: "direct:update5/idle+lost",
+        demote: "none+lost=",
+    },
     "update4/sending+stale": {
         ...same("update4/sending+stale"),
         ...unchanged("update4/sending+stale"),
@@ -849,6 +879,8 @@ test("every state of the outage screen enables only the controls whose event it 
         "direct:update4/sending": sending4,
         "direct:update4/sending+lost": sending4,
         "direct:update4/saved": { ...sending4, pending: "confirmed" },
+        "direct:update4/saved+lost": { ...sending4, pending: "confirmed" },
+        "direct:none+lost": quiet,
         "none|4resolved": quiet,
         "resolve4/held:cancelled|4cancelled": heldBy("cancelled"),
         "resolve4/held:resolved|4resolved": heldBy("resolved"),
@@ -899,13 +931,13 @@ const sentKey = ({ screen }: Step) =>
 const sendAs = (payload: string, key: string) => (step: Step) =>
     run(step, { type: "send", payload, key, change: sentChange(step) });
 
-test("a send repeats the workflow's write whose answer was lost with its key, and any other send is a new request", () => {
+test("a send repeats the write whose answer was lost with its key, also after other content was saved, and any other send is a new request", () => {
     const first = sendAs("first", "key-1")(states["update4/idle"]);
     expect(sentKey(first)).toBe("key-1");
     const afterRefusal = sendAs("first", "key-2")(events.fail(first));
     expect(sentKey(afterRefusal)).toBe("key-2");
     const lost = events.lost(afterRefusal);
-    expect(lost.screen.workflow?.attempt?.key).toBe("key-2");
+    expect(lost.screen.attempt?.key).toBe("key-2");
     expect(sentKey(sendAs("first", "key-3")(lost))).toBe("key-2");
     const other = sendAs("second", "key-4")(lost);
     expect(sentKey(other)).toBe("key-4");
@@ -914,13 +946,17 @@ test("a send repeats the workflow's write whose answer was lost with its key, an
     const busy = failed(sendAs("first", "key-6")(lost), null, throttled());
     expect(sentKey(sendAs("first", "key-7")(busy))).toBe("key-2");
     const repeatRefused = events.fail(sendAs("first", "key-8")(lost));
-    expect(repeatRefused.screen.workflow?.attempt).toBeNull();
+    expect(repeatRefused.screen.attempt).toBeNull();
     expect(sentKey(sendAs("first", "key-9")(repeatRefused))).toBe("key-9");
     const otherLost = events.lost(other);
-    expect(otherLost.screen.workflow?.attempt?.key).toBe("key-4");
+    expect(otherLost.screen.attempt?.key).toBe("key-4");
     expect(sentKey(sendAs("first", "key-10")(otherLost))).toBe("key-10");
+    const otherSaved = events.sent(events.answered(other));
+    expect(
+        sentKey(sendAs("first", "key-12")(events.openUpdate(otherSaved))),
+    ).toBe("key-2");
     const reopened = events.openUpdate(events.close(otherRefused));
-    expect(reopened.screen.workflow?.attempt).toBeNull();
+    expect(reopened.screen.attempt).toBeNull();
     expect(sentKey(sendAs("first", "key-11")(reopened))).toBe("key-11");
 });
 
@@ -1023,6 +1059,7 @@ test("a direct edit refused as stale ends as saved only when an unanswered try o
     expect(events.sent(saved).screen).toEqual({
         workflow: null,
         receipt: null,
+        attempt: null,
     });
 
     const throttledRepeat = refuse(lostOnce(opened), edit(), null, throttled());
