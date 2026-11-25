@@ -7,12 +7,14 @@ import { canReset, type Action, type AutomationStatus } from "./model";
 
 export function CalibrationSelection({
     status,
+    loadedAt,
     action,
     canManage,
     onAction,
     onReset,
 }: {
     status: AutomationStatus;
+    loadedAt: number | null;
     action: Action;
     canManage: boolean;
     onAction: (action: Action) => void;
@@ -21,12 +23,16 @@ export function CalibrationSelection({
     const t = useTranslations("Calibrations");
     const format = useFormat();
     const current = status.current_calibration;
+    const chosen =
+        current !== null && (!current.effective || loadedAt !== null);
     const resetting =
         (action.status === "confirming" || action.status === "pending") &&
         action.kind === "reset";
     return (
         <section aria-labelledby="calibration-in-force">
-            <h3 id="calibration-in-force">{t("in_force")}</h3>
+            <h3 id="calibration-in-force">
+                {chosen ? t("chosen") : t("in_force")}
+            </h3>
             {current === null ? (
                 <p>{t("in_force_none")}</p>
             ) : (
@@ -49,6 +55,11 @@ export function CalibrationSelection({
                         <Notice>{t("not_effective")}</Notice>
                     )}
                 </>
+            )}
+            {loadedAt !== null && (
+                <p className="fine">
+                    {t("last_loaded", { time: format.deviceTime(loadedAt) })}
+                </p>
             )}
             {canManage &&
                 (canReset(status) ||

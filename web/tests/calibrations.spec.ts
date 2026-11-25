@@ -1078,7 +1078,54 @@ test("activating a candidate without its calibration days says its factor applie
     ).toBeVisible();
 });
 
-test("the calibration in force names its run, time and who selected it", async ({
+test("after a failed refresh the last loaded calibration is named as chosen and marked in use nowhere", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await routeRuns(page, () => [run(40, { selection_state: "active" })]);
+    let unavailable = false;
+    await page.route("**/plants/21/calibration/automation/", (route) =>
+        unavailable
+            ? route.fulfill({
+                  status: 503,
+                  json: errorBody("busy", "Calibration status is busy."),
+              })
+            : route.fulfill({
+                  json: automation({ current_calibration: inForce(40) }),
+              }),
+    );
+    await openCalibration(page);
+    const row = page.getByRole("row", { name: /^40\s/ });
+    await row.getByRole("button", { name: "View details" }).click();
+    const detail = page.locator(".calibration-detail");
+    const inUse = page.getByRole("region", { name: "Calibration in use" });
+    const chosen = page.getByRole("region", { name: "Chosen calibration" });
+    await expect(inUse).toContainText("Calibration No. 40, factor 1.1.");
+    await expect(row.getByText("In use", { exact: true })).toBeVisible();
+    await expect(detail.getByText("In use", { exact: true })).toBeVisible();
+    unavailable = true;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    const notice = page
+        .getByRole("alert")
+        .filter({ hasText: "Calibration status is busy." });
+    await expect(notice).toContainText("Could not refresh.");
+    await expect(inUse).toHaveCount(0);
+    await expect(chosen).toContainText("Calibration No. 40, factor 1.1.");
+    await expect(chosen).toContainText(/Last loaded: \S/);
+    await expect(row.getByText("In use", { exact: true })).toHaveCount(0);
+    await expect(detail.getByText("In use", { exact: true })).toHaveCount(0);
+    unavailable = false;
+    await notice
+        .getByRole("button", { name: "Try again", exact: true })
+        .click();
+    await expect(notice).toHaveCount(0);
+    await expect(chosen).toHaveCount(0);
+    await expect(inUse).not.toContainText("Last loaded");
+    await expect(row.getByText("In use", { exact: true })).toBeVisible();
+    await expect(detail.getByText("In use", { exact: true })).toBeVisible();
+});
+
+test("a chosen calibration that is not applied is named as chosen, not in use, with its run, time and who chose it", async ({
     page,
 }) => {
     await mockApi(page);
@@ -1102,7 +1149,10 @@ test("the calibration in force names its run, time and who selected it", async (
         }),
     );
     await openCalibration(page);
-    const inForce = page.getByRole("region", { name: "Calibration in use" });
+    await expect(
+        page.getByRole("region", { name: "Calibration in use" }),
+    ).toHaveCount(0);
+    const inForce = page.getByRole("region", { name: "Chosen calibration" });
     await expect(inForce).toContainText(/Calibration No\. 40, factor 1\.1\./);
     await expect(inForce).toContainText("Chosen by automatic calibration.");
     await expect(inForce).toContainText(

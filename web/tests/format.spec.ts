@@ -3,6 +3,7 @@ import {
     MISSING,
     formatNumber,
     formatQuantity,
+    formatSigned,
     formatSignificant,
 } from "../src/lib/format/number";
 import {
@@ -29,6 +30,13 @@ test("significant digits round to the requested precision", () => {
     expect(formatSignificant("tr", 1234.5, 4)).toBe("1.235");
     expect(formatSignificant("en", 0.000123456, 2)).toBe("0.00012");
     expect(formatSignificant("en", null, 4)).toBe(MISSING);
+});
+
+test("a signed number shows its sign with a minus sign and no sign once it rounds to zero", () => {
+    expect(formatSigned("en", 0.424, 2)).toBe("+0.42");
+    expect(formatSigned("tr", -1.5, 2)).toBe("−1,50");
+    expect(formatSigned("en", -0.001, 2)).toBe("0.00");
+    expect(formatSigned("en", null, 2)).toBe(MISSING);
 });
 
 test("quantities carry their unit and missing quantities carry none", () => {

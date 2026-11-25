@@ -1668,32 +1668,28 @@ test("forecast performance shows archived metrics, missing days and selected ran
         page.getByRole("heading", { name: "Comparison", exact: true }),
     ).toBeVisible();
 
-    await page.getByText("Additional metrics", { exact: true }).click();
     await page.getByText("Days not compared (1)", { exact: true }).click();
     await expect(
         page.getByText("No forecast to compare for this day: 2026-11-02"),
     ).toBeVisible();
-    await page
-        .getByText("How the comparison is measured", { exact: true })
-        .click();
-    await expect(
-        page.getByText("Compares the last forecast before sunrise", {
-            exact: false,
-        }),
-    ).toBeVisible();
-    await expect(
-        page.getByText("Mean absolute daily error without calibration"),
-    ).toBeVisible();
     await expect(
         page.locator(".stat").filter({
-            hasText: "Mean absolute daily error without calibration",
+            hasText: "Mean absolute daily error",
         }),
-    ).toContainText("2.5");
+    ).toHaveText("Mean absolute daily error1.5 MWh");
     await expect(
-        page.getByText("Mean absolute error in producing intervals", {
-            exact: true,
-        }),
-    ).toBeVisible();
+        page
+            .locator("section")
+            .filter({
+                has: page.getByRole("heading", {
+                    name: "Comparison",
+                    exact: true,
+                }),
+            })
+            .getByText(
+                /Additional metrics|How the comparison is measured|Compares the last forecast|without calibration|producing intervals/,
+            ),
+    ).toHaveCount(0);
     await page.getByLabel("Start date").fill("2026-11-01");
     await page.getByLabel("End date").fill("2026-11-02");
     await page.getByRole("button", { name: "Show", exact: true }).click();
@@ -1702,7 +1698,6 @@ test("forecast performance shows archived metrics, missing days and selected ran
         .toContain("start_date=2026-11-01&end_date=2026-11-02");
     await expect.poll(() => lastQuery).toContain("daylight_only=true");
 
-    await page.getByText("Additional metrics", { exact: true }).click();
     await expect(page.getByRole("cell", { name: "8.5" })).toBeVisible();
     await expect(
         page.getByRole("img", {
@@ -1732,14 +1727,9 @@ test("forecast performance shows archived metrics, missing days and selected ran
         error_mwh: "",
         reason: "forecast_not_available",
     });
-    await expect(
-        page.locator(".stat").filter({
-            hasText: "Mean absolute error in producing intervals",
-        }),
-    ).toContainText("—");
 });
 
-test("calibration detail explains support, rejection and incumbent comparison", async ({
+test("calibration detail gives the rejection reasons, its period and days, and the error without and with it", async ({
     page,
 }) => {
     await mockApi(page);
@@ -1783,28 +1773,27 @@ test("calibration detail explains support, rejection and incumbent comparison", 
             "It increased the error compared with the calibration in use then.",
         ),
     ).toBeVisible();
-    await expect(page.getByText("4 of 5 needed")).toBeVisible();
     await expect(
         page.getByText(
             "Days without production among the test days prevent a change of calibration.",
         ),
     ).toBeVisible();
+    const detail = page.locator(".calibration-detail");
+    await expect(detail.locator(".stat")).toHaveText([
+        "Factor1.1",
+        "Period2026-01-01 – 2026-01-10",
+        "Calibration days8",
+        "Test days2",
+        "Error without calibration3 MWh",
+        "Error with this calibration2 MWh",
+    ]);
+    await expect(detail.locator(".tags")).toContainText("Preliminary");
     await expect(
-        page.getByText(
-            "Errors count whole intervals that overlap daylight, not 24-hour totals.",
+        detail.getByText(
+            /needed|overlap daylight|calibration in use then \(factor|per interval|Statistics and values not used|Calculation record|Values not used|Days used/,
         ),
-    ).toBeVisible();
-    await expect(
-        page.getByText("Mean absolute daily error (MWh)", { exact: true }),
-    ).toBeVisible();
-    await expect(
-        page.getByText("Average daily difference (MWh)", { exact: true }),
-    ).toBeVisible();
-    await expect(
-        page.getByRole("columnheader", {
-            name: "Error with the calibration in use then (factor 1.2)",
-        }),
-    ).toBeVisible();
+    ).toHaveCount(0);
+    await expect(detail.getByRole("table")).toHaveCount(0);
     const download = page.waitForEvent("download");
     await page
         .locator(".calibration-detail")
