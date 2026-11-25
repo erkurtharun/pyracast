@@ -10,6 +10,7 @@ import {
 
 // React drops an input event whose value was assigned through `value`, so the text is entered as an edit.
 function enter(field: HTMLInputElement, text: string) {
+    if (field.value === text) return;
     field.setRangeText(text, 0, field.value.length, "end");
     field.dispatchEvent(new Event("input", { bubbles: true }));
 }

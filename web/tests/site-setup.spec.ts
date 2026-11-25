@@ -904,6 +904,20 @@ async function expectPastedCoordinates(page: Page) {
             entry.text,
         ).toBe(entry.single === "refused");
     }
+    await latitude.fill("41.0082");
+    await longitude.fill("");
+    await latitude.evaluate((element: HTMLInputElement) =>
+        element.setSelectionRange(2, 2),
+    );
+    expect(await paste(latitude, "41.0082, 28.9784")).toBe(true);
+    await expect(longitude).toHaveValue("28.9784");
+    await expect(latitude).toHaveValue("41.0082");
+    expect(
+        await latitude.evaluate((element: HTMLInputElement) => [
+            element.selectionStart,
+            element.selectionEnd,
+        ]),
+    ).toEqual([2, 2]);
 }
 
 // A pair pasted as the form's first edit makes a shell destination ask; Stay keeps both figures.
@@ -923,7 +937,7 @@ async function expectPastedPairKept(page: Page) {
     await expect(page.getByLabel("Longitude (°)")).toHaveValue("28.9784");
 }
 
-test("a text pasted into the wizard's latitude fills both fields only when it is a pair, and a pasted pair asks before leaving", async ({
+test("a text pasted into the wizard's latitude fills both fields only when it is a pair, leaves an equal latitude and its caret alone, and a pasted pair asks before leaving", async ({
     page,
 }) => {
     await mockApi(page, { empty: true });
@@ -933,7 +947,7 @@ test("a text pasted into the wizard's latitude fills both fields only when it is
     await expectPastedCoordinates(page);
 });
 
-test("a text pasted into a location request's latitude fills both fields only when it is a pair, and a pasted pair asks before leaving", async ({
+test("a text pasted into a location request's latitude fills both fields only when it is a pair, leaves an equal latitude and its caret alone, and a pasted pair asks before leaving", async ({
     page,
 }) => {
     await mockApi(page);
