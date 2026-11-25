@@ -10,6 +10,7 @@ Read on demand. The code is the source of truth; these pages hold what it cannot
 | System-wide design decisions and their rationale | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Irradiance, energy and calibration calculations | [IRRADIANCE.md](IRRADIANCE.md) |
 | Production topology, release and recovery | [DEPLOYMENT.md](DEPLOYMENT.md) |
+| How the installed app, its service worker and a release under an open window behave | [flows/installed-app.md](flows/installed-app.md) |
 | How contributors and coding agents work, verify and deliver | [AGENTS.md](../AGENTS.md) |
 
 ## Keeping it true

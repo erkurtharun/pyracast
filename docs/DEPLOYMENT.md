@@ -383,6 +383,19 @@ Inspect the host from `/opt/pyracast/current` as root with
   planned maintenance. A PostgreSQL major upgrade needs its own rehearsed dump and restore. Never
   prune volumes in production.
 
+### Releases under open windows
+
+A release stops the old web container before the new one serves, so one build answers at a time. An
+open window keeps the build it loaded until it navigates: the next in-app navigation meets an answer
+of another build id and loads a document of the new build, and while a value is unsaved the browser
+asks first (`docs/flows/installed-app.md`). The server accepts the session an old document signed in
+with for at most 12 h after that sign-in (the absolute session limit,
+`src/pyracast/accounts/sessions.py`); a document suspended for longer can still send a request later
+and is refused. While the product is in development no release keeps request shapes, stored
+formats or the manifest compatible for such a document: the new release answers its requests as it
+stands, and the next navigation loads the current build. Files of the replaced build
+are not kept.
+
 ### App worker
 
 A browser that opened the app keeps the service worker served at `/app/sw.js`
@@ -392,7 +405,10 @@ that fails, offline, on an answer other than the script or on a script that does
 the installed worker until a later check succeeds. So every release serves the address, and the
 release a failed one falls back to serves it as well, since every release from the installable
 app on does. The address answers `text/javascript` with `no-store` and its own policy; the
-container smoke pins those headers, the manifest and the icons.
+container smoke pins those headers, the manifest and the icons. The worker passes every navigation
+on; only one the server does not answer gets a saved page of the device's copy or the notice, and it
+writes the copy only to empty it when it expired or the person removed it on a saved page
+(`docs/flows/installed-app.md`).
 
 - **Withdrawal:** a release whose change is exactly these edits:
   1. move `web/public/app/sw.js` with `git mv` to `sw-previous.js` in `web/testing/`; it keeps the worker that browsers hold, which
