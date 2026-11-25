@@ -117,17 +117,16 @@ export function Calibrations({ scope }: { scope: PlantScope }) {
                 <div className="section-heading">
                     <div>
                         <h2>{t("calibration_history")}</h2>
-                        <p className="fine">{t("selection_effect")}</p>
                     </div>
                     <div className="button-group">
                         {runs.data && (
                             <CsvDownload
-                                label={t("download_calibration_csv")}
                                 pending={performing > 0}
                                 build={() =>
                                     calibrationsExport(
                                         plant,
                                         runs.data?.results ?? [],
+                                        t("file"),
                                     )
                                 }
                             />

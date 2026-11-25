@@ -406,8 +406,6 @@
     },
     "ChangeRequests": {
         "atDecision": "Karar anında",
-        "proposeRevert": "Sağlayıcı ölçümünü iste",
-        "proposeRevertInterval": "{interval} aralığı için sağlayıcı ölçümünü iste",
         "currentChanged": "Başvurudan sonra değişti.",
         "automaticIntervals": "Otomatik kaynak aralıkları",
         "providerHourIncomplete": "Bu düzeltme, {start} – {end} aralığının yalnızca bir kısmını değiştiriyor. Kalan bölüm eksik kalacak; saatlik kaynak enerjisi bölünmez.",
@@ -437,7 +435,6 @@
         "reasonRequired": "Bu düzeltme için gerekçe girin.",
         "send": "Onaya gönder",
         "approvalHelp": "Bu başvuru, canlı verileri değiştirmeden önce çalışma alanı yöneticisi tarafından incelenir.",
-        "proposeCorrection": "Düzeltme öner",
         "proposeOutage": "Kesinti bildir",
         "proposeUpdate": "Değişiklik öner",
         "proposeResolution": "Çözüm bildir",

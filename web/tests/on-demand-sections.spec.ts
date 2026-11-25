@@ -13,8 +13,10 @@ import {
 } from "./support/workspace";
 
 const chunks = "**/_next/static/**/*.js";
-const englishCatalogue = (body: string) => body.includes("Calibration history");
-const turkishCatalogue = (body: string) => body.includes("Kalibrasyon geçmişi");
+const englishCatalogue = (body: string) =>
+    body.includes("Use forecasts without calibration");
+const turkishCatalogue = (body: string) =>
+    body.includes("Tahminlerde kalibrasyon kullanma");
 // Code that reads the namespace's texts; a catalogue holds it as a key, not as an argument.
 const readingTexts = (namespace: string) => (body: string) =>
     body.includes(`("${namespace}")`);
@@ -134,7 +136,7 @@ const sections = [
         before: [],
         open: "Calibration",
         shown: (page: Page) =>
-            page.getByRole("heading", { name: "Calibration history" }),
+            page.getByRole("heading", { name: "Calibrations", exact: true }),
     },
     {
         name: "production history with its import and editing",
@@ -149,7 +151,7 @@ const sections = [
         open: "Comparison",
         shown: (page: Page) =>
             page.getByRole("heading", {
-                name: "Production comparison",
+                name: "Comparison",
                 exact: true,
             }),
     },
@@ -201,7 +203,7 @@ test("a section whose code cannot be loaded shows the page error and loads it on
     await page.unroute(chunks);
     await page.getByRole("button", { name: "Try again", exact: true }).click();
     await expect(
-        page.getByRole("heading", { name: "Calibration history" }),
+        page.getByRole("heading", { name: "Calibrations", exact: true }),
     ).toBeVisible();
     await expect(tab(page, "Calibration")).toHaveAttribute(
         "aria-current",
@@ -229,7 +231,7 @@ test("a plant screen failure keeps the workspace navigation and offers a reload"
         .getByRole("button", { name: "Reload page", exact: true })
         .click();
     await expect(
-        page.getByRole("heading", { name: "Calibration history" }),
+        page.getByRole("heading", { name: "Calibrations", exact: true }),
     ).toBeVisible();
     expect(await page.evaluate(() => "failedDocument" in window)).toBe(false);
 });
@@ -277,12 +279,16 @@ test("a Turkish visit loads only the Turkish catalogue", async ({
         page.getByRole("heading", { name: "Santraller" }),
     ).toBeVisible();
     const bodies = await Promise.all(scripts);
-    expect(bodies.some((body) => body.includes("Kalibrasyon geçmişi"))).toBe(
-        true,
-    );
-    expect(bodies.some((body) => body.includes("Calibration history"))).toBe(
-        false,
-    );
+    expect(
+        bodies.some((body) =>
+            body.includes("Tahminlerde kalibrasyon kullanma"),
+        ),
+    ).toBe(true);
+    expect(
+        bodies.some((body) =>
+            body.includes("Use forecasts without calibration"),
+        ),
+    ).toBe(false);
 });
 
 test("a language changed in another tab replaces the whole screen once its catalogue arrives", async ({
@@ -313,7 +319,7 @@ test("a tab change keeps the outgoing section and marks the tabs busy until the 
     await expect(page.getByText("Loading section…")).toHaveCount(0);
     section.release();
     await expect(
-        page.getByRole("heading", { name: "Calibration history" }),
+        page.getByRole("heading", { name: "Calibrations", exact: true }),
     ).toBeVisible();
     await expect(
         page.getByRole("navigation", { name: "Plant sections" }),
@@ -391,7 +397,7 @@ test("a refresh that brings an on-demand section replaces only the section slot"
     ).toHaveCount(1);
     section.release();
     await expect(
-        page.getByRole("heading", { name: "Calibration history" }),
+        page.getByRole("heading", { name: "Calibrations", exact: true }),
     ).toBeVisible();
 });
 
@@ -786,7 +792,7 @@ test("a catalogue that cannot be loaded offers a retry that loads the page again
     await page.route(chunks, async (route) => {
         const response = await route.fetch();
         const body = await response.text();
-        if (blocked && body.includes("Calibration history"))
+        if (blocked && body.includes("Use forecasts without calibration"))
             await route.abort("internetdisconnected");
         else await route.fulfill({ response, body });
     });

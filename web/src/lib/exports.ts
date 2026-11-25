@@ -46,14 +46,32 @@ function plantColumns<Row>(plant: PlantRef): Column<Row>[] {
 const list = (values: readonly string[] | undefined) =>
     values?.length ? values.join("; ") : null;
 
+// csvFilename cuts its joined parts at 150 characters, so only the ASCII plant slug gives way.
+function plantFilename(plant: string, kind: string, ...dates: string[]) {
+    const tail = [...dates, kind].filter(Boolean).join("-");
+    const room = 150 - `pyracast--${tail}`.length;
+    const slug =
+        plant
+            .toLocaleLowerCase("tr")
+            .replaceAll("ı", "i")
+            .normalize("NFKD")
+            .replace(/\p{M}/gu, "")
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-|-$/g, "")
+            .slice(0, room)
+            .replace(/-$/, "") || "plant";
+    return csvFilename("pyracast", slug, ...dates, kind);
+}
+
 export function productionExport(
     plant: PlantRef,
     date: string,
     intervals: readonly Schemas["ProductionIntervalOutput"][],
+    kind: string,
 ): CsvExport {
     const stamp = (value: string) => plantTimestamp(value, plant.timezone);
     return table(
-        csvFilename("production", plant.name, date),
+        plantFilename(plant.name, kind, date),
         [
             ["starts_at", (row) => stamp(row.interval.starts_at)],
             ["ends_at", (row) => stamp(row.interval.ends_at)],
@@ -133,21 +151,19 @@ function runColumns(plant: PlantRef): Column<Run>[] {
 export function calibrationsExport(
     plant: PlantRef,
     runs: readonly Run[],
+    kind: string,
 ): CsvExport {
-    return table(
-        csvFilename("calibrations", plant.name),
-        runColumns(plant),
-        runs,
-    );
+    return table(plantFilename(plant.name, kind), runColumns(plant), runs);
 }
 
 export function calibrationExport(
     plant: PlantRef,
     run: Schemas["CalibrationOutput"],
+    kind: string,
 ): CsvExport {
     const report = (...path: string[]) => reportValue(run.result, ...path);
     return table(
-        csvFilename("calibration", String(run.id), plant.name),
+        plantFilename(plant.name, kind),
         [
             ...runColumns(plant),
             ["cutoff_at", () => plantTimestamp(run.cutoff_at, plant.timezone)],
@@ -189,27 +205,43 @@ type Day = Pick<
     | "calibration_in_sample"
 >;
 
+export type PerformanceFileNames = {
+    file: string;
+    comparison: string;
+    forecast: string;
+    satellite: string;
+};
+
 export function performanceExport(
     plant: PlantRef,
     performance: Pick<
         Schemas["PerformanceOutput"],
-        "comparison" | "start_date" | "end_date"
+        "start_date" | "end_date"
     > & { days: readonly Day[] },
+    names: PerformanceFileNames,
 ): CsvExport {
     return table(
-        csvFilename(
-            "performance",
+        plantFilename(
             plant.name,
+            names.file,
             performance.start_date,
             performance.end_date,
         ),
         [
             ...plantColumns<Day>(plant),
-            ["comparison", () => performance.comparison],
+            ["comparison", () => names.comparison],
             ["date", (day) => day.date],
             ["status", (day) => day.status],
             ["reason", (day) => day.reason],
-            ["source_kind", (day) => day.source_kind],
+            [
+                "source_kind",
+                (day) =>
+                    day.source_kind === null
+                        ? null
+                        : day.source_kind === "estimated_actuals"
+                          ? names.satellite
+                          : names.forecast,
+            ],
             ["measured_energy_mwh", (day) => day.measured_energy_mwh],
             ["predicted_energy_mwh", (day) => day.predicted_energy_mwh],
             ["error_mwh", (day) => day.error_mwh],

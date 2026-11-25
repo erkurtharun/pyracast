@@ -405,8 +405,6 @@
         "signedInAs": "Signed in as {email}"
     },
     "ChangeRequests": {
-        "proposeRevert": "Request provider reading",
-        "proposeRevertInterval": "Request provider reading for {interval}",
         "currentChanged": "Changed since submission.",
         "atDecision": "At decision",
         "automaticIntervals": "Automatic source intervals",
@@ -437,7 +435,6 @@
         "reasonRequired": "Enter a reason for this correction.",
         "send": "Send for approval",
         "approvalHelp": "A workspace administrator reviews this submission before it changes live data.",
-        "proposeCorrection": "Suggest correction",
         "proposeOutage": "Submit outage",
         "proposeUpdate": "Suggest changes",
         "proposeResolution": "Submit resolution",

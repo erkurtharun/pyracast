@@ -393,7 +393,7 @@ test("a customer manages one plant site through the real API", async ({
         .fill(process.env.BROWSER_HISTORY_DATE!);
     await page.getByRole("checkbox", { name: "Show full day" }).check();
     const productionTable = page.getByRole("table", {
-        name: "Production intervals",
+        name: "Actual production values",
     });
     const firstHour = productionTable.getByRole("row").filter({
         has: page.getByRole("rowheader", {
@@ -406,7 +406,9 @@ test("a customer manages one plant site through the real API", async ({
             .getByRole("button", { name: "Edit 00:00–01:00", exact: true })
             .click();
         await page
-            .getByLabel("Production for 00:00–01:00 (MWh)", { exact: true })
+            .getByLabel("Actual production for 00:00–01:00 (MWh)", {
+                exact: true,
+            })
             .fill(value);
         const saved = page.waitForResponse(
             (response) =>
@@ -416,7 +418,7 @@ test("a customer manages one plant site through the real API", async ({
         await page.getByRole("button", { name: "Save", exact: true }).click();
         expect((await saved).status()).toBe(200);
         await expect(
-            page.getByLabel("Production for 00:00–01:00 (MWh)", {
+            page.getByLabel("Actual production for 00:00–01:00 (MWh)", {
                 exact: true,
             }),
         ).toHaveCount(0);
@@ -435,7 +437,7 @@ test("a customer manages one plant site through the real API", async ({
     );
     await page
         .getByRole("button", {
-            name: "Remove correction for 00:00–01:00",
+            name: "Remove entered value for 00:00–01:00",
             exact: true,
         })
         .click();
@@ -450,20 +452,18 @@ test("a customer manages one plant site through the real API", async ({
         await (await productionDownload).path(),
     );
     await page.getByRole("button", { name: "Import CSV" }).click();
-    await page.getByLabel("Production CSV").setInputFiles({
+    await page.getByLabel("CSV file", { exact: true }).setInputFiles({
         name: "production-export.csv",
         mimeType: "text/csv",
         buffer: exportedProduction,
     });
-    await expect(page.getByText(/1 valid observations ready/)).toBeVisible();
+    await expect(page.getByText(/1 row read/)).toBeVisible();
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
     await page
-        .getByRole("button", { name: "Preview import", exact: true })
+        .getByRole("button", { name: "Import 1 value", exact: true })
         .click();
-    await page.getByRole("button", { name: "Confirm import (1)" }).click();
     await expect(
-        page.getByText(
-            "Import complete: 0 created, 1 already present, 1 total.",
-        ),
+        page.getByText("Imported. New values: 0 · Already saved: 1"),
     ).toBeVisible();
     await page.getByRole("button", { name: "Import CSV" }).click();
     await page.screenshot({
@@ -707,9 +707,9 @@ test("a customer manages one plant site through the real API", async ({
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await page.getByRole("button", { name: "Comparison", exact: true }).click();
     await expect(
-        page.getByRole("heading", { name: "Production comparison" }),
+        page.getByRole("heading", { name: "Comparison", exact: true }),
     ).toBeVisible();
-    await expect(page.getByText("Loading performance…")).toHaveCount(0);
+    await expect(page.getByText("Loading…")).toHaveCount(0);
     await page.screenshot({
         path: testInfo.outputPath("forecast-performance-desktop.png"),
         fullPage: true,

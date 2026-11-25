@@ -186,12 +186,12 @@ test("plant configuration saves fixed angles and clears them when tracking", asy
         .click();
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await page.getByRole("button", { name: "Import CSV" }).click();
-    await page.getByLabel("Production CSV").setInputFiles({
+    await page.getByLabel("CSV file", { exact: true }).setInputFiles({
         name: "production.csv",
         mimeType: "text/csv",
         buffer: Buffer.from(productionCsv(250)),
     });
-    await expect(page.getByText(/1 valid observations ready/)).toBeVisible();
+    await expect(page.getByText(/1 row read/)).toBeVisible();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByLabel("Mounting type").selectOption("fixed");
     await page.getByLabel("Surface tilt (degrees, optional)").fill("0");
@@ -202,7 +202,7 @@ test("plant configuration saves fixed angles and clears them when tracking", asy
     await page.getByRole("button", { name: "Save configuration" }).click();
     await expect.poll(() => bodies.length).toBe(1);
     await page.getByRole("button", { name: "Production", exact: true }).click();
-    await expect(page.getByText(/1 valid observations ready/)).toHaveCount(0);
+    await expect(page.getByText(/1 row read/)).toHaveCount(0);
     expect(bodies[0]).toMatchObject({
         mounting_type: "fixed",
         surface_tilt_degrees: 0,
@@ -265,18 +265,18 @@ test("mock contract: imports validated production with explicit energy units", a
         .click();
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await page.getByRole("button", { name: "Import CSV" }).click();
-    await page.getByLabel("Production CSV").setInputFiles({
+    await page.getByLabel("CSV file", { exact: true }).setInputFiles({
         name: "production.csv",
         mimeType: "text/csv",
         buffer: Buffer.from(productionCsv(250)),
     });
-    await expect(page.getByText(/1 valid observations ready/)).toBeVisible();
-    await page.getByRole("button", { name: "Preview import" }).click();
-    await page.getByRole("button", { name: "Confirm import (1)" }).click();
+    await expect(page.getByText(/1 row read/)).toBeVisible();
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Import 1 value", exact: true })
+        .click();
     await expect(
-        page.getByText(
-            "Import complete: 1 created, 0 already present, 1 total.",
-        ),
+        page.getByText("Imported. New values: 1 · Already saved: 0"),
     ).toBeVisible();
 });
 
@@ -290,7 +290,7 @@ test("CSV selection replaces validated rows and recovers after an invalid file",
         .click();
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await page.getByRole("button", { name: "Import CSV" }).click();
-    const input = page.getByLabel("Production CSV");
+    const input = page.getByLabel("CSV file", { exact: true });
     const select = (name: string, energy: string) =>
         input.setInputFiles({
             name,
@@ -298,36 +298,32 @@ test("CSV selection replaces validated rows and recovers after an invalid file",
             buffer: Buffer.from(productionCsv(energy)),
         });
     await select("first.csv", "250");
-    await expect(
-        page.getByText(/first.csv: 1 valid observations ready/),
-    ).toBeVisible();
+    await expect(page.getByText(/first\.csv · 1 row read/)).toBeVisible();
     await select("invalid.csv", "-1");
-    await expect(page.getByText(/valid observations ready/)).toHaveCount(0);
+    await expect(page.getByText(/rows? read/)).toHaveCount(0);
     await expect(
         page.getByRole("alert").filter({
-            hasText: "Row 2: energy must be a non-negative number.",
+            hasText: "Row 2: write the energy as zero or a positive number.",
         }),
     ).toBeVisible();
-    await page
-        .getByRole("button", { name: "Preview import", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
     await expect(
-        page.getByText("Choose and validate a CSV before importing."),
+        page.getByText("Choose a CSV file first.", { exact: true }),
     ).toBeVisible();
     await select("replacement.csv", "777");
+    await expect(page.getByText(/replacement\.csv · 1 row read/)).toBeVisible();
     await expect(
-        page.getByText(/replacement.csv: 1 valid observations ready/),
-    ).toBeVisible();
-    await expect(
-        page.getByText("Row 2: energy must be a non-negative number."),
+        page.getByText("Row 2: write the energy as zero or a positive number."),
     ).toHaveCount(0);
     const imported = page.waitForRequest(
         (request) =>
             request.method() === "POST" &&
             request.url().includes("/production/changes/"),
     );
-    await page.getByRole("button", { name: "Preview import" }).click();
-    await page.getByRole("button", { name: "Confirm import (1)" }).click();
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Import 1 value", exact: true })
+        .click();
     expect((await imported).postDataJSON()).toMatchObject({
         configuration_id: 31,
         unit: "kWh",
@@ -371,7 +367,7 @@ for (const staleRead of ["resolve", "reject"] as const) {
             await page.getByRole("button", { name: "Import CSV" }).click();
             const csv = (energy: number, source: string) =>
                 Buffer.from(productionCsv(energy, source));
-            const input = page.getByLabel("Production CSV");
+            const input = page.getByLabel("CSV file", { exact: true });
             await input.setInputFiles({
                 name: "old.csv",
                 mimeType: "text/csv",
@@ -385,7 +381,7 @@ for (const staleRead of ["resolve", "reject"] as const) {
                     buffer: csv(777, "new-meter"),
                 });
                 await expect(
-                    page.getByText(/new.csv: 1 valid observations ready/),
+                    page.getByText(/new\.csv · 1 row read/),
                 ).toBeVisible();
             }
             await page.evaluate(async () => {
@@ -400,12 +396,10 @@ for (const staleRead of ["resolve", "reject"] as const) {
                 page.getByText("Old file read failed.", { exact: true }),
             ).toHaveCount(0);
             if (selection === "clear") {
-                await expect(
-                    page.getByText(/valid observations ready/),
-                ).toHaveCount(0);
+                await expect(page.getByText(/rows? read/)).toHaveCount(0);
                 await expect(
                     page.getByRole("button", {
-                        name: "Preview import",
+                        name: "Preview",
                         exact: true,
                     }),
                 ).toBeVisible();
@@ -416,9 +410,11 @@ for (const staleRead of ["resolve", "reject"] as const) {
                     request.method() === "POST" &&
                     request.url().includes("/production/changes/"),
             );
-            await page.getByRole("button", { name: "Preview import" }).click();
             await page
-                .getByRole("button", { name: "Confirm import (1)" })
+                .getByRole("button", { name: "Preview", exact: true })
+                .click();
+            await page
+                .getByRole("button", { name: "Import 1 value", exact: true })
                 .click();
             expect((await imported).postDataJSON()).toMatchObject({
                 changes: [{ energy: 777, source: "new-meter" }],
@@ -810,7 +806,7 @@ test("the outgoing production view's disclosures stay closed while the compariso
     await comparison.requested;
     await toggle();
     await expect(importer).not.toHaveAttribute("open", /.*/);
-    await expect(page.getByLabel("Production CSV")).toBeHidden();
+    await expect(page.getByLabel("CSV file", { exact: true })).toBeHidden();
     await comparison.release();
     await expect(page).toHaveURL(/\/production\/\?view=comparison$/);
     await expect(button("Comparison")).toHaveAttribute("aria-current", "page");
@@ -1078,7 +1074,7 @@ test("regional and plant data sources identify estimated actuals and retain arch
     await expect.poll(() => sources.at(-1)).toBe("forecast");
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await page
-        .getByText("Source and correction details", { exact: true })
+        .getByText("Source of actual production", { exact: true })
         .click();
     await expect(
         page.getByText(/Saved corrections take priority/i),
@@ -1268,17 +1264,17 @@ test("CSV rejects ambiguous units, offsets, overlaps, invalid energy and oversiz
             header + "2026-01-01T09:00:00,2026-01-01T09:30:00,-1,valid,meter",
             csvTexts(),
         ),
-    ).toThrow("timezone-aware");
+    ).toThrow("with their offset");
     expect(() =>
         parseProduction(
             header + "2026-01-01T09:00:00Z,2026-01-01T09:30:00Z,-1,valid,meter",
             csvTexts(),
         ),
-    ).toThrow("non-negative");
+    ).toThrow("zero or a positive number");
     const row = "2026-01-01T09:00:00Z,2026-01-01T09:30:00Z,1,valid,meter";
     expect(() =>
         parseProduction(header + row + "\n" + row, csvTexts()),
-    ).toThrow("overlapping");
+    ).toThrow("Some times in the file overlap.");
     expect(() =>
         parseProduction(header + Array(2001).fill(row).join("\n"), csvTexts()),
     ).toThrow("2,000");
@@ -1303,13 +1299,13 @@ test("CSV preserves quoted commas and multiline source fields and rejects missin
     ]);
     expect(() =>
         parseProduction(header + interval + ",,valid,meter", csvTexts()),
-    ).toThrow("non-negative");
+    ).toThrow("zero or a positive number");
     expect(() =>
         parseProduction(
             header + interval + ',1,valid,"unterminated',
             csvTexts(),
         ),
-    ).toThrow("could not be parsed");
+    ).toThrow("could not be read as CSV");
 });
 
 test("mock contract: follows tenant pagination and keeps missing intervals visible", async ({
@@ -1445,7 +1441,7 @@ test("performance hides stale CSV while a selected range is loading", async ({
     await page.getByRole("button", { name: "Comparison", exact: true }).click();
     const performance = page.locator("section").filter({
         has: page.getByRole("heading", {
-            name: "Production comparison",
+            name: "Comparison",
             exact: true,
         }),
     });
@@ -1456,13 +1452,11 @@ test("performance hides stale CSV while a selected range is loading", async ({
     await expect(csv).toBeVisible();
     await page.getByLabel("Start date").fill("2026-11-01");
     await page.getByLabel("End date").fill("2026-11-02");
-    await page.getByRole("button", { name: "Load performance" }).click();
+    await page.getByRole("button", { name: "Show", exact: true }).click();
     try {
         await expect.poll(() => requested).toBe(true);
         await expect(csv).toHaveCount(0);
-        await expect(performance.getByRole("status")).toContainText(
-            "Loading performance",
-        );
+        await expect(performance.getByRole("status")).toContainText("Loading…");
     } finally {
         release();
     }
@@ -1471,7 +1465,7 @@ test("performance hides stale CSV while a selected range is loading", async ({
     await csv.click();
     const exported = await download;
     expect(exported.suggestedFilename()).toBe(
-        "performance-East array-2026-11-01-2026-11-02.csv",
+        "pyracast-east-array-2026-11-01-2026-11-02-comparison.csv",
     );
     const parsed = Papa.parse<Record<string, string>>(
         await readFile(await exported.path(), "utf8"),
@@ -1536,47 +1530,49 @@ test("forecast performance shows archived metrics, missing days and selected ran
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await page.getByRole("button", { name: "Comparison", exact: true }).click();
     await expect(
-        page.getByRole("heading", { name: "Production comparison" }),
+        page.getByRole("heading", { name: "Comparison", exact: true }),
     ).toBeVisible();
 
-    await page.getByText("Additional metrics & interpretation").click();
-    await page.getByText("Unavailable dates (1)", { exact: true }).click();
+    await page.getByText("Additional metrics", { exact: true }).click();
+    await page.getByText("Days not compared (1)", { exact: true }).click();
     await expect(
-        page.getByText("No forecast was archived for this day: 2026-11-02"),
+        page.getByText("No forecast to compare for this day: 2026-11-02"),
     ).toBeVisible();
-    await page.getByText("How comparison is measured", { exact: true }).click();
+    await page
+        .getByText("How the comparison is measured", { exact: true })
+        .click();
     await expect(
-        page.getByText(
-            "Compares the last forecast saved before daylight began",
-            {
-                exact: false,
-            },
-        ),
-    ).toBeVisible();
-    await expect(
-        page.getByText("Baseline daylight energy error"),
+        page.getByText("Compares the last forecast before sunrise", {
+            exact: false,
+        }),
     ).toBeVisible();
     await expect(
-        page
-            .locator(".stat")
-            .filter({ hasText: "Baseline daylight energy error" }),
+        page.getByText("Mean absolute daily error without calibration"),
+    ).toBeVisible();
+    await expect(
+        page.locator(".stat").filter({
+            hasText: "Mean absolute daily error without calibration",
+        }),
     ).toContainText("2.5");
     await expect(
-        page.getByText("Generating-interval error", { exact: true }),
+        page.getByText("Mean absolute error in producing intervals", {
+            exact: true,
+        }),
     ).toBeVisible();
     await page.getByLabel("Start date").fill("2026-11-01");
     await page.getByLabel("End date").fill("2026-11-02");
-    await page.getByRole("button", { name: "Load performance" }).click();
+    await page.getByRole("button", { name: "Show", exact: true }).click();
     await expect
         .poll(() => lastQuery)
         .toContain("start_date=2026-11-01&end_date=2026-11-02");
     await expect.poll(() => lastQuery).toContain("daylight_only=true");
 
-    await page.getByText("Additional metrics & interpretation").click();
+    await page.getByText("Additional metrics", { exact: true }).click();
     await expect(page.getByRole("cell", { name: "8.5" })).toBeVisible();
     await expect(
         page.getByRole("img", {
-            name: /^Absolute daily forecast error for 1 matched day;/,
+            name: "Absolute error by day",
+            exact: true,
         }),
     ).toBeVisible();
     const download = page.waitForEvent("download");
@@ -1602,7 +1598,9 @@ test("forecast performance shows archived metrics, missing days and selected ran
         reason: "forecast_not_available",
     });
     await expect(
-        page.locator(".stat").filter({ hasText: "Generating-interval error" }),
+        page.locator(".stat").filter({
+            hasText: "Mean absolute error in producing intervals",
+        }),
     ).toContainText("—");
 });
 
@@ -1647,30 +1645,35 @@ test("calibration detail explains support, rejection and incumbent comparison", 
     await page.getByRole("button", { name: "View details" }).click();
     await expect(
         page.getByText(
-            "The candidate increased error compared with the selection at training.",
+            "It increased the error compared with the calibration in use then.",
         ),
     ).toBeVisible();
-    await expect(page.getByText("4 / 5 required")).toBeVisible();
+    await expect(page.getByText("4 of 5 needed")).toBeVisible();
     await expect(
         page.getByText(
-            "Zero production in the comparison period prevents a calibration change.",
+            "Days without production among the test days prevent a change of calibration.",
         ),
     ).toBeVisible();
     await expect(
         page.getByText(
-            "Metrics use whole meter intervals intersecting daylight, not 24-hour totals.",
+            "Errors count whole intervals that overlap daylight, not 24-hour totals.",
         ),
     ).toBeVisible();
-    await expect(page.getByText("Daylight energy MAE (MWh)")).toBeVisible();
-    await expect(page.getByText("Daylight energy bias (MWh)")).toBeVisible();
+    await expect(
+        page.getByText("Mean absolute daily error (MWh)", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByText("Average daily difference (MWh)", { exact: true }),
+    ).toBeVisible();
     await expect(
         page.getByRole("columnheader", {
-            name: "Selection at training (factor 1.2)",
+            name: "Error with the calibration in use then (factor 1.2)",
         }),
     ).toBeVisible();
     const download = page.waitForEvent("download");
     await page
-        .getByRole("button", { name: "Download calibration details CSV" })
+        .locator(".calibration-detail")
+        .getByRole("button", { name: "Download CSV" })
         .click();
     const exported = Papa.parse<Record<string, string>>(
         await readFile(await (await download).path(), "utf8"),

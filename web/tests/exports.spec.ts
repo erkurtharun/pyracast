@@ -137,11 +137,18 @@ test("only a formula character after invisible ones is neutralised", () => {
 });
 
 test("the production export holds the import columns and one row per recorded interval in plant time", () => {
-    const file = productionExport(plant, "2026-11-10", [
-        interval("2026-11-10T05:00:00Z", "2026-11-10T05:30:00Z", 0.5),
-        interval("2026-11-10T05:30:00Z", "2026-11-10T06:00:00Z", null),
-    ]);
-    expect(file.filename).toBe("production-Doğu- array-2026-11-10.csv");
+    const file = productionExport(
+        plant,
+        "2026-11-10",
+        [
+            interval("2026-11-10T05:00:00Z", "2026-11-10T05:30:00Z", 0.5),
+            interval("2026-11-10T05:30:00Z", "2026-11-10T06:00:00Z", null),
+        ],
+        "actual-production",
+    );
+    expect(file.filename).toBe(
+        "pyracast-dogu-array-2026-11-10-actual-production.csv",
+    );
     expect(lines(file)).toEqual([
         '"starts_at","ends_at","energy_mwh","quality","source","timezone"',
         '"2026-11-10T08:00:00+03:00","2026-11-10T08:30:00+03:00",0.5,"valid","meter","Europe/Istanbul"',
@@ -150,10 +157,15 @@ test("the production export holds the import columns and one row per recorded in
 });
 
 test("a production export is imported again without edits", () => {
-    const file = productionExport(plant, "2026-11-10", [
-        interval("2026-11-10T05:00:00Z", "2026-11-10T05:30:00Z", 0.5),
-        interval("2026-11-10T05:30:00Z", "2026-11-10T06:00:00Z", 0.25),
-    ]);
+    const file = productionExport(
+        plant,
+        "2026-11-10",
+        [
+            interval("2026-11-10T05:00:00Z", "2026-11-10T05:30:00Z", 0.5),
+            interval("2026-11-10T05:30:00Z", "2026-11-10T06:00:00Z", 0.25),
+        ],
+        "actual-production",
+    );
     const parsed = parseProduction(
         csvDocument(file.header, file.rows),
         csvTexts(),
@@ -179,36 +191,41 @@ test("a production export is imported again without edits", () => {
 
 test("an aggregated interval of mixed qualities is exported as shown and refused on import with its way out", () => {
     const row = interval("2026-11-10T05:00:00Z", "2026-11-10T06:00:00Z", 0.75);
-    const file = productionExport(plant, "2026-11-10", [
-        {
-            ...row,
-            effective: {
-                energy_mwh: 0.75,
-                quality: "mixed",
-                source: "multiple_manual",
-                source_kind: "manual",
-                provisional: false,
-                aggregated: true,
+    const file = productionExport(
+        plant,
+        "2026-11-10",
+        [
+            {
+                ...row,
+                effective: {
+                    energy_mwh: 0.75,
+                    quality: "mixed",
+                    source: "multiple_manual",
+                    source_kind: "manual",
+                    provisional: false,
+                    aggregated: true,
+                },
             },
-        },
-    ]);
+        ],
+        "actual-production",
+    );
     expect(lines(file)[1]).toBe(
         '"2026-11-10T08:00:00+03:00","2026-11-10T09:00:00+03:00",0.75,"mixed","multiple_manual","Europe/Istanbul"',
     );
     const text = csvDocument(file.header, file.rows);
     expect(() => parseProduction(text, csvTexts())).toThrow(
-        "Row 2: this interval combines stored intervals of different qualities; correct those intervals at their stored resolution instead.",
+        "Row 2: the half hours of this hour have different statuses. Correct each half hour separately.",
     );
     expect(() => parseProduction(text, csvTexts("tr"))).toThrow(
-        "Satır 2: bu aralık farklı veri niteliğindeki kayıtlı aralıkları birleştiriyor; bunun yerine o aralıkları kayıtlı çözünürlükte düzeltin.",
+        "Satır 2: bu saatin yarım saatlerinin durumu farklı. Her yarım saati ayrı düzeltin.",
     );
 });
 
 test("an empty list gives the header and no fabricated row", () => {
     for (const file of [
-        productionExport(plant, "2026-11-10", []),
+        productionExport(plant, "2026-11-10", [], "actual-production"),
         outagesExport(plant, []),
-        calibrationsExport(plant, []),
+        calibrationsExport(plant, [], "calibrations"),
     ])
         expect(lines(file)).toHaveLength(2);
 });
@@ -251,14 +268,14 @@ const run: Schemas["CalibrationOutput"] = {
 };
 
 test("calibration exports list each run with its selection and no provider data", () => {
-    const list = calibrationsExport(plant, [run]);
-    expect(list.filename).toBe("calibrations-Doğu- array.csv");
+    const list = calibrationsExport(plant, [run], "calibrations");
+    expect(list.filename).toBe("pyracast-dogu-array-calibrations.csv");
     expect(lines(list).slice(0, 2)).toEqual([
         '"plant_id","plant_name","timezone","id","window_start","window_end","status","reason","selection_state","assessment","factor","provisional_production","created_at","completed_at"',
         '21,"Doğu: array","Europe/Istanbul",40,"2026-01-01","2026-01-30","ready",,"candidate","evaluated",1.1,false,"2026-01-31T04:00:00+03:00","2026-01-31T05:00:00+03:00"',
     ]);
-    const detail = calibrationExport(plant, run);
-    expect(detail.filename).toBe("calibration-40-Doğu- array.csv");
+    const detail = calibrationExport(plant, run, "calibration-40");
+    expect(detail.filename).toBe("pyracast-dogu-array-calibration-40.csv");
     expect(lines(detail).slice(0, 2)).toEqual([
         '"plant_id","plant_name","timezone","id","window_start","window_end","status","reason","selection_state","assessment","factor","provisional_production","created_at","completed_at","cutoff_at","activation_blocker","training_days","holdout_days","valid_days","baseline_daily_mae_mwh","candidate_daily_mae_mwh","baseline_interval_mae_mw","candidate_interval_mae_mw"',
         '21,"Doğu: array","Europe/Istanbul",40,"2026-01-01","2026-01-30","ready",,"candidate","evaluated",1.1,false,"2026-01-31T04:00:00+03:00","2026-01-31T05:00:00+03:00","2026-01-31T03:00:00+03:00",,20,7,27,2,1.5,0.4,0.3',
@@ -266,32 +283,79 @@ test("calibration exports list each run with its selection and no provider data"
     expect(csvDocument(detail.header, detail.rows)).not.toContain("secret");
 });
 
+const comparisonDay = {
+    date: "2026-11-01",
+    status: "matched",
+    reason: null,
+    source_kind: "estimated_actuals",
+    measured_energy_mwh: 10,
+    predicted_energy_mwh: 11,
+    error_mwh: 1,
+    provisional_production: false,
+    calibration_in_sample: true,
+} as const;
+
+const comparisonNames = {
+    file: "comparison",
+    comparison: "Weather-based expected production",
+    forecast: "Forecast",
+    satellite: "Production calculated from satellite data",
+};
+
 test("the performance export keeps the plant, zone, source and model check per day", () => {
-    const file = performanceExport(plant, {
-        comparison: "historical_model",
-        start_date: "2026-11-01",
-        end_date: "2026-11-02",
-        days: [
-            {
-                date: "2026-11-01",
-                status: "matched",
-                reason: null,
-                source_kind: "estimated_actuals",
-                measured_energy_mwh: 10,
-                predicted_energy_mwh: 11,
-                error_mwh: 1,
-                provisional_production: false,
-                calibration_in_sample: true,
-            },
-        ],
-    });
-    expect(file.filename).toBe(
-        "performance-Doğu- array-2026-11-01-2026-11-02.csv",
+    const file = performanceExport(
+        plant,
+        {
+            start_date: "2026-11-01",
+            end_date: "2026-11-02",
+            days: [
+                comparisonDay,
+                {
+                    ...comparisonDay,
+                    date: "2026-11-02",
+                    source_kind: "forecast",
+                },
+            ],
+        },
+        comparisonNames,
     );
-    expect(lines(file).slice(0, 2)).toEqual([
+    expect(file.filename).toBe(
+        "pyracast-dogu-array-2026-11-01-2026-11-02-comparison.csv",
+    );
+    expect(lines(file).slice(0, 3)).toEqual([
         '"plant_id","plant_name","timezone","comparison","date","status","reason","source_kind","measured_energy_mwh","predicted_energy_mwh","error_mwh","provisional_production","calibration_in_sample"',
-        '21,"Doğu: array","Europe/Istanbul","historical_model","2026-11-01","matched",,"estimated_actuals",10,11,1,false,true',
+        '21,"Doğu: array","Europe/Istanbul","Weather-based expected production","2026-11-01","matched",,"Production calculated from satellite data",10,11,1,false,true',
+        '21,"Doğu: array","Europe/Istanbul","Weather-based expected production","2026-11-02","matched",,"Forecast",10,11,1,false,true',
     ]);
+});
+
+test("production, comparison and calibration files keep their dates and kind when the plant name is long or has no ASCII letter", () => {
+    const long = { ...plant, name: "Ç".repeat(200) };
+    const names = [
+        productionExport(long, "2026-11-10", [], "gerceklesen-uretim"),
+        performanceExport(
+            long,
+            { start_date: "2026-11-01", end_date: "2026-11-02", days: [] },
+            { ...comparisonNames, file: "karsilastirma" },
+        ),
+        calibrationsExport(long, [], "kalibrasyonlar"),
+        calibrationExport(long, run, "kalibrasyon-40"),
+    ].map((file) => file.filename);
+    expect(names.map((name) => name.length)).toEqual([154, 154, 154, 154]);
+    expect(names.map((name) => name.replace(/^pyracast-c+-/, ""))).toEqual([
+        "2026-11-10-gerceklesen-uretim.csv",
+        "2026-11-01-2026-11-02-karsilastirma.csv",
+        "kalibrasyonlar.csv",
+        "kalibrasyon-40.csv",
+    ]);
+    expect(
+        productionExport(
+            { ...plant, name: "東京" },
+            "2026-11-10",
+            [],
+            "actual-production",
+        ).filename,
+    ).toBe("pyracast-plant-2026-11-10-actual-production.csv");
 });
 
 test("the forecast export writes one row per interval with its unit and source", () => {

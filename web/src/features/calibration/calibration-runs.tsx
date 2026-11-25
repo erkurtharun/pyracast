@@ -2,9 +2,8 @@
 import { useTranslations } from "next-intl";
 import { useFormat } from "@/lib/format/use-format";
 import { ScrollRegion } from "@/ui/scroll-region";
-import { Tag } from "@/ui/ui";
-import { StatusTag, useLabel } from "@/ui/vocabulary";
-import { provisional, type Run } from "./model";
+import { CalibrationMarks } from "./calibration-marks";
+import type { Run } from "./model";
 
 export function CalibrationRunList({
     runs,
@@ -21,18 +20,17 @@ export function CalibrationRunList({
 }) {
     const t = useTranslations("Calibrations");
     const format = useFormat();
-    const label = useLabel();
     return (
-        <ScrollRegion label={t("calibration_runs")}>
+        <ScrollRegion label={t("calibration_history")}>
             <table>
-                <caption className="sr-only">{t("calibration_runs")}</caption>
+                <caption className="sr-only">
+                    {t("calibration_history")}
+                </caption>
                 <thead>
                     <tr>
                         <th>{t("run")}</th>
                         <th>{t("window")}</th>
                         <th>{t("status")}</th>
-                        <th>{t("selection_state")}</th>
-                        <th>{t("assessment")}</th>
                         <th>{t("factor")}</th>
                         <th>{t("actions")}</th>
                     </tr>
@@ -40,34 +38,12 @@ export function CalibrationRunList({
                 <tbody>
                     {runs.map((run) => (
                         <tr key={run.id}>
-                            <td>#{run.id}</td>
+                            <td>{run.id}</td>
                             <td>
-                                {run.window_start} → {run.window_end}
+                                {run.window_start} – {run.window_end}
                             </td>
                             <td>
-                                <StatusTag
-                                    group="CalibrationStatus"
-                                    value={run.status}
-                                />
-                            </td>
-                            <td>
-                                <StatusTag
-                                    group="SelectionState"
-                                    value={run.selection_state}
-                                />
-                            </td>
-                            <td>
-                                {run.assessment === ""
-                                    ? ""
-                                    : label(
-                                          "CalibrationAssessment",
-                                          run.assessment,
-                                      )}{" "}
-                                {provisional(run) && (
-                                    <Tag tone="warning">
-                                        {t("provisional_production")}
-                                    </Tag>
-                                )}
+                                <CalibrationMarks run={run} />
                             </td>
                             <td>{format.number(run.factor, 4)}</td>
                             <td>

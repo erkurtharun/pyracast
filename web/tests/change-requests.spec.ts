@@ -121,9 +121,7 @@ function draft(page: Page) {
 }
 
 async function stage(page: Page, start: string, energy: string) {
-    await page
-        .getByRole("button", { name: `Suggest correction for ${start}` })
-        .click();
+    await page.getByRole("button", { name: `Edit ${start}` }).click();
     const editor = page.locator(".production-row-editor");
     await editor.getByRole("textbox").first().fill(energy);
     await editor
@@ -155,7 +153,7 @@ test("the correction reason is named by its label and described by the approval 
         });
     });
     await openPlant(page, "Production");
-    await page.getByRole("button", { name: /^Suggest correction for/ }).click();
+    await page.getByRole("button", { name: /^Edit \d/ }).click();
     await expect(
         page
             .locator(".production-row-editor")
@@ -287,9 +285,9 @@ test("member submits a native production correction, sent again after a refusal 
     ).toHaveCount(0);
     canRevert = true;
     await openPlant(page, "Production");
-    await page.getByRole("button", { name: /^Suggest correction for/ }).click();
+    await page.getByRole("button", { name: /^Edit \d/ }).click();
     await page
-        .getByRole("button", { name: /^Request provider reading for/ })
+        .getByRole("button", { name: /^Remove entered value for/ })
         .click();
     await draft(page)
         .getByLabel("Reason for correction")
@@ -1207,7 +1205,7 @@ test("a member sees why an interval cannot be proposed", async ({ page }) => {
     await openPlant(page, "Production");
     const rows = page.locator(".production-table tbody tr");
     await expect(
-        rows.nth(0).getByRole("button", { name: /^Suggest correction for/ }),
+        rows.nth(0).getByRole("button", { name: /^Edit \d/ }),
     ).toBeVisible();
     await expect(rows.nth(1)).toContainText(
         "Only completed intervals can be changed.",
@@ -1230,12 +1228,10 @@ test("a member sees one notice when no interval of the day can be proposed", asy
     await openPlant(page, "Production");
     await expect(
         page.getByText(
-            "Nothing on this day can be changed. Values recorded under an earlier plant configuration cannot be changed.",
+            "Nothing on this day can be changed. Values saved with earlier technical details cannot be changed.",
         ),
     ).toBeVisible();
-    await expect(
-        page.getByRole("button", { name: /^Suggest correction for/ }),
-    ).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Edit \d/ })).toHaveCount(0);
 });
 
 test("an administrator sees why an interval cannot be edited", async ({
@@ -1250,7 +1246,7 @@ test("an administrator sees why an interval cannot be edited", async ({
         rows.nth(0).getByRole("button", { name: /^Edit / }),
     ).toBeVisible();
     await expect(rows.nth(1)).toContainText(
-        "Values recorded under another plant configuration cannot be changed here.",
+        "Values saved with other technical details cannot be changed here.",
     );
 });
 
@@ -1403,14 +1399,12 @@ test("a member stages several intervals of one day and sends them as one request
             .filter({ hasText: /^Added 08:00.08:30 to the request\.$/ }),
     ).toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Suggest correction for 08:00" }),
+        page.getByRole("button", { name: "Edit 08:00" }),
     ).toBeFocused();
     await stage(page, "08:30", "0,6");
+    await page.getByRole("button", { name: "Edit 09:00" }).click();
     await page
-        .getByRole("button", { name: "Suggest correction for 09:00" })
-        .click();
-    await page
-        .getByRole("button", { name: /^Request provider reading for 09:00/ })
+        .getByRole("button", { name: /^Remove entered value for 09:00/ })
         .click();
     await stage(page, "09:30", "0,8");
     const staged = draft(page);
@@ -1601,10 +1595,10 @@ test("a member sees which intervals wait for approval and opens the request", as
     await expect(marker).toHaveText("Waiting for approval – view");
     await expect(marker).toHaveAttribute("href", "/app/w/1/inbox/?request=7");
     await expect(
-        rows.nth(0).getByRole("button", { name: /^Suggest correction for/ }),
+        rows.nth(0).getByRole("button", { name: /^Edit \d/ }),
     ).toHaveCount(0);
     await expect(
-        rows.nth(1).getByRole("button", { name: /^Suggest correction for/ }),
+        rows.nth(1).getByRole("button", { name: /^Edit \d/ }),
     ).toBeVisible();
     await expect(rows.nth(1).getByRole("link")).toHaveCount(0);
 
@@ -1639,7 +1633,7 @@ test("a waiting marker opened in a new tab leaves the page where it is", async (
     await tab.close();
     expect(page.url()).toBe(before);
     await expect(
-        page.getByRole("group", { name: "Production intervals" }),
+        page.getByRole("group", { name: "Actual production values" }),
     ).toBeVisible();
 });
 
@@ -1787,7 +1781,7 @@ test("an administrator who edits directly sees no proposal draft", async ({
     ).toHaveCount(0);
     await editor.getByRole("textbox").first().fill("0,5");
     await editor.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByText("Production saved.")).toBeVisible();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
     expect(writes).toHaveLength(1);
     await expect(draft(page)).toHaveCount(0);
 });
@@ -1839,7 +1833,7 @@ test("a staged interval that comes to wait for the member's own request is named
         }),
     ).toBeVisible();
     await expect(
-        rows.nth(0).getByRole("button", { name: /^Suggest correction for/ }),
+        rows.nth(0).getByRole("button", { name: /^Edit \d/ }),
     ).toHaveCount(0);
     const item = draft(page).getByRole("listitem");
     await expect(item).toContainText(
@@ -1858,7 +1852,7 @@ test("editing a staged interval outside daylight shows its row and discarding cl
     await openPlant(page, "Production");
     const fullDay = page.getByRole("checkbox", { name: "Show full day" });
     const night = page.getByRole("button", {
-        name: "Suggest correction for 08:00",
+        name: "Edit 08:00",
     });
     await expect(night).toHaveCount(0);
     await fullDay.check();
@@ -1957,7 +1951,7 @@ test("a reason of only spaces is refused at its field in Turkish", async ({
     await openPlant(page, "Üretim");
     await page
         .getByRole("button", {
-            name: /^08:00.08:30 aralığı için düzeltme öner/,
+            name: /^08:00.08:30 aralığını düzenle/,
         })
         .click();
     const editor = page.locator(".production-row-editor");
@@ -2008,7 +2002,7 @@ test("a draft stays with its day when Back shows another day", async ({
     await expect(staged.getByRole("listitem")).toHaveCount(1);
     await expect(send).toBeDisabled();
     await expect(
-        page.getByRole("button", { name: "Suggest correction for 08:00" }),
+        page.getByRole("button", { name: "Edit 08:00" }),
     ).toBeDisabled();
 
     await staged
@@ -2041,7 +2035,7 @@ test("a draft stays with its day when a link shows another day", async ({
         staged.getByRole("button", { name: "Send for approval", exact: true }),
     ).toBeDisabled();
     await expect(
-        page.getByRole("button", { name: "Suggest correction for 08:00" }),
+        page.getByRole("button", { name: "Edit 08:00" }),
     ).toBeDisabled();
 
     await staged
@@ -2110,7 +2104,7 @@ test("a member promoted while a draft is open can choose another day", async ({
     await expect(
         page.getByRole("status").filter({
             hasText:
-                "You can now edit production directly, so the correction request you were preparing was discarded.",
+                "You can now edit production directly, so the change request you were preparing was discarded.",
         }),
     ).toHaveCount(1);
     await expect(previous).toBeEnabled();
@@ -2124,7 +2118,7 @@ test("the notice of a promotion that discarded a draft goes with the next access
     page,
 }) => {
     const promoted =
-        "You can now edit production directly, so the correction request you were preparing was discarded.";
+        "You can now edit production directly, so the change request you were preparing was discarded.";
     let role: "viewer" | "admin" = "viewer";
     await memberOnClock(page, () => role);
     await serveDays(page, () => [{}, {}]);
@@ -2138,7 +2132,7 @@ test("the notice of a promotion that discarded a draft goes with the next access
     role = "viewer";
     await page.clock.runFor(120_001);
     await expect(
-        page.getByRole("button", { name: "Suggest correction for 08:00" }),
+        page.getByRole("button", { name: "Edit 08:00" }),
     ).toBeVisible();
     await expect(notice).toHaveCount(0);
 
@@ -2245,7 +2239,7 @@ test("while a request is being sent nothing can be staged, edited or removed", a
         .click();
 
     const other = page.getByRole("button", {
-        name: "Suggest correction for 08:30",
+        name: "Edit 08:30",
     });
     await expect(
         staged.getByRole("button", { name: "Sending…", exact: true }),
@@ -2274,9 +2268,7 @@ test("an open editor whose interval comes to wait for the member's own request s
     let pending: number | null = null;
     await serveDays(page, () => [{ pending_request_id: pending }, {}]);
     await openPlant(page, "Production");
-    await page
-        .getByRole("button", { name: "Suggest correction for 08:00" })
-        .click();
+    await page.getByRole("button", { name: "Edit 08:00" }).click();
     const editor = page.locator(".production-row-editor");
     await expect(
         editor.getByRole("button", { name: "Add to request", exact: true }),
@@ -2285,7 +2277,7 @@ test("an open editor whose interval comes to wait for the member's own request s
     pending = 7;
     await readOnFocus(page);
     await expect(editor.getByRole("alert")).toHaveText(
-        "A request of yours for this interval now waits for approval. Your attempted value is preserved below. Cancel to choose another interval.",
+        "A change request of yours for this interval is waiting for approval. Cancel to choose another interval.",
     );
     await expect(
         editor.getByRole("button", { name: "Add to request", exact: true }),
@@ -2298,7 +2290,7 @@ test("an open editor whose interval comes to wait for the member's own request s
         }),
     ).toBeVisible();
     await expect(
-        page.getByRole("group", { name: "Production intervals" }),
+        page.getByRole("group", { name: "Actual production values" }),
     ).toBeFocused();
 });
 
@@ -2386,9 +2378,7 @@ test("an editor closes when a link shows a day whose read fails, and refresh rea
             : route.fulfill({ json: dayRows(date, [{}, {}]) });
     });
     await openPlant(page, "Production");
-    await page
-        .getByRole("button", { name: "Suggest correction for 08:00" })
-        .click();
+    await page.getByRole("button", { name: "Edit 08:00" }).click();
     const editor = page.locator(".production-row-editor");
     await expect(editor).toHaveCount(1);
 
@@ -2405,7 +2395,7 @@ test("an editor closes when a link shows a day whose read fails, and refresh rea
     failing = false;
     await refresh.click();
     await expect(
-        page.getByRole("button", { name: "Suggest correction for 08:00" }),
+        page.getByRole("button", { name: "Edit 08:00" }),
     ).toBeEnabled();
     await expect(editor).toHaveCount(0);
 });

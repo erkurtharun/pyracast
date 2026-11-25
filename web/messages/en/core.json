@@ -237,16 +237,16 @@
         "changedField": "{field}: {before} → {after}"
     },
     "ProductionCsv": {
-        "size": "Choose a CSV no larger than 2 MiB.",
-        "header": "Use the CSV columns starts_at, ends_at, energy_kwh or energy_mwh, quality and source; timezone is optional.",
-        "parse": "CSV could not be parsed: {reason}",
-        "count": "Import between 1 and 2,000 observations per batch.",
-        "interval": "Row {row}: use timezone-aware ISO timestamps for a 30 or 60 minute interval.",
-        "future": "Row {row}: production intervals must be completed.",
-        "energy": "Row {row}: energy must be a non-negative number.",
-        "quality": "Row {row}: include a valid quality and source (up to 200 characters).",
-        "mixed": "Row {row}: this interval combines stored intervals of different qualities; correct those intervals at their stored resolution instead.",
-        "overlap": "The CSV contains overlapping intervals."
+        "size": "Choose a CSV file of at most 2 MB.",
+        "header": "The file needs the columns starts_at, ends_at, energy_kwh or energy_mwh, quality and source; a timezone column may be added.",
+        "parse": "The file could not be read as CSV. Check its commas and quotation marks.",
+        "count": "Use a file with 1 to 2,000 rows.",
+        "interval": "Row {row}: write the start and end with their offset, 30 or 60 minutes apart, as in the example.",
+        "future": "Row {row}: the end lies in the future. Remove the row or correct its time.",
+        "energy": "Row {row}: write the energy as zero or a positive number.",
+        "quality": "Row {row}: write valid, outage, curtailed or invalid in quality, and a source of up to 200 characters.",
+        "mixed": "Row {row}: the half hours of this hour have different statuses. Correct each half hour separately.",
+        "overlap": "Some times in the file overlap. Remove the overlapping rows."
     },
     "SocialAuth": {
         "continue": {

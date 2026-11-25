@@ -38,7 +38,6 @@ export function ProductionTable({
     renderEditor: (row: Interval) => ReactNode;
 }) {
     const t = useTranslations("ProductionHistory");
-    const proposals = useTranslations("ChangeRequests");
     const actions =
         canManage ||
         rows.some((row) => row.can_propose || row.pending_request_id != null);
@@ -91,9 +90,7 @@ export function ProductionTable({
                                                             actionsDisabled
                                                         }
                                                         aria-label={t(
-                                                            canManage
-                                                                ? "edit_interval"
-                                                                : "propose_interval",
+                                                            "edit_interval",
                                                             {
                                                                 interval:
                                                                     intervalLabel(
@@ -105,11 +102,7 @@ export function ProductionTable({
                                                             onOpen(row)
                                                         }
                                                     >
-                                                        {canManage
-                                                            ? t("edit")
-                                                            : proposals(
-                                                                  "proposeCorrection",
-                                                              )}
+                                                        {t("edit")}
                                                     </button>
                                                 ) : (
                                                     <span className="fine">

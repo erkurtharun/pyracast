@@ -281,9 +281,7 @@ async function stagedCorrection(page: Page) {
     await page.goto("/app/");
     await page.getByRole("button", { name: /East array/ }).click();
     await page.getByRole("button", { name: "Production", exact: true }).click();
-    await page
-        .getByRole("button", { name: "Suggest correction for 08:00" })
-        .click();
+    await page.getByRole("button", { name: "Edit 08:00" }).click();
     const editor = page.locator(".production-row-editor");
     await editor.getByRole("textbox").first().fill("0,5");
     await editor
@@ -322,7 +320,7 @@ test("a restored document hides a staged correction before it reloads and does n
     );
     await restoreFromCache(page);
     await expect(
-        page.getByRole("button", { name: "Suggest correction for 08:00" }),
+        page.getByRole("button", { name: "Edit 08:00" }),
     ).toBeVisible();
     expect(await isMarked(page)).toBe(false);
     expect(questions).toEqual([]);
@@ -443,8 +441,12 @@ test("an action still running when another user's session arrives sends nothing 
     const outstanding = await outstandingAnswers(page);
     const reload = await holdReload(page);
     const observe = await tagObserver(page);
-    await page.getByRole("button", { name: "Reset to baseline" }).click();
-    await page.getByRole("button", { name: "Reset to baseline" }).click();
+    await page
+        .getByRole("button", { name: "Use forecasts without calibration" })
+        .click();
+    await page
+        .getByRole("button", { name: "Use forecasts without calibration" })
+        .click();
     await Promise.all([list.reached, automation.reached]);
     account.current = secondAccount;
     await observe("tag-b");
@@ -457,7 +459,7 @@ test("an action still running when another user's session arrives sends nothing 
     await none;
     reload.release();
     await expect(
-        page.getByRole("heading", { name: "Calibration history" }),
+        page.getByRole("heading", { name: "Calibrations", exact: true }),
     ).toBeVisible();
     expect(await isMarked(page)).toBe(false);
     expect(

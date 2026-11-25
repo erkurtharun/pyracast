@@ -1,7 +1,13 @@
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
 import { test, expect, type Page } from "./support/test";
-import { answer, mockApi, paged, type Mock } from "./support/workspace";
+import {
+    answer,
+    mockApi,
+    paged,
+    tenantRow,
+    type Mock,
+} from "./support/workspace";
 import { errorBody } from "./support/errors";
 import type { components } from "../src/lib/schema";
 
@@ -83,17 +89,26 @@ async function routeRuns(page: Page, runs: () => ReturnType<typeof run>[]) {
 
 async function reviewActivation(page: Page, id: number) {
     await page
-        .getByRole("row", { name: new RegExp(`#${id}`) })
-        .getByRole("button", { name: "Review activation" })
+        .getByRole("row", { name: new RegExp(`^${id}\\s`) })
+        .getByRole("button", { name: "Use this calibration" })
         .click();
 }
 
 async function activate(page: Page, id: number) {
     await reviewActivation(page, id);
-    await page
-        .getByRole("button", { name: "Activate calibration", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Use", exact: true }).click();
 }
+
+const listDownload = (page: Page) =>
+    page
+        .locator(".section-heading", {
+            has: page.getByRole("heading", {
+                level: 2,
+                name: "Calibrations",
+                exact: true,
+            }),
+        })
+        .getByRole("button", { name: "Download CSV" });
 
 async function openCalibration(page: Page) {
     await page.goto("/app/");
@@ -104,7 +119,7 @@ async function openCalibration(page: Page) {
         .getByRole("button", { name: "Calibration", exact: true })
         .click();
     await expect(
-        page.getByRole("heading", { name: "Calibration history" }),
+        page.getByRole("heading", { name: "Calibrations", exact: true }),
     ).toBeVisible();
 }
 
@@ -141,16 +156,16 @@ for (const staleError of [false, true]) {
         );
         await openCalibration(page);
         await page
-            .getByRole("row", { name: /#40/ })
+            .getByRole("row", { name: /^40\s/ })
             .getByRole("button", { name: "View details" })
             .click();
         await observed;
         await page
-            .getByRole("row", { name: /#41/ })
+            .getByRole("row", { name: /^41\s/ })
             .getByRole("button", { name: "View details" })
             .click();
         await expect(
-            page.getByRole("heading", { name: "Calibration #41" }),
+            page.getByRole("heading", { name: "Calibration No. 41" }),
         ).toBeVisible();
         const response = page.waitForResponse("**/plants/21/calibrations/40/");
         release();
@@ -164,7 +179,7 @@ for (const staleError of [false, true]) {
                 ),
         );
         await expect(
-            page.getByRole("heading", { name: "Calibration #41" }),
+            page.getByRole("heading", { name: "Calibration No. 41" }),
         ).toBeVisible();
         await expect(page.getByText("Old detail failed")).toHaveCount(0);
     });
@@ -200,7 +215,7 @@ test("refresh during activation still reloads the completed selection", async ({
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await refreshed;
     release();
-    await expect(page.getByRole("row", { name: /#41/ })).toBeVisible();
+    await expect(page.getByRole("row", { name: /^41\s/ })).toBeVisible();
 });
 
 const selectionChanges = [
@@ -208,7 +223,7 @@ const selectionChanges = [
         kind: "an activation",
         before: "candidate",
         after: "active",
-        tag: "Active",
+        inUse: true,
         exports: 2,
         endpoint: "**/plants/21/calibrations/40/activate/",
         act: (page: Page) => activate(page, 40),
@@ -217,15 +232,19 @@ const selectionChanges = [
         kind: "a reset",
         before: "active",
         after: "candidate",
-        tag: "Candidate",
+        inUse: false,
         exports: 1,
         endpoint: "**/plants/21/calibration/reset/",
         act: async (page: Page) => {
             await page
-                .getByRole("button", { name: "Reset to baseline" })
+                .getByRole("button", {
+                    name: "Use forecasts without calibration",
+                })
                 .click();
             await page
-                .getByRole("button", { name: "Reset to baseline" })
+                .getByRole("button", {
+                    name: "Use forecasts without calibration",
+                })
                 .click();
         },
     },
@@ -277,27 +296,21 @@ for (const change of selectionChanges)
         await openCalibration(page);
         await change.act(page);
         await reload;
-        await expect(
-            page.getByText(
-                "Calibration selection updated. Refresh the forecast to see the current result.",
-            ),
-        ).toBeVisible();
+        await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
         const working = page.getByRole("button", { name: "Working…" });
         await expect(working).toHaveCount(change.exports);
         for (const button of await working.all())
             await expect(button).toBeDisabled();
         await expect(
-            page.getByRole("button", { name: /^Download calibration/ }),
+            page.getByRole("button", { name: "Download CSV", exact: true }),
         ).toHaveCount(0);
         holding = false;
         release();
-        await expect(page.getByRole("row", { name: /#40/ })).toContainText(
-            change.tag,
-        );
+        const row = page.getByRole("row", { name: /^40\s/ });
+        if (change.inUse) await expect(row).toContainText("In use");
+        else await expect(row).not.toContainText("In use");
         const download = page.waitForEvent("download");
-        await page
-            .getByRole("button", { name: "Download calibration CSV" })
-            .click();
+        await listDownload(page).click();
         const records = Papa.parse<Record<string, string>>(
             await readFile(await (await download).path(), "utf8"),
             { header: true, skipEmptyLines: true },
@@ -350,18 +363,18 @@ test("the calibration exports wait for the runs reloaded after a request", async
     );
     await openCalibration(page);
     await page
-        .getByRole("row", { name: /#40/ })
+        .getByRole("row", { name: /^40\s/ })
         .getByRole("button", { name: "View details" })
         .click();
     await page
         .getByRole("button", {
-            name: "Request a new calibration for 2026-01-01 – 2026-01-10",
+            name: "Calculate new calibration for 2026-01-01 – 2026-01-10",
         })
         .click();
     await reload;
     await expect(
         page.getByText(
-            "A new calibration was requested. It appears in the list when it starts.",
+            "The new calibration will appear in the list when its calculation starts.",
         ),
     ).toBeVisible();
     const working = page.getByRole("button", { name: "Working…" });
@@ -369,17 +382,15 @@ test("the calibration exports wait for the runs reloaded after a request", async
     for (const button of await working.all())
         await expect(button).toBeDisabled();
     await expect(
-        page.getByRole("button", { name: /^Download calibration/ }),
+        page.getByRole("button", { name: "Download CSV", exact: true }),
     ).toHaveCount(0);
     holding = false;
     release();
-    await expect(page.getByRole("row", { name: /#41/ })).toContainText(
+    await expect(page.getByRole("row", { name: /^41\s/ })).toContainText(
         "Waiting",
     );
     const download = page.waitForEvent("download");
-    await page
-        .getByRole("button", { name: "Download calibration CSV" })
-        .click();
+    await listDownload(page).click();
     const records = Papa.parse<Record<string, string>>(
         await readFile(await (await download).path(), "utf8"),
         { header: true, skipEmptyLines: true },
@@ -411,26 +422,28 @@ test("after a reset the opened run shows and exports its reloaded selection", as
     );
     await openCalibration(page);
     await page
-        .getByRole("row", { name: /#40/ })
+        .getByRole("row", { name: /^40\s/ })
         .getByRole("button", { name: "View details" })
         .click();
     const detail = page.locator(".calibration-detail");
-    await expect(detail.locator(".tags")).toContainText("Active");
-    await page.getByRole("button", { name: "Reset to baseline" }).click();
-    await page.getByRole("button", { name: "Reset to baseline" }).click();
-    await expect(page.getByRole("row", { name: /#40/ })).toContainText(
-        "Candidate",
-    );
-    await expect(detail.locator(".tags")).toContainText("Candidate");
+    await expect(detail.locator(".tags")).toContainText("In use");
+    await page
+        .getByRole("button", { name: "Use forecasts without calibration" })
+        .click();
+    await page
+        .getByRole("button", { name: "Use forecasts without calibration" })
+        .click();
     await expect(
         detail.getByText(
-            "This calibration cannot be activated: active calibration changed.",
+            "This calibration cannot be used. The calibration in use changed after it was calculated.",
         ),
     ).toBeVisible();
+    await expect(page.getByRole("row", { name: /^40\s/ })).not.toContainText(
+        "In use",
+    );
+    await expect(detail.locator(".tags")).not.toContainText("In use");
     const download = page.waitForEvent("download");
-    await detail
-        .getByRole("button", { name: "Download calibration details CSV" })
-        .click();
+    await detail.getByRole("button", { name: "Download CSV" }).click();
     const [record] = Papa.parse<Record<string, string>>(
         await readFile(await (await download).path(), "utf8"),
         { header: true, skipEmptyLines: true },
@@ -488,11 +501,13 @@ for (const offer of resetOffers)
         await openCalibration(page);
         await expect(
             page
-                .getByRole("region", { name: "Calibration in force" })
-                .getByRole("heading", { name: "Calibration in force" }),
+                .getByRole("region", { name: "Calibration in use" })
+                .getByRole("heading", { name: "Calibration in use" }),
         ).toBeVisible();
         await expect(
-            page.getByRole("button", { name: "Reset to baseline" }),
+            page.getByRole("button", {
+                name: "Use forecasts without calibration",
+            }),
         ).toHaveCount(offer.offered ? 1 : 0);
     });
 
@@ -512,18 +527,18 @@ test("a reset refused because the configuration changed meanwhile says so", asyn
         }),
     );
     await openCalibration(page);
-    await page.getByRole("button", { name: "Reset to baseline" }).click();
-    await page.getByRole("button", { name: "Reset to baseline" }).click();
+    await page
+        .getByRole("button", { name: "Use forecasts without calibration" })
+        .click();
+    await page
+        .getByRole("button", { name: "Use forecasts without calibration" })
+        .click();
     await expect(
         page.getByText("The plant configuration is no longer current.", {
             exact: true,
         }),
     ).toBeVisible();
-    await expect(
-        page.getByText(
-            "Calibration selection updated. Refresh the forecast to see the current result.",
-        ),
-    ).toHaveCount(0);
+    await expect(page.getByText("Saved.", { exact: true })).toHaveCount(0);
 });
 
 for (const failing of ["activation", "reload"] as const)
@@ -561,9 +576,7 @@ for (const failing of ["activation", "reload"] as const)
                     : "Runs reload failed",
             ),
         ).toBeVisible();
-        await expect(
-            page.getByRole("button", { name: "Download calibration CSV" }),
-        ).toBeEnabled();
+        await expect(listDownload(page)).toBeEnabled();
         await expect(
             page.getByRole("button", { name: "Working…" }),
         ).toHaveCount(0);
@@ -586,7 +599,7 @@ test("superseded runs are labelled in Turkish", async ({ page, baseURL }) => {
     await page
         .getByRole("button", { name: "Kalibrasyon", exact: true })
         .click();
-    const row = page.getByRole("row", { name: /#40/ });
+    const row = page.getByRole("row", { name: /^40\s/ });
     await expect(row).toContainText("Yerini yenisi aldı");
     await expect(row).not.toContainText("superseded");
 });
@@ -599,26 +612,33 @@ test("refresh clears a finished action notice", async ({ page }) => {
     );
     await openCalibration(page);
     await activate(page, 40);
-    const notice = page.getByText(
-        "Calibration selection updated. Refresh the forecast to see the current result.",
-    );
+    const notice = page.getByText("Saved.", { exact: true });
     await expect(notice).toBeVisible();
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(notice).toHaveCount(0);
 });
 
-test("the selection note names the affected forecasts and estimates", async ({
+test("the effect of a change of calibration is stated once, in the dialog that makes it", async ({
     page,
 }) => {
     await mockApi(page);
     await routeRuns(page, () => [run(40)]);
+    await routeAutomation(page, { current_calibration: inForce(40) });
     await openCalibration(page);
+    const effect = page.getByText(
+        /Forecasts already made keep their calibration/,
+    );
+    await expect(page.getByRole("row", { name: /^40\s/ })).toBeVisible();
+    await expect(effect).toHaveCount(0);
+    await page
+        .getByRole("button", { name: "Use forecasts without calibration" })
+        .click();
     await expect(
-        page.getByText(
-            "Issued forecasts keep their calibration. New forecasts and estimated past days use the selected calibration from its first training day. Reset also turns off automatic calibration.",
-            { exact: true },
-        ),
+        page.getByRole("region", {
+            name: "Use forecasts without calibration?",
+        }),
     ).toBeVisible();
+    await expect(effect).toHaveCount(1);
 });
 
 test("detail and activation errors remain independent", async ({ page }) => {
@@ -713,20 +733,22 @@ test("automatic calibration can be enabled before a fit and disabled without res
         page.getByText("Off: turned off by a workspace administrator."),
     ).toBeVisible();
     await page
-        .getByRole("checkbox", { name: "Automatic calibration enabled" })
+        .getByRole("checkbox", { name: "Calibrate forecasts automatically" })
         .click();
     await expect(
-        page.getByRole("checkbox", { name: "Automatic calibration enabled" }),
+        page.getByRole("checkbox", {
+            name: "Calibrate forecasts automatically",
+        }),
     ).toBeChecked();
-    await expect(page.getByRole("row", { name: /#40/ })).toBeVisible();
-    await expect(
-        page.getByText("Waiting for seven new held-out days."),
-    ).toBeVisible();
+    await expect(page.getByRole("row", { name: /^40\s/ })).toBeVisible();
+    await expect(page.getByText("Waiting for 7 new test days.")).toBeVisible();
     await page
-        .getByRole("checkbox", { name: "Automatic calibration enabled" })
+        .getByRole("checkbox", { name: "Calibrate forecasts automatically" })
         .click();
     await expect(
-        page.getByRole("checkbox", { name: "Automatic calibration enabled" }),
+        page.getByRole("checkbox", {
+            name: "Calibrate forecasts automatically",
+        }),
     ).not.toBeChecked();
     expect(changes).toEqual([true, false]);
 });
@@ -753,17 +775,25 @@ test("automatic status reloads after manual activation and reset", async ({
     await openCalibration(page);
     await activate(page, 40);
     await expect(
-        page.getByRole("checkbox", { name: "Automatic calibration enabled" }),
+        page.getByRole("checkbox", {
+            name: "Calibrate forecasts automatically",
+        }),
     ).toBeChecked();
-    await page.getByRole("button", { name: "Reset to baseline" }).click();
+    await page
+        .getByRole("button", { name: "Use forecasts without calibration" })
+        .click();
     await expect(
         page.getByText(
-            "New forecasts and estimated past days use the uncalibrated model (factor 1). Issued forecasts keep their calibration. Automatic calibration will be turned off.",
+            "New forecasts and production calculated from satellite data are made without calibration (factor 1). Forecasts already made keep their calibration. Automatic calibration will be turned off.",
         ),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Reset to baseline" }).click();
+    await page
+        .getByRole("button", { name: "Use forecasts without calibration" })
+        .click();
     await expect(
-        page.getByRole("checkbox", { name: "Automatic calibration enabled" }),
+        page.getByRole("checkbox", {
+            name: "Calibrate forecasts automatically",
+        }),
     ).not.toBeChecked();
 });
 
@@ -807,19 +837,23 @@ test("an older automation response cannot undo an enabled setting", async ({
     });
     await openCalibration(page);
     await expect(
-        page.getByRole("checkbox", { name: "Automatic calibration enabled" }),
+        page.getByRole("checkbox", {
+            name: "Calibrate forecasts automatically",
+        }),
     ).not.toBeChecked();
     delayNext = true;
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await observed;
     await page
-        .getByRole("checkbox", { name: "Automatic calibration enabled" })
+        .getByRole("checkbox", { name: "Calibrate forecasts automatically" })
         .click();
     await expect(
-        page.getByRole("checkbox", { name: "Automatic calibration enabled" }),
+        page.getByRole("checkbox", {
+            name: "Calibrate forecasts automatically",
+        }),
     ).toBeChecked();
     await expect(
-        page.getByText(/Needs 30 days from this reference source/),
+        page.getByText(/Needs 30 days with current data/),
     ).toBeVisible();
     const oldResponse = page.waitForResponse(
         "**/plants/21/calibration/automation/",
@@ -827,31 +861,126 @@ test("an older automation response cannot undo an enabled setting", async ({
     release();
     await (await oldResponse).finished();
     await expect(
-        page.getByRole("checkbox", { name: "Automatic calibration enabled" }),
+        page.getByRole("checkbox", {
+            name: "Calibrate forecasts automatically",
+        }),
     ).toBeChecked();
     await expect(
-        page.getByText(/Needs 30 days from this reference source/),
+        page.getByText(/Needs 30 days with current data/),
     ).toBeVisible();
 });
 
+for (const role of ["admin", "viewer"] as const)
+    test(`automation paused because its owner left says who can turn it on again, to the ${role}`, async ({
+        page,
+    }) => {
+        await mockApi(page);
+        if (role === "viewer")
+            await page.route("**/api/tenants/", (route) =>
+                route.fulfill({
+                    json: paged([
+                        tenantRow({ id: 1, name: "Sunfield Energy", role }),
+                    ]),
+                }),
+            );
+        await routeRuns(page, () => [run(40)]);
+        const changes: boolean[] = [];
+        let authorized = false;
+        await page.route("**/plants/21/calibration/automation/", (route) => {
+            if (route.request().method() === "PATCH") {
+                changes.push(route.request().postDataJSON().enabled);
+                authorized = true;
+            }
+            return route.fulfill({
+                json: automation({
+                    enabled: true,
+                    authorized,
+                    last_attempt: authorized
+                        ? null
+                        : {
+                              calibration_id: null,
+                              status: "skipped",
+                              reason: "authorization_revoked",
+                              created_at: "2026-01-12T03:00:00Z",
+                          },
+                }),
+            });
+        });
+        await openCalibration(page);
+        await expect(
+            page.locator("p", { hasText: "Last result:" }),
+        ).toContainText(
+            "The person who turned it on is no longer a workspace administrator.",
+        );
+        const member = page.getByText(
+            "The workspace administrator needs to turn automatic calibration on again.",
+            { exact: true },
+        );
+        const administrator = page.getByText(
+            "Automatic calibration is paused: the person who turned it on is no longer a workspace administrator. Turn it on again to resume.",
+            { exact: true },
+        );
+        const turnOn = page.getByRole("button", {
+            name: "Turn on automatic calibration",
+        });
+        if (role === "viewer") {
+            await expect(member).toBeVisible();
+            await expect(administrator).toHaveCount(0);
+            await expect(turnOn).toHaveCount(0);
+            return;
+        }
+        await expect(administrator).toBeVisible();
+        await expect(member).toHaveCount(0);
+        await turnOn.click();
+        await expect(administrator).toHaveCount(0);
+        expect(changes).toEqual([true]);
+    });
+
+test("a preliminary calibration is marked in the list and its detail gives the factor and the reason", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await routeRuns(page, () => [
+        run(40, { assessment: "provisional", factor: 1.0625 }),
+    ]);
+    await openCalibration(page);
+    const row = page.getByRole("row", { name: /^40\s/ });
+    await expect(row.getByText("Preliminary", { exact: true })).toBeVisible();
+    await row.getByRole("button", { name: "View details" }).click();
+    const detail = page.locator(".calibration-detail");
+    await expect(detail.locator(".tags")).toContainText("Preliminary");
+    await expect(detail).toContainText(
+        "Preliminary: based on fewer than 30 days.",
+    );
+    await expect(detail.locator(".stat", { hasText: "Factor" })).toContainText(
+        "1.0625",
+    );
+});
+
 const states = [
-    ["active", { tag: "Active", review: false }],
-    ["candidate", { tag: "Candidate", review: true }],
-    ["previous_configuration", { tag: "Earlier configuration", review: false }],
-    ["not_ready", { tag: "Not ready", review: false }],
+    ["active", { inUse: true, review: false }],
+    ["candidate", { inUse: false, review: true }],
+    ["previous_configuration", { inUse: false, review: false }],
+    ["not_ready", { inUse: false, review: false }],
 ] as const;
 
 for (const [state, expected] of states)
-    test(`a run in selection state ${state} is labelled and offers activation only as a candidate`, async ({
+    test(`a run in selection state ${state} is marked in use only when selected and offers its use only as a candidate`, async ({
         page,
     }) => {
         await mockApi(page);
         await routeRuns(page, () => [run(40, { selection_state: state })]);
         await openCalibration(page);
-        const row = page.getByRole("row", { name: /#40/ });
-        await expect(row).toContainText(expected.tag);
+        const row = page.getByRole("row", { name: /^40\s/ });
+        await expect(row).toBeVisible();
+        await expect(row.getByText("In use", { exact: true })).toHaveCount(
+            expected.inUse ? 1 : 0,
+        );
+        await expect(row).not.toContainText(
+            /Active|Candidate|Earlier configuration|Not ready/,
+        );
         await expect(
-            row.getByRole("button", { name: "Review activation" }),
+            row.getByRole("button", { name: "Use this calibration" }),
         ).toHaveCount(expected.review ? 1 : 0);
     });
 
@@ -868,10 +997,10 @@ test("activating a candidate states its effect before it is confirmed", async ({
     await openCalibration(page);
     await reviewActivation(page, 40);
     const confirmation = page.getByRole("region", {
-        name: "Activate calibration #40",
+        name: "Use calibration No. 40?",
     });
     await expect(confirmation).toContainText(
-        "Factor 1.1 applies to new forecasts and to estimated past days from 2026-01-01, its first training day. Issued forecasts keep their calibration.",
+        "Factor 1.1 applies to new forecasts and to production calculated from satellite data from 2026-01-01, its first calibration day. Forecasts already made keep their calibration.",
     );
     await expect(confirmation).toContainText(
         "Automatic calibration will be turned on.",
@@ -880,11 +1009,7 @@ test("activating a candidate states its effect before it is confirmed", async ({
     await confirmation.getByRole("button", { name: "Cancel" }).click();
     expect(activations).toEqual([]);
     await activate(page, 40);
-    await expect(
-        page.getByText(
-            "Calibration selection updated. Refresh the forecast to see the current result.",
-        ),
-    ).toBeVisible();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
     expect(activations).toHaveLength(1);
 });
 
@@ -912,15 +1037,15 @@ test("the calibration in force names its run, time and who selected it", async (
         }),
     );
     await openCalibration(page);
-    const inForce = page.getByRole("region", { name: "Calibration in force" });
-    await expect(inForce).toContainText(/Calibration #40 with factor 1\.1/);
-    await expect(inForce).toContainText("Selected by automatic calibration.");
+    const inForce = page.getByRole("region", { name: "Calibration in use" });
+    await expect(inForce).toContainText(/Calibration No\. 40, factor 1\.1\./);
+    await expect(inForce).toContainText("Chosen by automatic calibration.");
     await expect(inForce).toContainText(
-        "Forecasts do not apply it now because its training data changed",
+        "Not applied: the data of its calibration days changed.",
     );
     await expect(
         page.getByText(
-            "Paused until the plant configuration is approved again.",
+            "Automatic calibration is paused: this plant has no current technical details.",
         ),
     ).toBeVisible();
 });
@@ -928,23 +1053,23 @@ test("the calibration in force names its run, time and who selected it", async (
 const blockers = [
     [
         "configuration_changed",
-        "configuration changed. It was made for another plant configuration",
+        "It was calculated with other technical details, or the plant has no current technical details.",
     ],
     [
         "production_source_changed",
-        "production source changed. The production source changed after it was trained.",
+        "The source of actual production changed after it was calculated.",
     ],
     [
         "outage_history_changed",
-        "outage history changed. The outage history inside its window changed after it was trained.",
+        "Outages in its period changed after it was calculated.",
     ],
     [
         "incumbent_changed",
-        "active calibration changed. The active calibration changed after it was compared.",
+        "The calibration in use changed after it was calculated.",
     ],
     [
         "calibration_not_activatable",
-        "not activatable. It did not finish with a held-out evaluation that allows activation.",
+        "Its calculation did not end with a result that can be used.",
     ],
 ] as const;
 
@@ -969,25 +1094,23 @@ for (const [blocker, explanation] of blockers)
         });
         await openCalibration(page);
         await page
-            .getByRole("row", { name: /#40/ })
+            .getByRole("row", { name: /^40\s/ })
             .getByRole("button", { name: "View details" })
             .click();
         await expect(
-            page.getByText(
-                `This calibration cannot be activated: ${explanation}`,
-            ),
+            page.getByText(`This calibration cannot be used. ${explanation}`),
         ).toBeVisible();
         await expect(
-            page.getByRole("button", { name: "Review activation" }),
+            page.getByRole("button", { name: "Use this calibration" }),
         ).toHaveCount(blocker === "configuration_changed" ? 0 : 1);
         await page
             .getByRole("button", {
-                name: "Request a new calibration for 2026-01-01 – 2026-01-10",
+                name: "Calculate new calibration for 2026-01-01 – 2026-01-10",
             })
             .click();
         await expect(
             page.getByText(
-                "A new calibration was requested. It appears in the list when it starts.",
+                "The new calibration will appear in the list when its calculation starts.",
             ),
         ).toBeVisible();
         expect(requests).toEqual([
@@ -1009,16 +1132,16 @@ test("a blocked run offers no new request while another run is open", async ({
     ]);
     await openCalibration(page);
     await page
-        .getByRole("row", { name: /#40/ })
+        .getByRole("row", { name: /^40\s/ })
         .getByRole("button", { name: "View details" })
         .click();
     await expect(
         page.getByText(
-            "A calibration is already pending or running; request another one when it has finished.",
+            "A calibration is queued or being calculated. Calculate a new one when it has finished.",
         ),
     ).toBeVisible();
     await expect(
-        page.getByRole("button", { name: /Request a new calibration/ }),
+        page.getByRole("button", { name: /Calculate new calibration/ }),
     ).toHaveCount(0);
 });
 
@@ -1034,17 +1157,17 @@ test("a blocked run whose window is not 7 to 90 days long says why it cannot be 
     ]);
     await openCalibration(page);
     await page
-        .getByRole("row", { name: /#40/ })
+        .getByRole("row", { name: /^40\s/ })
         .getByRole("button", { name: "View details" })
         .click();
     await expect(
         page.getByText(
-            "A new calibration needs a window of 7 to 90 days; this window cannot be requested again.",
+            "A new calibration needs a period of 7 to 90 days; this period cannot be calculated again.",
         ),
     ).toBeVisible();
-    await expect(page.getByText(/already pending or running/)).toHaveCount(0);
+    await expect(page.getByText(/queued or being calculated/)).toHaveCount(0);
     await expect(
-        page.getByRole("button", { name: /Request a new calibration/ }),
+        page.getByRole("button", { name: /Calculate new calibration/ }),
     ).toHaveCount(0);
 });
 
@@ -1067,21 +1190,21 @@ for (const day of plantDays)
         ]);
         await openCalibration(page);
         await page
-            .getByRole("row", { name: /#40/ })
+            .getByRole("row", { name: /^40\s/ })
             .getByRole("button", { name: "View details" })
             .click();
         await expect(
-            page.getByText(/This calibration cannot be activated/),
+            page.getByText(/This calibration cannot be used/),
         ).toBeVisible();
         await expect(
-            page.getByRole("button", { name: /Request a new calibration/ }),
+            page.getByRole("button", { name: /Calculate new calibration/ }),
         ).toHaveCount(day.offered ? 1 : 0);
         await expect(
             page.getByText(
-                "Request a new calibration for this window once its last day has ended in plant time.",
+                "Calculate a new calibration for this period once its last day has ended in plant time.",
             ),
         ).toHaveCount(day.offered ? 0 : 1);
-        await expect(page.getByText(/already pending or running/)).toHaveCount(
+        await expect(page.getByText(/queued or being calculated/)).toHaveCount(
             0,
         );
     });
@@ -1103,20 +1226,20 @@ test("a blocked run states no request reason until the calibration status is loa
     });
     await openCalibration(page);
     await page
-        .getByRole("row", { name: /#40/ })
+        .getByRole("row", { name: /^40\s/ })
         .getByRole("button", { name: "View details" })
         .click();
     await expect(
-        page.getByText(/This calibration cannot be activated/),
+        page.getByText(/This calibration cannot be used/),
     ).toBeVisible();
-    await expect(page.getByText(/already pending or running/)).toHaveCount(0);
+    await expect(page.getByText(/queued or being calculated/)).toHaveCount(0);
     await expect(
-        page.getByRole("button", { name: /Request a new calibration/ }),
+        page.getByRole("button", { name: /Calculate new calibration/ }),
     ).toHaveCount(0);
     release();
     await expect(
         page.getByRole("button", {
-            name: "Request a new calibration for 2026-01-01 – 2026-01-10",
+            name: "Calculate new calibration for 2026-01-01 – 2026-01-10",
         }),
     ).toBeVisible();
 });

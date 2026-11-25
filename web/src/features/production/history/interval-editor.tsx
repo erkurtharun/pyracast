@@ -106,27 +106,28 @@ export function IntervalEditor({
             {(canManage
                 ? row.can_revert || editor.attempt?.action === "revert"
                 : row.can_propose_revert) && (
-                <button
-                    className="button secondary"
-                    type="button"
-                    disabled={blocked}
-                    aria-label={
-                        !canManage
-                            ? proposals("proposeRevertInterval", { interval })
-                            : provider === null
-                              ? t("remove_correction_interval", { interval })
-                              : t("revert_interval", { interval })
-                    }
-                    onClick={() => onSave("revert")}
-                >
-                    {!canManage
-                        ? proposals("proposeRevert")
-                        : provider === null
-                          ? t("remove_correction")
-                          : t("use_provider", {
-                                energy: format.number(provider),
-                            })}
-                </button>
+                <>
+                    <button
+                        className="button secondary"
+                        type="button"
+                        disabled={blocked}
+                        aria-label={
+                            provider === null
+                                ? t("remove_correction_interval", { interval })
+                                : t("revert_interval", { interval })
+                        }
+                        onClick={() => onSave("revert")}
+                    >
+                        {provider === null
+                            ? t("remove_correction")
+                            : t("use_provider", {
+                                  energy: format.number(provider),
+                              })}
+                    </button>
+                    {provider === null && (
+                        <p className="fine">{t("remove_consequence")}</p>
+                    )}
+                </>
             )}
             {editor.attempt && (
                 <UnconfirmedNotice

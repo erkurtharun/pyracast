@@ -533,6 +533,7 @@ export function ProductionHistory({
                                 { ...plant, timezone: history.timezone },
                                 date,
                                 rows,
+                                t("file"),
                             )
                         }
                     />

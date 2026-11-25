@@ -59,16 +59,16 @@ const labels = {
         outages: "Outages",
         edit: /^Edit 08:00/,
         save: "Save",
-        suggest: /^Suggest correction for 08:00/,
+        suggest: /^Edit 08:00/,
         add: "Add to request",
         draft: "Correction request",
         reason: "Reason for correction",
         send: "Send for approval",
         importCsv: "Import CSV",
-        csv: "Production CSV",
-        preview: "Preview import",
-        confirm: "Confirm import (5)",
-        imported: "Import complete: 4 created, 1 already present, 5 total.",
+        csv: "CSV file",
+        preview: "Preview",
+        confirm: "Import 5 values",
+        imported: "Imported. New values: 4 · Already saved: 1",
         report: "Report outage",
         title: "Incident title",
         saveOutage: "Save outage",
@@ -95,17 +95,16 @@ const labels = {
         outages: "Kesintiler",
         edit: /^08:00.+aralığını düzenle$/,
         save: "Kaydet",
-        suggest: /^08:00.+aralığı için düzeltme öner$/,
+        suggest: /^08:00.+aralığını düzenle$/,
         add: "Talebe ekle",
         draft: "Düzeltme talebi",
         reason: "Düzeltme gerekçesi",
         send: "Onaya gönder",
-        importCsv: "CSV aktar",
-        csv: "Üretim CSV dosyası",
-        preview: "Aktarımı önizle",
-        confirm: "Aktarımı onayla (5)",
-        imported:
-            "İçe aktarma tamamlandı: 4 yeni kayıt, 1 mevcut kayıt, toplam 5 kayıt.",
+        importCsv: "CSV içe aktar",
+        csv: "CSV dosyası",
+        preview: "Önizle",
+        confirm: "5 değeri içe aktar",
+        imported: "İçe aktarıldı. Yeni değer: 4 · Zaten kayıtlı: 1",
         report: "Kesinti bildir",
         title: "Olay başlığı",
         saveOutage: "Kesintiyi kaydet",
@@ -603,7 +602,7 @@ for (const lost of ["drop", "abort"] as const)
         await page.getByRole("button", { name: /^Edit 08:00/ }).click();
         const editor = page.locator(".production-row-editor");
         const revert = editor.getByRole("button", {
-            name: /^Remove correction for 08:00/,
+            name: /^Remove entered value for 08:00/,
         });
         await revert.click();
         await expectUnconfirmed(editor, true);
@@ -1356,7 +1355,7 @@ test("a revert lost after it merged its half hour into an hourly gap keeps its u
     await openPlant(page, "Production");
     await page.getByRole("button", { name: /^Edit 08:00/ }).click();
     await page
-        .getByRole("button", { name: /^Remove correction for 08:00/ })
+        .getByRole("button", { name: /^Remove entered value for 08:00/ })
         .click();
     const orphan = page.locator(".production-row-editor");
     await expect(orphan).toContainText(
@@ -1364,14 +1363,10 @@ test("a revert lost after it merged its half hour into an hourly gap keeps its u
     );
     await expectUnconfirmed(orphan, true);
     await orphan
-        .getByRole("button", { name: "Remove correction", exact: true })
+        .getByRole("button", { name: "Remove entered value", exact: true })
         .click();
     await expect(orphan).toHaveCount(0);
-    await expect(
-        page.getByText(
-            "Correction removed. The available provider value is used.",
-        ),
-    ).toBeVisible();
+    await expect(page.getByText("Entered value removed.")).toBeVisible();
     expect(server.requests).toHaveLength(2);
     expect(server.requests[1]).toEqual(server.requests[0]);
     expect(server.applied()).toBe(1);
@@ -1907,7 +1902,7 @@ test("a lost import whose Confirm a view change on its way disables is told with
     await expectUnconfirmed(importer, false);
     comparison.release();
     await expect(
-        page.getByRole("heading", { name: "Production comparison" }),
+        page.getByRole("heading", { name: "Comparison", exact: true }),
     ).toBeVisible();
     expect(server.requests).toHaveLength(1);
 });

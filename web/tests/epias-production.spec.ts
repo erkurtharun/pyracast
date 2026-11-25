@@ -214,7 +214,7 @@ async function openProduction(page: Page) {
     ).toBeVisible();
 }
 const table = (page: Page) =>
-    page.getByRole("table", { name: /Production intervals/ });
+    page.getByRole("table", { name: /Actual production values/ });
 const row = (page: Page, interval: string) =>
     table(page)
         .getByRole("row")
@@ -272,7 +272,7 @@ test("actual production defaults to generation hours and full day restores every
     await expect(row(page, "07:00–08:00")).toBeVisible();
     await expect(row(page, "18:00–19:00")).toBeVisible();
     await expect(row(page, "10:00–11:00").getByRole("cell").first()).toHaveText(
-        "0 Settlement",
+        "0 UEVM",
     );
     await expect(
         row(page, "08:00–09:00").getByText("—", { exact: true }),
@@ -280,28 +280,29 @@ test("actual production defaults to generation hours and full day restores every
     await fullDay.check();
     await expect(table(page).getByRole("row")).toHaveCount(25);
     await expect(row(page, "00:00–01:00").getByRole("cell").first()).toHaveText(
-        "0 Settlement",
+        "0 UEVM",
     );
     await expect(
         row(page, "08:00–09:00").getByText("—", { exact: true }),
     ).toBeVisible();
-    await expect(page.getByText("Total: —")).toBeVisible();
+    await expect(page.getByText("Daily total: —")).toBeVisible();
     await expect(page.getByRole("button", { name: /^Edit / })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Import CSV" })).toHaveCount(
         0,
     );
-    await expect(page.getByText(/^Provider:/)).toHaveCount(0);
+    await expect(page.getByText(/^EPİAŞ value:/)).toHaveCount(0);
     await fullDay.uncheck();
     await expect(table(page).getByRole("row")).toHaveCount(13);
     await page
-        .getByText("Source and correction details", { exact: true })
+        .getByText("Source of actual production", { exact: true })
         .click();
     await expect(page.getByText("EPİAŞ · Not connected")).toBeVisible();
-    await expect(
-        page.getByText(/Saved production remains available/),
-    ).toBeVisible();
+    await expect(page.getByText(/Saved values stay/)).toBeVisible();
     const download = page.waitForEvent("download");
     await page.getByRole("button", { name: "Download CSV" }).click();
+    expect((await download).suggestedFilename()).toMatch(
+        /^pyracast-[a-z0-9-]+-2026-11-09-actual-production\.csv$/,
+    );
     const records = Papa.parse<Record<string, string>>(
         await readFile(await (await download).path(), "utf8"),
         { header: true, skipEmptyLines: true },
@@ -331,7 +332,9 @@ test("full day exposes night corrections and keeps the filter fixed until the dr
         .getByRole("button", { name: "Edit 00:00–01:00", exact: true })
         .click();
     await expect(fullDay).toBeDisabled();
-    await page.getByLabel("Production for 00:00–01:00 (MWh)").fill("0.5");
+    await page
+        .getByLabel("Actual production for 00:00–01:00 (MWh)")
+        .fill("0.5");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(row(page, "00:00–01:00")).toContainText("0.5");
     await expect(fullDay).toBeEnabled();
@@ -351,30 +354,31 @@ test("edits survive provider refresh and revert explicitly restores the latest p
     await page
         .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
         .click();
-    const input = page.getByLabel("Production for 08:00–09:00 (MWh)");
+    const input = page.getByLabel("Actual production for 08:00–09:00 (MWh)");
     await input.fill("2,5");
     await page.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(row(page, "08:00–09:00")).toContainText("2.5");
-    await expect(row(page, "08:00–09:00")).toContainText("Corrected");
-    await expect(row(page, "08:00–09:00")).toContainText("Provider: 1 MWh");
+    await expect(
+        row(page, "08:00–09:00").getByRole("cell").first(),
+    ).toContainText("2.5 Entered Corrected");
+    await expect(row(page, "08:00–09:00")).toContainText("EPİAŞ value: 1 MWh");
     await expect(
         page.getByRole("button", { name: "Edit 08:00–09:00", exact: true }),
     ).toBeFocused();
-    await expect(page.getByText(/^Provider:/)).toHaveCount(1);
+    await expect(page.getByText(/^EPİAŞ value:/)).toHaveCount(1);
     state.provider[8] = 3;
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
-    await expect(row(page, "08:00–09:00")).toContainText("Provider: 3 MWh");
+    await expect(row(page, "08:00–09:00")).toContainText("EPİAŞ value: 3 MWh");
     expect(state.saved.get(8)?.energy).toBe(2.5);
     await page
         .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
         .click();
     await page
-        .getByRole("button", { name: "Use provider value for 08:00–09:00" })
+        .getByRole("button", { name: "Use EPİAŞ value for 08:00–09:00" })
         .click();
     await expect(row(page, "08:00–09:00").getByRole("cell").first()).toHaveText(
-        "3 Settlement",
+        "3 UEVM",
     );
-    await expect(page.getByText(/^Provider:/)).toHaveCount(0);
+    await expect(page.getByText(/^EPİAŞ value:/)).toHaveCount(0);
     await expect(
         page.getByRole("button", { name: "Edit 08:00–09:00", exact: true }),
     ).toBeFocused();
@@ -433,9 +437,7 @@ test("generation filtering preserves native intervals and repeated local hours a
     );
     await openProduction(page);
     await expect(table(page).getByRole("row")).toHaveCount(5);
-    await expect(row(page, "02:00 GMT+2–02:00 GMT+1")).toContainText(
-        "0 Settlement",
-    );
+    await expect(row(page, "02:00 GMT+2–02:00 GMT+1")).toContainText("0 UEVM");
     await expect(row(page, "02:00 GMT+1–02:30 GMT+1")).toContainText("—");
     await page.getByRole("checkbox", { name: "Show full day" }).check();
     await expect(table(page).getByRole("row")).toHaveCount(7);
@@ -450,7 +452,7 @@ test("conflicting edits preserve attempted energy and require current values to 
     await page
         .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
         .click();
-    const input = page.getByLabel("Production for 08:00–09:00 (MWh)");
+    const input = page.getByLabel("Actual production for 08:00–09:00 (MWh)");
     await input.fill("2.5");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(
@@ -464,9 +466,7 @@ test("conflicting edits preserve attempted energy and require current values to 
     await expect(input).toHaveValue("2.5");
     await expect(row(page, "08:00–09:00")).toContainText("4");
     await page.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(
-        page.getByText("Production saved.", { exact: true }),
-    ).toBeVisible();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
     expect(state.writes[1]).toMatchObject({
         changes: [{ expected_revision_id: 99, energy: 2.5 }],
     });
@@ -481,7 +481,9 @@ test("an implausible value is saved only after the administrator confirms it", a
     await page
         .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
         .click();
-    await page.getByLabel("Production for 08:00–09:00 (MWh)").fill("2500");
+    await page
+        .getByLabel("Actual production for 08:00–09:00 (MWh)")
+        .fill("2500");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(
         page
@@ -495,9 +497,7 @@ test("an implausible value is saved only after the administrator confirms it", a
     await page
         .getByRole("button", { name: "Save anyway", exact: true })
         .click();
-    await expect(
-        page.getByText("Production saved.", { exact: true }),
-    ).toBeVisible();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
     expect(state.writes[1]).toMatchObject({
         confirm_implausible: true,
         changes: [{ energy: 2500 }],
@@ -528,12 +528,14 @@ test("corrections recorded under an earlier configuration stay beside the interv
     state.earlier.set(9, [earlier(6, "09:00", "10:00", 0.5)]);
     await openProduction(page);
     await expect(row(page, "08:00–09:00")).toContainText(
-        "Recorded under configuration r1, 08:00–08:30: 0.25 MWh",
+        "Saved with earlier technical details, 08:00–08:30: 0.25 MWh",
     );
     await expect(row(page, "09:00–10:00")).toContainText(
-        "Recorded under configuration r1: 0.5 MWh",
+        "Saved with earlier technical details: 0.5 MWh",
     );
-    await expect(row(page, "10:00–11:00")).not.toContainText("Recorded under");
+    await expect(row(page, "10:00–11:00")).not.toContainText(
+        "Saved with earlier technical details",
+    );
 });
 
 test("manual-only days distinguish absent production from a measured all-zero day", async ({
@@ -543,20 +545,49 @@ test("manual-only days distinguish absent production from a measured all-zero da
     state.provider.fill(null);
     state.connected = false;
     await openProduction(page);
-    await expect(page.getByText("No production data")).toBeVisible();
+    await expect(
+        page.getByText("No actual production", { exact: true }),
+    ).toBeVisible();
     await expect(table(page).getByRole("row")).toHaveCount(25);
-    await expect(page.getByText("Total: 0 MWh", { exact: true })).toHaveCount(
-        0,
-    );
+    await expect(
+        page.getByText("Daily total: 0 MWh", { exact: true }),
+    ).toHaveCount(0);
     await page
         .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
         .click();
-    await page.getByLabel("Production for 08:00–09:00 (MWh)").fill("0");
+    await page.getByLabel("Actual production for 08:00–09:00 (MWh)").fill("0");
     await page.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(row(page, "08:00–09:00")).toContainText("Corrected");
+    await expect(row(page, "08:00–09:00").getByRole("cell").first()).toHaveText(
+        "0 Entered",
+    );
+    await expect(row(page, "08:00–09:00")).not.toContainText("Corrected");
+    await expect(row(page, "08:00–09:00")).not.toContainText("EPİAŞ value");
+    await page
+        .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
+        .click();
+    await expect(
+        page.getByRole("button", { name: /Use EPİAŞ value/ }),
+    ).toHaveCount(0);
+    await expect(
+        page.getByText("This interval will have no value.", { exact: true }),
+    ).toBeVisible();
+    await page
+        .getByRole("button", {
+            name: "Remove entered value for 08:00–09:00",
+            exact: true,
+        })
+        .click();
+    await expect(
+        page.getByText("Entered value removed.", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        row(page, "08:00–09:00").getByText("—", { exact: true }),
+    ).toBeVisible();
     state.provider.fill(0);
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
-    await expect(page.getByText("Total: 0 MWh", { exact: true })).toBeVisible();
+    await expect(
+        page.getByText("Daily total: 0 MWh", { exact: true }),
+    ).toBeVisible();
     await expect(table(page).getByRole("row")).toHaveCount(25);
 });
 
@@ -569,7 +600,9 @@ test("reloading a conflict preserves the draft when the native interval disappea
     await page
         .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
         .click();
-    await page.getByLabel("Production for 08:00–09:00 (MWh)").fill("2.5");
+    await page
+        .getByLabel("Actual production for 08:00–09:00 (MWh)")
+        .fill("2.5");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(
         page.getByRole("alert").filter({ hasText: "Production changed." }),
@@ -605,11 +638,11 @@ test("reloading a conflict preserves the draft when the native interval disappea
     );
     await page.getByRole("button", { name: "Reload current values" }).click();
     await expect(
-        page.getByLabel("Attempted production for 08:00–09:00 (MWh)"),
+        page.getByLabel("Your value for 08:00–09:00 (MWh)"),
     ).toHaveValue("2.5");
     await expect(
         page.getByRole("alert").filter({
-            hasText: "This interval changed and is no longer available.",
+            hasText: "This interval changed and can no longer be edited.",
         }),
     ).toBeVisible();
     await expect(
@@ -617,13 +650,13 @@ test("reloading a conflict preserves the draft when the native interval disappea
     ).toHaveCount(0);
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(
-        page.getByRole("group", { name: "Production intervals" }),
+        page.getByRole("group", { name: "Actual production values" }),
     ).toBeFocused();
     await page
         .getByRole("button", { name: "Edit 09:00–10:00", exact: true })
         .click();
     await expect(
-        page.getByLabel("Production for 09:00–10:00 (MWh)"),
+        page.getByLabel("Actual production for 09:00–10:00 (MWh)"),
     ).toHaveValue("1");
 });
 
@@ -653,21 +686,23 @@ test("importing a different native interval preserves an open draft for recovery
     await page
         .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
         .click();
-    await page.getByLabel("Production for 08:00–09:00 (MWh)").fill("2.5");
+    await page
+        .getByLabel("Actual production for 08:00–09:00 (MWh)")
+        .fill("2.5");
     await page.getByRole("button", { name: "Import CSV", exact: true }).click();
-    await page.getByLabel("Production CSV").setInputFiles({
+    await page.getByLabel("CSV file", { exact: true }).setInputFiles({
         name: "half-hour.csv",
         mimeType: "text/csv",
         buffer: Buffer.from(
             "starts_at,ends_at,energy_kwh,quality,source\n2026-11-09T08:00:00+03:00,2026-11-09T08:30:00+03:00,250,valid,meter",
         ),
     });
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
     await page
-        .getByRole("button", { name: "Preview import", exact: true })
+        .getByRole("button", { name: "Import 1 value", exact: true })
         .click();
-    await page.getByRole("button", { name: "Confirm import (1)" }).click();
     await expect(
-        page.getByLabel("Attempted production for 08:00–09:00 (MWh)"),
+        page.getByLabel("Your value for 08:00–09:00 (MWh)"),
     ).toHaveValue("2.5");
     await expect(
         page.getByRole("button", { name: "Save", exact: true }),
@@ -681,7 +716,7 @@ test("importing a different native interval preserves an open draft for recovery
         .getByRole("button", { name: "Edit 08:00–08:30", exact: true })
         .click();
     await expect(
-        page.getByLabel("Production for 08:00–08:30 (MWh)"),
+        page.getByLabel("Actual production for 08:00–08:30 (MWh)"),
     ).toHaveValue("0.25");
 });
 
@@ -728,7 +763,9 @@ test("a failed import refresh preserves the draft and releases an invalidated pe
     await page
         .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
         .click();
-    await page.getByLabel("Production for 08:00–09:00 (MWh)").fill("2.5");
+    await page
+        .getByLabel("Actual production for 08:00–09:00 (MWh)")
+        .fill("2.5");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(
         page.getByRole("alert").filter({ hasText: "Production changed." }),
@@ -737,24 +774,24 @@ test("a failed import refresh preserves the draft and releases an invalidated pe
     await page.getByRole("button", { name: "Reload current values" }).click();
     await pendingReload;
     await page.getByRole("button", { name: "Import CSV", exact: true }).click();
-    await page.getByLabel("Production CSV").setInputFiles({
+    await page.getByLabel("CSV file", { exact: true }).setInputFiles({
         name: "half-hour.csv",
         mimeType: "text/csv",
         buffer: Buffer.from(
             "starts_at,ends_at,energy_kwh,quality,source\n2026-11-09T08:00:00+03:00,2026-11-09T08:30:00+03:00,250,valid,meter",
         ),
     });
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
     await page
-        .getByRole("button", { name: "Preview import", exact: true })
+        .getByRole("button", { name: "Import 1 value", exact: true })
         .click();
-    await page.getByRole("button", { name: "Confirm import (1)" }).click();
     await expect(
         page
             .getByRole("alert")
-            .filter({ hasText: "Could not refresh saved production." }),
+            .filter({ hasText: "Actual production could not be refreshed." }),
     ).toBeVisible();
     await expect(
-        page.getByLabel("Production for 08:00–09:00 (MWh)"),
+        page.getByLabel("Actual production for 08:00–09:00 (MWh)"),
     ).toHaveValue("2.5");
     await expect(page.getByLabel("Day", { exact: true })).toBeEnabled();
     await expect(
@@ -772,13 +809,13 @@ test("a failed import refresh preserves the draft and releases an invalidated pe
     release();
     await (await lateResponse).finished();
     await expect(
-        page.getByLabel("Production for 08:00–09:00 (MWh)"),
+        page.getByLabel("Actual production for 08:00–09:00 (MWh)"),
     ).toHaveValue("2.5");
     failRefresh = false;
     await page.getByRole("button", { name: "Reload current values" }).click();
     await expect(row(page, "08:00–09:00")).toContainText("4");
     await expect(
-        page.getByLabel("Production for 08:00–09:00 (MWh)"),
+        page.getByLabel("Actual production for 08:00–09:00 (MWh)"),
     ).toHaveValue("2.5");
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(
@@ -807,30 +844,32 @@ test("production polling pauses during editing and hidden documents and retains 
     let previous = requests;
     state.provider[8] = 4;
     await page.clock.fastForward(30_000);
-    await expect(row(page, "08:00–09:00")).toContainText("4 Settlement");
+    await expect(row(page, "08:00–09:00")).toContainText("4 UEVM");
     expect(requests).toBeGreaterThan(previous);
     await page
         .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
         .click();
-    await page.getByLabel("Production for 08:00–09:00 (MWh)").fill("2.5");
+    await page
+        .getByLabel("Actual production for 08:00–09:00 (MWh)")
+        .fill("2.5");
     previous = requests;
     state.provider[8] = 7;
     await page.clock.fastForward(90_000);
     expect(requests).toBe(previous);
     await expect(
-        page.getByLabel("Production for 08:00–09:00 (MWh)"),
+        page.getByLabel("Actual production for 08:00–09:00 (MWh)"),
     ).toHaveValue("2.5");
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await page.clock.fastForward(30_000);
-    await expect(row(page, "08:00–09:00")).toContainText("7 Settlement");
+    await expect(row(page, "08:00–09:00")).toContainText("7 UEVM");
     fail = true;
     await page.clock.fastForward(30_000);
     await expect(
         page
             .getByRole("alert")
-            .filter({ hasText: "Could not refresh saved production." }),
+            .filter({ hasText: "Actual production could not be refreshed." }),
     ).toBeVisible();
-    await expect(row(page, "08:00–09:00")).toContainText("7 Settlement");
+    await expect(row(page, "08:00–09:00")).toContainText("7 UEVM");
     fail = false;
     previous = requests;
     await page.evaluate(() =>
@@ -849,11 +888,11 @@ test("production polling pauses during editing and hidden documents and retains 
     );
     state.provider[8] = 8;
     await page.clock.fastForward(30_000);
-    await expect(row(page, "08:00–09:00")).toContainText("8 Settlement");
+    await expect(row(page, "08:00–09:00")).toContainText("8 UEVM");
     await expect(
         page
             .getByRole("alert")
-            .filter({ hasText: "Could not refresh saved production." }),
+            .filter({ hasText: "Actual production could not be refreshed." }),
     ).toHaveCount(0);
 });
 
@@ -876,16 +915,16 @@ test("a held production poll is not overlapped by the next one", async ({
     });
     await page.clock.fastForward(30_000);
     await expect.poll(() => polls).toBe(1);
-    await expect(row(page, "08:00–09:00")).toContainText("1 Settlement");
+    await expect(row(page, "08:00–09:00")).toContainText("1 UEVM");
     await page.clock.fastForward(30_000);
     await page.clock.runFor(20);
     expect(polls).toBe(1);
-    await expect(row(page, "08:00–09:00")).toContainText("1 Settlement");
+    await expect(row(page, "08:00–09:00")).toContainText("1 UEVM");
     release();
-    await expect(row(page, "08:00–09:00")).toContainText("4 Settlement");
+    await expect(row(page, "08:00–09:00")).toContainText("4 UEVM");
     await page.clock.fastForward(30_000);
     await expect.poll(() => polls).toBe(2);
-    await expect(row(page, "08:00–09:00")).toContainText("5 Settlement");
+    await expect(row(page, "08:00–09:00")).toContainText("5 UEVM");
 });
 
 test("production uses the server total and exposes invalid saved quality", async ({
@@ -901,13 +940,17 @@ test("production uses the server total and exposes invalid saved quality", async
     });
     state.heads.set(8, 1);
     await openProduction(page);
-    await expect(page.getByText("Total: —")).toBeVisible();
+    await expect(page.getByText("Daily total: —")).toBeVisible();
     await expect(row(page, "08:00–09:00")).toContainText("Invalid");
     await page
         .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
         .click();
-    await expect(page.getByLabel("Data quality")).toHaveValue("invalid");
-    await page.getByLabel("Data quality").selectOption("valid");
+    await expect(
+        page.getByRole("combobox", { name: "Status", exact: true }),
+    ).toHaveValue("invalid");
+    await page
+        .getByRole("combobox", { name: "Status", exact: true })
+        .selectOption("valid");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect
         .poll(() => state.writes[0])
@@ -957,25 +1000,23 @@ test("CSV preview reviews effective values in the unit its energy column names a
     });
     await openProduction(page);
     await page.getByRole("button", { name: "Import CSV", exact: true }).click();
-    await page.getByLabel("Production CSV").setInputFiles({
+    await page.getByLabel("CSV file", { exact: true }).setInputFiles({
         name: "production.csv",
         mimeType: "text/csv",
         buffer: Buffer.from(
             "starts_at,ends_at,energy_kwh,quality,source\n2026-11-09T08:00:00+03:00,2026-11-09T08:30:00+03:00,250,valid,meter",
         ),
     });
-    await page
-        .getByRole("button", { name: "Preview import", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
     await expect(
-        page.getByRole("table", { name: "Production import preview" }),
+        page.getByRole("table", { name: "Values to import" }),
     ).toContainText("0.25");
     await expect(page.getByText("Saved", { exact: true })).toHaveCount(0);
     expect(state.writes).toHaveLength(0);
     await expect(
-        page.getByText(/This import only replaces part of the provider hour/),
+        page.getByText(/This file replaces only part of the EPİAŞ hour/),
     ).toBeVisible();
-    await page.getByLabel("Production CSV").setInputFiles({
+    await page.getByLabel("CSV file", { exact: true }).setInputFiles({
         name: "production-mwh.csv",
         mimeType: "text/csv",
         buffer: Buffer.from(
@@ -983,20 +1024,18 @@ test("CSV preview reviews effective values in the unit its energy column names a
         ),
     });
     await expect(
-        page.getByRole("button", { name: "Confirm import (1)" }),
+        page.getByRole("button", { name: "Import 1 value", exact: true }),
     ).toHaveCount(0);
-    await page
-        .getByRole("button", { name: "Preview import", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
     await expect(
-        page.getByRole("table", { name: "Production import preview" }),
+        page.getByRole("table", { name: "Values to import" }),
     ).toContainText("250");
     state.provider[8] = 2;
-    await page.getByRole("button", { name: "Confirm import (1)" }).click();
+    await page
+        .getByRole("button", { name: "Import 1 value", exact: true })
+        .click();
     await expect(
-        page.getByText(
-            "Import complete: 1 created, 0 already present, 1 total.",
-        ),
+        page.getByText("Imported. New values: 1 · Already saved: 0"),
     ).toBeVisible();
     expect(state.writes[0]).toMatchObject({
         unit: "MWh",
@@ -1044,29 +1083,29 @@ test("a CSV import above plant capacity needs an acknowledgement and records its
     });
     await openProduction(page);
     await page.getByRole("button", { name: "Import CSV", exact: true }).click();
-    await page.getByLabel("Production CSV").setInputFiles({
+    await page.getByLabel("CSV file", { exact: true }).setInputFiles({
         name: "production.csv",
         mimeType: "text/csv",
         buffer: csv,
     });
-    await page
-        .getByRole("button", { name: "Preview import", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
     await expect(
         page.getByText(/exceeds what the plant can produce/),
     ).toBeVisible();
     const acknowledgement = page.getByRole("checkbox", {
         name: "I checked these values and want to save them.",
     });
-    await page.getByRole("button", { name: "Confirm import (1)" }).click();
+    await page
+        .getByRole("button", { name: "Import 1 value", exact: true })
+        .click();
     await expect(acknowledgement).toBeFocused();
     expect(state.writes).toHaveLength(0);
     await acknowledgement.check();
-    await page.getByRole("button", { name: "Confirm import (1)" }).click();
+    await page
+        .getByRole("button", { name: "Import 1 value", exact: true })
+        .click();
     await expect(
-        page.getByText(
-            "Import complete: 1 created, 0 already present, 1 total.",
-        ),
+        page.getByText("Imported. New values: 1 · Already saved: 0"),
     ).toBeVisible();
     expect(state.writes[0]).toMatchObject({
         unit: "MWh",
@@ -1184,25 +1223,25 @@ test("native timeline preserves half-hour and offset-hour corrections with their
         page.getByRole("combobox", { name: "Interval", exact: true }),
     ).toHaveCount(0);
     await expect(table(page).getByRole("row")).toHaveCount(6);
-    await expect(row(page, "07:00\u201308:00")).toContainText("Settlement");
+    await expect(row(page, "07:00\u201308:00")).toContainText("UEVM");
     await expect(row(page, "08:00\u201308:30")).toContainText(
-        "Provider 08:00\u201309:00: 2 MWh",
+        "EPİAŞ value, 08:00\u201309:00: 2 MWh",
     );
     await expect(row(page, "08:30\u201309:00")).toContainText("\u2014");
     await expect(row(page, "09:30\u201310:30")).toContainText(
-        "Provider 09:00\u201310:00: 3 MWh",
+        "EPİAŞ value, 09:00\u201310:00: 3 MWh",
     );
     await expect(row(page, "09:30\u201310:30")).toContainText(
-        "Provider 10:00\u201311:00: 4 MWh",
+        "EPİAŞ value, 10:00\u201311:00: 4 MWh",
     );
     await page
         .getByRole("button", { name: "Edit 09:30\u201310:30", exact: true })
         .click();
-    await page.getByLabel("Production for 09:30\u201310:30 (MWh)").fill("1");
+    await page
+        .getByLabel("Actual production for 09:30\u201310:30 (MWh)")
+        .fill("1");
     await page.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(
-        page.getByText("Production saved.", { exact: true }),
-    ).toBeVisible();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
     expect(state.writes[0]).toMatchObject({
         changes: [
             {
@@ -1280,12 +1319,14 @@ test("a saved correction cannot be exported before the day it changed is reloade
     await page
         .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
         .click();
-    await page.getByLabel("Production for 08:00–09:00 (MWh)").fill("2.5");
+    await page
+        .getByLabel("Actual production for 08:00–09:00 (MWh)")
+        .fill("2.5");
     holding = true;
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await reload;
-    await expect(page.getByText("Production saved.")).toBeVisible();
-    await expect(row(page, "08:00–09:00")).toContainText("1 Settlement");
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
+    await expect(row(page, "08:00–09:00")).toContainText("1 UEVM");
     const csv = page
         .locator(".production-workspace")
         .getByRole("button", { name: /^(Download CSV|Working…)$/ });
@@ -1344,7 +1385,7 @@ test("source details keep the cached source with a retry when its refresh fails"
     await openProduction(page);
     const details = page.locator(".production-source");
     await details
-        .getByText("Source and correction details", { exact: true })
+        .getByText("Source of actual production", { exact: true })
         .click();
     await expect(details.getByText("G4-BOR-1 GES · Connected")).toBeVisible();
     sourceFails = true;
@@ -1356,7 +1397,7 @@ test("source details keep the cached source with a retry when its refresh fails"
     await page
         .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
         .click();
-    await page.getByLabel("Production for 08:00–09:00 (MWh)").fill("2");
+    await page.getByLabel("Actual production for 08:00–09:00 (MWh)").fill("2");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await reload;
     const failure = details
@@ -1454,10 +1495,10 @@ test("Turkish production at 320px keeps native corrections, decimal commas and i
     await fullDay.check();
     await fullDay.uncheck();
     await expect(
-        page.getByText("Sağlayıcı 13:00–14:00: 1 MWh", { exact: true }),
+        page.getByText("EPİAŞ değeri, 13:00–14:00: 1 MWh", { exact: true }),
     ).toBeVisible();
     await expect(
-        page.getByText("Sağlayıcı 14:00–15:00: 2 MWh", { exact: true }),
+        page.getByText("EPİAŞ değeri, 14:00–15:00: 2 MWh", { exact: true }),
     ).toBeVisible();
     const noOverflow = async () =>
         expect(
@@ -1473,9 +1514,11 @@ test("Turkish production at 320px keeps native corrections, decimal commas and i
     await page
         .getByRole("button", { name: "13:30–14:30 aralığını düzenle" })
         .click();
-    await page.getByLabel("13:30–14:30 aralığının üretimi (MWh)").fill("0,75");
+    await page
+        .getByLabel("13:30–14:30 aralığında gerçekleşen üretim (MWh)")
+        .fill("0,75");
     await expect(
-        page.getByRole("combobox", { name: "Veri durumu" }),
+        page.getByRole("combobox", { name: "Durum", exact: true }),
     ).toHaveValue("valid");
     await noOverflow();
     await page.screenshot({
@@ -1483,23 +1526,23 @@ test("Turkish production at 320px keeps native corrections, decimal commas and i
         fullPage: true,
     });
     await page.getByRole("button", { name: "Kaydet", exact: true }).click();
-    await expect(
-        page.getByText("Üretim kaydedildi.", { exact: true }),
-    ).toBeVisible();
+    await expect(page.getByText("Kaydedildi.", { exact: true })).toBeVisible();
     expect(state.writes[0]).toMatchObject({
         changes: [{ energy: 0.75, expected_revision_id: 1 }],
     });
-    await page.getByRole("button", { name: "CSV aktar", exact: true }).click();
-    await page.getByLabel("Üretim CSV dosyası", { exact: true }).setInputFiles({
+    await page
+        .getByRole("button", { name: "CSV içe aktar", exact: true })
+        .click();
+    await page.getByLabel("CSV dosyası", { exact: true }).setInputFiles({
         name: "production.csv",
         mimeType: "text/csv",
         buffer: Buffer.from(
             "starts_at,ends_at,energy_kwh,quality,source\n2026-11-09T08:00:00+03:00,2026-11-09T09:00:00+03:00,250,valid,meter",
         ),
     });
-    await page.getByRole("button", { name: "Aktarımı önizle" }).click();
+    await page.getByRole("button", { name: "Önizle", exact: true }).click();
     await expect(
-        page.getByRole("button", { name: "Aktarımı onayla (1)" }),
+        page.getByRole("button", { name: "1 değeri içe aktar", exact: true }),
     ).toBeVisible();
     await expect(page.getByText("Kaydedildi", { exact: true })).toHaveCount(0);
     await noOverflow();
