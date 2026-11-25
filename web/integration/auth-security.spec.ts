@@ -228,7 +228,7 @@ test("verified email and a recovery code protect a real browser session", async 
     await emailChange.getByText("Change email", { exact: true }).click();
     await emailChange.getByLabel("New email address").fill(changedEmail);
     await emailChange
-        .getByRole("button", { name: "Send verification code" })
+        .getByRole("button", { name: "Send email code" })
         .click();
     await emailChange
         .getByLabel("Authenticator or recovery code")
@@ -256,7 +256,7 @@ test("verified email and a recovery code protect a real browser session", async 
             return !!changeCode;
         })
         .toBe(true);
-    await emailChange.getByLabel("Email verification code").fill(changeCode);
+    await emailChange.getByLabel("Email code").fill(changeCode);
     await emailChange.getByRole("button", { name: "Verify new email" }).click();
     await expect(
         emailChange.getByText(`${changedEmail} is now your address.`),
