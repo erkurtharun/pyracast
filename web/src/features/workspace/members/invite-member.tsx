@@ -30,7 +30,7 @@ export function InviteMember({ tenantId }: { tenantId: number }) {
                         path: { tenant_id: tenantId },
                         body: { email: formText(data, "email") },
                     });
-                    await refresh.workspace(tenantId);
+                    return () => refresh.workspace(tenantId);
                 }}
             >
                 <Field

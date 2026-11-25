@@ -700,7 +700,7 @@ export function ReminderEditor({
             <div ref={wrapper}>
                 <ActionForm
                     submit={t("saveReminders")}
-                    pending={review.status !== "closed"}
+                    pending={review.status === "closed" ? null : "unanswered"}
                     unsaved={edited(draft)}
                     success={null}
                     onSubmit={submit}

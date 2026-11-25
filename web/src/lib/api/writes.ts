@@ -1,26 +1,22 @@
-let started = 0;
-let confirmed = 0;
-const unanswered = new Set<number>();
+let unanswered = 0;
+let changed = () => {};
 
 export function trackWrite<T>(answer: Promise<T>): Promise<T> {
-    const serial = ++started;
-    unanswered.add(serial);
-    answer.then(
-        () => {
-            confirmed = Math.max(confirmed, serial);
-            unanswered.delete(serial);
-        },
-        () => unanswered.delete(serial),
-    );
+    count(1);
+    const settle = () => count(-1);
+    answer.then(settle, settle);
     return answer;
 }
 
-export function writesStarted() {
-    return started;
+function count(step: number) {
+    unanswered += step;
+    changed();
 }
 
-export function confirmedSince(since: number) {
-    return (
-        confirmed > since && [...unanswered].every((serial) => serial <= since)
-    );
+export function writesUnanswered() {
+    return unanswered > 0;
+}
+
+export function whenWritesChange(listener: () => void) {
+    changed = listener;
 }
