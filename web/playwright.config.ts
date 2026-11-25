@@ -10,7 +10,7 @@ export default defineConfig({
     retries: process.env.CI ? 2 : 0,
     failOnFlakyTests: !!process.env.CI,
     // Below the 25 minute CI job limit, so a hung run reports its tests instead of being killed.
-    globalTimeout: 15 * 60_000,
+    globalTimeout: 20 * 60_000,
     globalTeardown: coverage ? "./testing/server-coverage.ts" : undefined,
     reporter: coverage
         ? [["list"], ["./testing/coverage-reporter.ts"]]

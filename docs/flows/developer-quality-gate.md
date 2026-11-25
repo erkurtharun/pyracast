@@ -93,7 +93,7 @@ None for users. Privilege boundaries: workflow `permissions: contents: read` (`a
 | New Python advisory | `pip-audit --strict` fails the `audit` job without a code change. |
 | Playwright test fails in CI (main config) | Retried twice; a test that passes only on a retry is flaky and fails the job (`failOnFlakyTests`). The integration config has no retries. |
 | `test.only` left in a spec in CI | `forbidOnly` fails both configurations. |
-| Mocked suite exceeds 15 min, integration spec exceeds 240 s | Playwright's `globalTimeout` stops the run and reports the unfinished tests; the 300 s subprocess timeout of `run_spec` remains the outer limit. |
+| Mocked suite exceeds 20 min, integration spec exceeds 240 s | Playwright's `globalTimeout` stops the run and reports the unfinished tests; the 300 s subprocess timeout of `run_spec` remains the outer limit. |
 | `-m browser` selects no test | pytest collects nothing and exits nonzero, so the web job fails. |
 | `check_scientific.py` on another OS, failed download, bad checksum, missing `uv`, failed sync or smoke assertion | `RuntimeError`, `URLError` or `CalledProcessError` (smoke assertions fail inside the child interpreter). |
 | Sonar enabled but token, project key or organization missing | "Missing Sonar configuration: ..." and the job fails. |
