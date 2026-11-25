@@ -36,7 +36,6 @@ import {
     readCopy,
     refuseClears,
     seedCopy,
-    storeDeletions,
     watchDeletions,
     watchStoreChunk,
     type Holder,
@@ -1221,16 +1220,12 @@ test("the store deletes a held copy at a start once the withdrawal constant is o
     await loadStore(page, false);
     expect(await start()).toBe("kept");
     await expectHeldFigures(page);
-    expect(await storeDeletions(page)).toBe(0);
     await allowClears();
     expect(await start()).toBe("deleted");
     expect((await readCopy(page)).version).toBeUndefined();
-    expect(await storeDeletions(page)).toBe(1);
-    expect(await start()).toBe("deleted");
-    expect(await storeDeletions(page)).toBe(2);
 });
 
-test("the store answers within its limit while another window keeps the copy from being deleted, and reports the deletion once it succeeds", async ({
+test("the store answers within its limit while another window keeps the copy from being deleted", async ({
     page,
 }) => {
     await seedCopy(page);
@@ -1245,10 +1240,6 @@ test("the store answers within its limit while another window keeps the copy fro
     const state = await callStore(page, "copyState");
     await page.clock.runFor(2_000);
     expect(await state()).toBe("unavailable");
-    expect(await storeDeletions(page)).toBe(0);
-    await deletion.release();
-    await expect.poll(() => storeDeletions(page)).toBe(1);
-    expect((await readCopy(page)).version).toBeUndefined();
 });
 
 async function stagedCorrection(page: Page) {

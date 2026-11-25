@@ -477,17 +477,11 @@ export async function callStore(page: Page, operation: keyof LoadedStore) {
             deadline: (limitMs: number) => unknown;
         };
         const none = { outstanding: () => null, acknowledge: () => {} };
-        const deleted = () =>
-            Object.assign(window, {
-                storeDeletions:
-                    ((Reflect.get(window, "storeDeletions") as
-                        number | undefined) ?? 0) + 1,
-            });
         const limit = deadline(2_000);
         Object.assign(window, {
             storeAnswer:
                 name === "start"
-                    ? store.start(none, limit, deleted)
+                    ? store.start(none, limit)
                     : store[name](limit),
         });
     }, operation);
@@ -495,11 +489,4 @@ export async function callStore(page: Page, operation: keyof LoadedStore) {
         page.evaluate(
             () => Reflect.get(window, "storeAnswer") as Promise<string>,
         );
-}
-
-export function storeDeletions(page: Page) {
-    return page.evaluate(
-        () =>
-            (Reflect.get(window, "storeDeletions") as number | undefined) ?? 0,
-    );
 }

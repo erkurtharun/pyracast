@@ -352,8 +352,10 @@ export function startSavedCopy() {
         return;
     }
     const flag = readStored(savedFlagKey);
-    void boundedStore((store, limit) =>
-        store.start(savedRemoval, limit, () => forgetSavedCopy(flag)),
+    void boundedStore((store, limit) => store.start(savedRemoval, limit)).then(
+        (outcome) => {
+            if (outcome === "deleted") forgetSavedCopy(flag);
+        },
     );
 }
 
