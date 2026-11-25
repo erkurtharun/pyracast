@@ -979,12 +979,12 @@ async function offerGoogleSignIn(page: Page) {
 }
 
 const continueWithGoogle = (page: Page) =>
-    page.getByRole("button", { name: "Continue with Google" }).click();
+    page.getByRole("button", { name: "Sign in with Google" }).click();
 
 async function keepReturn(page: Page, address: string) {
     await page.goto("/app/");
     await expect(
-        page.getByRole("button", { name: "Continue with Google" }),
+        page.getByRole("button", { name: "Sign in with Google" }),
     ).toBeVisible();
     await page.evaluate(
         ({ key, value }) => window.sessionStorage.setItem(key, value),
@@ -1093,7 +1093,7 @@ test("a provider sign-in that needs the second factor opens the forecast it star
     );
     await page.goto(datedForecast);
     await continueWithGoogle(page);
-    await page.getByLabel("Authenticator or recovery code").fill("123456");
+    await page.getByLabel("Authenticator code or recovery code").fill("123456");
     await page.getByRole("button", { name: "Verify code" }).click();
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-25");
     await expect(page).toHaveURL(datedForecast);
@@ -1226,7 +1226,7 @@ test("a provider return shows the launch card while its sign-in completes", asyn
         page.getByRole("heading", { name: "Welcome back" }),
     ).toHaveCount(0);
     await expect(
-        page.getByRole("button", { name: "Continue with Google" }),
+        page.getByRole("button", { name: "Sign in with Google" }),
     ).toHaveCount(0);
     release.resolve();
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-25");
@@ -1347,7 +1347,7 @@ async function holdDocumentNavigations(page: Page, path: RegExp) {
 }
 
 const startAddress = (page: Page) =>
-    page.getByRole("button", { name: "Continue with Google" });
+    page.getByRole("button", { name: "Sign in with Google" });
 
 test("starting a provider sign-in keeps the workspace address of the tab", async ({
     page,
