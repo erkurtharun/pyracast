@@ -334,3 +334,98 @@ def test_values_keep_full_precision_and_a_missing_value_is_never_zero() -> None:
     words = _texts(_book(_report(precise)))
     for word in ("Source", "Estimated", "Partial", "Coverage", "Updated"):
         assert word not in words
+
+
+DAY_THREE = date(2026, 10, 28)
+PLAIN = (None, None, None)
+BAND = ("DDEBEA", None, None)
+PLAIN_START = (None, "medium", "09383A")
+BAND_START = ("DDEBEA", "medium", "09383A")
+
+
+def _hours(*hours: int, outage: float | None = None) -> tuple[ReportInterval, ...]:
+    return tuple(_interval(hour, 1.0, outage) for hour in hours)
+
+
+def _look(sheet: Worksheet, row: int, width: int) -> tuple[str | None, str | None, str | None]:
+    looks = set()
+    for column in range(1, width + 1):
+        cell = sheet.cell(row, column)
+        top = cell.border.top
+        looks.add(
+            (
+                cell.fill.fgColor.rgb[-6:] if cell.fill.fill_type == "solid" else None,
+                top.style,
+                top.color.rgb[-6:] if top.style else None,
+            )
+        )
+    (look,) = looks
+    return look
+
+
+def _looks(sheet: Worksheet, rows: range, width: int) -> list[tuple[str | None, ...]]:
+    return [_look(sheet, row, width) for row in rows]
+
+
+def test_the_second_day_is_banded_and_begins_under_a_line_while_a_lone_day_has_neither() -> None:
+    lone = _sheet(_report(_day(TODAY, intervals=_hours(9, 10, 11))))
+    assert lone.auto_filter.ref == "A13:D16"
+    assert _looks(lone, range(10, 11), 2) == [PLAIN]
+    assert _looks(lone, range(14, 17), 4) == [PLAIN] * 3
+    sheet = _sheet(
+        _report(_day(TODAY, intervals=_hours(9, 10, 11)), _day(TOMORROW, intervals=_hours(9, 10)))
+    )
+    assert sheet.auto_filter.ref == "A14:D19"
+    assert not sheet.merged_cells.ranges
+    assert sheet.max_row == 19
+    assert _looks(sheet, range(10, 12), 2) == [PLAIN, BAND]
+    assert _looks(sheet, range(15, 20), 4) == [PLAIN, PLAIN, PLAIN, BAND_START, BAND]
+    assert sheet["E18"].fill.fill_type is None
+
+
+def test_a_third_day_returns_to_no_band_and_begins_under_a_line() -> None:
+    sheet = _sheet(
+        _report(
+            _day(TODAY, intervals=_hours(10, 11)),
+            _day(TOMORROW, intervals=_hours(10, 11)),
+            _day(DAY_THREE, intervals=_hours(10, 11)),
+        )
+    )
+    assert sheet.auto_filter.ref == "A15:D21"
+    assert not sheet.merged_cells.ranges
+    assert _looks(sheet, range(10, 13), 2) == [PLAIN, BAND, PLAIN]
+    assert _looks(sheet, range(16, 22), 4) == [
+        PLAIN,
+        PLAIN,
+        BAND_START,
+        BAND,
+        PLAIN_START,
+        PLAIN,
+    ]
+
+
+def test_the_band_and_the_line_span_the_outage_column() -> None:
+    affected = _day(
+        TOMORROW,
+        outage_total=4.25,
+        outage=True,
+        status="estimated",
+        intervals=_hours(10, 11, outage=0.5),
+    )
+    sheet = _sheet(_report(_day(TODAY, intervals=_hours(10, 11)), affected))
+    assert sheet.auto_filter.ref == "A15:E19"
+    assert _looks(sheet, range(10, 12), 3) == [PLAIN, BAND]
+    assert _looks(sheet, range(16, 20), 5) == [PLAIN, PLAIN, BAND_START, BAND]
+    assert sheet["F18"].fill.fill_type is None
+
+
+def test_the_band_and_the_line_span_the_utc_offset_column() -> None:
+    sheet = _sheet(
+        _report(
+            _day(date(2026, 10, 25), intervals=_hours(10, 11)),
+            _day(TODAY, intervals=_hours(10, 11)),
+        )
+    )
+    assert sheet["E14"].value == "UTC offset"
+    assert sheet.auto_filter.ref == "A14:E18"
+    assert _looks(sheet, range(15, 19), 5) == [PLAIN, PLAIN, BAND_START, BAND]

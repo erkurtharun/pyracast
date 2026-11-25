@@ -12,7 +12,7 @@ from django.utils.translation import gettext as _
 from django.utils.translation import pgettext
 from openpyxl import Workbook
 from openpyxl.cell.cell import Cell
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.properties import PageSetupProperties
 from openpyxl.worksheet.worksheet import Worksheet
@@ -26,6 +26,8 @@ if TYPE_CHECKING:
 
 _ILLEGAL_XML = re.compile(r"[\x00-\x08\x0b-\x0c\x0e-\x1f\ud800-\udfff￾￿]")
 _HEADER = "09383A"
+_BAND = PatternFill("solid", fgColor="DDEBEA")
+_DAY_START = Border(top=Side(style="medium", color=_HEADER))
 _LEFT = Alignment(horizontal="left", vertical="top")
 _RIGHT = Alignment(horizontal="right", vertical="top")
 _TOTAL = "#,##0.00"
@@ -55,6 +57,15 @@ def _header(sheet: Worksheet, row: int, titles: list[str]) -> None:
         cell = _text(sheet, row, column, title)
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor=_HEADER)
+
+
+def _day_row(sheet: Worksheet, row: int, width: int, day: int, *, starts: bool) -> None:
+    for column in range(1, width + 1):
+        cell = sheet.cell(row, column)
+        if day % 2:
+            cell.fill = _BAND
+        if starts and day:
+            cell.border = _DAY_START
 
 
 def _heading(sheet: Worksheet, row: int, title: str) -> None:
@@ -128,8 +139,9 @@ def _daily(
         titles.append(_("Without outage (MWh)"))
     _header(sheet, 9, titles)
     row = 9
-    for day, shown in zip(report.days, figures, strict=True):
+    for position, (day, shown) in enumerate(zip(report.days, figures, strict=True)):
         row += 1
+        _day_row(sheet, row, len(titles), position, starts=False)
         _number(sheet, row, 1, day.day, day_format)
         _number(sheet, row, 2, shown.value, _TOTAL)
         if outage:
@@ -152,9 +164,9 @@ def _intervals(
 ) -> list[int]:
     zone = ZoneInfo(report.timezone)
     rows = [
-        (day, shown, item)
-        for day, shown in zip(report.days, figures, strict=True)
-        for item in day.intervals
+        (position, index == 0, day, shown, item)
+        for position, (day, shown) in enumerate(zip(report.days, figures, strict=True))
+        for index, item in enumerate(day.intervals)
     ]
     offsets = any(
         end - start != timedelta(days=1)
@@ -168,7 +180,8 @@ def _intervals(
     _heading(sheet, after + 2, _("Hourly values") if report.electrical else _("Interval values"))
     header = after + 3
     _header(sheet, header, titles)
-    for row, (day, shown, item) in enumerate(rows, header + 1):
+    for row, (position, starts, day, shown, item) in enumerate(rows, header + 1):
+        _day_row(sheet, row, len(titles), position, starts=starts)
         _number(sheet, row, 1, day.day, day_format)
         _number(sheet, row, 2, item.start.astimezone(zone).replace(tzinfo=None), "hh:mm")
         _number(sheet, row, 3, item.end.astimezone(zone).replace(tzinfo=None), "hh:mm")
