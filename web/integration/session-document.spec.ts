@@ -42,7 +42,7 @@ test("a sign-in on an open sign-in screen loads a fresh document, and the next a
     await markDocument(page);
     await submitSignIn(page, process.env.BROWSER_OTHER_EMAIL!);
     await expect(
-        page.getByText("This workspace is not available to your account."),
+        page.getByText("You do not have access to this workspace."),
     ).toBeVisible();
     expect(await isMarked(page)).toBe(false);
     await expect(page.getByRole("button", { name: /Site/ })).toHaveCount(0);
