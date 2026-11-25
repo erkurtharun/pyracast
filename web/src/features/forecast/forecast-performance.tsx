@@ -162,7 +162,14 @@ function PerformanceResults({
         resource.data?.days.filter((day) => day.status === "matched") ?? [];
     const historical = resource.data?.comparison === "historical_model";
     const mode = historical ? "historical" : "forecast";
-    const realtime = matched.some((day) => day.provisional_production);
+    const modeName = t(historical ? "model_check" : "forecast_accuracy");
+    const realtimeDay = (day: (typeof matched)[number]) =>
+        day.provisional_snapshot_ids.length > 0;
+    const realtime = matched.some(realtimeDay);
+    const notCompared =
+        (resource.data?.requested_days ?? 0) -
+        (resource.data?.matched_days ?? 0);
+    const unavailableDates = t("unavailable_dates", { count: notCompared });
     const missingReasons = new Map<string, string[]>();
     for (const day of resource.data?.days ?? []) {
         if (day.status === "matched") continue;
@@ -185,9 +192,7 @@ function PerformanceResults({
                                 build={() =>
                                     performanceExport(plant, data, {
                                         file: t("file"),
-                                        comparison: historical
-                                            ? t("model_check")
-                                            : t("forecast_accuracy"),
+                                        comparison: modeName,
                                         forecast: t("forecast_kind"),
                                         satellite: t("satellite_kind"),
                                     })
@@ -227,10 +232,7 @@ function PerformanceResults({
                                 <div className="stats">
                                     <Stat
                                         label={t("missing_days")}
-                                        value={
-                                            data.requested_days -
-                                            data.matched_days
-                                        }
+                                        value={notCompared}
                                     />
                                     <Stat
                                         label={t("daylight_energy_error")}
@@ -315,9 +317,7 @@ function PerformanceResults({
                                     <table>
                                         <caption>
                                             {t("date_range", {
-                                                mode: historical
-                                                    ? t("model_check")
-                                                    : t("forecast_accuracy"),
+                                                mode: modeName,
                                                 start: data.start_date,
                                                 end: data.end_date,
                                             })}
@@ -342,7 +342,7 @@ function PerformanceResults({
                                                 <tr key={day.date}>
                                                     <td>{day.date}</td>
                                                     <td>
-                                                        {day.provisional_production
+                                                        {realtimeDay(day)
                                                             ? t(
                                                                   "provisional_production",
                                                               )
@@ -368,15 +368,9 @@ function PerformanceResults({
                                 </ScrollRegion>
                             </details>
                         )}
-                        {missingReasons.size > 0 && (
+                        {missingReasons.size > 0 ? (
                             <details>
-                                <summary>
-                                    {t("unavailable_dates", {
-                                        count:
-                                            data.requested_days -
-                                            data.matched_days,
-                                    })}
-                                </summary>
+                                <summary>{unavailableDates}</summary>
                                 <ul>
                                     {[...missingReasons].map(
                                         ([reason, dates]) => (
@@ -390,6 +384,9 @@ function PerformanceResults({
                                     )}
                                 </ul>
                             </details>
+                        ) : (
+                            !data.metrics &&
+                            notCompared > 0 && <p>{unavailableDates}</p>
                         )}
                     </>
                 )}

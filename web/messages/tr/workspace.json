@@ -469,7 +469,7 @@
         "editStagedInterval": "{interval} için eklenen düzeltmeyi düzenle",
         "removeStaged": "Kaldır",
         "removeStagedInterval": "{interval} için eklenen düzeltmeyi kaldır",
-        "stagedProviderReading": "Sağlayıcı okuması",
+        "stagedProviderReading": "EPİAŞ değerini kullan ({energy} MWh)",
         "stagedChanged": "Bu aralık siz ekledikten sonra değişti. Düzenleyin veya kaldırın.",
         "sending": "Gönderiliyor…",
         "discardDraft": "Talepten vazgeç",

@@ -1640,6 +1640,7 @@ test("forecast performance shows archived metrics, missing days and selected ran
                         error_mwh: -1.5,
                         source_kind: "estimated_actuals",
                         provisional_production: false,
+                        provisional_snapshot_ids: [],
                         calibration_in_sample: false,
                     },
                     {

@@ -94,6 +94,7 @@ export function CalibrationAutomationPanel({
                 <>
                     {data.enabled &&
                         !data.authorized &&
+                        data.configuration_current &&
                         (canManage ? (
                             <Notice>
                                 <p>{t("authorization_paused")}</p>

@@ -939,6 +939,44 @@ for (const role of ["admin", "viewer"] as const)
         expect(changes).toEqual([true]);
     });
 
+test("automation paused because its owner left and the technical details are out of date shows only the technical details blocker", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await routeRuns(page, () => [run(40)]);
+    const changes: unknown[] = [];
+    await page.route("**/plants/21/calibration/automation/", (route) => {
+        if (route.request().method() === "PATCH")
+            changes.push(route.request().postDataJSON());
+        return route.fulfill({
+            json: automation({
+                enabled: true,
+                authorized: false,
+                configuration_current: false,
+            }),
+        });
+    });
+    await openCalibration(page);
+    await expect(
+        page.getByText(
+            "Automatic calibration is paused: this plant has no current technical details.",
+            { exact: true },
+        ),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "Turn on automatic calibration" }),
+    ).toHaveCount(0);
+    await expect(
+        page.getByText(/no longer a workspace administrator/),
+    ).toHaveCount(0);
+    await expect(
+        page.getByText(
+            "The workspace administrator needs to turn automatic calibration on again.",
+        ),
+    ).toHaveCount(0);
+    expect(changes).toEqual([]);
+});
+
 test("a preliminary calibration is marked in the list and its detail gives the factor and the reason", async ({
     page,
 }) => {
@@ -973,6 +1011,9 @@ for (const [state, expected] of states)
     }) => {
         await mockApi(page);
         await routeRuns(page, () => [run(40, { selection_state: state })]);
+        await routeAutomation(page, {
+            current_calibration: state === "active" ? inForce(40) : null,
+        });
         await openCalibration(page);
         const row = page.getByRole("row", { name: /^40\s/ });
         await expect(row).toBeVisible();
@@ -992,7 +1033,11 @@ test("activating a candidate states its effect before it is confirmed", async ({
 }) => {
     await mockApi(page);
     const activations: string[] = [];
-    await routeRuns(page, () => [run(40)]);
+    await routeRuns(page, () => [
+        run(40, {
+            result: { training_day_dates: ["2026-01-03", "2026-01-04"] },
+        }),
+    ]);
     await page.route("**/plants/21/calibrations/40/activate/", (route) => {
         activations.push(route.request().url());
         return route.fulfill({ json: {} });
@@ -1003,7 +1048,7 @@ test("activating a candidate states its effect before it is confirmed", async ({
         name: "Use calibration No. 40?",
     });
     await expect(confirmation).toContainText(
-        "Factor 1.1 applies to new forecasts and to production calculated from satellite data from 2026-01-01, its first calibration day. Forecasts already made keep their calibration.",
+        "Factor 1.1 applies to new forecasts and to production calculated from satellite data from 2026-01-03, its first calibration day. Forecasts already made keep their calibration.",
     );
     await expect(confirmation).toContainText(
         "Automatic calibration will be turned on.",
@@ -1014,6 +1059,23 @@ test("activating a candidate states its effect before it is confirmed", async ({
     await activate(page, 40);
     await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
     expect(activations).toHaveLength(1);
+});
+
+test("activating a candidate without its calibration days names no date", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await routeRuns(page, () => [run(40)]);
+    await openCalibration(page);
+    await reviewActivation(page, 40);
+    await expect(
+        page
+            .getByRole("region", { name: "Use calibration No. 40?" })
+            .getByText(
+                "Factor 1.1 applies to new forecasts and to production calculated from satellite data from its first calibration day. Forecasts already made keep their calibration.",
+                { exact: true },
+            ),
+    ).toBeVisible();
 });
 
 test("the calibration in force names its run, time and who selected it", async ({
@@ -1051,6 +1113,15 @@ test("the calibration in force names its run, time and who selected it", async (
             "Automatic calibration is paused: this plant has no current technical details.",
         ),
     ).toBeVisible();
+    const row = page.getByRole("row", { name: /^40\s/ });
+    await expect(row).toBeVisible();
+    await expect(row.getByText("In use", { exact: true })).toHaveCount(0);
+    await row.getByRole("button", { name: "View details" }).click();
+    const detail = page.locator(".calibration-detail");
+    await expect(
+        detail.getByRole("heading", { name: "Calibration No. 40" }),
+    ).toBeVisible();
+    await expect(detail.getByText("In use", { exact: true })).toHaveCount(0);
 });
 
 const blockers = [

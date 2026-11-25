@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useFormat } from "@/lib/format/use-format";
 import { QUALITIES, qualityOf } from "@/lib/production";
@@ -7,7 +7,7 @@ import { UnconfirmedError } from "@/lib/api/errors";
 import { ControlField, UnconfirmedNotice, WriteFailure } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import { useLabel } from "@/ui/vocabulary";
-import type { Draft, Editor, Interval } from "./model";
+import { revertOutcome, type Draft, type Editor, type Interval } from "./model";
 import { repeatsAttempt } from "./screen";
 
 export type DraftChange = Partial<Pick<Draft, "energy" | "quality">>;
@@ -44,12 +44,8 @@ export function IntervalEditor({
     const blocked =
         saving || (canManage && editor.status === "failed" && !editor.attempt);
     const format = useFormat();
-    const provider = row.provider_originals.length
-        ? row.provider_originals.reduce(
-              (total, original) => total + original.energy_mwh,
-              0,
-          )
-        : null;
+    const outcome = revertOutcome(row);
+    const consequenceId = useId();
     return (
         <form
             className="production-row-editor"
@@ -112,20 +108,32 @@ export function IntervalEditor({
                         type="button"
                         disabled={blocked}
                         aria-label={
-                            provider === null
-                                ? t("remove_correction_interval", { interval })
-                                : t("revert_interval", { interval })
+                            outcome.kind === "restore"
+                                ? t("revert_interval", {
+                                      interval,
+                                      energy: format.number(outcome.energy),
+                                  })
+                                : t("remove_correction_interval", { interval })
+                        }
+                        aria-describedby={
+                            outcome.kind === "restore"
+                                ? undefined
+                                : consequenceId
                         }
                         onClick={() => onSave("revert")}
                     >
-                        {provider === null
-                            ? t("remove_correction")
-                            : t("use_provider", {
-                                  energy: format.number(provider),
-                              })}
+                        {outcome.kind === "restore"
+                            ? t("use_provider", {
+                                  energy: format.number(outcome.energy),
+                              })
+                            : t("remove_correction")}
                     </button>
-                    {provider === null && (
-                        <p className="fine">{t("remove_consequence")}</p>
+                    {outcome.kind !== "restore" && (
+                        <p className="fine" id={consequenceId}>
+                            {outcome.kind === "none"
+                                ? t("remove_consequence")
+                                : t("overlap_consequence")}
+                        </p>
                     )}
                 </>
             )}

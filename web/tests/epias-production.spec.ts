@@ -297,7 +297,12 @@ test("actual production defaults to generation hours and full day restores every
         .getByText("Source of actual production", { exact: true })
         .click();
     await expect(page.getByText("EPİAŞ · Not connected")).toBeVisible();
-    await expect(page.getByText(/Saved values stay/)).toBeVisible();
+    await expect(
+        page.getByText(
+            "No new EPİAŞ values are arriving. Saved values stay, and production can still be entered.",
+            { exact: true },
+        ),
+    ).toBeVisible();
     const download = page.waitForEvent("download");
     await page.getByRole("button", { name: "Download CSV" }).click();
     expect((await download).suggestedFilename()).toMatch(
@@ -372,9 +377,15 @@ test("edits survive provider refresh and revert explicitly restores the latest p
     await page
         .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
         .click();
-    await page
-        .getByRole("button", { name: "Use EPİAŞ value for 08:00–09:00" })
-        .click();
+    const restore = page.getByRole("button", {
+        name: "Use EPİAŞ value (3 MWh) for 08:00–09:00",
+        exact: true,
+    });
+    await expect(restore).toHaveText("Use EPİAŞ value (3 MWh)");
+    await expect(
+        page.getByText("This interval will have no value.", { exact: true }),
+    ).toHaveCount(0);
+    await restore.click();
     await expect(row(page, "08:00–09:00").getByRole("cell").first()).toHaveText(
         "3 UEVM",
     );
@@ -546,7 +557,7 @@ test("manual-only days distinguish absent production from a measured all-zero da
     state.connected = false;
     await openProduction(page);
     await expect(
-        page.getByText("No actual production", { exact: true }),
+        page.getByText("No actual production values.", { exact: true }),
     ).toBeVisible();
     await expect(table(page).getByRole("row")).toHaveCount(25);
     await expect(
@@ -568,15 +579,18 @@ test("manual-only days distinguish absent production from a measured all-zero da
     await expect(
         page.getByRole("button", { name: /Use EPİAŞ value/ }),
     ).toHaveCount(0);
+    const remove = page.getByRole("button", {
+        name: "Remove entered value for 08:00–09:00",
+        exact: true,
+    });
+    await expect(remove).toHaveText("Remove entered value");
+    await expect(remove).toHaveAccessibleDescription(
+        "This interval will have no value.",
+    );
     await expect(
         page.getByText("This interval will have no value.", { exact: true }),
     ).toBeVisible();
-    await page
-        .getByRole("button", {
-            name: "Remove entered value for 08:00–09:00",
-            exact: true,
-        })
-        .click();
+    await remove.click();
     await expect(
         page.getByText("Entered value removed.", { exact: true }),
     ).toBeVisible();
@@ -1234,6 +1248,28 @@ test("native timeline preserves half-hour and offset-hour corrections with their
     await expect(row(page, "09:30\u201310:30")).toContainText(
         "EPİAŞ value, 10:00\u201311:00: 4 MWh",
     );
+    for (const interval of ["08:00\u201308:30", "09:30\u201310:30"]) {
+        await page
+            .getByRole("button", { name: `Edit ${interval}`, exact: true })
+            .click();
+        const remove = page.getByRole("button", {
+            name: `Remove entered value for ${interval}`,
+            exact: true,
+        });
+        await expect(remove).toHaveText("Remove entered value");
+        await expect(remove).toHaveAccessibleDescription(
+            "EP\u0130A\u015e values for the overlapping hours are used again.",
+        );
+        await expect(
+            page.getByRole("button", { name: /Use EP\u0130A\u015e value/ }),
+        ).toHaveCount(0);
+        await expect(
+            page.getByText("This interval will have no value.", {
+                exact: true,
+            }),
+        ).toHaveCount(0);
+        await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    }
     await page
         .getByRole("button", { name: "Edit 09:30\u201310:30", exact: true })
         .click();

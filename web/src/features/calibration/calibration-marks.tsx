@@ -6,16 +6,16 @@ import { provisional, type Run } from "./model";
 
 export function CalibrationMarks({
     run,
+    inUse,
 }: {
-    run: Pick<Run, "status" | "selection_state" | "assessment" | "result">;
+    run: Pick<Run, "status" | "assessment" | "result">;
+    inUse: boolean;
 }) {
     const t = useTranslations("Calibrations");
     return (
         <span className="tags">
             <StatusTag group="CalibrationStatus" value={run.status} />
-            {run.selection_state === "active" && (
-                <Tag tone="success">{t("in_use")}</Tag>
-            )}
+            {inUse && <Tag tone="success">{t("in_use")}</Tag>}
             {run.assessment === "provisional" && <Tag>{t("preliminary")}</Tag>}
             {provisional(run) && (
                 <Tag tone="warning">{t("provisional_production")}</Tag>

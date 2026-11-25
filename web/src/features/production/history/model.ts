@@ -107,6 +107,21 @@ export function sameInterval(a: Bounds, b: Bounds) {
     );
 }
 
+export type RevertOutcome =
+    | { kind: "restore"; energy: number }
+    | { kind: "overlap" }
+    | { kind: "none" };
+
+export function revertOutcome(
+    row: Pick<Interval, "starts_at" | "ends_at" | "provider_originals">,
+): RevertOutcome {
+    const [only, ...others] = row.provider_originals;
+    if (!only) return { kind: "none" };
+    return !others.length && sameInterval(only, row)
+        ? { kind: "restore", energy: only.energy_mwh }
+        : { kind: "overlap" };
+}
+
 export function saveFailure(error: unknown) {
     return {
         error: (error as Error).message,

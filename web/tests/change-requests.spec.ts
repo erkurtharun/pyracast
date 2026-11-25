@@ -311,6 +311,108 @@ test("member submits a native production correction, sent again after a refusal 
     expect(direct).toEqual([]);
 });
 
+test("a member's staged revert reads as using the EPİAŞ value only where one covers the interval exactly", async ({
+    page,
+}) => {
+    await member(page);
+    const submissions: Record<string, unknown>[] = [];
+    await page.route("**/api/**/production/?*", (route) => {
+        const date = new URL(route.request().url()).searchParams.get(
+            "start_date",
+        )!;
+        const at = (time: string) => `${date}T${time}:00+03:00`;
+        const entered = (
+            start: string,
+            end: string,
+            id: number,
+            originals: [string, string, number][],
+        ): Parameters<typeof nativeProductionHistory>[2][number] => ({
+            starts_at: at(start),
+            ends_at: at(end),
+            effective: reading,
+            can_edit: false,
+            can_propose: true,
+            can_propose_revert: true,
+            revision_id: id,
+            observation: {
+                id,
+                configuration_id: 31,
+                starts_at: at(start),
+                ends_at: at(end),
+                energy_mwh: 1,
+                quality: "valid",
+                source: "meter",
+                recorded_by_id: 2,
+                created_at: `${date}T12:00:00Z`,
+                supersedes_id: null,
+                is_reverted: false,
+            },
+            provider_originals: originals.map(([from, to, energy]) => ({
+                starts_at: at(from),
+                ends_at: at(to),
+                energy_mwh: energy,
+                source_kind: "settlement_injection",
+                snapshot_id: 1,
+                collected_at: `${date}T00:00:00Z`,
+                available_at: `${date}T00:00:00Z`,
+                content_sha256: "",
+                provisional: false,
+            })),
+        });
+        return route.fulfill({
+            json: nativeProductionHistory(date, "Europe/Istanbul", [
+                entered("08:00", "09:00", 4, [["08:00", "09:00", 2]]),
+                entered("09:00", "09:30", 5, [["09:00", "10:00", 3]]),
+                entered("10:00", "10:30", 6, []),
+            ]),
+        });
+    });
+    await page.route("**/change-requests/production/", (route) => {
+        submissions.push(route.request().postDataJSON());
+        return route.fulfill({ status: 201, json: proposal() });
+    });
+    await openPlant(page, "Production");
+    const outcomes = [
+        ["08:00", "Use EPİAŞ value (2 MWh)", null],
+        [
+            "09:00",
+            "Remove entered value",
+            "EPİAŞ values for the overlapping hours are used again.",
+        ],
+        ["10:00", "Remove entered value", "This interval will have no value."],
+    ] as const;
+    for (const [start, action, consequence] of outcomes) {
+        await page.getByRole("button", { name: `Edit ${start}` }).click();
+        const revert = page
+            .locator(".production-row-editor")
+            .getByRole("button", { name: action });
+        await expect(revert).toHaveText(action);
+        if (consequence)
+            await expect(revert).toHaveAccessibleDescription(consequence);
+        else await expect(revert).not.toHaveAttribute("aria-describedby");
+        await revert.click();
+    }
+    const items = draft(page).getByRole("listitem");
+    await expect(items).toHaveCount(3);
+    for (const [index, [start, action]] of outcomes.entries()) {
+        await expect(items.nth(index).locator("strong")).toContainText(start);
+        await expect(items.nth(index)).toContainText(action);
+    }
+    await expect(draft(page)).not.toContainText("Provider reading");
+    await draft(page).getByLabel("Reason for correction").fill("Checked meter");
+    await draft(page)
+        .getByRole("button", { name: "Send for approval", exact: true })
+        .click();
+    await expect(page.getByText(/^Sent for approval\./)).toBeVisible();
+    expect(submissions[0]).toMatchObject({
+        changes: [
+            { action: "revert", expected_revision_id: 4 },
+            { action: "revert", expected_revision_id: 5 },
+            { action: "revert", expected_revision_id: 6 },
+        ],
+    });
+});
+
 test("a server error shows its reference", async ({ page }) => {
     await member(page);
     await page.route("**/api/**/production/?*", (route) => {

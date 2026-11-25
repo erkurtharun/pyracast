@@ -5,6 +5,7 @@ import { qualityOf } from "@/lib/production";
 import {
     energyValue,
     intervalKey,
+    revertOutcome,
     type Draft,
     type Editor,
     type History,
@@ -404,7 +405,11 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
                           energy,
                           quality: open.quality,
                       }
-                    : { ...bounds, action: "revert" };
+                    : {
+                          ...bounds,
+                          action: "revert",
+                          outcome: revertOutcome(event.row),
+                      };
             const base = draft ?? {
                 day: screen.day,
                 items: [],

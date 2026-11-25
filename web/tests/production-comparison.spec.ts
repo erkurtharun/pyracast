@@ -53,6 +53,7 @@ test("available historical model days appear without empty grid rows", async ({
                         predicted_energy_mwh: index < 22 ? null : 12,
                         error_mwh: index < 22 ? null : 2,
                         provisional_production: index >= 22,
+                        provisional_snapshot_ids: index >= 22 ? [index] : [],
                         historical_configuration_assumed: index >= 22,
                     }),
                 ),
@@ -281,6 +282,7 @@ test("a failed refresh on return keeps the comparison until a retry loads it", a
                               measured_energy_mwh: 10,
                               predicted_energy_mwh: 12,
                               error_mwh: 2,
+                              provisional_snapshot_ids: [],
                           },
                       ],
                   },
@@ -322,7 +324,7 @@ test("a failed refresh on return keeps the comparison until a retry loads it", a
     await expect(missing).toContainText("1");
 });
 
-test("a forecast accuracy comparison with real-time production says so above its figures and signs the daily difference", async ({
+test("a forecast accuracy comparison signs the daily difference, and an entered day whose source names real-time production is not marked real-time", async ({
     page,
 }) => {
     await page.clock.setFixedTime(new Date("2026-11-11T12:00:00Z"));
@@ -353,6 +355,9 @@ test("a forecast accuracy comparison with real-time production says so above its
                         predicted_energy_mwh: 9,
                         error_mwh: -1,
                         provisional_production: index === 1,
+                        manual_observation_ids: index === 1 ? [5] : [],
+                        settlement_snapshot_ids: index === 1 ? [] : [3],
+                        provisional_snapshot_ids: [],
                     }),
                 ),
             }),
@@ -367,11 +372,6 @@ test("a forecast accuracy comparison with real-time production says so above its
     const comparison = page.locator("section").filter({
         has: page.getByRole("heading", { name: "Comparison", exact: true }),
     });
-    await expect(
-        comparison.getByText("Includes EPİAŞ real-time production.", {
-            exact: true,
-        }),
-    ).toBeVisible();
     await expect(
         comparison.locator(".stat").filter({
             hasText: "Average daily difference (forecast − actual)",
@@ -392,8 +392,52 @@ test("a forecast accuracy comparison with real-time production says so above its
         ).toBeVisible();
     await expect(
         comparison.getByRole("cell", { name: "Compared", exact: true }),
-    ).toHaveCount(1);
+    ).toHaveCount(2);
+    await expect(
+        comparison.getByText(/Includes EPİAŞ real-time production/),
+    ).toHaveCount(0);
     await expect(
         comparison.getByRole("img", { name: "Absolute error by day" }),
+    ).toBeVisible();
+});
+
+test("a range with requested days and none compared counts the days not compared", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/plants/21/performance/**", (route) =>
+        route.fulfill({
+            json: answer("PerformanceOutput", {
+                comparison: "archived_forecast",
+                start_date: "2026-10-12",
+                end_date: "2026-11-10",
+                matched_days: 0,
+                requested_days: 30,
+                relative_error: null,
+                skill_score: null,
+                skill_days: 0,
+                metrics: null,
+                baseline_metrics: null,
+                days: [],
+            }),
+        }),
+    );
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Production", exact: true }).click();
+    await page.getByRole("button", { name: "Comparison", exact: true }).click();
+    const comparison = page.locator("section").filter({
+        has: page.getByRole("heading", { name: "Comparison", exact: true }),
+    });
+    await expect(
+        comparison.getByText(
+            "No day in this date range can be compared. Choose other dates or check the actual production.",
+            { exact: true },
+        ),
+    ).toBeVisible();
+    await expect(
+        comparison.getByText("Days not compared (30)", { exact: true }),
     ).toBeVisible();
 });

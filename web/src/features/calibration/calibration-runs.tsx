@@ -7,12 +7,14 @@ import type { Run } from "./model";
 
 export function CalibrationRunList({
     runs,
+    inUse,
     canManage,
     busy,
     onDetails,
     onReview,
 }: {
     runs: readonly Run[];
+    inUse: number | null;
     canManage: boolean;
     busy: boolean;
     onDetails: (run: Run) => void;
@@ -43,7 +45,10 @@ export function CalibrationRunList({
                                 {run.window_start} – {run.window_end}
                             </td>
                             <td>
-                                <CalibrationMarks run={run} />
+                                <CalibrationMarks
+                                    run={run}
+                                    inUse={run.id === inUse}
+                                />
                             </td>
                             <td>{format.number(run.factor, 4)}</td>
                             <td>

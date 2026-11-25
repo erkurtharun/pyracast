@@ -413,11 +413,16 @@ for (const width of [320, 390, 768, 1440]) {
                 await expect(
                     page.getByText("Real-time (EPİAŞ)", { exact: true }),
                 ).toHaveCount(2);
+                const factor = page
+                    .locator(".calibration-detail .stat")
+                    .filter({
+                        has: page.getByText("Factor", { exact: true }),
+                    });
                 await expect(
-                    page
-                        .locator(".calibration-detail .stat")
-                        .filter({ hasText: "Factor" }),
-                ).toContainText("1.1");
+                    factor.getByText("Factor", { exact: true }),
+                ).toBeVisible();
+                await expect(factor.locator("strong")).toBeVisible();
+                await expect(factor.locator("strong")).toHaveText("1.1");
             }
             if (tab === "Production") {
                 const table = page.getByRole("table", {

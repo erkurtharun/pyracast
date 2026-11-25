@@ -16,7 +16,7 @@ import { CalibrationAutomationPanel } from "./calibration-automation";
 import { CalibrationRunDetail } from "./calibration-run-detail";
 import { CalibrationRunList } from "./calibration-runs";
 import { CalibrationSelection } from "./calibration-selection";
-import { requestState, type Action, type Run } from "./model";
+import { calibrationInUse, requestState, type Action, type Run } from "./model";
 
 type DetailState =
     | { status: "idle" | "loading" }
@@ -180,6 +180,7 @@ export function Calibrations({ scope }: { scope: PlantScope }) {
                         data.results.length ? (
                             <CalibrationRunList
                                 runs={data.results}
+                                inUse={calibrationInUse(automation.data)}
                                 canManage={canManage}
                                 busy={pending}
                                 onDetails={(run: Run) =>

@@ -51,6 +51,20 @@ export function canReset(status: AutomationStatus) {
     );
 }
 
+export function calibrationInUse(status: AutomationStatus | undefined) {
+    const current = status?.current_calibration;
+    return current?.effective ? current.calibration_id : null;
+}
+
+export function firstCalibrationDay(run: Pick<Run, "result">) {
+    const days: unknown =
+        run.result && typeof run.result === "object"
+            ? Reflect.get(run.result, "training_day_dates")
+            : undefined;
+    const first: unknown = Array.isArray(days) ? days[0] : undefined;
+    return typeof first === "string" ? first : null;
+}
+
 export function provisional(run: Pick<Run, "result">) {
     const report = run.result;
     return (

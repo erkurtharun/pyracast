@@ -470,7 +470,7 @@
         "editStagedInterval": "Edit staged correction for {interval}",
         "removeStaged": "Remove",
         "removeStagedInterval": "Remove staged correction for {interval}",
-        "stagedProviderReading": "Provider reading",
+        "stagedProviderReading": "Use EPİAŞ value ({energy} MWh)",
         "stagedChanged": "This interval changed after you added it. Edit or remove it.",
         "sending": "Sending…",
         "discardDraft": "Discard request",

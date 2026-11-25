@@ -10,7 +10,13 @@ import { ScrollRegion } from "@/ui/scroll-region";
 import { JsonDetails, Notice, Stat } from "@/ui/ui";
 import { useCodeLabel } from "@/ui/vocabulary";
 import { CalibrationMarks } from "./calibration-marks";
-import type { Action, AutomationStatus, RequestState } from "./model";
+import {
+    calibrationInUse,
+    firstCalibrationDay,
+    type Action,
+    type AutomationStatus,
+    type RequestState,
+} from "./model";
 
 const REQUEST_REFUSALS = {
     configuration: "await_configuration",
@@ -39,13 +45,14 @@ function ActivationEffect({
 }) {
     const t = useTranslations("Calibrations");
     const format = useFormat();
+    const factor = format.number(run.factor, 4);
+    const start = firstCalibrationDay(run);
     return (
         <>
             <p>
-                {t("activate_effect", {
-                    factor: format.number(run.factor, 4),
-                    start: run.window_start,
-                })}
+                {start === null
+                    ? t("activate_effect_undated", { factor })
+                    : t("activate_effect", { factor, start })}
             </p>
             <p>
                 {automation?.enabled
@@ -89,7 +96,10 @@ export function CalibrationRunDetail({
         <div className="calibration-detail">
             <div className="section-heading">
                 <h3>{t("calibration_id", { id: run.id })}</h3>
-                <CalibrationMarks run={run} />
+                <CalibrationMarks
+                    run={run}
+                    inUse={run.id === calibrationInUse(automation)}
+                />
             </div>
             {blocker !== null && run.selection_state !== "active" && (
                 <Notice>
