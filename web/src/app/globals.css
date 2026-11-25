@@ -1280,32 +1280,8 @@ pre,
     display: block;
     font-weight: 400;
 }
-.forecast-interval-table .interval-source {
-    text-align: left;
-}
 .forecast-interval-table .interval-value {
     white-space: nowrap;
-}
-.interval-notes {
-    margin-top: var(--space-3);
-    color: var(--muted);
-    font-size: 12px;
-}
-.interval-notes ul {
-    list-style: none;
-    margin: var(--space-2-5) 0 0;
-    padding: 0;
-}
-.interval-notes li {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: var(--space-3);
-    padding: var(--space-2) 0;
-    border-top: 1px solid var(--line);
-    overflow-wrap: anywhere;
-}
-.interval-notes p {
-    margin: 0;
 }
 .production-table th,
 .production-table td {

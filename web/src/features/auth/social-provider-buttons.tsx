@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { authRequest } from "@/lib/auth-api";
 import { routes } from "@/lib/routes";
 import { useSessionState } from "@/lib/session-client";
+import { rememberProviderReturn } from "./provider-return";
 
 export type SocialProvider = "google" | "microsoft";
 export function useSocialProviders(provided?: SocialProvider[]) {
@@ -64,6 +65,9 @@ export function SocialProviderButtons({
                     key={provider}
                     action="/api/auth/browser/v1/auth/provider/redirect"
                     method="post"
+                    onSubmit={
+                        process === "login" ? rememberProviderReturn : undefined
+                    }
                 >
                     <input
                         type="hidden"

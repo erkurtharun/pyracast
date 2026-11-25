@@ -9,11 +9,11 @@ import {
     type ForecastInterval as Interval,
 } from "./forecast-intervals";
 import { ForecastChart } from "./panel/forecast-chart";
-import { ForecastProvenance } from "./panel/forecast-provenance";
 import { ForecastSummary } from "./panel/forecast-summary";
 import { ForecastUnavailable } from "./panel/forecast-unavailable";
 import {
     chartIntervals,
+    hourly,
     scenarioIntervals,
     type ForecastResult,
 } from "./panel/model";
@@ -47,6 +47,7 @@ export function ForecastPanel({
     );
     const time = (value: string) => intervalTime.format(new Date(value));
     const scenarioLabel = t("with_outages_title");
+    const satellite = forecast.source_kind === "estimated_actuals";
     return (
         <>
             <ForecastSummary
@@ -63,9 +64,7 @@ export function ForecastPanel({
                 checked={showFullDay}
                 onChange={setShowFullDay}
             />
-            {rows.length === 0 ? (
-                <p>{t("no_interval_data_available")}</p>
-            ) : (
+            {rows.length > 0 && (
                 <>
                     <ForecastChart
                         rows={rows}
@@ -79,26 +78,17 @@ export function ForecastPanel({
                     <ForecastIntervals
                         rows={rows}
                         electrical={electrical}
+                        satellite={satellite}
                         scenarioLabel={scenario ? scenarioLabel : undefined}
-                        showSources={forecast.source_kind === "mixed"}
                         label={
-                            forecast.source_kind === "mixed"
-                                ? t("updated_estimates_and_forecast")
-                                : forecast.source_kind === "estimated_actuals"
-                                  ? t("estimated_actual_intervals")
-                                  : t("forecast_intervals")
+                            hourly(result, intervals)
+                                ? t("hourly_values")
+                                : t("half_hourly_values")
                         }
                         formatTime={time}
                     />
                 </>
             )}
-            <ForecastProvenance
-                forecast={forecast}
-                result={result}
-                electrical={electrical}
-                scenario={Boolean(scenario)}
-                diagnostic={diagnostic}
-            />
         </>
     );
 }

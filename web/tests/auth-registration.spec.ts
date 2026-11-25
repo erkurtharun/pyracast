@@ -1165,3 +1165,21 @@ test("a verification answered with a refusal that is not allauth's does not repo
     ).toHaveCount(0);
     await expect(page.getByLabel("Email code")).toBeVisible();
 });
+
+for (const [next, target] of [
+    ["/admin/plants/7/?tab=review", "/admin/plants/7/"],
+    ["//evil.example/admin/", "/admin/"],
+] as const) {
+    test(`an administrator's request for the console is sent to ${target} for ${JSON.stringify(next)}`, async ({
+        page,
+    }) => {
+        await mockApi(page, { admin: true });
+        const requested: string[] = [];
+        await page.route("**/admin/**", (route) => {
+            requested.push(new URL(route.request().url()).pathname);
+            return route.abort();
+        });
+        await page.goto(`/app/?next=${encodeURIComponent(next)}`);
+        await expect.poll(() => requested).toEqual([target]);
+    });
+}

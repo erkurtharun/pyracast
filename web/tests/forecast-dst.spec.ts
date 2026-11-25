@@ -44,9 +44,7 @@ async function openDay(page: Page, date: string, starts: string[]) {
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page
-        .getByText(`View interval data (${starts.length} intervals)`)
-        .click();
+    await page.getByText("Show table", { exact: true }).click();
     return page.getByRole("table");
 }
 

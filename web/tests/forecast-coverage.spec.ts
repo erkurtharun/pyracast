@@ -62,15 +62,15 @@ for (const electrical of [true, false]) {
             await page
                 .getByRole("button", { name: "Irradiance", exact: true })
                 .click();
-        await expect(page.getByRole("status")).toContainText(
-            "Some forecast data is missing.",
+        await expect(page.getByRole("status")).toHaveText(
+            "Data is missing for some hours.",
         );
         await page
             .getByRole("checkbox", {
                 name: "Show full day",
             })
             .check();
-        await page.getByText("View interval data (4 intervals)").click();
+        await page.getByText("Show table", { exact: true }).click();
         const missing = page
             .getByRole("row")
             .filter({ hasText: "00:00–03:30" });
@@ -78,10 +78,7 @@ for (const electrical of [true, false]) {
             missing.getByRole("cell", { name: "00:00–03:30", exact: true }),
         ).toBeVisible();
         await expect(missing.locator(".interval-value")).toHaveText(["—"]);
-        await page.locator(".interval-notes summary").click();
-        await expect(page.locator(".interval-notes")).toContainText(
-            "missing source interval",
-        );
+        await expect(page.locator(".interval-notes")).toHaveCount(0);
         const downloadPromise = page.waitForEvent("download");
         await page
             .getByRole("button", { name: "Download CSV", exact: true })
@@ -95,7 +92,7 @@ for (const electrical of [true, false]) {
     });
 }
 
-test("irradiance distinguishes available source hours from ambiguous zero power", async ({
+test("irradiance shows hours without a usable value as missing without interval notes", async ({
     page,
 }) => {
     await mockApi(page);
@@ -141,20 +138,17 @@ test("irradiance distinguishes available source hours from ambiguous zero power"
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
     await page.getByRole("button", { name: "Irradiance", exact: true }).click();
-    await expect(page.getByRole("status")).toContainText(
-        "Some forecast data is missing.",
+    await expect(page.getByRole("status")).toHaveText(
+        "Data is missing for some hours.",
     );
     await page
         .getByRole("checkbox", {
             name: "Show full day",
         })
         .check();
-    await page.getByText("View interval data (4 intervals)").click();
-    await page.locator(".interval-notes summary").click();
-    const ambiguous = page
-        .locator(".interval-notes li")
-        .filter({ hasText: "ambiguous zero power" });
-    await expect(ambiguous).toHaveCount(2);
+    await page.getByText("Show table", { exact: true }).click();
+    await expect(page.locator(".interval-notes")).toHaveCount(0);
+    await expect(page.getByText(/ambiguous zero power/)).toHaveCount(0);
     await expect(
         page
             .getByRole("table")
@@ -200,13 +194,16 @@ test("switching forecast views waits for data with the matching units", async ({
     await page.goto("/app/");
     await page.getByRole("button", { name: /East array/ }).click();
     await expect(
-        page.getByRole("heading", { name: "Electrical generation" }),
+        page.getByRole("heading", { name: "Generation forecast" }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Irradiance", exact: true }).click();
     await observed;
     try {
         await expect(
-            page.getByRole("heading", { name: "Irradiance", exact: true }),
+            page.getByRole("heading", {
+                name: "Irradiance forecast",
+                exact: true,
+            }),
         ).toHaveCount(0);
         await expect(
             page.getByText("Loading irradiance forecast…", { exact: true }),
@@ -215,13 +212,16 @@ test("switching forecast views waits for data with the matching units", async ({
         release();
     }
     await expect(
-        page.getByRole("heading", { name: "Irradiance", exact: true }),
+        page.getByRole("heading", {
+            name: "Irradiance forecast",
+            exact: true,
+        }),
     ).toBeVisible();
     await expect(page.getByText("kWh/m²", { exact: true })).toBeVisible();
 });
 
 for (const width of [320, 390]) {
-    test(`mixed forecast coverage remains visible at ${width}px`, async ({
+    test(`a day from several forecast updates shows one data line at ${width}px`, async ({
         page,
     }) => {
         await page.setViewportSize({ width, height: 800 });
@@ -278,22 +278,15 @@ for (const width of [320, 390]) {
             .getByRole("button", { name: "Irradiance", exact: true })
             .click();
         await expect(
-            page.getByText("Mixed forecast updates", { exact: true }),
+            page.getByText("Forecast data: Nov 11, 2026, 8:00 AM", {
+                exact: true,
+            }),
         ).toBeVisible();
-        await page.getByText("View interval data (2 intervals)").click();
+        await expect(page.locator("section.panel .tag")).toHaveCount(0);
+        await page.getByText("Show table", { exact: true }).click();
         await expect(page.getByRole("cell", { name: /^07:00–/ })).toBeVisible();
         await expect(page.getByRole("cell", { name: /^10:30–/ })).toBeVisible();
-        await page.getByText("Source & quality", { exact: true }).click();
-        await expect(
-            page.getByText(
-                "Forecast update 6: collected Nov 11, 2026, 5:00 AM",
-            ),
-        ).toBeVisible();
-        await expect(
-            page.getByText(
-                "Forecast update 8: collected Nov 11, 2026, 8:00 AM",
-            ),
-        ).toBeVisible();
+        await expect(page.getByText(/^Forecast update /)).toHaveCount(0);
         const downloadPromise = page.waitForEvent("download");
         await page
             .getByRole("button", { name: "Download CSV", exact: true })
@@ -337,7 +330,7 @@ test("outage comparison CSV writes both scenarios per interval without provenanc
         .click();
     const downloadPromise = page.waitForEvent("download");
     await page
-        .getByRole("button", { name: "Download both scenarios CSV" })
+        .getByRole("button", { name: "Download CSV", exact: true })
         .click();
     const download = await downloadPromise;
     const csv = await readFile(await download.path(), "utf8");
@@ -433,45 +426,28 @@ for (const state of [
         await page
             .getByRole("button", { name: /East array|Antalya solar park/ })
             .click();
-        if (state === "stale")
-            await expect(page.getByRole("status")).toHaveText(
-                "Production comparison is out of date.",
-            );
-        else if (state === "insufficient")
+        if (state === "stale" || state === "insufficient")
             await expect(page.getByRole("status")).toHaveCount(0);
         else if (state === "recovered")
             await expect(page.getByRole("status")).toHaveText(
-                "Earlier production was below the uncalibrated model.",
+                "Production was below expected on several recent days.",
             );
         else
             await expect(page.getByRole("status")).toHaveText(
-                `Production below uncalibrated model: ${state === "zero" ? 100 : 14}% on 2026-11-13.`,
+                `Production was ${state === "zero" ? 100 : 14}% below expected during the hours compared on 2026-11-13.`,
             );
         await expect(
             page.getByText("If derating persists", { exact: true }),
         ).toHaveCount(0);
         await expect(
-            page.getByRole("button", { name: "Download both scenarios CSV" }),
-        ).toHaveCount(0);
-        await expect(
-            page.getByRole("img", { name: /^Power by interval/ }),
+            page.getByRole("img", { name: "Average power (MW)", exact: true }),
         ).toBeVisible();
-        await page.getByText("View interval data (1 interval)").click();
+        await page.getByText("Show table", { exact: true }).click();
         await expect(page.getByRole("columnheader")).toHaveCount(2);
         await expect(
             page.getByRole("table").locator(".interval-value"),
         ).toHaveText(["5"]);
-        await page.getByText("Source & quality", { exact: true }).click();
-        await expect(page.locator(".provenance")).toContainText(
-            "Uncalibrated reference model",
-        );
-        await expect(page.locator(".provenance")).toContainText(
-            "2 qualifying days: 2026-11-08 to 2026-11-13.",
-        );
-        if (state === "recovered")
-            await expect(page.locator(".provenance")).toContainText(
-                "Latest comparison within threshold on 2026-11-13.",
-            );
+        await expect(page.locator(".provenance")).toHaveCount(0);
         expect(
             await page.evaluate(() => document.documentElement.scrollWidth),
         ).toBeLessThanOrEqual(320);
