@@ -19,7 +19,7 @@ const start = new Date("2026-11-20T09:00:00Z");
 const idleLimit = 30 * 60_000;
 const tick = 30_000;
 const listPoll = 2 * 60_000;
-const capacity = "DC nameplate capacity (MW)";
+const capacity = "Panel capacity (MWp)";
 
 function cover(page: Page) {
     return page.getByRole("heading", {

@@ -260,7 +260,7 @@ test("actual production defaults to generation hours and full day restores every
     state.connected = false;
     await openProduction(page);
     await expect(
-        page.getByRole("button", { name: "Actuals", exact: true }),
+        page.getByRole("button", { name: "Actual production", exact: true }),
     ).toHaveAttribute("aria-current", "page");
     await expect(
         page.getByRole("button", { name: "Comparison", exact: true }),

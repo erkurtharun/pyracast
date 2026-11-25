@@ -6,6 +6,7 @@ import { csvTexts } from "./support/production-csv";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
 import {
+    answer,
     region,
     plant,
     user,
@@ -34,7 +35,9 @@ test("mock contract: signs in with CSRF, selects region, and signs out", async (
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Irradiance forecast", exact: true })
+        .click();
     await expect(
         page.getByRole("heading", { name: "No forecast data for this day." }),
     ).toBeVisible();
@@ -107,44 +110,51 @@ test("one plant request saves location and technical details before approval", a
     await page.getByLabel("Longitude").fill("30.2");
     await page.getByLabel("Time zone").selectOption("Europe/Berlin");
     await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.getByLabel("DC nameplate capacity (MW)").fill("130");
-    await page.getByLabel("Inverter AC capacity (MW, optional)").fill("100");
-    await page.getByLabel("Mounting type").selectOption("fixed");
-    await page.getByLabel("Surface tilt (degrees, optional)").fill("0");
-    await page.getByLabel("Surface azimuth (degrees, optional)").fill("180");
+    await page.getByLabel("Panel capacity (MWp)").fill("130");
+    await page.getByLabel("Inverter capacity (MW AC, optional)").fill("100");
+    await page.getByLabel("Mounting").selectOption("fixed");
+    await page.getByLabel("Panel tilt (°, optional)").fill("0");
+    await page.getByLabel("Panel azimuth (°, optional)").fill("180");
+    await expect(
+        page.getByLabel("Panel azimuth (°, optional)"),
+    ).toHaveAccessibleDescription("Clockwise from north.");
+    await expect(page.getByText("Capacity and mounting guide")).toHaveCount(0);
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     expect(writes).toBe(0);
     await expect(
-        page.getByRole("heading", { name: "Check your plant details" }),
+        page.getByRole("heading", { name: "Check the details" }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Back", exact: true }).click();
-    await expect(page.getByLabel("DC nameplate capacity (MW)")).toHaveValue(
-        "130",
-    );
-    await expect(
-        page.getByLabel("Surface tilt (degrees, optional)"),
-    ).toHaveValue("0");
+    await expect(page.getByLabel("Panel capacity (MWp)")).toHaveValue("130");
+    await expect(page.getByLabel("Panel tilt (°, optional)")).toHaveValue("0");
     await page.getByRole("button", { name: "Back", exact: true }).click();
     await expect(page.getByLabel("Plant name", { exact: true })).toHaveValue(
         "New solar park",
     );
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page
-        .getByRole("button", { name: "Submit plant for approval" })
-        .click();
+    await page.getByRole("button", { name: "Send for approval" }).click();
     await expect(
         page.getByRole("heading", { name: "New solar park" }),
     ).toBeVisible();
     await expect(
-        page.getByText(/Awaiting administrator approval/),
+        page.getByText(/Waiting for approval by Pyracast/),
     ).toBeVisible();
-    await expect(page.getByRole("list", { name: "Next steps" })).toBeVisible();
+    await expect(
+        page.getByText(
+            "You can still change the technical details and the location.",
+        ),
+    ).toBeVisible();
     await expect(page.getByLabel("Forecast date")).toHaveCount(0);
+    for (const removed of [
+        "Next steps",
+        "Pyracast checks the plant details and connects its data source.",
+        "After approval, forecasts appear here and are collected on schedule.",
+    ])
+        await expect(page.getByText(removed)).toHaveCount(0);
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await expect(page.getByLabel("DC nameplate capacity (MW)")).toHaveValue(
-        "130",
-    );
+    await expect(page.getByLabel("Panel capacity (MWp)")).toHaveValue("130");
+    await expect(page.getByText("Capacity and mounting guide")).toHaveCount(0);
     expect(writes).toBe(1);
 });
 
@@ -193,13 +203,13 @@ test("plant configuration saves fixed angles and clears them when tracking", asy
     });
     await expect(page.getByText(/1 valid observations ready/)).toBeVisible();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByLabel("Mounting type").selectOption("fixed");
-    await page.getByLabel("Surface tilt (degrees, optional)").fill("0");
-    await page.getByLabel("Surface azimuth (degrees, optional)").fill("360");
-    await page.getByRole("button", { name: "Save configuration" }).click();
+    await page.getByLabel("Mounting").selectOption("fixed");
+    await page.getByLabel("Panel tilt (°, optional)").fill("0");
+    await page.getByLabel("Panel azimuth (°, optional)").fill("360");
+    await page.getByRole("button", { name: "Save technical details" }).click();
     expect(bodies).toHaveLength(0);
-    await page.getByLabel("Surface azimuth (degrees, optional)").fill("180");
-    await page.getByRole("button", { name: "Save configuration" }).click();
+    await page.getByLabel("Panel azimuth (°, optional)").fill("180");
+    await page.getByRole("button", { name: "Save technical details" }).click();
     await expect.poll(() => bodies.length).toBe(1);
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await expect(page.getByText(/1 valid observations ready/)).toHaveCount(0);
@@ -212,11 +222,9 @@ test("plant configuration saves fixed angles and clears them when tracking", asy
         export_limit_mw: null,
     });
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await expect(
-        page.getByLabel("Surface tilt (degrees, optional)"),
-    ).toHaveValue("0");
-    await page.getByLabel("Mounting type").selectOption("tracking");
-    await page.getByRole("button", { name: "Save configuration" }).click();
+    await expect(page.getByLabel("Panel tilt (°, optional)")).toHaveValue("0");
+    await page.getByLabel("Mounting").selectOption("tracking");
+    await page.getByRole("button", { name: "Save technical details" }).click();
     await expect.poll(() => bodies.length).toBe(2);
     expect(bodies[1]).toMatchObject({
         mounting_type: "tracking",
@@ -446,7 +454,7 @@ test("open regional and plant forecasts refresh after new data arrives", async (
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
     const irradiance = page.getByRole("button", {
-        name: "Irradiance",
+        name: "Irradiance forecast",
         exact: true,
     });
     await irradiance.click();
@@ -465,7 +473,7 @@ test("open regional and plant forecasts refresh after new data arrives", async (
     // must come after that read has been applied, or the poll finds it still in flight.
     reason = "configuration_unavailable";
     const generation = page.getByRole("button", {
-        name: "Generation",
+        name: "Generation forecast",
         exact: true,
     });
     await generation.click();
@@ -508,14 +516,14 @@ test("a date picked while a forecast view switch loads keeps the chosen view", a
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
     const irradiance = page.getByRole("button", {
-        name: "Irradiance",
+        name: "Irradiance forecast",
         exact: true,
     });
     await irradiance.click();
     await expect(irradiance).toHaveAttribute("aria-current", "page");
     holding = true;
     const generation = page.getByRole("button", {
-        name: "Generation",
+        name: "Generation forecast",
         exact: true,
     });
     await generation.click();
@@ -523,7 +531,7 @@ test("a date picked while a forecast view switch loads keeps the chosen view", a
     release();
     await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-27$/);
     await expect(generation).toHaveAttribute("aria-current", "page");
-    await expect(page.getByLabel("Resolution")).toBeVisible();
+    await expect(page.getByLabel("Interval", { exact: true })).toBeVisible();
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-27");
 });
 
@@ -579,7 +587,10 @@ test("the displayed section clicked while another section loads keeps its date a
         page,
         "forecast/?date=2026-03-27&view=irradiance",
     );
-    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
+    await expect(button("Irradiance forecast")).toHaveAttribute(
+        "aria-current",
+        "page",
+    );
     const production = await holdNavigation(page, "production");
     await button("Production").click();
     await production.requested;
@@ -592,14 +603,20 @@ test("the displayed section clicked while another section loads keeps its date a
     await expect(page).toHaveURL(
         /\/forecast\/\?date=2026-03-26&view=irradiance$/,
     );
-    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
+    await expect(button("Irradiance forecast")).toHaveAttribute(
+        "aria-current",
+        "page",
+    );
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-26");
     // No product event marks a discarded answer as handled, so a further change probes the base after it.
     await page.getByLabel("Forecast date").fill("2026-03-25");
     await expect(page).toHaveURL(
         /\/forecast\/\?date=2026-03-25&view=irradiance$/,
     );
-    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
+    await expect(button("Irradiance forecast")).toHaveAttribute(
+        "aria-current",
+        "page",
+    );
 });
 
 test("a forecast view chosen while another section loads applies to the forecast", async ({
@@ -609,18 +626,27 @@ test("a forecast view chosen while another section loads applies to the forecast
         page,
         "forecast/?date=2026-03-27&view=irradiance",
     );
-    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
+    await expect(button("Irradiance forecast")).toHaveAttribute(
+        "aria-current",
+        "page",
+    );
     const production = await holdNavigation(page, "production");
     await button("Production").click();
     await production.requested;
-    await button("Generation").click();
+    await button("Generation forecast").click();
     await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-27$/);
     await production.release();
     await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-27$/);
-    await expect(button("Generation")).toHaveAttribute("aria-current", "page");
+    await expect(button("Generation forecast")).toHaveAttribute(
+        "aria-current",
+        "page",
+    );
     await page.getByLabel("Forecast date").fill("2026-03-26");
     await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-26$/);
-    await expect(button("Generation")).toHaveAttribute("aria-current", "page");
+    await expect(button("Generation forecast")).toHaveAttribute(
+        "aria-current",
+        "page",
+    );
 });
 
 for (const source of ["estimated_actuals", "archived_forecast"] as const)
@@ -651,7 +677,7 @@ for (const source of ["estimated_actuals", "archived_forecast"] as const)
             await expect(choice).toHaveValue(source);
             await expect(
                 page.getByText(
-                    "Choose a local day from 2025-03-27 to 2026-03-28 for this data source.",
+                    "Choose a date within 2025-03-27 – 2026-03-28.",
                     { exact: true },
                 ),
             ).toBeVisible();
@@ -722,7 +748,10 @@ test("a superseded section change that fails loads its own section in full", asy
     page,
 }) => {
     const button = await openPlant(page, "forecast/?view=irradiance");
-    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
+    await expect(button("Irradiance forecast")).toHaveAttribute(
+        "aria-current",
+        "page",
+    );
     let seen!: () => void;
     let fail!: () => void;
     const requested = new Promise<void>((resolve) => (seen = resolve));
@@ -740,9 +769,12 @@ test("a superseded section change that fails loads its own section in full", asy
     );
     await button("Production").click();
     await requested;
-    await button("Generation").click();
+    await button("Generation forecast").click();
     await expect(page).toHaveURL(/\/forecast\/$/);
-    await expect(button("Generation")).toHaveAttribute("aria-current", "page");
+    await expect(button("Generation forecast")).toHaveAttribute(
+        "aria-current",
+        "page",
+    );
     fail();
     // Next.js answers a failed navigation request with a document load of its target,
     // also after a later navigation committed.
@@ -763,7 +795,7 @@ for (const overtaken of ["a section change", "Back"] as const)
             await expect(page).toHaveURL(/\/forecast\/$/);
         }
         const forecast = await holdNavigation(page, "forecast");
-        await button("Irradiance").click();
+        await button("Irradiance forecast").click();
         await forecast.requested;
         if (overtaken === "Back") await page.goBack();
         else await button("Production").click();
@@ -774,13 +806,13 @@ for (const overtaken of ["a section change", "Back"] as const)
         if (overtaken === "Back") await page.goForward();
         else await page.goBack();
         await expect(page).toHaveURL(/\/forecast\/$/);
-        await expect(button("Generation")).toHaveAttribute(
+        await expect(button("Generation forecast")).toHaveAttribute(
             "aria-current",
             "page",
         );
         await page.getByLabel("Forecast date").fill("2026-03-26");
         await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-26$/);
-        await expect(button("Generation")).toHaveAttribute(
+        await expect(button("Generation forecast")).toHaveAttribute(
             "aria-current",
             "page",
         );
@@ -790,22 +822,28 @@ test("generation-only controls rest while the irradiance view loads", async ({
     page,
 }) => {
     const button = await openPlant(page, "forecast/?date=2026-03-29");
-    await expect(button("Generation")).toHaveAttribute("aria-current", "page");
+    await expect(button("Generation forecast")).toHaveAttribute(
+        "aria-current",
+        "page",
+    );
     const controls = page.locator(".forecast-controls");
-    await expect(page.getByLabel("Resolution")).toBeEnabled();
+    await expect(page.getByLabel("Interval", { exact: true })).toBeEnabled();
     const forecast = await holdNavigation(page, "forecast");
-    await button("Irradiance").click();
+    await button("Irradiance forecast").click();
     await forecast.requested;
-    await expect(page.getByLabel("Resolution")).toBeDisabled();
+    await expect(page.getByLabel("Interval", { exact: true })).toBeDisabled();
     await expect(controls).toHaveAttribute("aria-busy", "true");
     await expect(page.getByLabel("Forecast date")).toBeEnabled();
     await forecast.release();
     await expect(page).toHaveURL(
         /\/forecast\/\?date=2026-03-29&view=irradiance$/,
     );
-    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
+    await expect(button("Irradiance forecast")).toHaveAttribute(
+        "aria-current",
+        "page",
+    );
     await expect(controls).not.toHaveAttribute("aria-busy", "true");
-    await expect(page.getByLabel("Resolution")).toHaveCount(0);
+    await expect(page.getByLabel("Interval", { exact: true })).toHaveCount(0);
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-29");
     await expect(page.getByLabel("Data", { exact: true })).toHaveValue(
         "forecast",
@@ -909,34 +947,37 @@ test("region collection schedule validates and saves distinct local times", asyn
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Irradiance forecast", exact: true })
+        .click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("button", { name: "Data collection" }).click();
+    await page.getByRole("button", { name: "Forecast update times" }).click();
     await expect(
         page.getByText(
-            "Daily history: 03:00. Pausing also stops history collection.",
+            "Production calculated from satellite data is updated daily at 03:00. Turning off automatic updates stops it too.",
         ),
     ).toBeVisible();
+    await expect(page.getByText(/in plant time/)).toHaveCount(0);
     expect(reads).toBe(1);
-    await page.getByText("Collection details", { exact: true }).click();
+    await page.getByText("Update details", { exact: true }).click();
     await expect(
         page.getByText(
-            /Historical estimate retries preserve requests for scheduled forecasts/,
+            /Retries for production calculated from satellite data keep enough requests/,
         ),
     ).toBeVisible();
     await expect(
-        page.getByText("Last successful collection").locator(".."),
+        page.getByText("Last update", { exact: true }).locator(".."),
     ).toContainText("Not yet");
-    await expect(page.getByText("Next collection").locator("..")).toContainText(
-        "Jan 1, 2026, 10:00 AM",
-    );
-    await page.getByText("Recent collection jobs", { exact: true }).click();
+    await expect(
+        page.getByText("Next planned update").locator(".."),
+    ).toContainText("Jan 1, 2026, 10:00 AM");
+    await page.getByText("Recent update jobs", { exact: true }).click();
     await expect(page.getByText(/Provider request failed/)).toBeVisible();
     await expect(
-        page.getByText(/Historical estimates - Succeeded/),
+        page.getByText(/Historical estimates · Succeeded/),
     ).toBeVisible();
     await expect(
-        page.getByText(/Historical estimates - Partially collected/),
+        page.getByText(/Historical estimates · Partly updated/),
     ).toBeVisible();
     await expect(page.getByText(/Daily account budget exhausted/)).toHaveCount(
         0,
@@ -949,25 +990,19 @@ test("region collection schedule validates and saves distinct local times", asyn
     ]) {
         await expect(page.getByText(accountDetail)).toHaveCount(0);
     }
-    await page
-        .getByRole("button", { name: "Save collection schedule" })
-        .click();
+    await page.getByRole("button", { name: "Save" }).click();
     expect(saves).toBe(0);
-    await page.getByRole("button", { name: "+ Add time" }).click();
-    await page
-        .getByRole("button", { name: "Save collection schedule" })
-        .click();
+    await page.getByRole("button", { name: "Add time" }).click();
+    await page.getByRole("button", { name: "Save" }).click();
     await expect(
         page.getByText("Enter a valid time in every row."),
     ).toBeVisible();
-    await page.getByLabel("Collection time 2", { exact: true }).fill("09:00");
-    await page
-        .getByRole("button", { name: "Save collection schedule" })
-        .click();
+    await page.getByLabel("Update time 2", { exact: true }).fill("09:00");
+    await page.getByRole("button", { name: "Save" }).click();
     await expect(
-        page.getByText("Each collection time must be unique."),
+        page.getByText("Choose a different time for each update."),
     ).toBeVisible();
-    await page.getByLabel("Collection time 2", { exact: true }).fill("11:00");
+    await page.getByLabel("Update time 2", { exact: true }).fill("11:00");
     schedule.last_success_at = "2026-01-01T06:00:00Z";
     schedule.effective_from = "2026-01-01T00:00:30Z";
     const refreshed = page.waitForResponse(
@@ -977,36 +1012,31 @@ test("region collection schedule validates and saves distinct local times", asyn
     );
     await page.clock.fastForward(30_000);
     await refreshed;
+    await expect(page.getByLabel("Update time 2", { exact: true })).toHaveValue(
+        "11:00",
+    );
     await expect(
-        page.getByLabel("Collection time 2", { exact: true }),
-    ).toHaveValue("11:00");
-    await expect(
-        page.getByText("Last successful collection").locator(".."),
+        page.getByText("Last update", { exact: true }).locator(".."),
     ).toContainText("Jan 1, 2026, 9:00 AM");
     expect(reads).toBe(2);
-    await page.getByRole("button", { name: "+ Add time" }).click();
-    await page.getByLabel("Collection time 3", { exact: true }).fill("10:00");
-    await page
-        .getByRole("button", { name: "Save collection schedule" })
-        .click();
-    await expect(
-        page.getByLabel("Collection time 2", { exact: true }),
-    ).toHaveValue("10:00");
-    await expect(
-        page.getByLabel("Collection time 3", { exact: true }),
-    ).toHaveValue("11:00");
+    await page.getByRole("button", { name: "Add time" }).click();
+    await page.getByLabel("Update time 3", { exact: true }).fill("10:00");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByLabel("Update time 2", { exact: true })).toHaveValue(
+        "10:00",
+    );
+    await expect(page.getByLabel("Update time 3", { exact: true })).toHaveValue(
+        "11:00",
+    );
     expect(saves).toBe(1);
-    await page
-        .getByRole("button", { name: "Remove collection time 3" })
-        .click();
-    await expect(
-        page.getByLabel("Collection time 3", { exact: true }),
-    ).toHaveCount(0);
+    await page.getByRole("button", { name: "Remove update time 3" }).click();
+    await expect(page.getByLabel("Update time 3", { exact: true })).toHaveCount(
+        0,
+    );
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("button", { name: "Email reminders" }).click();
-    await page.getByText("Reminder details", { exact: true }).click();
+    await page.getByRole("button", { name: "Forecast email" }).click();
     await expect(
-        page.getByText(/do not request new provider data/),
+        page.getByText("At most 10 a day.", { exact: true }),
     ).toBeVisible();
 });
 
@@ -1107,7 +1137,9 @@ test("the data choice names what each view shows and keeps the date", async ({
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Irradiance forecast", exact: true })
+        .click();
     await expect(choice.locator("option")).toHaveText([
         "Forecast",
         "Last forecast before sunrise",
@@ -1129,7 +1161,9 @@ test("the data choice names what each view shows and keeps the date", async ({
     await expect(day).toHaveValue("2026-03-28");
     await expect(day).toHaveAttribute("max", "2026-03-28");
     await expect.poll(() => sources.at(-1)).toBe("estimated_actuals");
-    await page.getByRole("button", { name: "Generation", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Generation forecast", exact: true })
+        .click();
     await expect(choice).toHaveValue("estimated_actuals");
     await expect(choice.locator("option")).toHaveText([
         "Forecast",
@@ -1147,7 +1181,9 @@ test("the data choice names what each view shows and keeps the date", async ({
     expect(plantRequests).toHaveLength(asked);
     await choice.selectOption("forecast");
     await expect(day).toHaveValue("2026-03-29");
-    await expect(page.getByLabel("Resolution")).toHaveValue("60");
+    await expect(page.getByLabel("Interval", { exact: true })).toHaveValue(
+        "60",
+    );
     await expect(heading).toHaveText("Generation forecast");
     await expect(choice).toHaveValue("forecast");
     await expect(generation).toContainText("129.29");
@@ -1162,7 +1198,7 @@ test("the data choice names what each view shows and keeps the date", async ({
         "Production calculated from satellite data",
     );
     await expect(choice).toHaveValue("estimated_actuals");
-    await page.getByLabel("Resolution").selectOption("30");
+    await page.getByLabel("Interval", { exact: true }).selectOption("30");
     await expect
         .poll(() =>
             plantRequests.at(-1)?.searchParams.get("resolution_minutes"),
@@ -1206,7 +1242,9 @@ test("forecast crops edge zeros, retains gaps and downloads the full safe CSV", 
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Irradiance forecast", exact: true })
+        .click();
     await page.getByText("Show table", { exact: true }).click();
     const table = page.getByRole("table");
     await expect(table.getByRole("row")).toHaveCount(4);
@@ -1282,7 +1320,9 @@ test("all-zero forecasts remain visible as measured zero values", async ({
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Irradiance forecast", exact: true })
+        .click();
     await page.getByText("Show table", { exact: true }).click();
     await expect(
         page.getByRole("table").getByRole("cell", { name: "0", exact: true }),
@@ -1298,18 +1338,20 @@ test("mock contract: saves cached forecast reminders without provider queries", 
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Irradiance forecast", exact: true })
+        .click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("button", { name: "Email reminders" }).click();
-    await page.getByLabel("Enable forecast emails for this plant").check();
-    await page.getByLabel("Delivery time 1", { exact: true }).fill("08:00");
+    await page.getByRole("button", { name: "Forecast email" }).click();
+    await page.getByLabel("Send forecast email for this plant").check();
+    await page.getByLabel("Send time 1", { exact: true }).fill("08:00");
     await page.getByRole("button", { name: "Add time", exact: true }).click();
-    await page.getByLabel("Delivery time 2", { exact: true }).fill("17:30");
+    await page.getByLabel("Send time 2", { exact: true }).fill("17:30");
     const outgoing = page.waitForRequest(
         (request) =>
             request.method() === "PUT" && request.url().includes("/reminders/"),
     );
-    await page.getByRole("button", { name: "Save reminders" }).click();
+    await page.getByRole("button", { name: "Save" }).click();
     expect((await outgoing).postDataJSON()).toEqual({
         enabled: true,
         include_workspace_members: false,
@@ -1319,11 +1361,8 @@ test("mock contract: saves cached forecast reminders without provider queries", 
         expected_revision: 0,
         hide_recipients: true,
     });
-    await page.getByText("Reminder details", { exact: true }).click();
     await expect(
-        page.getByText("they do not request new provider data", {
-            exact: false,
-        }),
+        page.getByText("At most 10 a day.", { exact: true }),
     ).toBeVisible();
 });
 test("mock contract: visible API error, empty state and accessible mobile layout", async ({
@@ -1473,7 +1512,9 @@ test("mock contract: follows tenant pagination and keeps missing intervals visib
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Irradiance forecast", exact: true })
+        .click();
     await expect(page.getByRole("status")).toHaveText(
         "Data is missing for some hours.",
     );
@@ -1840,10 +1881,10 @@ test("recycle bin confirms deletion and restores a plant site with associated da
         .getByRole("button", { name: "Delete plant", exact: true })
         .click();
     const confirmation = page.getByRole("region", {
-        name: "Delete plant confirmation",
+        name: "Delete plant",
     });
     await expect(confirmation).toContainText("30 days");
-    await expect(confirmation).toContainText("permanently deleted");
+    await expect(confirmation).toContainText("deleted permanently");
     await confirmation
         .getByRole("button", { name: "Cancel", exact: true })
         .click();
@@ -1853,7 +1894,7 @@ test("recycle bin confirms deletion and restores a plant site with associated da
         .click();
     await page
         .getByRole("button", {
-            name: "Move plant to recycle bin",
+            name: "Delete",
             exact: true,
         })
         .click();
@@ -1899,7 +1940,9 @@ test("recycle bin confirms deletion and restores a plant site with associated da
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Irradiance forecast", exact: true })
+        .click();
     await expect(
         page.getByRole("heading", { name: plant.name, exact: true }),
     ).toBeVisible();
@@ -2167,4 +2210,47 @@ test("a failed portfolio refresh keeps the plant cards until access is denied", 
         page.getByText("You are not a member of this workspace."),
     ).toBeVisible();
     await expect(card).toHaveCount(0);
+});
+
+test("the plant header names the offset of the day on screen and the present offset elsewhere", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/api/tenants/1/sites/", (route) =>
+        route.fulfill({
+            json: paged([
+                {
+                    ...region,
+                    timezone: "Europe/Berlin",
+                    plant,
+                    reminder: null,
+                },
+            ]),
+        }),
+    );
+    const header = page.locator(".plant-time");
+    await page.goto("/app/w/1/plants/11/forecast/?date=2026-07-15");
+    await expect(header).toHaveText("Plant time: UTC+2");
+    await expect(page.getByText("Dates in plant time")).toHaveCount(0);
+    await page.goto("/app/w/1/plants/11/forecast/?date=2026-03-29");
+    await expect(header).toHaveText("Plant time: UTC+1 / UTC+2");
+    await page.goto("/app/w/1/plants/11/production/?date=2026-08-03");
+    await expect(header).toHaveText("Plant time: UTC+2");
+    await page.route("**/plants/21/performance/**", (route) =>
+        route.fulfill({
+            json: answer("PerformanceOutput", {
+                start_date: "2026-10-11",
+                end_date: "2026-11-09",
+                matched_days: 0,
+                requested_days: 30,
+                metrics: null,
+                baseline_metrics: null,
+                days: [],
+            }),
+        }),
+    );
+    await page.goto("/app/w/1/plants/11/production/?view=comparison");
+    await expect(header).toHaveText("Plant time: UTC+2 / UTC+1");
+    await page.goto("/app/w/1/plants/11/settings/");
+    await expect(header).toHaveText("Plant time: UTC+1");
 });

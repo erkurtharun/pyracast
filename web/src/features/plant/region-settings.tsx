@@ -17,9 +17,11 @@ type LocationRequest = components["schemas"]["LocationChangeOutput"];
 export function RegionSettings({
     region,
     scope,
+    forecastsStopped,
 }: {
     region: Region;
     scope: RegionScope;
+    forecastsStopped: boolean;
 }) {
     const t = useTranslations("RegionSettings");
     const format = useFormat();
@@ -35,7 +37,11 @@ export function RegionSettings({
             </p>
             <details>
                 <summary>{t("requestLocationChange")}</summary>
-                <LocationRequests region={region} scope={scope} />
+                <LocationRequests
+                    region={region}
+                    scope={scope}
+                    forecastsStopped={forecastsStopped}
+                />
             </details>
         </section>
     );
@@ -44,9 +50,11 @@ export function RegionSettings({
 function LocationRequests({
     region,
     scope,
+    forecastsStopped,
 }: {
     region: Region;
     scope: RegionScope;
+    forecastsStopped: boolean;
 }) {
     const t = useTranslations("RegionSettings");
     const format = useFormat();
@@ -70,6 +78,7 @@ function LocationRequests({
                             <Outcome
                                 request={latest}
                                 timezone={region.timezone}
+                                forecastsStopped={forecastsStopped}
                             />
                         )}
                         {latest?.status === "pending" ? (
@@ -148,9 +157,11 @@ function LocationRequests({
 function Outcome({
     request,
     timezone,
+    forecastsStopped,
 }: {
     request: LocationRequest;
     timezone: string;
+    forecastsStopped: boolean;
 }) {
     const t = useTranslations("RegionSettings");
     const format = useFormat();
@@ -168,6 +179,9 @@ function Outcome({
                       ? t("latestRejected", { date })
                       : t("latestWithdrawn", { date })}
             </p>
+            {request.status === "approved" && forecastsStopped && (
+                <p>{t("forecastsStopped")}</p>
+            )}
             {request.decision_reason && (
                 <p>{t("decisionNote", { reason: request.decision_reason })}</p>
             )}

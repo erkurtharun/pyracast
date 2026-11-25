@@ -134,6 +134,7 @@ export function PlantConfigurationFields({
                             step="any"
                             min={0}
                             max={360}
+                            hint={t("geometryGuide")}
                             defaultValue={
                                 configuration?.surface_azimuth_degrees ??
                                 undefined
@@ -150,11 +151,6 @@ export function PlantConfigurationFields({
                     </>
                 )}
             </div>
-            <details>
-                <summary>{t("capacityAndMountingGuide")}</summary>
-                <p className="fine">{t("capacityGuide")}</p>
-                <p className="fine">{t("geometryGuide")}</p>
-            </details>
         </>
     );
 }

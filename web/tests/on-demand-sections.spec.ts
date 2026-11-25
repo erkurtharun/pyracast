@@ -240,7 +240,7 @@ test("a link into an on-demand section opens it on the first load", async ({
     await mockPlant(page);
     await page.goto("/app/w/1/plants/11/outages/");
     await expect(
-        page.getByRole("heading", { name: "Plant outages", exact: true }),
+        page.getByRole("heading", { name: "Outages", exact: true }),
     ).toBeVisible();
     await expect(tab(page, "Outages")).toHaveAttribute("aria-current", "page");
 });
@@ -343,10 +343,10 @@ test("a link into an on-demand section keeps the plant header, tabs and back but
     await expect(
         page.getByRole("status").filter({ hasText: "Loading section…" }),
     ).toHaveCount(1);
-    await expect(page.getByText("Loading plant...")).toHaveCount(0);
+    await expect(page.getByText("Loading plant…")).toHaveCount(0);
     section.release();
     await expect(
-        page.getByRole("heading", { name: "Plant outages", exact: true }),
+        page.getByRole("heading", { name: "Outages", exact: true }),
     ).toBeVisible();
     await expect(page.getByText("Loading section…")).toHaveCount(0);
 });
@@ -372,7 +372,7 @@ test("a refresh that brings an on-demand section replaces only the section slot"
     await page.goto("/app/w/1/plants/11/calibration/");
     await expect(
         page.getByText(
-            "Calibration becomes available after administrator approval and matched production history.",
+            "Calibration is available after Pyracast approves the plant.",
         ),
     ).toBeVisible();
     const section = await interceptScript(page, () => true, "held");
