@@ -144,6 +144,9 @@ test("a member sees that an administrator finishes the setup", async ({
     await expect(card).not.toContainText("Finish adding plant");
     await card.click();
     await expect(
+        page.getByRole("button", { name: "All plants", exact: true }),
+    ).toBeVisible();
+    await expect(
         page.getByText(
             "The workspace administrator needs to finish adding this plant.",
         ),
