@@ -150,7 +150,10 @@ def test_the_reset_notice_is_published_by_the_dispatcher_in_the_account_language
 
     [message] = mail.outbox
     assert message.to == [user.email]
-    assert message.subject == "Pyracast iki adımlı doğrulamanızı kaldırdı"
+    assert (
+        message.subject
+        == "Pyracast iki ad\u0131ml\u0131 do\u011frulaman\u0131z\u0131 kald\u0131rd\u0131"
+    )
     assert notices() == [(NOTICE, user.email, {}, "", "sent")]
 
 
