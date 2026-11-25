@@ -2,6 +2,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
+from zoneinfo import ZoneInfo
 
 from allauth.account.adapter import get_adapter
 from allauth.account.models import EmailAddress
@@ -11,98 +12,82 @@ from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.utils import translation
 from django.utils.functional import Promise
-from django.utils.translation import gettext
+from django.utils.translation import gettext, pgettext_lazy
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.debug import sensitive_variables
 
 from pyracast.accounts.authentication import login_identity
 from pyracast.accounts.language import user_language
 from pyracast.accounts.models import OutboundMail, OutboundMailError, OutboundMailKind
+from pyracast.notifications.formats import moment_text, utc_offset
+
+# Accounts have no time zone of their own; their readers are in Türkiye.
+ACCOUNT_ZONE = ZoneInfo("Europe/Istanbul")
 
 
 @dataclass(frozen=True)
 class Notice:
     subject: Promise
-    sentence: Promise
+    sentence: Promise | None = None
     security: bool = True
     action_key: str = ""
     action_label: Promise | None = None
 
 
 NOTICES = {
-    "account/email/password_changed": Notice(
-        _("Your password was changed"), _("The password of your Pyracast account was changed.")
-    ),
-    "account/email/password_set": Notice(
-        _("A password was set for your account"),
-        _("A password was set for your Pyracast account."),
-    ),
-    "account/email/password_reset": Notice(
-        _("Your password was reset"), _("The password of your Pyracast account was reset.")
-    ),
+    "account/email/password_changed": Notice(_("Your password was changed")),
+    "account/email/password_set": Notice(_("A password was set for your account")),
+    "account/email/password_reset": Notice(_("Your password was reset")),
     "account/email/email_changed": Notice(
         _("Your email address was changed"),
         _("Your Pyracast email address changed from %(from_email)s to %(to_email)s."),
     ),
-    "account/email/email_confirm": Notice(
-        _("Your email address was verified"),
-        _("The email address of your Pyracast account was verified."),
-    ),
+    "account/email/email_confirm": Notice(_("Your email address was verified")),
     "account/email/email_deleted": Notice(
         _("An email address was removed"),
         _("%(deleted_email)s was removed from your Pyracast account."),
     ),
-    "mfa/email/totp_activated": Notice(
-        _("Two-factor authentication was turned on"),
-        _("Two-factor authentication with an authenticator app was turned on for your account."),
-    ),
-    "mfa/email/totp_deactivated": Notice(
-        _("Two-factor authentication was turned off"),
-        _("Two-factor authentication with an authenticator app was turned off for your account."),
-    ),
+    "mfa/email/totp_activated": Notice(_("Two-step verification was turned on")),
+    "mfa/email/totp_deactivated": Notice(_("Two-step verification was turned off")),
     "account/email/second_factor_reset": Notice(
-        _("Your second factor was reset"),
-        _(
-            "An operator removed the second factors of your Pyracast account and "
-            "ended its sessions."
-        ),
+        _("Pyracast removed your two-step verification"),
+        _("You were signed out on every device. Sign in again."),
         security=False,
     ),
     "mfa/email/recovery_codes_generated": Notice(
-        _("New recovery codes were generated"),
-        _("New recovery codes were generated for your account. The previous codes no longer work."),
+        _("New recovery codes were generated"), _("The previous codes no longer work.")
     ),
     "socialaccount/email/account_connected": Notice(
-        _("A sign-in provider was connected"),
-        _("%(provider)s was connected to your Pyracast account for signing in."),
+        _("A %(provider)s account was connected"),
+        _("You can now sign in to Pyracast with this account."),
     ),
     "socialaccount/email/account_disconnected": Notice(
-        _("A sign-in provider was disconnected"),
-        _("%(provider)s was disconnected from your Pyracast account."),
+        _("A %(provider)s account was disconnected"),
+        _("You can no longer sign in to Pyracast with this account."),
     ),
     "account/email/unknown_account": Notice(
         _("Pyracast account not found"),
         _("Someone tried to use %(email)s with Pyracast, but no account uses this address."),
         security=False,
         action_key="signup_url",
-        action_label=_("Create an account"),
+        action_label=_("Create account"),
     ),
     "account/email/account_already_exists": Notice(
         _("Your Pyracast account already exists"),
         _("Someone tried to create a Pyracast account with %(email)s, which already has one."),
         security=False,
         action_key="password_reset_url",
-        action_label=_("Reset password"),
+        action_label=pgettext_lazy("account mail action", "Reset password"),
     ),
     "account/email/login_locked": Notice(
         _("Password sign-in is paused"),
         _(
-            "After many failed sign-in attempts, password sign-in to your Pyracast account is "
-            "paused for up to 24 hours. Resetting your password ends the pause."
+            "After many failed sign-in attempts, signing in with your password is paused for up "
+            "to 24 hours. Reset your password to sign in now."
         ),
         security=False,
         action_key="password_reset_url",
-        action_label=_("Reset password"),
+        action_label=pgettext_lazy("account mail action", "Reset password"),
     ),
 }
 _SENTENCE_KEYS = ("from_email", "to_email", "deleted_email", "provider", "email")
@@ -135,13 +120,20 @@ def device_label(user_agent: str) -> str:
     return browser or system or gettext("an unknown device")
 
 
+def mail_time(moment: datetime, zone: ZoneInfo) -> str:
+    local = moment.astimezone(zone)
+    return f"{moment_text(local)} ({utc_offset(local)})"
+
+
 def render_notice(notice: Notice, context: Mapping[str, Any]) -> tuple[str, str, str]:
     values = {key: str(context.get(key, "")) for key in _SENTENCE_KEYS}
+    subject = str(notice.subject) % values
+    timestamp = context.get("timestamp")
     template_context = {
-        "title": str(notice.subject),
-        "sentence": str(notice.sentence) % values,
+        "title": subject,
+        "sentence": str(notice.sentence) % values if notice.sentence else "",
         "security": notice.security,
-        "time": context.get("timestamp"),
+        "time": mail_time(timestamp, ACCOUNT_ZONE) if timestamp else "",
         "device": device_label(str(context.get("user_agent", ""))),
         "ip": context.get("ip", ""),
         "secure_url": f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/",
@@ -149,7 +141,7 @@ def render_notice(notice: Notice, context: Mapping[str, Any]) -> tuple[str, str,
         "action_label": notice.action_label,
     }
     return (
-        str(notice.subject),
+        subject,
         render_to_string("mail/notice.txt", template_context).strip(),
         render_to_string("mail/notice.html", template_context),
     )
