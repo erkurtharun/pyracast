@@ -20,8 +20,13 @@ function sentTimes(times: readonly string[]) {
     );
 }
 
-const sameTimes = (a: readonly string[], b: readonly string[]) =>
-    sentTimes(a).join() === sentTimes(b).join();
+function sameTimes(a: readonly string[], b: readonly string[]) {
+    const sorted = sentTimes(b);
+    return (
+        a.length === b.length &&
+        sentTimes(a).every((time, index) => time === sorted[index])
+    );
+}
 
 export function CollectionSchedule({
     scope,
@@ -69,6 +74,8 @@ function ScheduleEditor({
     const label = useLabel();
 
     const [times, setTimes] = useState(data.times);
+    const [saved, setSaved] =
+        useState<Pick<Schedule, "enabled" | "times">>(data);
     return (
         <>
             <section className="panel">
@@ -76,7 +83,7 @@ function ScheduleEditor({
                 <p>{t("chooseTimes")}</p>
                 <ActionForm
                     submit={t("saveCollectionSchedule")}
-                    unsaved={!sameTimes(times, data.times)}
+                    unsaved={!sameTimes(times, saved.times)}
                     onSubmit={async (form) => {
                         const enabled = form.get("enabled") === "on";
                         if (
@@ -97,16 +104,18 @@ function ScheduleEditor({
                                 t("addAtLeastOneCollectionTime"),
                             );
                         if (
-                            enabled === data.enabled &&
-                            sameTimes(times, data.times)
+                            enabled === saved.enabled &&
+                            sameTimes(times, saved.times)
                         )
                             return;
-                        await api.put(
-                            "/api/tenants/{tenant_id}/regions/{region_id}/collection-schedule/",
-                            {
-                                path: scope,
-                                body: { enabled, times: sentTimes(times) },
-                            },
+                        setSaved(
+                            await api.put(
+                                "/api/tenants/{tenant_id}/regions/{region_id}/collection-schedule/",
+                                {
+                                    path: scope,
+                                    body: { enabled, times: sentTimes(times) },
+                                },
+                            ),
                         );
                         onSaved();
                     }}

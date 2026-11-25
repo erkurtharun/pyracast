@@ -326,6 +326,63 @@ test("swapped collection times save nothing and ask no more once saved", async (
     expect(puts).toBe(0);
 });
 
+test("a saved schedule whose next read is held asks nothing, and saving it again sends nothing", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    let saved = schedule;
+    let puts = 0;
+    let holding = false;
+    let release = () => {};
+    const released = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/collection-schedule/", async (route) => {
+        if (route.request().method() === "PUT") {
+            puts++;
+            saved = { ...saved, ...route.request().postDataJSON() };
+        } else if (holding) await released;
+        await route.fulfill({ json: saved });
+    });
+    await openPlant(page, "Settings");
+    await page.getByRole("button", { name: "Data collection" }).click();
+    await page
+        .getByRole("button", { name: "Remove collection time 2" })
+        .click();
+    holding = true;
+    const save = page.getByRole("button", {
+        name: "Save collection schedule",
+    });
+    await save.click();
+    const confirmed = page.getByText("Saved successfully.");
+    await expect(confirmed).toBeVisible();
+    expect(await asks(page)).toBe(false);
+    const time = page.getByLabel("Collection time 1", { exact: true });
+    await time.fill("10:00");
+    await expect(confirmed).toHaveCount(0);
+    await time.fill("09:00");
+    await save.click();
+    await expect(confirmed).toBeVisible();
+    expect(puts).toBe(1);
+    expect(await asks(page)).toBe(false);
+    release();
+});
+
+test("a first time added to an empty saved schedule asks", async ({ page }) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    await page.route("**/collection-schedule/", (route) =>
+        route.fulfill({ json: { ...schedule, enabled: false, times: [] } }),
+    );
+    await openPlant(page, "Settings");
+    await page.getByRole("button", { name: "Data collection" }).click();
+    expect(await asks(page)).toBe(false);
+    await page.getByRole("button", { name: "+ Add time", exact: true }).click();
+    await expect(
+        page.getByLabel("Collection time 1", { exact: true }),
+    ).toBeVisible();
+    expect(await asks(page)).toBe(true);
+});
+
 async function saveReminders(page: Page) {
     const saved = page.waitForResponse(
         (response) =>
