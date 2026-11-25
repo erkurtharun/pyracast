@@ -53,6 +53,7 @@ test("available historical model days appear without empty grid rows", async ({
                         predicted_energy_mwh: index < 22 ? null : 12,
                         error_mwh: index < 22 ? null : 2,
                         provisional_production: index >= 22,
+                        provisional_snapshot_ids: index >= 22 ? [index] : [],
                         historical_configuration_assumed: index >= 22,
                     }),
                 ),
@@ -67,12 +68,16 @@ test("available historical model days appear without empty grid rows", async ({
     await page.getByRole("button", { name: "Comparison", exact: true }).click();
     const comparison = page.locator("section").filter({
         has: page.getByRole("heading", {
-            name: "Production comparison",
+            name: "Comparison",
             exact: true,
         }),
     });
     await expect.poll(() => query).toContain("comparison=archived_forecast");
-    await comparison.getByRole("button", { name: "Model check" }).click();
+    await comparison
+        .getByRole("button", {
+            name: "Weather-based expected production",
+        })
+        .click();
     await expect.poll(() => query).toContain("comparison=historical_model");
     expect(query).toContain("start_date=2026-10-12&end_date=2026-11-10");
     await expect(comparison.getByText("Advanced", { exact: true })).toHaveCount(
@@ -80,50 +85,65 @@ test("available historical model days appear without empty grid rows", async ({
     );
     await expect(comparison.getByRole("row")).toHaveCount(9);
     await expect(
-        comparison.locator(".stat").filter({ hasText: "Relative error" }),
-    ).toContainText("20 %");
-    await expect(
         comparison
             .locator(".stat")
-            .filter({ hasText: "Skill vs uncalibrated model" }),
+            .filter({ hasText: "Absolute error as % of production" }),
+    ).toContainText("20 %");
+    await expect(
+        comparison.locator(".stat").filter({
+            hasText: "Improvement over forecasts without calibration",
+        }),
     ).toContainText("12.5 %");
     await expect(
         comparison.getByText(
-            "Skill uses 3 days outside the calibration's training period.",
+            "The improvement uses 3 days outside the calibration days.",
         ),
     ).toBeVisible();
-    await expect(
-        comparison.locator(".stat").filter({ hasText: "Missing days" }),
-    ).toContainText("21");
+    await expect(comparison.getByText(/Days not compared/)).toHaveText([
+        "Days not compared (22)",
+    ]);
     await expect(
         comparison.locator(".stat").filter({ hasText: "Excluded days" }),
-    ).toContainText("1");
-    await comparison
-        .getByText("Additional metrics & interpretation", { exact: true })
-        .click();
+    ).toHaveCount(0);
     await expect(
-        comparison.getByText("Scored: 64 intervals / 64 hours."),
+        comparison.locator(".stat").filter({
+            hasText: "Average daily difference (expected − actual)",
+        }),
+    ).toContainText("2");
+    await comparison.getByText("Additional metrics", { exact: true }).click();
+    await expect(
+        comparison.getByText("Compared: 64 intervals · 64 hours"),
     ).toBeVisible();
     await expect(
-        comparison.getByRole("columnheader", { name: "Model (MWh)" }),
+        comparison.getByRole("columnheader", { name: "Expected (MWh)" }),
+    ).toBeVisible();
+    await expect(
+        comparison.getByRole("columnheader", {
+            name: "Expected − actual (MWh)",
+        }),
+    ).toBeVisible();
+    await expect(
+        comparison.getByRole("table", {
+            name: "Weather-based expected production · 2026-10-12 – 2026-11-10",
+        }),
     ).toBeVisible();
     await expect(
         comparison.getByRole("cell", {
-            name: "Provisional production",
+            name: "Real-time (EPİAŞ)",
             exact: true,
         }),
     ).toHaveCount(8);
     await expect(
-        comparison.getByText("Includes provisional reported production", {
-            exact: false,
+        comparison.getByText("Includes EPİAŞ real-time production.", {
+            exact: true,
         }),
     ).toBeVisible();
     await comparison
-        .getByText("Unavailable dates (22)", { exact: true })
+        .getByText("Days not compared (22)", { exact: true })
         .click();
     await expect(comparison.getByRole("listitem")).toHaveText([
-        `Saved reference data is invalid: ${day(0)}`,
-        `Historical weather estimates are not available: ${Array.from(
+        `The data to compare with cannot be used: ${day(0)}`,
+        `No satellite data for this day: ${Array.from(
             { length: 21 },
             (_, index) => day(index + 1),
         ).join(", ")}`,
@@ -137,13 +157,21 @@ test("available historical model days appear without empty grid rows", async ({
     const scan = await accessibilityViolations(page);
     expect(scan).toEqual([]);
     await comparison.getByText("Advanced", { exact: true }).click();
-    await comparison.getByLabel("Previous-day cutoff").fill("09:30");
+    await comparison
+        .getByLabel(
+            "Use the last forecast available by this time on the previous day",
+        )
+        .fill("09:30");
     await comparison.getByLabel("Start date").fill("2026-10-22");
-    await comparison.getByRole("button", { name: "Load performance" }).click();
+    await comparison.getByRole("button", { name: "Show", exact: true }).click();
     await expect
         .poll(() => new URLSearchParams(query).get("issuance_cutoff"))
         .toBe("09:30");
-    await comparison.getByRole("button", { name: "Model check" }).click();
+    await comparison
+        .getByRole("button", {
+            name: "Weather-based expected production",
+        })
+        .click();
     await expect.poll(() => query).toContain("comparison=historical_model");
     expect(query).toContain("start_date=2026-10-22");
     expect(query).not.toContain("issuance_cutoff");
@@ -189,22 +217,23 @@ test("a completely unavailable comparison stays compact", async ({ page }) => {
     await page.getByRole("button", { name: "Comparison", exact: true }).click();
     const comparison = page.locator("section").filter({
         has: page.getByRole("heading", {
-            name: "Production comparison",
+            name: "Comparison",
             exact: true,
         }),
     });
     await expect(
-        comparison.getByText("No complete production and reference pairs", {
-            exact: false,
-        }),
+        comparison.getByText(
+            "No day in this date range can be compared. Choose other dates or check the actual production.",
+            { exact: true },
+        ),
     ).toBeVisible();
     await expect(comparison.getByRole("table")).toHaveCount(0);
     await expect(comparison.locator(".stat")).toHaveCount(0);
     await comparison
-        .getByText("Unavailable dates (30)", { exact: true })
+        .getByText("Days not compared (30)", { exact: true })
         .click();
     await expect(comparison.getByRole("listitem")).toHaveText([
-        `No forecast was archived for this day: ${Array.from(
+        `No forecast to compare for this day: ${Array.from(
             { length: 30 },
             (_, index) => String(index),
         ).join(", ")}`,
@@ -253,6 +282,7 @@ test("a failed refresh on return keeps the comparison until a retry loads it", a
                               measured_energy_mwh: 10,
                               predicted_energy_mwh: 12,
                               error_mwh: 2,
+                              provisional_snapshot_ids: [],
                           },
                       ],
                   },
@@ -264,8 +294,8 @@ test("a failed refresh on return keeps the comparison until a retry loads it", a
         .click();
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await page.getByRole("button", { name: "Comparison", exact: true }).click();
-    const missing = page.locator(".stat").filter({ hasText: "Missing days" });
-    await expect(missing).toContainText("1");
+    const missing = page.getByText("Days not compared (1)", { exact: true });
+    await expect(missing).toBeVisible();
     await page.clock.runFor(5_000);
     unavailable = true;
     const failed = page.waitForResponse(
@@ -283,11 +313,129 @@ test("a failed refresh on return keeps the comparison until a retry loads it", a
         .getByRole("alert")
         .filter({ hasText: "Could not refresh" });
     await expect(notice).toContainText("Comparison service is busy.");
-    await expect(missing).toContainText("1");
+    await expect(missing).toBeVisible();
     unavailable = false;
     await notice
         .getByRole("button", { name: "Try again", exact: true })
         .click();
     await expect(notice).toHaveCount(0);
-    await expect(missing).toContainText("1");
+    await expect(missing).toBeVisible();
+});
+
+test("a forecast accuracy comparison signs the daily difference, and an entered day whose source names real-time production is not marked real-time", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(new Date("2026-11-11T12:00:00Z"));
+    await mockApi(page);
+    await page.route("**/plants/21/performance/**", (route) =>
+        route.fulfill({
+            json: answer("PerformanceOutput", {
+                comparison: "archived_forecast",
+                start_date: "2026-11-09",
+                end_date: "2026-11-10",
+                matched_days: 2,
+                requested_days: 2,
+                relative_error: 0.1,
+                skill_score: null,
+                skill_days: 0,
+                metrics: {
+                    daily_mae_mwh: 1,
+                    daily_bias_mwh: -1,
+                    source_positive_mae_mw: 0.1,
+                },
+                baseline_metrics: null,
+                days: ["2026-11-09", "2026-11-10"].map(
+                    (date, index): PerformanceDay => ({
+                        date,
+                        status: "matched",
+                        reason: null,
+                        measured_energy_mwh: 10,
+                        predicted_energy_mwh: 9,
+                        error_mwh: -1,
+                        provisional_production: index === 1,
+                        manual_observation_ids: index === 1 ? [5] : [],
+                        settlement_snapshot_ids: index === 1 ? [] : [3],
+                        provisional_snapshot_ids: [],
+                    }),
+                ),
+            }),
+        }),
+    );
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Production", exact: true }).click();
+    await page.getByRole("button", { name: "Comparison", exact: true }).click();
+    const comparison = page.locator("section").filter({
+        has: page.getByRole("heading", { name: "Comparison", exact: true }),
+    });
+    await expect(
+        comparison.locator(".stat").filter({
+            hasText: "Average daily difference (forecast − actual)",
+        }),
+    ).toContainText("-1");
+    await expect(
+        comparison.getByRole("table", {
+            name: "Forecast accuracy · 2026-11-09 – 2026-11-10",
+        }),
+    ).toBeVisible();
+    for (const name of [
+        "Actual (MWh)",
+        "Forecast (MWh)",
+        "Forecast − actual (MWh)",
+    ])
+        await expect(
+            comparison.getByRole("columnheader", { name, exact: true }),
+        ).toBeVisible();
+    await expect(
+        comparison.getByRole("cell", { name: "Compared", exact: true }),
+    ).toHaveCount(2);
+    await expect(
+        comparison.getByText(/Includes EPİAŞ real-time production|Real-time/),
+    ).toHaveCount(0);
+    await expect(
+        comparison.getByRole("img", { name: "Absolute error by day" }),
+    ).toBeVisible();
+});
+
+test("a range with requested days and none compared counts the days not compared", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/plants/21/performance/**", (route) =>
+        route.fulfill({
+            json: answer("PerformanceOutput", {
+                comparison: "archived_forecast",
+                start_date: "2026-10-12",
+                end_date: "2026-11-10",
+                matched_days: 0,
+                requested_days: 30,
+                relative_error: null,
+                skill_score: null,
+                skill_days: 0,
+                metrics: null,
+                baseline_metrics: null,
+                days: [],
+            }),
+        }),
+    );
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Production", exact: true }).click();
+    await page.getByRole("button", { name: "Comparison", exact: true }).click();
+    const comparison = page.locator("section").filter({
+        has: page.getByRole("heading", { name: "Comparison", exact: true }),
+    });
+    await expect(
+        comparison.getByText(
+            "No day in this date range can be compared. Choose other dates or check the actual production.",
+            { exact: true },
+        ),
+    ).toBeVisible();
+    await expect(
+        comparison.getByText("Days not compared (30)", { exact: true }),
+    ).toBeVisible();
 });

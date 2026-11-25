@@ -16,7 +16,7 @@ import { CalibrationAutomationPanel } from "./calibration-automation";
 import { CalibrationRunDetail } from "./calibration-run-detail";
 import { CalibrationRunList } from "./calibration-runs";
 import { CalibrationSelection } from "./calibration-selection";
-import { requestState, type Action, type Run } from "./model";
+import { calibrationInUse, requestState, type Action, type Run } from "./model";
 
 type DetailState =
     | { status: "idle" | "loading" }
@@ -117,17 +117,16 @@ export function Calibrations({ scope }: { scope: PlantScope }) {
                 <div className="section-heading">
                     <div>
                         <h2>{t("calibration_history")}</h2>
-                        <p className="fine">{t("selection_effect")}</p>
                     </div>
                     <div className="button-group">
                         {runs.data && (
                             <CsvDownload
-                                label={t("download_calibration_csv")}
                                 pending={performing > 0}
                                 build={() =>
                                     calibrationsExport(
                                         plant,
                                         runs.data?.results ?? [],
+                                        t("file"),
                                     )
                                 }
                             />
@@ -181,6 +180,7 @@ export function Calibrations({ scope }: { scope: PlantScope }) {
                         data.results.length ? (
                             <CalibrationRunList
                                 runs={data.results}
+                                inUse={calibrationInUse(automation.data)}
                                 canManage={canManage}
                                 busy={pending}
                                 onDetails={(run: Run) =>

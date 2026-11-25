@@ -59,16 +59,16 @@ const labels = {
         outages: "Outages",
         edit: /^Edit 08:00/,
         save: "Save",
-        suggest: /^Suggest correction for 08:00/,
+        suggest: /^Edit 08:00/,
         add: "Add to change request",
         draft: "Change request",
         reason: "Reason for correction",
         send: "Send for approval",
         importCsv: "Import CSV",
-        csv: "Production CSV",
-        preview: "Preview import",
-        confirm: "Confirm import (5)",
-        imported: "Import complete: 4 created, 1 already present, 5 total.",
+        csv: "CSV file",
+        preview: "Preview",
+        confirm: "Import 5 values",
+        imported: "Imported. New values: 4 · Already saved: 1",
         report: "Report outage",
         title: "Title",
         saveOutage: "Save",
@@ -95,17 +95,16 @@ const labels = {
         outages: "Kesintiler",
         edit: /^08:00.+aralığını düzenle$/,
         save: "Kaydet",
-        suggest: /^08:00.+aralığı için düzeltme öner$/,
+        suggest: /^08:00.+aralığını düzenle$/,
         add: "Değişiklik talebine ekle",
         draft: "Değişiklik talebi",
         reason: "Düzeltme gerekçesi",
         send: "Onaya gönder",
-        importCsv: "CSV aktar",
-        csv: "Üretim CSV dosyası",
-        preview: "Aktarımı önizle",
-        confirm: "Aktarımı onayla (5)",
-        imported:
-            "İçe aktarma tamamlandı: 4 yeni kayıt, 1 mevcut kayıt, toplam 5 kayıt.",
+        importCsv: "CSV içe aktar",
+        csv: "CSV dosyası",
+        preview: "Önizle",
+        confirm: "5 değeri içe aktar",
+        imported: "İçe aktarıldı. Yeni değer: 4 · Zaten kayıtlı: 1",
         report: "Kesinti bildir",
         title: "Başlık",
         saveOutage: "Kaydet",
@@ -603,7 +602,7 @@ for (const lost of ["drop", "abort"] as const)
         await page.getByRole("button", { name: /^Edit 08:00/ }).click();
         const editor = page.locator(".production-row-editor");
         const revert = editor.getByRole("button", {
-            name: /^Remove correction for 08:00/,
+            name: /^Remove entered value for 08:00/,
         });
         await revert.click();
         await expectUnconfirmed(editor, true);
@@ -1352,22 +1351,18 @@ test("a revert lost after it merged its half hour into an hourly gap keeps its u
     await openPlant(page, "Production");
     await page.getByRole("button", { name: /^Edit 08:00/ }).click();
     await page
-        .getByRole("button", { name: /^Remove correction for 08:00/ })
+        .getByRole("button", { name: /^Remove entered value for 08:00/ })
         .click();
     const orphan = page.locator(".production-row-editor");
     await expect(orphan).toContainText(
-        "This interval changed and is no longer available.",
+        "This interval changed and can no longer be edited.",
     );
     await expectUnconfirmed(orphan, true);
     await orphan
-        .getByRole("button", { name: "Remove correction", exact: true })
+        .getByRole("button", { name: "Remove entered value", exact: true })
         .click();
     await expect(orphan).toHaveCount(0);
-    await expect(
-        page.getByText(
-            "Correction removed. The available provider value is used.",
-        ),
-    ).toBeVisible();
+    await expect(page.getByText("Entered value removed.")).toBeVisible();
     expect(server.requests).toHaveLength(2);
     expect(server.requests[1]).toEqual(server.requests[0]);
     expect(server.applied()).toBe(1);
@@ -1709,7 +1704,7 @@ test("an orphaned direct change names the write its repeat sends while it shows 
     release();
     const orphan = page.locator(".production-row-editor");
     await expect(orphan).toContainText(
-        "This interval changed and is no longer available.",
+        "This interval changed and can no longer be edited.",
     );
     await expect(orphan.getByRole("textbox")).toHaveValue("1,50");
     await expectUnconfirmed(orphan, false);
@@ -1742,7 +1737,7 @@ test("Reload current values that finds the interval's bounds changed keeps the l
         .click();
     const orphan = page.locator(".production-row-editor");
     await expect(orphan).toContainText(
-        "This interval changed and is no longer available.",
+        "This interval changed and can no longer be edited.",
     );
     await expectUnconfirmed(orphan, true);
     await orphan
@@ -1859,7 +1854,7 @@ test("an orphaned direct change whose outcome is unknown keeps its notice once t
     await readAgainOnFocus(page);
     await expect(repeat).toHaveCount(0);
     await expect(orphan).toContainText(
-        "This interval changed and is no longer available.",
+        "This interval changed and can no longer be edited.",
     );
     await expectUnconfirmed(orphan, false);
     expect(server.requests).toHaveLength(1);
@@ -2086,15 +2081,15 @@ test("a lost resolution whose outage list is then refused is told beside the ref
     expect(server.applied()).toBe(1);
 });
 
-for (const action of ["Set", "Remove correction"] as const)
-    test(`a lost ${action === "Set" ? "change" : "Remove correction"} whose day stopped being shown at midnight names the plant date of its interval beside its repeat, and the repeat applies once`, async ({
+for (const action of ["Set", "Remove entered value"] as const)
+    test(`a lost ${action === "Set" ? "change" : "Remove entered value"} whose day stopped being shown at midnight names the plant date of its interval beside its repeat, and the repeat applies once`, async ({
         page,
     }) => {
         const beforeMidnight = new Date(now.getTime() + 539 * 60_000);
         await page.clock.install({ time: beforeMidnight });
         await signIn(page);
         const server = await serveDirectProduction(page, answers("drop"));
-        if (action === "Remove correction") server.changeByOperator(0.9);
+        if (action === "Remove entered value") server.changeByOperator(0.9);
         await openPlant(page, "Production");
         const day = page.getByLabel("Day", { exact: true });
         await expect(day).toHaveValue("2026-11-09");
@@ -2107,17 +2102,18 @@ for (const action of ["Set", "Remove correction"] as const)
                 .click();
         } else
             await editor
-                .getByRole("button", { name: /^Remove correction for 08:00/ })
+                .getByRole("button", {
+                    name: /^Remove entered value for 08:00/,
+                })
                 .click();
         await expectUnconfirmed(editor, true);
         await page.clock.runFor(2 * 60_000);
         await focusWindow(page);
         await expect(day).toHaveValue("2026-11-10");
         await expect(
-            editor.getByLabel(
-                "Attempted production for Nov 09, 2026 08:00–08:30 (MWh)",
-                { exact: true },
-            ),
+            editor.getByLabel("Your value for Nov 09, 2026 08:00–08:30 (MWh)", {
+                exact: true,
+            }),
         ).toBeVisible();
         await editor
             .getByRole("button", {
@@ -2150,7 +2146,7 @@ test("an orphaned direct change whose repeat is lost after it was applied is rep
         .getByRole("button", { name: "Reload current values", exact: true })
         .click();
     await expect(editor).toContainText(
-        "This interval changed and is no longer available.",
+        "This interval changed and can no longer be edited.",
     );
     const repeat = editor.getByRole("button", {
         name: "Save 0.5 MWh (Normal)",

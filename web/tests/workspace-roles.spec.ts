@@ -198,10 +198,12 @@ test("viewer reads shared settings without write controls or requests", async ({
         .getByRole("button", { name: "Calibration", exact: true })
         .click();
     await expect(
-        page.getByRole("button", { name: "Reset to baseline" }),
+        page.getByRole("button", { name: "Use forecasts without calibration" }),
     ).toHaveCount(0);
     await expect(
-        page.getByRole("checkbox", { name: "Automatic calibration enabled" }),
+        page.getByRole("checkbox", {
+            name: "Calibrate forecasts automatically",
+        }),
     ).toBeDisabled();
     await page.getByRole("button", { name: "Account", exact: true }).click();
     await page.getByText("Change email", { exact: true }).click();

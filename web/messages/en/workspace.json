@@ -381,8 +381,6 @@
         "signedInAs": "Signed in as {email}"
     },
     "ChangeRequests": {
-        "proposeRevert": "Remove entered value",
-        "proposeRevertInterval": "Remove entered value for {interval}",
         "currentChanged": "Changed since it was sent.",
         "atDecision": "Value at decision",
         "automaticIntervals": "EPİAŞ values",
@@ -412,7 +410,6 @@
         "optionalReason": "Reason (optional)",
         "reasonRequired": "Enter a reason for this correction.",
         "send": "Send for approval",
-        "proposeCorrection": "Edit",
         "proposeOutage": "Report outage",
         "proposeUpdate": "Edit outage",
         "proposeResolution": "End outage",
@@ -471,7 +468,7 @@
         "editStagedInterval": "Edit the correction for {interval}",
         "removeStaged": "Remove",
         "removeStagedInterval": "Remove the correction for {interval}",
-        "stagedProviderReading": "Remove entered value",
+        "stagedProviderReading": "Use EPİAŞ value ({energy} MWh)",
         "stagedChanged": "This interval changed after you added it. Edit or remove it.",
         "sending": "Sending…",
         "discardDraft": "Discard change request",

@@ -270,13 +270,15 @@ test("two registrations ask independently: saving the changed value keeps the ch
     await openPlant(page, "Production");
     await editValue(page, "0,5");
     await openImport(page);
-    await page.getByLabel("Production CSV").setInputFiles(meter("meter.csv"));
-    await expect(page.getByText(/^meter.csv: 1 valid/)).toBeVisible();
+    await page
+        .getByLabel("CSV file", { exact: true })
+        .setInputFiles(meter("meter.csv"));
+    await expect(page.getByText(/^meter\.csv · 1 row read/)).toBeVisible();
     await saveValue(page);
-    await expect(page.getByText("Production saved.")).toBeVisible();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
     expect(server.applied()).toBe(1);
     expect(await asks(page)).toBe(true);
-    await page.getByLabel("Production CSV").setInputFiles([]);
+    await page.getByLabel("CSV file", { exact: true }).setInputFiles([]);
     expect(await asks(page)).toBe(false);
 });
 
@@ -1098,17 +1100,17 @@ test("a file being read asks from its choice, also when it replaces a prepared f
     await openPlant(page, "Production");
     await openImport(page);
     const releaseRead = await holdFileReads(page);
-    const input = page.getByLabel("Production CSV");
+    const input = page.getByLabel("CSV file", { exact: true });
     await input.setInputFiles(meter("first.csv"));
     expect(await asks(page)).toBe(true);
     await releaseRead();
-    await expect(page.getByText(/^first\.csv: 1 valid/)).toBeVisible();
+    await expect(page.getByText(/^first\.csv · 1 row read/)).toBeVisible();
     expect(await asks(page)).toBe(true);
     await input.setInputFiles(meter("second.csv"));
-    await expect(page.getByText(/^first\.csv: 1 valid/)).toHaveCount(0);
+    await expect(page.getByText(/^first\.csv · 1 row read/)).toHaveCount(0);
     expect(await asks(page)).toBe(true);
     await releaseRead();
-    await expect(page.getByText(/^second\.csv: 1 valid/)).toBeVisible();
+    await expect(page.getByText(/^second\.csv · 1 row read/)).toBeVisible();
     await input.setInputFiles([]);
     expect(await asks(page)).toBe(false);
 });
@@ -1120,15 +1122,18 @@ test("a prepared import asks until it is confirmed", async ({ page }) => {
     await serveImport(page, answers(), {});
     await openPlant(page, "Production");
     await openImport(page);
-    await page.getByLabel("Production CSV").setInputFiles(meter("meter.csv"));
     await page
-        .getByRole("button", { name: "Preview import", exact: true })
-        .click();
-    const confirm = page.getByRole("button", { name: "Confirm import (1)" });
+        .getByLabel("CSV file", { exact: true })
+        .setInputFiles(meter("meter.csv"));
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    const confirm = page.getByRole("button", {
+        name: "Import 1 value",
+        exact: true,
+    });
     await expect(confirm).toBeVisible();
     expect(await asks(page)).toBe(true);
     await confirm.click();
-    await expect(page.getByText(/^Import complete/)).toBeVisible();
+    await expect(page.getByText(/^Imported\./)).toBeVisible();
     expect(await asks(page)).toBe(false);
 });
 
@@ -1149,19 +1154,19 @@ test("a changed production value or quality asks until it is saved or cancelled"
     await page.getByRole("button", { name: /^Edit 08:00/ }).click();
     await page
         .locator(".production-row-editor")
-        .getByLabel("Quality")
+        .getByLabel("Status")
         .selectOption("outage");
     expect(await asks(page)).toBe(true);
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     expect(await asks(page)).toBe(false);
     await editValue(page, "0,5");
     await saveValue(page);
-    await expect(page.getByText("Production saved.")).toBeVisible();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
     expect(await asks(page)).toBe(false);
     expect(server.applied()).toBe(1);
 });
 
-test("an unchanged Remove correction asks while it runs and while its answer is unconfirmed, and no more once applied", async ({
+test("an unchanged Remove entered value asks while it runs and while its answer is unconfirmed, and no more once applied", async ({
     page,
 }) => {
     await page.clock.setFixedTime(now);
@@ -1179,7 +1184,7 @@ test("an unchanged Remove correction asks while it runs and while its answer is 
     await page.getByRole("button", { name: /^Edit 08:00/ }).click();
     const editor = page.locator(".production-row-editor");
     const revert = editor.getByRole("button", {
-        name: /^Remove correction for 08:00/,
+        name: /^Remove entered value for 08:00/,
     });
     expect(await asks(page)).toBe(false);
     await revert.click();
@@ -1202,9 +1207,7 @@ test("a staged proposal asks until it is discarded", async ({ page }) => {
     await signIn(page, { role: "viewer" });
     await serveProduction(page, [{ can_edit: false, can_propose: true }]);
     await openPlant(page, "Production");
-    await page
-        .getByRole("button", { name: "Suggest correction for 08:00" })
-        .click();
+    await page.getByRole("button", { name: "Edit 08:00" }).click();
     const editor = page.locator(".production-row-editor");
     await editor.getByRole("textbox").first().fill("0,5");
     await editor
@@ -1277,7 +1280,7 @@ test("a refresh that changes the row under an unchanged editor, and the editor i
     await page.clock.runFor(5_000);
     await focusWindow(page);
     await expect(
-        page.getByText(/^This interval changed and is no longer available/),
+        page.getByText(/^This interval changed and can no longer be edited/),
     ).toBeVisible();
     expect(await asks(page)).toBe(false);
 });
@@ -1319,7 +1322,7 @@ for (const [name, target] of Object.entries(targets))
         await expect(actualsOf(page)).toBeEnabled();
         await expect(editorValue(page)).toHaveValue("0,5");
         await saveValue(page);
-        await expect(page.getByText("Production saved.")).toBeVisible();
+        await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
         expect(server.energy()).toBe(0.5);
         expect(sent).toEqual([]);
         expect(page.url()).toBe(url);
@@ -1354,7 +1357,7 @@ test("with a changed value Forward and Back each load a document after the brows
     await expect(editorValue(page)).toHaveValue("0,5");
     await expect(actualsOf(page)).not.toHaveAttribute("inert");
     await saveValue(page);
-    await expect(page.getByText("Production saved.")).toBeVisible();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
     expect(server.energy()).toBe(0.5);
     expect(sent).toEqual([]);
     expect(await marked(page)).toBe(true);
@@ -1514,15 +1517,17 @@ test("a file chosen while a clean day change is on its way asks when that change
     await markDocument(page);
     await page.getByRole("button", { name: "Previous day" }).click();
     await routerAsked;
-    await page.getByLabel("Production CSV").setInputFiles(meter("meter.csv"));
-    await expect(page.getByText(/^meter\.csv: 1 valid/)).toBeVisible();
+    await page
+        .getByLabel("CSV file", { exact: true })
+        .setInputFiles(meter("meter.csv"));
+    await expect(page.getByText(/^meter\.csv · 1 row read/)).toBeVisible();
     await stay(page, () => Promise.resolve(answerRouter()));
     expect(documents).toEqual([]);
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
     await page
-        .getByRole("button", { name: "Preview import", exact: true })
+        .getByRole("button", { name: "Import 1 value", exact: true })
         .click();
-    await page.getByRole("button", { name: "Confirm import (1)" }).click();
-    await expect(page.getByText(/^Import complete/)).toBeVisible();
+    await expect(page.getByText(/^Imported\./)).toBeVisible();
     expect(server.applied()).toBe(1);
     expect(await marked(page)).toBe(true);
     const asked = questions(page);
@@ -1590,9 +1595,7 @@ const discardedNotice =
     "The plant details changed; your unsent entries were discarded.";
 
 async function stageEight(page: Page) {
-    await page
-        .getByRole("button", { name: "Suggest correction for 08:00" })
-        .click();
+    await page.getByRole("button", { name: "Edit 08:00" }).click();
     const editor = page.locator(".production-row-editor");
     await editor.getByRole("textbox").first().fill("0,5");
     await editor
@@ -1610,7 +1613,7 @@ for (const staged of [true, false])
         await serveProduction(page, [{ can_edit: false, can_propose: true }]);
         await openPlant(page, "Production");
         const suggest = page.getByRole("button", {
-            name: "Suggest correction for 08:00",
+            name: "Edit 08:00",
         });
         if (staged) await stageEight(page);
         await changeConfiguration();
@@ -1647,7 +1650,7 @@ test("the notice of entries a configuration change discarded ends when plant mid
 });
 
 for (const typed of [false, true])
-    test(`a configuration change after a Remove correction whose answer was lost ${typed ? "says a value typed after it was discarded" : "and nothing typed after it says nothing was discarded"}`, async ({
+    test(`a configuration change after a Remove entered value whose answer was lost ${typed ? "says a value typed after it was discarded" : "and nothing typed after it says nothing was discarded"}`, async ({
         page,
     }) => {
         await page.clock.install({ time: now });
@@ -1659,7 +1662,7 @@ for (const typed of [false, true])
         await page.getByRole("button", { name: /^Edit 08:00/ }).click();
         const editor = page.locator(".production-row-editor");
         await editor
-            .getByRole("button", { name: /^Remove correction for 08:00/ })
+            .getByRole("button", { name: /^Remove entered value for 08:00/ })
             .click();
         await expect(editor.getByRole("alert")).toContainText(
             "Outcome unknown",

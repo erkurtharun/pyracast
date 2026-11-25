@@ -54,7 +54,7 @@ async function retryFailedRead(page: Page) {
 const savedProductionFailed = (page: Page) =>
     page
         .getByRole("alert")
-        .filter({ hasText: "Could not refresh saved production." });
+        .filter({ hasText: "Actual production could not be refreshed." });
 
 test("after the connection drops, the production screen and the shell say so at their own polls, and the online event reads again", async ({
     page,
@@ -467,7 +467,9 @@ test("a first automatic calibration read that failed offers Retry, which reads i
     await openPlant(page, "Calibration");
     await retryFailedRead(page);
     await expect(
-        page.getByRole("checkbox", { name: "Automatic calibration enabled" }),
+        page.getByRole("checkbox", {
+            name: "Calibrate forecasts automatically",
+        }),
     ).toBeVisible();
 });
 
