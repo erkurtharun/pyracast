@@ -39,7 +39,7 @@ def test_authentication_code_mail_has_accessible_html_and_matching_plain_text(
     html, mimetype = message.alternatives[0]
     assert isinstance(html, str)
     assert mimetype == "text/html"
-    assert f'<html lang="{language}">' in html
+    assert f'<html lang="{language}" dir="ltr">' in html
     assert html.count("012345") == 1
     assert "<h1" in html
     assert "<script" not in html
@@ -89,7 +89,7 @@ def test_invitation_mail_has_private_action_and_escaped_workspace(language: str)
     assert tenant.name in str(message.body)
     html = message.alternatives[0][0]
     assert isinstance(html, str)
-    assert f'<html lang="{language}">' in html
+    assert f'<html lang="{language}" dir="ltr">' in html
     assert '<img src=x onerror="unsafe">' not in html
     assert "&lt;img" in html
     assert "/app/invitation/#token=" in html

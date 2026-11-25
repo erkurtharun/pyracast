@@ -3,7 +3,7 @@
     "firstLoad": {
         "/app": 661174,
         "/app/w/[tenantId]": 688242,
-        "/app/w/[tenantId]/plants/[siteId]/[section]": 768627
+        "/app/w/[tenantId]/plants/[siteId]/[section]": 777066
     },
     "onDemand": {
         "Calibrations": 15147,
@@ -11,7 +11,7 @@
         "ProductionSection": 32773,
         "ForecastPerformance": 7130,
         "ReminderEditor": 12896,
-        "copyState": 3052,
+        "copyState": 3467,
         "english": 73541,
         "turkish": 79775
     },

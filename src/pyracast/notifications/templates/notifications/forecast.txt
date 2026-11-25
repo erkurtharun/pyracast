@@ -1,15 +1,15 @@
-{% load i18n %}{% autoescape off %}{{ title }}
-{% for row in rows %}
-{{ row.date }}{% if row.source %} · {{ row.source }}{% endif %}
-{{ row.label }}: {{ row.normal }}{% if row.outage %}
-{{ outage_label }}: {{ row.outage }}{% endif %}
-{% endfor %}
-{{ updated }}
-{% for warning in warnings %}{{ warning }}
-{% endfor %}
-{% translate "Interval forecasts are in the attached Excel file." %}
+{% autoescape off %}{% if heading %}{{ heading }}
 
-{% translate "View forecasts" %}: {{ url }}
+{% endif %}{% if no_data %}{{ no_data }}
+{% else %}{% for day in days %}{{ day.word }} ({{ day.date }}): {% if day.value %}{{ day.value }} {{ unit }}{% else %}{{ day.gap }}{% endif %}{% for note in day.text_notes %}
+{{ note }}{% endfor %}
+{% endfor %}
+{% if stale %}{{ stale }}
+{% endif %}{% if data_line %}{{ data_line }}
+{% endif %}{{ attachment_line }}
+{% endif %}
+{{ action_label }}:
+{{ url }}
 
-{{ footer }}
-{% endautoescape %}
+--
+{{ footer }}{% endautoescape %}
