@@ -1169,7 +1169,10 @@ test("the data choice names what each view shows and keeps the date", async ({
         .getByText("Source of actual production", { exact: true })
         .click();
     await expect(
-        page.getByText(/Saved corrections take priority/i),
+        page.getByText(
+            "Your entry stays in use even when a later EPİAŞ value arrives.",
+            { exact: true },
+        ),
     ).toBeVisible();
 });
 

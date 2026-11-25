@@ -431,11 +431,11 @@ test("an action still running when another user's session arrives sends nothing 
         .getByRole("button", { name: "Calibration", exact: true })
         .click();
     await page
-        .getByRole("row", { name: /#40/ })
+        .getByRole("row", { name: /^40\s/ })
         .getByRole("button", { name: "View details" })
         .click();
     await expect(page.locator(".calibration-detail .tags")).toContainText(
-        "Active",
+        "In use",
     );
     await markDocument(page);
     const outstanding = await outstandingAnswers(page);

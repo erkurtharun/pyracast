@@ -1359,7 +1359,7 @@ test("a revert lost after it merged its half hour into an hourly gap keeps its u
         .click();
     const orphan = page.locator(".production-row-editor");
     await expect(orphan).toContainText(
-        "This interval changed and is no longer available.",
+        "This interval changed and can no longer be edited.",
     );
     await expectUnconfirmed(orphan, true);
     await orphan
@@ -1708,7 +1708,7 @@ test("an orphaned direct change names the write its repeat sends while it shows 
     release();
     const orphan = page.locator(".production-row-editor");
     await expect(orphan).toContainText(
-        "This interval changed and is no longer available.",
+        "This interval changed and can no longer be edited.",
     );
     await expect(orphan.getByRole("textbox")).toHaveValue("1,50");
     await expectUnconfirmed(orphan, false);
@@ -1741,7 +1741,7 @@ test("Reload current values that finds the interval's bounds changed keeps the l
         .click();
     const orphan = page.locator(".production-row-editor");
     await expect(orphan).toContainText(
-        "This interval changed and is no longer available.",
+        "This interval changed and can no longer be edited.",
     );
     await expectUnconfirmed(orphan, true);
     await orphan
@@ -1858,7 +1858,7 @@ test("an orphaned direct change whose outcome is unknown keeps its notice once t
     await readAgainOnFocus(page);
     await expect(repeat).toHaveCount(0);
     await expect(orphan).toContainText(
-        "This interval changed and is no longer available.",
+        "This interval changed and can no longer be edited.",
     );
     await expectUnconfirmed(orphan, false);
     expect(server.requests).toHaveLength(1);
@@ -2150,7 +2150,7 @@ test("an orphaned direct change whose repeat is lost after it was applied is rep
         .getByRole("button", { name: "Reload current values", exact: true })
         .click();
     await expect(editor).toContainText(
-        "This interval changed and is no longer available.",
+        "This interval changed and can no longer be edited.",
     );
     const repeat = editor.getByRole("button", {
         name: "Save 0.5 MWh (Valid)",

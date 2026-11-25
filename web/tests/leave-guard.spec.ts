@@ -666,7 +666,7 @@ test("a changed production value or quality asks until it is saved or cancelled"
     await page.getByRole("button", { name: /^Edit 08:00/ }).click();
     await page
         .locator(".production-row-editor")
-        .getByLabel("Status", { exact: true })
+        .getByLabel("Status")
         .selectOption("outage");
     expect(await asks(page)).toBe(true);
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -794,7 +794,7 @@ test("a refresh that changes the row under an unchanged editor, and the editor i
     await page.clock.runFor(5_000);
     await focusWindow(page);
     await expect(
-        page.getByText(/^This interval changed and is no longer available/),
+        page.getByText(/^This interval changed and can no longer be edited/),
     ).toBeVisible();
     expect(await asks(page)).toBe(false);
 });
