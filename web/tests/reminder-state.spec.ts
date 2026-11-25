@@ -10,20 +10,32 @@ import {
 } from "./support/workspace";
 
 const STATES = [
-    ["sending", "On", "Forecast email: Not sent"],
-    ["paused_by_user", "Off", "Forecast email off"],
+    ["sending", "On", "Forecast email: Not sent", "approved"],
+    ["paused_by_user", "Off", "Forecast email off", "approved"],
     [
         "waiting_for_approval",
         "Waiting for approval by Pyracast",
         "Forecast email: Waiting for approval by Pyracast",
+        "pending",
     ],
-    ["provider_attention", "Paused", "Forecast email: Paused"],
-    ["no_recipients", "No recipients", "Forecast email: No recipients"],
-    ["invalid_recipient", "Invalid address", "Forecast email: Invalid address"],
+    ["provider_attention", "Paused", "Forecast email: Paused", "approved"],
+    [
+        "no_recipients",
+        "No recipients",
+        "Forecast email: No recipients",
+        "approved",
+    ],
+    [
+        "invalid_recipient",
+        "Invalid address",
+        "Forecast email: Invalid address",
+        "approved",
+    ],
     [
         "over_recipient_limit",
         "Too many recipients",
         "Forecast email: Too many recipients",
+        "approved",
     ],
 ] as const;
 
@@ -104,12 +116,12 @@ async function reminders(page: Page, state: string) {
     );
 }
 
-for (const [state, label, line] of STATES) {
+for (const [state, label, line, status] of STATES) {
     test(`the plant list and the reminders screen name the ${state} state with the latest outcome`, async ({
         page,
     }) => {
         await mockApi(page);
-        await plantList(page, { state, last_delivery: LAST });
+        await plantList(page, { state, last_delivery: LAST }, status);
         await reminders(page, state);
         await page.goto("/app/");
         const card = page.getByRole("button", { name: /East array/ });
@@ -130,9 +142,7 @@ for (const [state, label, line] of STATES) {
             hasText: "Last email",
         });
         await expect(last).toContainText("Last email: Not sent");
-        await expect(last).toContainText(
-            "The email service rejected the email.",
-        );
+        await expect(last).toContainText("The email was rejected.");
     });
 }
 
@@ -161,8 +171,9 @@ for (const [status, outcome] of [
         });
         await page.goto("/app/");
         const card = page.getByRole("button", { name: /East array/ });
+        await expect(card.locator("p")).toHaveText(["5 MWp"]);
         await expect(card).toContainText("Open plant");
-        await expect(card).not.toContainText("Forecast email");
+        await expect(card).not.toContainText("Istanbul");
     });
 
 test("a plant whose forecast email is on and not known to have been sent says so", async ({
@@ -177,6 +188,67 @@ test("a plant whose forecast email is on and not known to have been sent says so
     const card = page.getByRole("button", { name: /East array/ });
     await expect(card).toContainText("Forecast email: Not known whether sent");
 });
+
+for (const [status, lastError] of [
+    ["skipped", "missed_schedule"],
+    ["cancelled", "cancelled_by_settings_change"],
+] as const)
+    test(`a plant whose forecast email is on and whose last email was ${status} says it was not sent`, async ({
+        page,
+    }) => {
+        await mockApi(page);
+        await plantList(page, {
+            state: "sending",
+            last_delivery: { ...LAST, status, last_error: lastError },
+        });
+        await page.goto("/app/");
+        const card = page.getByRole("button", { name: /East array/ });
+        await expect(card.locator("p")).toHaveText([
+            "5 MWp",
+            "Forecast email: Not sent",
+        ]);
+    });
+
+for (const [status, attention, reason] of [
+    ["rejected", "review_rejected", "Pyracast did not approve this plant."],
+    [
+        "suspended",
+        "suspended",
+        "Forecasts for this plant are stopped. Write to Pyracast: info@pyracast.app",
+    ],
+    [
+        "approved",
+        "connection_unavailable",
+        "No new forecast data is arriving for this plant. Write to Pyracast: info@pyracast.app",
+    ],
+] as const)
+    test(`a ${status} plant whose forecast email waits shows only the plant's own reason`, async ({
+        page,
+    }) => {
+        await mockApi(page);
+        await page.route("**/api/tenants/1/sites/", (route) =>
+            route.fulfill({
+                json: paged([
+                    {
+                        ...region,
+                        status,
+                        attention,
+                        plant,
+                        reminder: {
+                            state: "waiting_for_approval",
+                            last_delivery: LAST,
+                        },
+                    },
+                ]),
+            }),
+        );
+        await page.goto("/app/");
+        const card = page.getByRole("button", { name: /East array/ });
+        await expect(card.locator("p")).toHaveText([
+            "5 MWp",
+            `Needs action: ${reason}`,
+        ]);
+    });
 
 for (const state of ["provider_attention", "sending"] as const)
     test(`the forecast email settings say the email is paused only while no forecast data arrives: ${state}`, async ({

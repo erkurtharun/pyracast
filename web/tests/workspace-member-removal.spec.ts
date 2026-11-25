@@ -67,10 +67,14 @@ for (const width of [320, 390]) {
         const confirmation = page.getByRole("region", {
             name: "Remove from workspace",
         });
-        await expect(confirmation).toContainText(viewer.email);
-        await expect(confirmation).toContainText(
-            "Their account and other workspaces will stay available.",
-        );
+        for (const line of [
+            "Remove this member from the workspace?",
+            viewer.email,
+            "They will lose access to this workspace. Their account and other workspaces will stay available.",
+        ])
+            await expect(
+                confirmation.getByText(line, { exact: true }),
+            ).toBeVisible();
         await confirmation
             .getByRole("button", { name: "Cancel", exact: true })
             .click();

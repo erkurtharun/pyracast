@@ -327,3 +327,90 @@ for (const item of plantStates)
             notices.getByRole("button", { name: "Send for approval again" }),
         ).toHaveCount(item.resubmit ? 1 : 0);
     });
+
+type Job = Schedule["recent_jobs"][number];
+
+function job(overrides: Partial<Job>): Job {
+    return {
+        id: 1,
+        endpoint: "forecasts",
+        status: "retry",
+        scheduled_for: "2026-01-01T13:00:00Z",
+        available_at: "2026-01-01T15:00:00Z",
+        retry_until: null,
+        attempts: 1,
+        last_error: "provider_throttled",
+        ...overrides,
+    };
+}
+
+for (const [cause, last, label, sentence] of [
+    [
+        "a timed pause",
+        job({ status: "retry", last_error: "provider_allowance_exhausted" }),
+        "Delayed",
+        "Forecast update delayed. Pyracast will try again.",
+    ],
+    [
+        "a rejected connection",
+        job({ status: "failed", last_error: "provider_authentication_failed" }),
+        "Not updating",
+        "No new forecast data is arriving for this plant. Write to Pyracast: info@pyracast.app",
+    ],
+] as const)
+    test(`a plant whose updates wait after ${cause} says what happens next`, async ({
+        page,
+    }) => {
+        const status = await openCollection(
+            page,
+            "en",
+            schedule({
+                state: "provider_attention",
+                inactive_reason: "provider_unavailable",
+                recent_jobs: [last],
+            }),
+        );
+
+        await expect(status.getByText(label, { exact: true })).toBeVisible();
+        await expect(status.getByRole("status")).toHaveText(sentence);
+    });
+
+for (const [status, error, shown] of [
+    ["failed", "publication_failure", "Forecast update failed."],
+    ["stale", "history_budget_reserved", null],
+    [
+        "retry",
+        "publication_failure",
+        "Forecast update delayed. Pyracast will try again.",
+    ],
+] as const)
+    test(`an update log row promises another attempt only while one is planned: ${status} after ${error}`, async ({
+        page,
+    }) => {
+        await openCollection(
+            page,
+            "en",
+            schedule({
+                recent_jobs: [
+                    job({
+                        endpoint:
+                            status === "stale"
+                                ? "estimated_actuals"
+                                : "forecasts",
+                        status,
+                        last_error: error,
+                    }),
+                ],
+            }),
+        );
+        await page.getByText("Recent update jobs", { exact: true }).click();
+        const row = page
+            .locator("details.panel")
+            .filter({ hasText: "Recent update jobs" })
+            .locator("li");
+        await expect(row).toHaveCount(1);
+        if (shown) await expect(row).toContainText(` · ${shown}`);
+        else await expect(row).toHaveText(/ · 1 attempt$/);
+        if (status !== "retry")
+            await expect(row).not.toContainText("Pyracast will try again");
+    });

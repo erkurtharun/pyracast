@@ -418,10 +418,13 @@ test("after a reset the opened run shows and exports its reloaded selection", as
     await expect(detail.locator(".tags")).toContainText("In use");
     await page.getByRole("button", { name: "Reset to baseline" }).click();
     await page.getByRole("button", { name: "Reset to baseline" }).click();
-    await expect(page.getByRole("row", { name: /#40/ })).toContainText(
+    await expect(
+        page.getByRole("row", { name: /#40/ }).getByRole("cell").nth(3),
+    ).toHaveText("Calculated");
+    await expect(detail.locator(".tags > *")).toHaveText([
         "Calculated",
-    );
-    await expect(detail.locator(".tags")).toContainText("Calculated");
+        "Calculated",
+    ]);
     await expect(
         detail.getByText(
             "This calibration cannot be activated: the calibration in use changed.",

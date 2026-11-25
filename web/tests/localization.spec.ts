@@ -333,6 +333,23 @@ test("a failed save keeps the current language and offers an accessible error", 
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
 });
 
+test("a language save whose answer was lost says its outcome is not known", async ({
+    page,
+}) => {
+    await mockLanguage(page, "en", true);
+    await page.route("**/api/session/language/", (route) =>
+        route.fulfill({ status: 502, body: "lost" }),
+    );
+    await page.goto("/app/");
+    await page.getByLabel("Language", { exact: true }).selectOption("tr");
+    await expect(page.getByRole("main").getByRole("alert")).toHaveText(
+        "It is not known whether it was saved. Check before you send it again.",
+    );
+    await expect(page.getByLabel("Language", { exact: true })).toHaveValue(
+        "en",
+    );
+});
+
 test("Turkish mobile navigation remains accessible without horizontal overflow", async ({
     page,
 }, testInfo) => {

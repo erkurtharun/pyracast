@@ -17,24 +17,40 @@ import { useWorkspace } from "@/features/workspace/workspace-shell";
 import { DeletedNotice } from "@/features/trash/recent-deletion";
 
 type ReminderSummary = components["schemas"]["ReminderSummaryOutput"];
+type SiteStatus = components["schemas"]["RegionStatusEnum"];
 
-function ForecastEmailLine({ reminder }: { reminder: ReminderSummary }) {
+const unsent = new Set(["failed", "skipped", "cancelled"]);
+
+function ForecastEmailLine({
+    reminder,
+    status,
+}: {
+    reminder: ReminderSummary;
+    status: SiteStatus;
+}) {
     const t = useTranslations("Dashboard");
     const label = useLabel();
+    const { state } = reminder;
     const outcome = reminder.last_delivery?.status;
-    const text =
-        reminder.state === "paused_by_user"
-            ? t("forecastEmailOff")
-            : reminder.state !== "sending"
-              ? t("forecastEmail", {
-                    state: label("ReminderState", reminder.state),
-                })
-              : outcome === "failed" || outcome === "uncertain"
-                ? t("forecastEmail", {
-                      state: label("NotificationDeliveryStatus", outcome),
-                  })
-                : null;
-    return text && <p className="fine">{text}</p>;
+    const text = (): string | null => {
+        if (status === "rejected" || status === "suspended") return null;
+        if (state === "paused_by_user") return t("forecastEmailOff");
+        if (state === "waiting_for_approval" && status !== "pending")
+            return null;
+        if (state !== "sending")
+            return t("forecastEmail", { state: label("ReminderState", state) });
+        if (outcome === "uncertain")
+            return t("forecastEmail", {
+                state: label("NotificationDeliveryStatus", outcome),
+            });
+        return outcome && unsent.has(outcome)
+            ? t("forecastEmail", {
+                  state: label("NotificationDeliveryStatus", "failed"),
+              })
+            : null;
+    };
+    const line = text();
+    return line && <p className="fine">{line}</p>;
 }
 
 export function Portfolio() {
@@ -199,6 +215,7 @@ export function Portfolio() {
                                     {site.reminder && (
                                         <ForecastEmailLine
                                             reminder={site.reminder}
+                                            status={site.status}
                                         />
                                     )}
                                     <div className="region-card-bottom">
@@ -218,15 +235,17 @@ export function Portfolio() {
                     </div>
                 ) : (
                     <>
-                        <Empty
-                            title={
-                                rows.length ? t("noMatches") : t("firstPlant")
-                            }
-                        >
-                            {rows.length
-                                ? t("differentSearch")
-                                : t("addDetails")}
-                        </Empty>
+                        {rows.length ? (
+                            <Empty title={t("noMatches")}>
+                                {t("differentSearch")}
+                            </Empty>
+                        ) : canManage ? (
+                            <Empty title={t("firstPlant")}>
+                                {t("addDetails")}
+                            </Empty>
+                        ) : (
+                            <Empty title={t("noPlants")} />
+                        )}
                         {offerCreate && !rows.length && (
                             <div className="empty-action">
                                 <button

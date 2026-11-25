@@ -543,12 +543,13 @@ test("mobile admin reviews current context, refreshes a conflict and approves ex
     });
     await page.goto("/app/");
     await page
-        .getByRole("button", { name: "Inbox, 1 unread", exact: true })
+        .getByRole("button", { name: "Inbox, 1 to review", exact: true })
         .click();
     await page
         .getByRole("button", { name: "Review details", exact: true })
         .click();
     await expect(page.getByText(/Former member/)).toBeVisible();
+    await expect(page.getByText("Configuration 31")).toHaveCount(0);
     await expect(
         page.locator(".proposal-energy").filter({ hasText: "0.75 MWh" }),
     ).toBeVisible();
@@ -576,7 +577,7 @@ test("mobile admin reviews current context, refreshes a conflict and approves ex
         .click();
     await expect(detail.getByRole("button", { name: "Approve" })).toBeEnabled();
     await expect(
-        page.getByRole("button", { name: "Inbox, 1 unread", exact: true }),
+        page.getByRole("button", { name: "Inbox, 1 to review", exact: true }),
     ).toBeVisible();
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({
@@ -604,6 +605,68 @@ test("mobile admin reviews current context, refreshes a conflict and approves ex
         page.getByRole("heading", { name: "Value at decision", exact: true }),
     ).toBeVisible();
 });
+
+for (const [replacement, lines, absent] of [
+    [
+        { ...reading, energy_mwh: 0, source_kind: "settlement_injection" },
+        ["Use EPİAŞ value (0 MWh)"],
+        ["Remove entered value", "The interval will have no value."],
+    ],
+    [
+        null,
+        ["Remove entered value", "The interval will have no value."],
+        [/Use EPİAŞ value/],
+    ],
+] as const)
+    test(`a revert in the inbox says what the interval will hold: ${replacement ? "the EPİAŞ value" : "no value"}`, async ({
+        page,
+    }) => {
+        await mockApi(page);
+        const item = {
+            ...proposal(),
+            production_items: [
+                {
+                    ...proposal().production_items[0],
+                    action: "revert",
+                    expected_revision_id: 4,
+                    proposed: replacement,
+                    energy_mwh: null,
+                },
+            ],
+        };
+        await page.route("**/api/tenants/", (route) =>
+            route.fulfill({
+                json: paged([
+                    {
+                        id: 1,
+                        name: "Workspace",
+                        role: "admin",
+                        pending_review_count: 1,
+                        unread_outcome_count: 0,
+                    },
+                ]),
+            }),
+        );
+        await page.route("**/change-requests/?*", (route) =>
+            route.fulfill({ json: paged([item]) }),
+        );
+        await page.route("**/change-requests/1/", (route) =>
+            route.fulfill({ json: item }),
+        );
+        await page.goto("/app/w/1/inbox/");
+        await page
+            .getByRole("button", { name: "Review details", exact: true })
+            .click();
+        const row = page.locator(".inbox-detail .proposal-comparison");
+        for (const line of lines)
+            await expect(row.getByText(line, { exact: true })).toBeVisible();
+        for (const line of absent)
+            await expect(
+                typeof line === "string"
+                    ? row.getByText(line, { exact: true })
+                    : row.getByText(line),
+            ).toHaveCount(0);
+    });
 
 test("Turkish member can withdraw and an opened outcome is marked read at 320px", async ({
     page,
@@ -685,6 +748,11 @@ test("Turkish member can withdraw and an opened outcome is marked read at 320px"
     await expect(
         page.getByRole("button", { name: "Ayrıntıları yenile", exact: true }),
     ).toBeVisible();
+    for (const removed of [
+        "Yapılandırma 31",
+        "Başvuruyu değiştirmek için geri çekip yeniden gönderin.",
+    ])
+        await expect(page.getByText(removed)).toHaveCount(0);
     await page
         .getByRole("button", {
             name: "Değişiklik talebini geri çek",
@@ -966,7 +1034,7 @@ test("workspace and current role changes clear review controls and previous tena
     );
     await page.goto("/app/");
     await page
-        .getByRole("button", { name: "Inbox, 1 unread", exact: true })
+        .getByRole("button", { name: "Inbox, 1 to review", exact: true })
         .click();
     await page
         .getByRole("button", { name: "Review details", exact: true })
@@ -1127,28 +1195,42 @@ test("a poll that was already reading cannot bring a decided request back to the
     await expect(page.locator(".inbox-card")).toHaveCount(0);
 });
 
-test("the inbox label counts several updates in the plural", async ({
-    page,
-}) => {
-    await mockApi(page);
-    await page.route("**/api/tenants/", (route) =>
-        route.fulfill({
-            json: paged([
-                {
-                    id: 1,
-                    name: "Workspace",
-                    role: "admin",
-                    pending_review_count: 1,
-                    unread_outcome_count: 1,
-                },
-            ]),
-        }),
-    );
-    await page.goto("/app/");
-    await expect(
-        page.getByRole("button", { name: "Inbox, 2 unread", exact: true }),
-    ).toBeVisible();
-});
+for (const [pending, unread, language, name] of [
+    [2, 0, "en", "Inbox, 2 to review"],
+    [0, 3, "en", "Inbox, 3 unread"],
+    [1, 2, "en", "Inbox, 2 unread, 1 to review"],
+    [1, 2, "tr", "Gelen kutusu, 2 okunmamış, 1 onay bekleyen"],
+] as const)
+    test(`the inbox label names ${pending} pending reviews and ${unread} unread outcomes separately in ${language}`, async ({
+        page,
+    }) => {
+        const account = await mockApi(page);
+        await page.route("**/api/session/", (route) =>
+            route.fulfill({
+                json: { ...sessionIdentity(account.current), language },
+            }),
+        );
+        await page.route("**/api/tenants/", (route) =>
+            route.fulfill({
+                json: paged([
+                    {
+                        id: 1,
+                        name: "Workspace",
+                        role: "admin",
+                        pending_review_count: pending,
+                        unread_outcome_count: unread,
+                    },
+                ]),
+            }),
+        );
+        await page.goto("/app/");
+        await expect(
+            page.getByRole("button", { name, exact: true }),
+        ).toBeVisible();
+        await expect(page.locator(".inbox-badge")).toHaveText(
+            String(pending + unread),
+        );
+    });
 
 async function routeUnavailableRows(
     page: Page,

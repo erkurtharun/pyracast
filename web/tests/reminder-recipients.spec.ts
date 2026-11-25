@@ -380,7 +380,7 @@ for (const [field, add, remove] of [
 }
 
 for (const [kind, label] of [
-    ["saved_complete", "Last forecast before sunrise"],
+    ["saved_complete", "Newer forecast data was not available."],
     ["saved_partial", "Data is missing for some hours."],
     ["unavailable", "No forecast data."],
 ] as const) {
@@ -432,9 +432,20 @@ test("an email not known to have been sent asks to check with a recipient withou
     ).toHaveCount(0);
 });
 
-for (const [code, detail] of [
-    ["mail_rate_limited", "Too many emails were sent at once."],
-    ["mail_preparation_failed", "Pyracast could not send the email."],
+for (const [code, status, detail] of [
+    ["mail_rate_limited", "retry", "Too many emails were sent at once."],
+    ["mail_preparation_failed", "retry", "Pyracast could not send the email."],
+    [
+        "mail_authorization_revoked",
+        "failed",
+        "Pyracast could not send the email. Write to Pyracast: info@pyracast.app",
+    ],
+    [
+        "mail_sender_forbidden",
+        "failed",
+        "Pyracast could not send the email. Write to Pyracast: info@pyracast.app",
+    ],
+    ["mail_rejected", "failed", "The email was rejected."],
 ] as const) {
     test(`${code} names the reason without exposing internal codes`, async ({
         page,
@@ -442,7 +453,7 @@ for (const [code, detail] of [
         await reminderApi(page, {
             recipients: [],
             enabled: true,
-            deliveries: [{ status: "retry", last_error: code, sent_at: null }],
+            deliveries: [{ status, last_error: code, sent_at: null }],
         });
         await openReminders(page);
         await page

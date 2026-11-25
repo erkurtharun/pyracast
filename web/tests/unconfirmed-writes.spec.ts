@@ -83,7 +83,7 @@ const labels = {
         optionalReason: "Reason (optional)",
         sent: "Sent for approval.",
         closed: (status: string) =>
-            `This change request is already closed. Status: ${status}. Nothing was changed.`,
+            `This change request is already closed. Status: ${status}. No second change request was created.`,
         statuses: {
             approved: "Approved",
             rejected: "Rejected",
@@ -120,7 +120,7 @@ const labels = {
         optionalReason: "Gerekçe (isteğe bağlı)",
         sent: "Onaya gönderildi.",
         closed: (status: string) =>
-            `Bu değişiklik talebi zaten kapandı. Durum: ${status}. Hiçbir şey değişmedi.`,
+            `Bu değişiklik talebi zaten kapandı. Durum: ${status}. İkinci bir değişiklik talebi oluşturulmadı.`,
         statuses: {
             approved: "Onaylandı",
             rejected: "Reddedildi",

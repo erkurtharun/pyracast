@@ -658,7 +658,23 @@ function ProductionProposal({
                     timeZoneName: "shortOffset",
                 })}
             </h4>
-            {row.action === "revert" && <p>{t("revert")}</p>}
+            {row.action === "revert" &&
+                (row.proposed ? (
+                    <p>
+                        {t("revertToProvider", {
+                            value: format.quantity(
+                                row.proposed.energy_mwh,
+                                "MWh",
+                                6,
+                            ),
+                        })}
+                    </p>
+                ) : (
+                    <>
+                        <p>{t("revert")}</p>
+                        <p className="fine">{t("revertLeavesEmpty")}</p>
+                    </>
+                ))}
             <div className="proposal-values">
                 <div>
                     <h5>{t(closed ? "atDecision" : "current")}</h5>
