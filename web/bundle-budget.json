@@ -1,7 +1,7 @@
 {
     "tolerancePercent": 1,
     "firstLoad": {
-        "/app": 661738,
+        "/app": 654594,
         "/app/w/[tenantId]": 688242,
         "/app/w/[tenantId]/plants/[siteId]/[section]": 776812
     },
