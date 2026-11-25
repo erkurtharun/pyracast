@@ -153,5 +153,8 @@ if (!workerWithdrawn)
         await expect(
             page.getByRole("heading", { name: "Signing out…" }),
         ).toBeVisible();
+        await expect(
+            page.getByText("It is not known whether it was saved"),
+        ).toBeVisible();
         await expectNothingSaved(offline);
     });
