@@ -416,7 +416,7 @@ def test_invitation_mail_uses_administrators_saved_language(
     deliver_mail()
     assert mail.outbox[-1].subject == "Pyracast çalışma alanı daveti"  # noqa: RUF001 -- Turkish text.
     deliver_mail()
-    assert "salt okunur erişim" in str(mail.outbox[-1].body)
+    assert "Davet edildiğiniz rol: Üye\n" in str(mail.outbox[-1].body)
 
 
 @override_settings(
@@ -437,7 +437,7 @@ def test_invitation_without_preference_uses_request_language(
     )
     assert response.status_code == 201
     deliver_mail()
-    assert "salt okunur erişim" in str(mail.outbox[-1].body)
+    assert "Davet edildiğiniz rol: Üye\n" in str(mail.outbox[-1].body)
 
 
 def test_workspace_invitation_hourly_limit_is_durable(
