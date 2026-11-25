@@ -133,6 +133,9 @@ async function mockTwoFactor(
 
 async function openSettings(page: Page) {
     await page.goto("/app/w/");
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
     await page.getByRole("button", { name: "Account" }).click();
 }
 
