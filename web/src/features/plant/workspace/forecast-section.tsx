@@ -7,13 +7,19 @@ import { DataSourceControl } from "@/features/forecast/data-source";
 import {
     clampDate,
     dateBounds,
+    shownChoice,
+    sourceOf,
     type DataSource,
 } from "@/features/forecast/date-bounds";
 import { ViewNav } from "@/ui/action";
 import { plantDay } from "@/lib/format/time";
 import { ControlField, Select } from "@/ui/form";
 import { Notice } from "@/ui/ui";
-import { PlantForecast } from "./forecast-reading";
+import {
+    PlantForecast,
+    useForecastRead,
+    type ForecastQuery,
+} from "./forecast-reading";
 
 export type ForecastOptions = { resolution: "30" | "60"; source: DataSource };
 
@@ -23,7 +29,6 @@ export function ForecastSection({
     configurationId,
     view,
     date,
-    baseDate,
     leaving,
     options,
     onOptions,
@@ -34,7 +39,6 @@ export function ForecastSection({
     configurationId: number | undefined;
     view: PlantView<"forecast">;
     date: string;
-    baseDate: string | undefined;
     leaving: boolean;
     options: ForecastOptions;
     onOptions: (options: ForecastOptions) => void;
@@ -45,7 +49,18 @@ export function ForecastSection({
     const today = plantDay(timezone);
     const bounds = dateBounds(source, today);
     const leavingGeneration = leaving && view === "generation";
-    const setDate = (next: string) => show({ date: next });
+    const query: ForecastQuery = {
+        scope,
+        electrical: view === "generation",
+        date,
+        resolution: resolution === "30" ? 30 : 60,
+        source,
+        poll:
+            source !== "archived_forecast" && date >= plantDay(timezone, -1)
+                ? cadence.live
+                : false,
+    };
+    const shown = useForecastRead(query, false).data;
     return (
         <>
             <ViewNav
@@ -64,20 +79,19 @@ export function ForecastSection({
                         value={date}
                         min={bounds.min}
                         max={bounds.max}
-                        onChange={(event) => setDate(event.target.value)}
+                        onChange={(event) => show({ date: event.target.value })}
                     />
                 </ControlField>
                 <DataSourceControl
-                    value={source}
-                    onChange={(next) => {
-                        onOptions({ ...options, source: next });
-                        const current = baseDate || plantDay(timezone, 1);
-                        const clamped = clampDate(
-                            current,
-                            dateBounds(next, today),
-                        );
-                        if (clamped !== current) setDate(clamped);
-                    }}
+                    value={shownChoice(
+                        source,
+                        shown?.source_kind,
+                        date < today,
+                    )}
+                    electrical={query.electrical}
+                    onChange={(next) =>
+                        onOptions({ ...options, source: sourceOf(next) })
+                    }
                 />
                 {view === "generation" && (
                     <Select
@@ -103,17 +117,7 @@ export function ForecastSection({
             ) : (
                 <PlantForecast
                     key={`${view}-${date}-${resolution}-${source}-${configurationId}`}
-                    scope={scope}
-                    electrical={view === "generation"}
-                    date={date}
-                    resolution={resolution === "30" ? 30 : 60}
-                    source={source}
-                    poll={
-                        source !== "archived_forecast" &&
-                        date >= plantDay(timezone, -1)
-                            ? cadence.live
-                            : false
-                    }
+                    {...query}
                 />
             )}
         </>

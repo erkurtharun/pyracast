@@ -296,6 +296,11 @@ test("the performance export keeps the plant, zone, source and model check per d
 
 test("the forecast export writes one row per interval with its unit and source", () => {
     const forecast = { date: "2026-11-12", source_kind: "forecast" as const };
+    const names = {
+        file: "uretim",
+        forecast: "Tahmin",
+        satellite: "Uydu verisinden hesaplanan üretim",
+    };
     const row = {
         start: "2026-11-12T08:00:00Z",
         end: "2026-11-12T09:00:00Z",
@@ -309,17 +314,19 @@ test("the forecast export writes one row per interval with its unit and source",
     const electrical = forecastExport(plant, forecast, [row], {
         electrical: true,
         scenario: false,
+        names,
     });
     expect(electrical.filename).toBe(
-        "forecast-Doğu- array-2026-11-12-forecast.csv",
+        "pyracast-dogu-array-2026-11-12-uretim.csv",
     );
     expect(lines(electrical).slice(0, 2)).toEqual([
         '"plant_id","plant_name","timezone","date","source_kind","starts_at","ends_at","mean_power_mw","energy_mwh","quality_flags"',
-        '21,"Doğu: array","Europe/Istanbul","2026-11-12","forecast","2026-11-12T11:00:00+03:00","2026-11-12T12:00:00+03:00",2,2,"clipped; estimated"',
+        '21,"Doğu: array","Europe/Istanbul","2026-11-12","Tahmin","2026-11-12T11:00:00+03:00","2026-11-12T12:00:00+03:00",2,2,"clipped; estimated"',
     ]);
     const scenario = forecastExport(plant, forecast, [row], {
         electrical: true,
         scenario: true,
+        names,
     });
     expect(lines(scenario)[0]).toBe(
         '"plant_id","plant_name","timezone","date","source_kind","starts_at","ends_at","normal_mean_power_mw","normal_energy_mwh","normal_quality_flags","affected_mean_power_mw","affected_energy_mwh","affected_quality_flags"',
@@ -328,14 +335,65 @@ test("the forecast export writes one row per interval with its unit and source",
         plant,
         forecast,
         [{ ...row, ghi_wm2: 410 }],
-        { electrical: false, scenario: false },
+        {
+            electrical: false,
+            scenario: false,
+            names: { ...names, file: "irradiance" },
+        },
     );
     expect(lines(irradiance)[0]).toBe(
         '"plant_id","plant_name","timezone","date","source_kind","starts_at","ends_at","ghi_wm2","quality_flags"',
     );
     expect(irradiance.filename).toBe(
-        "irradiance-Doğu- array-2026-11-12-forecast.csv",
+        "pyracast-dogu-array-2026-11-12-irradiance.csv",
     );
+});
+
+test("the forecast export names satellite rows and writes a day of both kinds as forecast", () => {
+    const names = {
+        file: "generation",
+        forecast: "Forecast",
+        satellite: "Production calculated from satellite data",
+    };
+    const row = (kinds: string[]) => ({
+        start: "2026-11-12T08:00:00Z",
+        end: "2026-11-12T09:00:00Z",
+        energy_mwh: 2,
+        source_kinds: kinds,
+    });
+    const satellite = forecastExport(
+        { ...plant, name: "IŞIK Çiftliği" },
+        { date: "2026-11-11", source_kind: "estimated_actuals" },
+        [row(["estimated_actuals"])],
+        { electrical: true, scenario: false, names },
+    );
+    expect(satellite.filename).toBe(
+        "pyracast-isik-ciftligi-2026-11-11-generation.csv",
+    );
+    expect(lines(satellite)[1]).toContain(
+        '"Production calculated from satellite data"',
+    );
+    const mixed = forecastExport(
+        plant,
+        { date: "2026-11-12", source_kind: "mixed" },
+        [
+            row(["estimated_actuals"]),
+            row(["estimated_actuals", "forecast"]),
+            row(["forecast"]),
+        ],
+        { electrical: true, scenario: false, names },
+    );
+    expect(
+        lines(mixed)
+            .slice(0, 4)
+            .map((line) => line.split(",").at(-1)),
+    ).toEqual([
+        '"interval_source"',
+        '"Production calculated from satellite data"',
+        '"Forecast"',
+        '"Forecast"',
+    ]);
+    expect(lines(mixed)[1]).toContain('"2026-11-12","Forecast"');
 });
 
 test("the plant export lists the configuration and location", () => {

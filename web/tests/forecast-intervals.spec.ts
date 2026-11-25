@@ -156,23 +156,24 @@ async function openForecast(
             .click();
 }
 
-test("Turkish mixed sources stay readable on mobile without empty quality columns", async ({
+const panel = (page: Page) => page.locator("section.panel");
+
+test("a Turkish mixed day stays readable on mobile with only the time and forecast columns", async ({
     page,
 }, testInfo) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openForecast(page, { mixed: true, language: "tr" });
     await expect(
-        page.locator(".tag", { hasText: /^Gerçekleşen tahmini \+ öngörü$/ }),
+        panel(page).getByRole("heading", { name: "Üretim tahmini" }),
     ).toBeVisible();
+    await expect(panel(page).getByText(/^Tahmin verisi: /)).toBeVisible();
+    await expect(panel(page).locator(".tag")).toHaveCount(0);
     await page.locator(".interval-details > summary").click();
-    const table = page.getByRole("table");
-    await expect(table.getByRole("columnheader")).toHaveCount(3);
-    await expect(
-        table.getByRole("cell", { name: "Gerçekleşen tahmini", exact: true }),
-    ).toBeVisible();
-    await expect(
-        table.getByRole("cell", { name: "Öngörü", exact: true }),
-    ).toBeVisible();
+    const table = page.getByRole("table", { name: "Saatlik değerler" });
+    await expect(table.getByRole("columnheader")).toHaveText([
+        "Saat",
+        "Tahmin (MWh)",
+    ]);
     expect(
         await page.evaluate(
             () => document.documentElement.scrollWidth <= innerWidth,
@@ -184,102 +185,88 @@ test("Turkish mixed sources stay readable on mobile without empty quality column
     });
 });
 
-const sourceFlags = [
+const internalFlags = [
     "forecast_fallback",
-    "mixed_estimated_actuals_and_forecast",
     "mixed_estimated_actual_vintages",
     "assumed_tracker_geometry",
-    "geometry_not_modeled",
+    "provisional_production_calibration",
+    "unvalidated_reference_transfer",
 ];
-const sourceFlagLabels = {
-    en: {
-        panel: "Source & quality",
-        labels: [
-            "saved forecast, historical estimates pending",
-            "estimates for completed intervals where available, forecast elsewhere",
-            "combined estimate updates",
-            "assumed tracking geometry",
-            "plant geometry not modeled",
-        ],
-    },
-    tr: {
-        panel: "Kaynak ve kalite",
-        labels: [
-            "Kayıtlı tahmin, geçmiş veri bekleniyor",
-            "Tamamlanan aralıklarda varsa uydu/model tahmini, diğer aralıklarda öngörü",
-            "Birleştirilmiş gerçekleşen tahmini güncellemeleri",
-            "Varsayılan takip sistemi geometrisi",
-            "Santral geometrisi modellenmedi",
-        ],
-    },
-} as const;
 
 for (const language of ["en", "tr"] as const) {
-    test(`the source and quality panel names the source and geometry flags in ${language === "en" ? "English" : "Turkish"}`, async ({
+    test(`the forecast tab shows no internal tags or source details in ${language === "en" ? "English" : "Turkish"}`, async ({
         page,
     }) => {
-        const { panel, labels } = sourceFlagLabels[language];
-        await openForecast(page, { language, qualityFlags: sourceFlags });
-        await page.getByText(panel, { exact: true }).click();
-        await expect(page.locator("details.provenance .tag")).toHaveText([
-            ...labels,
-        ]);
+        await openForecast(page, { language, qualityFlags: internalFlags });
+        await expect(
+            panel(page).getByRole("heading", {
+                name:
+                    language === "en"
+                        ? "Generation forecast"
+                        : "Üretim tahmini",
+            }),
+        ).toBeVisible();
+        await expect(panel(page).locator(".tag")).toHaveCount(0);
+        await expect(panel(page).locator("details.provenance")).toHaveCount(0);
+        await expect(
+            panel(page).getByText(
+                language === "en" ? "Source & quality" : "Kaynak ve kalite",
+            ),
+        ).toHaveCount(0);
+        await expect(panel(page).locator(".stat")).toHaveCount(1);
     });
 }
 
 for (const electrical of [true, false]) {
-    test(`${electrical ? "generation" : "irradiance"} discloses estimated and forecast interval sources in mixed views and CSV`, async ({
+    test(`${electrical ? "generation" : "irradiance"} shows a mixed day as forecast and names the row kinds in the CSV`, async ({
         page,
     }, testInfo) => {
         await openForecast(page, { electrical, mixed: true });
         await expect(
-            page.locator(".tag", { hasText: /^Estimated \+ forecast$/ }),
+            panel(page).getByRole("heading", {
+                name: electrical
+                    ? "Generation forecast"
+                    : "Irradiance forecast",
+            }),
         ).toBeVisible();
-        await expect(
-            page.getByText(
-                /Satellite\/model estimates for completed intervals/,
-            ),
-        ).toBeVisible();
-        await page.getByText("View interval data (2 intervals)").click();
+        await expect(panel(page).getByText(/^Forecast data: /)).toHaveCount(1);
+        await expect(panel(page).getByText(/^Satellite data: /)).toHaveCount(0);
+        await expect(panel(page).locator(".tag")).toHaveCount(0);
+        await page.getByText("Show table", { exact: true }).click();
         const table = page.getByRole("table");
-        await expect(
-            table.getByRole("columnheader", { name: "Source", exact: true }),
-        ).toBeVisible();
-        await expect(table.getByRole("row").nth(1)).toContainText(
-            "Estimated actuals",
-        );
-        await expect(table.getByRole("row").nth(2)).toContainText("Forecast");
-        await expect(page.locator(".interval-notes")).toHaveCount(0);
+        await expect(table.getByRole("columnheader")).toHaveText([
+            "Time",
+            electrical ? "Forecast (MWh)" : "Irradiance (W/m²)",
+        ]);
         if (electrical) {
             await page.getByLabel("Resolution").selectOption("30");
-            await page.getByText("View interval data (4 intervals)").click();
-            await expect(table.getByRole("row").nth(3)).toContainText(
-                "Estimated + forecast",
-            );
+            await page.getByText("Show table", { exact: true }).click();
+            await expect(
+                page.getByRole("table", { name: "Half-hourly values" }),
+            ).toBeVisible();
+            await expect(table.getByRole("row")).toHaveCount(5);
         }
         const download = page.waitForEvent("download");
         await page
             .getByRole("button", { name: "Download CSV", exact: true })
             .click();
+        const file = await download;
+        expect(file.suggestedFilename()).toBe(
+            `pyracast-east-array-2026-11-14-${electrical ? "generation" : "irradiance"}.csv`,
+        );
         const records = Papa.parse<Record<string, string>>(
-            await readFile(await (await download).path(), "utf8"),
+            await readFile(await file.path(), "utf8"),
             { header: true, skipEmptyLines: true },
         );
-        expect(records.data[0]?.interval_source).toContain("estimated_actuals");
-        expect(records.data[1]?.interval_source).toContain("forecast");
-        if (electrical) {
-            expect(records.data[2]?.interval_source).toContain(
-                "estimated_actuals",
-            );
-            expect(records.data[2]?.interval_source).toContain("forecast");
-        }
-        await page.getByText("Source & quality", { exact: true }).click();
-        await expect(
-            page.getByText(/Estimate update 1: collected/),
-        ).toBeVisible();
-        await expect(
-            page.getByText(/Forecast update 2: collected/),
-        ).toBeVisible();
+        expect(records.data[0]?.source_kind).toBe("Forecast");
+        expect(records.data[0]?.interval_source).toBe(
+            electrical
+                ? "Production calculated from satellite data"
+                : "Irradiance calculated from satellite data",
+        );
+        expect(records.data[1]?.interval_source).toBe("Forecast");
+        if (electrical)
+            expect(records.data[2]?.interval_source).toBe("Forecast");
         await page.screenshot({
             path: testInfo.outputPath("mixed-sources.png"),
             fullPage: true,
@@ -296,11 +283,11 @@ test("generation intervals show energy without redundant visible power columns",
     await expect(
         page.getByRole("checkbox", { name: "Show full day", exact: true }),
     ).toBeVisible();
-    await page.getByText("View interval data (2 intervals)").click();
-    const table = page.getByRole("table");
+    await page.getByText("Show table", { exact: true }).click();
+    const table = page.getByRole("table", { name: "Hourly values" });
     await expect(table.getByRole("columnheader")).toHaveText([
-        "Time interval",
-        "Energy (MWh)",
+        "Time",
+        "Forecast (MWh)",
     ]);
     await expect(
         table.getByRole("cell").filter({ hasText: "12:00–13:00" }),
@@ -311,24 +298,22 @@ test("generation intervals show energy without redundant visible power columns",
     );
     await expect(page.locator(".interval-notes")).toHaveCount(0);
     await expect(
-        page.getByText("— Data unavailable; not zero.", { exact: true }),
+        page.getByText("— means no value.", { exact: true }),
     ).toHaveCount(0);
     await expect(
-        page.getByRole("img", { name: /^Power by interval/ }),
+        page.getByRole("img", { name: "Average power (MW)", exact: true }),
     ).toBeVisible();
     await page.getByLabel("Resolution").selectOption("30");
-    await expect(
-        page.getByText("View interval data (4 intervals)"),
-    ).toBeVisible();
-    await page.getByText("View interval data (4 intervals)").click();
-    await expect(table.locator(".interval-value")).toHaveText([
+    await page.getByText("Show table", { exact: true }).click();
+    const halfHourly = page.getByRole("table", { name: "Half-hourly values" });
+    await expect(halfHourly.locator(".interval-value")).toHaveText([
         "1",
         "1",
         "1",
         "1",
     ]);
     await expect(
-        table.getByRole("cell").filter({ hasText: "12:00–12:30" }),
+        halfHourly.getByRole("cell").filter({ hasText: "12:00–12:30" }),
     ).toBeVisible();
     const download = page.waitForEvent("download");
     await page
@@ -348,26 +333,24 @@ test("generation intervals show energy without redundant visible power columns",
 });
 
 for (const scenario of ["outage"] as const) {
-    test(`${scenario} keeps both energies and moves only flagged intervals into collapsed notes`, async ({
+    test(`${scenario} keeps both energies in the table without interval notes`, async ({
         page,
     }, testInfo) => {
         await page.setViewportSize({ width: 390, height: 844 });
         await openForecast(page, { scenario, flagged: true });
         await expect(page.getByText(/Green: normal capacity/)).toHaveCount(0);
         await expect(
-            page.getByRole("img", {
-                name: new RegExp(
-                    `Normal capacity and with outages power by interval`,
-                ),
-            }),
+            page.getByRole("img", { name: "Average power (MW)", exact: true }),
         ).toBeVisible();
-        await page.getByText("View interval data (2 intervals)").click();
-        const affected = "With outages";
+        await expect(page.locator(".chart-legend")).toHaveText(
+            "Without outageWith outage",
+        );
+        await page.getByText("Show table", { exact: true }).click();
         const table = page.getByRole("table");
         await expect(table.getByRole("columnheader")).toHaveText([
-            "Time interval",
-            "Normal capacity (MWh)",
-            `${affected} (MWh)`,
+            "Time",
+            "Without outage (MWh)",
+            "With outage (MWh)",
         ]);
         await expect(table.locator(".interval-value")).toHaveText([
             "2",
@@ -376,21 +359,8 @@ for (const scenario of ["outage"] as const) {
             "1",
         ]);
         await expect(table).not.toContainText("test flag");
-        const notes = page.locator(".interval-notes");
-        await expect(notes).not.toHaveAttribute("open", "");
-        await expect(notes.locator("li")).toHaveCount(2);
-        await expect(
-            notes.getByText("Normal capacity: normal test flag", {
-                exact: true,
-            }),
-        ).not.toBeVisible();
-        await notes.locator("summary").click();
-        await expect(notes.locator("li").nth(0)).toHaveText(
-            "12:00–13:00Normal capacity: normal test flag",
-        );
-        await expect(notes.locator("li").nth(1)).toHaveText(
-            `13:00–14:00${affected}: affected test flag`,
-        );
+        await expect(page.locator(".interval-notes")).toHaveCount(0);
+        await expect(page.getByText(/test flag/)).toHaveCount(0);
         expect(
             await table.evaluate(
                 (element) => element.scrollWidth <= element.clientWidth,
@@ -427,7 +397,7 @@ for (const scenario of ["outage"] as const) {
         ).toBeLessThanOrEqual(320);
         const download = page.waitForEvent("download");
         await page
-            .getByRole("button", { name: "Download both scenarios CSV" })
+            .getByRole("button", { name: "Download CSV", exact: true })
             .click();
         const records = Papa.parse<Record<string, string>>(
             await readFile(await (await download).path(), "utf8"),
@@ -447,15 +417,21 @@ for (const scenario of ["outage"] as const) {
 }
 
 for (const electrical of [true, false]) {
-    test(`${electrical ? "generation" : "irradiance"} distinguishes zero from unavailable interval values`, async ({
+    test(`${electrical ? "generation" : "irradiance"} distinguishes zero from unavailable interval values and gives no total for missing hours`, async ({
         page,
     }) => {
         await openForecast(page, { electrical, missing: true });
-        await page.getByText("View interval data (3 intervals)").click();
+        await expect(
+            page.getByText("Data is missing for some hours.", { exact: true }),
+        ).toBeVisible();
+        await expect(
+            page.locator(".stat", { hasText: "Daily total" }).locator("strong"),
+        ).toHaveText(electrical ? "— MWh" : "— kWh/m²");
+        await page.getByText("Show table", { exact: true }).click();
         const table = page.getByRole("table");
         await expect(table.getByRole("columnheader")).toHaveText([
-            "Time interval",
-            electrical ? "Energy (MWh)" : "Irradiance (W/m²)",
+            "Time",
+            electrical ? "Forecast (MWh)" : "Irradiance (W/m²)",
         ]);
         await expect(table.locator(".interval-value")).toHaveText([
             "0",
@@ -463,10 +439,10 @@ for (const electrical of [true, false]) {
             "0",
         ]);
         await expect(
-            table.getByRole("cell", { name: /Data unavailable/ }),
+            table.getByRole("cell", { name: /No value\./ }),
         ).toHaveCount(1);
         await expect(
-            page.getByText("— Data unavailable; not zero.", { exact: true }),
+            page.getByText("— means no value.", { exact: true }),
         ).toBeVisible();
         await page
             .getByRole("checkbox", {
@@ -481,13 +457,6 @@ for (const electrical of [true, false]) {
             "0",
             "—",
         ]);
-        await expect(page.locator(".interval-notes summary")).toHaveText(
-            "Interval notes (2)",
-        );
-        await page.locator(".interval-notes summary").click();
-        await expect(page.locator(".interval-notes li")).toHaveCount(2);
-        await expect(page.locator(".interval-notes")).toContainText(
-            "missing source interval",
-        );
+        await expect(page.locator(".interval-notes")).toHaveCount(0);
     });
 }

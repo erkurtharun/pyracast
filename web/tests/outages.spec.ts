@@ -218,7 +218,7 @@ async function workspace(
                 date: "2026-11-12",
                 timezone: region.timezone,
                 freshness: "fresh",
-                source_kind: "forecasts",
+                source_kind: "Forecast",
                 result,
                 outage_scenario: active
                     ? {
@@ -318,14 +318,14 @@ test("outage lifecycle preserves metadata, compares both scenarios and restores 
     ).toBeVisible();
     await page.getByRole("button", { name: "Forecast", exact: true }).click();
     await expect(
-        page.locator(".stat").getByText("Normal capacity", { exact: true }),
+        page.locator(".stat").getByText("Without outage", { exact: true }),
     ).toBeVisible();
     await expect(
-        page.locator(".stat").getByText("With outages", { exact: true }),
+        page.locator(".stat").getByText("With outage", { exact: true }),
     ).toBeVisible();
     const download = page.waitForEvent("download");
     await page
-        .getByRole("button", { name: "Download both scenarios CSV" })
+        .getByRole("button", { name: "Download CSV", exact: true })
         .click();
     const file = await (await download).path();
     const csv = Papa.parse<Record<string, string>>(
@@ -368,10 +368,10 @@ test("outage lifecycle preserves metadata, compares both scenarios and restores 
     });
     await page.getByRole("button", { name: "Forecast", exact: true }).click();
     await expect(
-        page.getByText("Estimated energy", { exact: true }),
+        page.locator(".stat").getByText("Daily total", { exact: true }),
     ).toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Download both scenarios CSV" }),
+        page.locator(".stat").getByText("With outage", { exact: true }),
     ).toHaveCount(0);
 });
 
@@ -644,26 +644,27 @@ test("unknown impact remains missing and stale edits show a conflict", async ({
     ).toBeVisible();
     await page.getByRole("button", { name: "Forecast", exact: true }).click();
     await expect(
-        page.getByText("Outage impact is unknown for some intervals.", {
-            exact: true,
-        }),
+        page
+            .getByRole("status")
+            .filter({ hasText: /^Outage impact is unknown\./ }),
     ).toBeVisible();
     await expect(
         page.getByText(
-            "Update remaining capacity in Outages after this configuration change.",
+            "Technical details changed. Check the capacity in the outage record.",
+            { exact: true },
         ),
     ).toBeVisible();
-    await page.getByText(/View interval data/).click();
+    await page.getByText("Show table", { exact: true }).click();
     await expect(
         page.getByRole("columnheader", {
-            name: "With outages (MWh)",
+            name: "With outage (MWh)",
             exact: true,
         }),
     ).toBeVisible();
     const intervalValues = page.getByRole("table").locator(".interval-value");
     await expect(intervalValues).toHaveText(["2", "—"]);
     await expect(
-        page.getByRole("table").getByRole("cell", { name: /Data unavailable/ }),
+        page.getByRole("table").getByRole("cell", { name: /No value\./ }),
     ).toHaveCount(1);
 });
 

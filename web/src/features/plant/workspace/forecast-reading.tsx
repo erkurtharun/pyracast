@@ -6,33 +6,20 @@ import { ForecastPanel } from "@/features/forecast/forecast-panel";
 import type { DataSource } from "@/features/forecast/data-source";
 import { Resource } from "@/ui/resource";
 
-type ForecastQuery = {
+export type ForecastQuery = {
     scope: PlantScope;
+    electrical: boolean;
     date: string;
     resolution: 30 | 60;
     source: DataSource;
     poll: number | false;
 };
 
-export function PlantForecast({
-    electrical,
-    ...query
-}: ForecastQuery & { electrical: boolean }) {
-    return electrical ? (
-        <GenerationForecast {...query} />
-    ) : (
-        <IrradianceForecast {...query} />
-    );
-}
-
-function GenerationForecast({
-    scope,
-    date,
-    resolution,
-    source,
-    poll,
-}: ForecastQuery) {
-    const resource = useApiQuery(
+export function useForecastRead(
+    { scope, electrical, date, resolution, source, poll }: ForecastQuery,
+    enabled = true,
+): Loaded<Forecast> {
+    const generation = useApiQuery(
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/forecast/",
         {
             path: scope,
@@ -42,13 +29,9 @@ function GenerationForecast({
                 data_source: source,
             },
         },
-        { poll },
+        { poll, enabled: enabled && electrical },
     );
-    return <ForecastResource resource={resource} electrical />;
-}
-
-function IrradianceForecast({ scope, date, source, poll }: ForecastQuery) {
-    const resource = useApiQuery(
+    const irradiance = useApiQuery(
         "/api/tenants/{tenant_id}/regions/{region_id}/forecast/",
         {
             path: {
@@ -60,31 +43,28 @@ function IrradianceForecast({ scope, date, source, poll }: ForecastQuery) {
                 data_source: source,
             },
         },
-        { poll },
+        { poll, enabled: enabled && !electrical },
     );
-    return <ForecastResource resource={resource} electrical={false} />;
+    return electrical ? generation : irradiance;
 }
 
-function ForecastResource({
-    resource,
-    electrical,
-}: {
-    resource: Loaded<Forecast>;
-    electrical: boolean;
-}) {
+export function PlantForecast(query: ForecastQuery) {
     const t = useTranslations("PlantWorkspace");
+    const resource = useForecastRead(query);
     return (
         <section className="panel">
             <Resource
                 resource={resource}
                 loading={
-                    electrical ? t("loadingGeneration") : t("loadingIrradiance")
+                    query.electrical
+                        ? t("loadingGeneration")
+                        : t("loadingIrradiance")
                 }
             >
                 {(forecast) => (
                     <ForecastPanel
                         forecast={forecast}
-                        electrical={electrical}
+                        electrical={query.electrical}
                     />
                 )}
             </Resource>

@@ -24,6 +24,9 @@ export function ForecastChart({
     const { number } = useFormat();
     const [firstRow] = rows;
     const lastRow = rows.at(-1);
+    const title = electrical
+        ? t("power_across_the_day")
+        : t("irradiance_across_the_day");
     const max = Math.max(
         1,
         ...rows.map((row) =>
@@ -33,12 +36,7 @@ export function ForecastChart({
     return (
         <>
             <div className="chart-title">
-                <strong>
-                    {electrical
-                        ? t("power_across_the_day")
-                        : t("irradiance_across_the_day")}
-                </strong>
-                <span>{unit}</span>
+                <strong>{title}</strong>
             </div>
             {scenario && (
                 <div className="chart-legend">
@@ -52,17 +50,7 @@ export function ForecastChart({
                     </span>
                 </div>
             )}
-            <div
-                className="chart"
-                role="img"
-                aria-label={t(
-                    scenario
-                        ? "scenario_chart"
-                        : electrical
-                          ? "power_chart"
-                          : "irradiance_chart",
-                )}
-            >
+            <div className="chart" role="img" aria-label={title}>
                 {rows.map((row, index) => (
                     <div
                         className={`chart-column ${row[metric] == null ? "missing" : ""}`}

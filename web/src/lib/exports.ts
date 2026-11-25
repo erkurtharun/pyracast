@@ -245,28 +245,58 @@ function forecastValues(
     ];
 }
 
+// File names stay ASCII: Turkish letters lose their marks.
+function fileSlug(name: string): string {
+    return name
+        .toLocaleLowerCase("tr")
+        .replaceAll("ı", "i")
+        .normalize("NFKD")
+        .replace(/\p{M}/gu, "")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+}
+
+export type ForecastFileNames = {
+    file: string;
+    forecast: string;
+    satellite: string;
+};
+
 export function forecastExport(
     plant: PlantRef,
     forecast: { date?: string; source_kind?: string | null },
     rows: readonly ForecastRow[],
-    { electrical, scenario }: { electrical: boolean; scenario: boolean },
+    {
+        electrical,
+        scenario,
+        names,
+    }: { electrical: boolean; scenario: boolean; names: ForecastFileNames },
 ): CsvExport {
     const stamp = (value: string) => plantTimestamp(value, plant.timezone);
+    const kind = (kinds: readonly string[] | undefined) =>
+        !kinds?.length
+            ? null
+            : kinds.every((value) => value === "estimated_actuals")
+              ? names.satellite
+              : names.forecast;
     const source: Column<ForecastRow>[] =
         forecast.source_kind === "mixed"
-            ? [["interval_source", (row) => list(row.source_kinds)]]
+            ? [["interval_source", (row) => kind(row.source_kinds)]]
             : [];
     return table(
         csvFilename(
-            electrical ? "forecast" : "irradiance",
-            plant.name,
+            "pyracast",
+            fileSlug(plant.name),
             forecast.date ?? "",
-            forecast.source_kind ?? "",
+            names.file,
         ),
         [
             ...plantColumns<ForecastRow>(plant),
             ["date", () => forecast.date ?? null],
-            ["source_kind", () => forecast.source_kind ?? null],
+            [
+                "source_kind",
+                () => kind(forecast.source_kind ? [forecast.source_kind] : []),
+            ],
             ["starts_at", (row) => stamp(row.start)],
             ["ends_at", (row) => stamp(row.end)],
             ...forecastValues(electrical, scenario),

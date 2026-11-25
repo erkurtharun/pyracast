@@ -97,7 +97,8 @@ export type Loaded<T> = {
     discard(): void;
 };
 
-type Polling = { poll?: number | false };
+// `enabled: false` only reads what another reader of the same request stored.
+type Polling = { poll?: number | false; enabled?: boolean };
 
 export function answered<T>(read: () => Promise<Fetched<T>>) {
     return async (): Promise<Stored<T>> => {
@@ -183,7 +184,7 @@ async function withSentAt<T>(
 function useLoaded<T>(
     path: string,
     options: object,
-    { poll = false }: Polling,
+    { poll = false, enabled = true }: Polling,
     read: (url: string) => Promise<Fetched<T>>,
 ): Loaded<T> {
     const owner = useOwner();
@@ -192,6 +193,7 @@ function useLoaded<T>(
     const queryKey = keys.request(owner, path, options);
     const query = useQuery<Stored<T>>({
         queryKey,
+        enabled,
         queryFn: answered(() => withSentAt(read, url)),
         refetchInterval: (query) => {
             const stored = query.state.data;
