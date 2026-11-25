@@ -486,7 +486,7 @@ test("a customer manages one plant site through the real API", async ({
 
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page
-        .getByRole("button", { name: "Data collection", exact: true })
+        .getByRole("button", { name: "Forecast update times", exact: true })
         .click();
     await page.getByLabel("Update time 1", { exact: true }).fill("09:00");
     await page.getByRole("button", { name: "Add time" }).click();
@@ -498,9 +498,11 @@ test("a customer manages one plant site through the real API", async ({
     await expect(page.getByLabel("Update time 2", { exact: true })).toHaveValue(
         "16:00",
     );
-    await page.getByRole("button", { name: "Email reminders" }).click();
+    await page
+        .getByRole("button", { name: "Forecast email", exact: true })
+        .click();
     const reminders = page.getByRole("region", {
-        name: "Email reminders",
+        name: "Forecast email",
         exact: true,
     });
     const savedReminders = page
@@ -591,7 +593,7 @@ test("a customer manages one plant site through the real API", async ({
     await page.reload();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page
-        .getByRole("button", { name: "Email reminders", exact: true })
+        .getByRole("button", { name: "Forecast email", exact: true })
         .click();
     await expect(
         page.getByLabel("Email address 1", { exact: true }),
