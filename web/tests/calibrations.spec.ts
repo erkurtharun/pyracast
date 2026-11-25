@@ -387,7 +387,7 @@ test("the calibration exports wait for the runs reloaded after a request", async
     holding = false;
     release();
     await expect(page.getByRole("row", { name: /^41\s/ })).toContainText(
-        "Waiting",
+        "Queued",
     );
     const download = page.waitForEvent("download");
     await listDownload(page).click();
@@ -603,7 +603,7 @@ test("superseded runs are labelled in Turkish", async ({ page, baseURL }) => {
         .getByRole("button", { name: "Kalibrasyon", exact: true })
         .click();
     const row = page.getByRole("row", { name: /^40\s/ });
-    await expect(row).toContainText("Yerini yenisi aldı");
+    await expect(row).toContainText("Eskidi");
     await expect(row).not.toContainText("superseded");
 });
 
@@ -692,7 +692,7 @@ test("a release in progress leaves an activation unconfirmed instead of refused"
     await activate(page, 40);
     await expect(
         page.getByText(
-            "The server did not confirm the change. It may have been saved; check before you send it again.",
+            "It is not known whether it was saved. Check before you send it again.",
             { exact: true },
         ),
     ).toBeVisible();

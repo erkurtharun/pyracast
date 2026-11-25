@@ -184,7 +184,7 @@ test("a non-JSON authentication failure shows a safe error", async ({
         .fill("Test-only-cobalt-79!");
     await page.locator("form").getByRole("button", { name: "Sign in" }).click();
     await expect(page.locator("form").getByRole("alert")).toContainText(
-        "Request failed (403). Please try again.",
+        "Something went wrong. Try again.",
     );
     await expect(page.locator("form").getByRole("alert")).not.toContainText(
         "private gateway details",
@@ -767,7 +767,7 @@ for (const [status, text] of [
             .click();
         const alert = page.locator("form").getByRole("alert");
         await expect(alert).toContainText(text);
-        await expect(alert).not.toContainText("Request failed");
+        await expect(alert).not.toContainText("Something went wrong");
     });
 }
 
@@ -1030,11 +1030,11 @@ test("an administrator can choose the customer workspace and return", async ({
     await page.goto("/app/w/");
     await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
     await expect(
-        page.getByRole("link", { name: "Administration" }),
+        page.getByRole("link", { name: "Pyracast console" }),
     ).toHaveAttribute("href", "/admin/");
     await page.goto("/app/account/");
     await expect(
-        page.getByRole("heading", { name: "Account settings", exact: true }),
+        page.getByRole("heading", { name: "Account", exact: true }),
     ).toBeVisible();
     expect(new URL(page.url()).pathname).toBe("/app/account/");
 });
@@ -1046,7 +1046,7 @@ test("a customer cannot enter administration through a return parameter", async 
     await page.goto("/app/?next=%2Fadmin%2F");
     await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
     await expect(
-        page.getByRole("link", { name: "Administration" }),
+        page.getByRole("link", { name: "Pyracast console" }),
     ).toHaveCount(0);
 });
 
@@ -1153,7 +1153,7 @@ test("a verification answered with a refusal that is not allauth's does not repo
         .getByRole("button", { name: "Verify email", exact: true })
         .click();
     await expect(
-        page.getByText("Request failed (401). Please try again.", {
+        page.getByText("Something went wrong. Try again.", {
             exact: true,
         }),
     ).toBeVisible();

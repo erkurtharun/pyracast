@@ -57,7 +57,7 @@ test("Turkish workspace roles and invitation labels preserve readable characters
     role = "viewer";
     await page.reload();
     await expect(
-        page.getByText("Üye · değişiklikler onay gerektirir", { exact: true }),
+        page.locator(".workspace-readonly", { hasText: /^Üye$/ }),
     ).toBeVisible();
     await expect(
         page.getByRole("button", {
@@ -66,6 +66,51 @@ test("Turkish workspace roles and invitation labels preserve readable characters
         }),
     ).toHaveCount(0);
 });
+
+for (const [role, shown, hidden, addPlant] of [
+    [
+        "viewer",
+        ["No plants yet."],
+        [
+            "Start with your first plant",
+            "Add its location and technical details.",
+        ],
+        0,
+    ],
+    [
+        "admin",
+        [
+            "Start with your first plant",
+            "Add its location and technical details.",
+        ],
+        ["No plants yet."],
+        1,
+    ],
+] as const)
+    test(`an empty plant list gives the ${role} only what they can do`, async ({
+        page,
+    }) => {
+        await mockApi(page);
+        await page.route("**/api/tenants/", (route) =>
+            route.fulfill({
+                json: paged([
+                    tenantRow({ id: 1, name: "Sunfield Energy", role }),
+                ]),
+            }),
+        );
+        await page.route("**/api/tenants/1/sites/", (route) =>
+            route.fulfill({ json: paged([]) }),
+        );
+        await page.goto("/app/");
+        const empty = page.locator(".empty");
+        for (const text of shown)
+            await expect(empty.getByText(text, { exact: true })).toBeVisible();
+        for (const text of hidden)
+            await expect(page.getByText(text, { exact: true })).toHaveCount(0);
+        await expect(
+            page.getByRole("button", { name: "Add plant", exact: true }),
+        ).toHaveCount(addPlant);
+    });
 
 test("viewer reads shared settings without write controls or requests", async ({
     page,
@@ -147,7 +192,7 @@ test("viewer reads shared settings without write controls or requests", async ({
     await expect(page.locator(".readonly-form button:visible")).toHaveCount(0);
     await page.getByRole("button", { name: "Outages", exact: true }).click();
     await expect(
-        page.getByRole("button", { name: "Submit outage", exact: true }),
+        page.getByRole("button", { name: "Report outage", exact: true }),
     ).toBeVisible();
     await page
         .getByRole("button", { name: "Calibration", exact: true })
@@ -163,7 +208,7 @@ test("viewer reads shared settings without write controls or requests", async ({
     await page.getByRole("button", { name: "Account", exact: true }).click();
     await page.getByText("Change email", { exact: true }).click();
     await expect(
-        page.getByRole("button", { name: "Send verification" }),
+        page.getByRole("button", { name: "Send email code" }),
     ).toBeVisible();
     expect(writes).toEqual([]);
 });
@@ -278,7 +323,7 @@ test("workspace administrator invites, sends again and cancels with the server's
         })
         .click();
     await expect(page.locator("[data-live-region]")).toHaveText(
-        "A new invitation link is being sent to late@example.test.",
+        "A new invitation is being sent to late@example.test.",
     );
     await expect(
         row("late@example.test").getByText("Pending", { exact: true }),
@@ -294,12 +339,12 @@ test("workspace administrator invites, sends again and cancels with the server's
     ).toBe(true);
     await page
         .getByRole("button", {
-            name: "Cancel invitation: viewer@example.test",
+            name: "Withdraw invitation: viewer@example.test",
             exact: true,
         })
         .click();
     await expect(page.locator("[data-live-region]")).toHaveText(
-        "Invitation cancelled.",
+        "Invitation withdrawn.",
     );
     await expect(row("viewer@example.test")).toHaveCount(0);
     await expect(row("late@example.test")).toHaveCount(1);
@@ -562,7 +607,7 @@ test("anonymous expired invitation can be dismissed to restore company registrat
         "This invitation has expired.",
     );
     await page
-        .getByRole("button", { name: "Cancel invitation", exact: true })
+        .getByRole("button", { name: "Withdraw invitation", exact: true })
         .click();
     await expect(page).toHaveURL("/app/w/");
     expect(
@@ -575,6 +620,6 @@ test("anonymous expired invitation can be dismissed to restore company registrat
         .click();
     await expect(page.getByLabel("Company name")).toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Cancel invitation", exact: true }),
+        page.getByRole("button", { name: "Withdraw invitation", exact: true }),
     ).toHaveCount(0);
 });

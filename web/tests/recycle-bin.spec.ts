@@ -243,7 +243,7 @@ test("a plant restored through the add-plant wizard no longer offers its undo", 
     await bin(page, { deleted: false });
     await deleteFromSettings(page);
     await expect(deletionNotice(page)).toBeVisible();
-    await page.getByRole("button", { name: "Add a plant" }).click();
+    await page.getByRole("button", { name: "Add plant", exact: true }).click();
     await page.getByLabel("Plant name", { exact: true }).fill("Again");
     await page.getByLabel("Latitude (°)").fill(String(region.latitude));
     await page.getByLabel("Longitude (°)").fill(String(region.longitude));
@@ -282,7 +282,7 @@ test("the undo notice is gone after leaving the workspace and coming back", asyn
         .selectOption("1");
     await expect(page).toHaveURL("/app/w/1/");
     await expect(
-        page.getByRole("button", { name: "Add a plant" }),
+        page.getByRole("button", { name: "Add plant", exact: true }),
     ).toBeVisible();
     await expect(deletionNotice(page)).toHaveCount(0);
 });

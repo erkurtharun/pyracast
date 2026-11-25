@@ -342,7 +342,7 @@ for (const width of [320, 390, 768, 1440]) {
             path: testInfo.outputPath("portfolio.png"),
             fullPage: true,
         });
-        await page.getByRole("button", { name: "+ Add a plant" }).click();
+        await page.getByRole("button", { name: "Add plant" }).click();
         await fits(page, "New region", audit);
         await page
             .getByRole("button", { name: /East array|Antalya solar park/ })
@@ -568,7 +568,7 @@ for (const width of [320, 390, 768, 1440]) {
             page.getByRole("heading", { name: "Plants" }),
         ).toBeVisible();
         for (const [button, heading] of [
-            ["Account", "Account settings"],
+            ["Account", "Account"],
             ["Recycle bin", "Recycle bin"],
         ] as const) {
             if (button === "Recycle bin")
@@ -682,7 +682,7 @@ for (const width of [320, 390, 1440]) {
                           plants: "Santraller",
                           members: "Üyeler",
                           account: "Hesap",
-                          accountHeading: "Hesap ayarları",
+                          accountHeading: "Hesap",
                           trash: "Geri dönüşüm kutusu",
                           email: "E-posta adresi",
                           invite: "Davet gönder",
@@ -693,7 +693,7 @@ for (const width of [320, 390, 1440]) {
                           plants: "Plants",
                           members: "Members",
                           account: "Account",
-                          accountHeading: "Account settings",
+                          accountHeading: "Account",
                           trash: "Recycle bin",
                           email: "Email address",
                           invite: "Send invitation",
@@ -828,7 +828,7 @@ test("mobile viewer retains the read-only indicator and no workspace management 
     );
     await page.goto("/app/");
     await expect(
-        page.getByText("Member · changes require approval", { exact: true }),
+        page.locator(".workspace-readonly", { hasText: /^Member$/ }),
     ).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Members", exact: true }),
@@ -850,7 +850,7 @@ test("mobile platform administrator can reach administration and customer naviga
         name: "Main navigation",
     });
     await expect(
-        navigation.getByRole("link", { name: "Administration" }),
+        navigation.getByRole("link", { name: "Pyracast console" }),
     ).toHaveAttribute("href", "/admin/");
     await expect(navigation.locator("button, a")).toHaveCount(5);
     const controls = await navigation

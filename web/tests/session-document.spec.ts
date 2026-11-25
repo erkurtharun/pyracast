@@ -285,10 +285,10 @@ async function stagedCorrection(page: Page) {
     const editor = page.locator(".production-row-editor");
     await editor.getByRole("textbox").first().fill("0,5");
     await editor
-        .getByRole("button", { name: "Add to request", exact: true })
+        .getByRole("button", { name: "Add to change request", exact: true })
         .click();
     await expect(
-        page.getByRole("region", { name: "Correction request", exact: true }),
+        page.getByRole("region", { name: "Change request", exact: true }),
     ).toBeVisible();
     await markDocument(page);
     return { questions, account };
@@ -328,7 +328,7 @@ test("a restored document hides a staged correction before it reloads and does n
         window.sessionStorage.getItem("shownAtUnload"),
     );
     expect(shown).not.toBeNull();
-    expect(shown).not.toContain("Correction request");
+    expect(shown).not.toContain("Change request");
     expect(shown).not.toContain("East array");
 });
 

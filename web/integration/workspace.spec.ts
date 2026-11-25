@@ -343,7 +343,7 @@ test("a customer manages one plant site through the real API", async ({
     await page.getByRole("button", { name: "End outage", exact: true }).click();
     await page.getByLabel("End", { exact: true }).fill(outageTimes.ends);
     await page.getByRole("button", { name: "End outage", exact: true }).click();
-    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
+    await expect(page.getByText("Ended", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Forecast", exact: true }).click();
     await expect(
         page.locator(".stat").getByText("Daily total", { exact: true }),
@@ -557,7 +557,7 @@ test("a customer manages one plant site through the real API", async ({
         expect((await reread).status()).toBe(200);
         await expect(reviewDialog).toHaveCount(0);
         await expect(
-            reminders.getByText("Saved successfully.", { exact: true }),
+            reminders.getByText("Saved.", { exact: true }),
         ).toBeVisible();
     }
     await page.getByLabel("Send forecast email for this plant").check();
@@ -572,7 +572,7 @@ test("a customer manages one plant site through the real API", async ({
     await expect(page.getByLabel("Send time 1", { exact: true })).toHaveValue(
         "10:00",
     );
-    await expect(reminders.getByText("Sending", { exact: true })).toBeVisible();
+    await expect(reminders.getByText("On", { exact: true })).toBeVisible();
     await expect(savedReminders).toContainText("1 / 5");
     await expect(savedReminders).toContainText("Bcc: 1 recipient");
     await page
@@ -692,9 +692,7 @@ test("a customer manages one plant site through the real API", async ({
     );
     await page.getByRole("button", { name: "Save technical details" }).click();
     expect((await configurationSaved).ok()).toBeTruthy();
-    await expect(
-        page.getByText("Saved successfully.", { exact: true }),
-    ).toBeVisible();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
     await page.reload();
     await expect(page.getByLabel("Mounting")).toHaveValue("fixed");
     await expect(page.getByLabel("Panel tilt (°, optional)")).toHaveValue("33");

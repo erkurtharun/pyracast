@@ -214,11 +214,7 @@ export function ProposalDraft({
                     void submit();
                 }}
             >
-                <ControlField
-                    label={t("reason")}
-                    hint={t("approvalHelp")}
-                    error={reasonError}
-                >
+                <ControlField label={t("reason")} error={reasonError}>
                     {(describedBy) => (
                         <textarea
                             ref={reasonRef}

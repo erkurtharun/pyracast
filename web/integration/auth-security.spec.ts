@@ -130,7 +130,7 @@ test("verified email and a recovery code protect a real browser session", async 
         .fill(recoveryCode);
     await page.getByRole("button", { name: "Verify code" }).click();
     await expect(
-        page.getByRole("heading", { name: "Account settings", exact: true }),
+        page.getByRole("heading", { name: "Account", exact: true }),
     ).toBeVisible();
     const newPassword = `${password}-new`;
     const passwordSettings = page.locator("section").filter({
@@ -174,7 +174,7 @@ test("verified email and a recovery code protect a real browser session", async 
         .fill(secondRecoveryCode);
     await page.getByRole("button", { name: "Verify code" }).click();
     await expect(
-        page.getByRole("heading", { name: "Account settings", exact: true }),
+        page.getByRole("heading", { name: "Account", exact: true }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Sign out" }).click();
     await page.getByRole("button", { name: "Forgot password" }).click();
@@ -225,7 +225,7 @@ test("verified email and a recovery code protect a real browser session", async 
         .fill(thirdRecoveryCode);
     await page.getByRole("button", { name: "Verify code" }).click();
     await expect(
-        page.getByRole("heading", { name: "Account settings", exact: true }),
+        page.getByRole("heading", { name: "Account", exact: true }),
     ).toBeVisible();
     const changedEmail = email.replace("@", "+changed@");
     const emailChange = page.locator(".account-disclosure").filter({
@@ -233,9 +233,7 @@ test("verified email and a recovery code protect a real browser session", async 
     });
     await emailChange.getByText("Change email", { exact: true }).click();
     await emailChange.getByLabel("New email address").fill(changedEmail);
-    await emailChange
-        .getByRole("button", { name: "Send verification code" })
-        .click();
+    await emailChange.getByRole("button", { name: "Send email code" }).click();
     await emailChange
         .getByLabel("Authenticator code or recovery code")
         .fill(fifthRecoveryCode);
@@ -260,7 +258,7 @@ test("verified email and a recovery code protect a real browser session", async 
             return !!changeCode;
         })
         .toBe(true);
-    await emailChange.getByLabel("Email verification code").fill(changeCode);
+    await emailChange.getByLabel("Email code").fill(changeCode);
     await emailChange.getByRole("button", { name: "Verify new email" }).click();
     await expect(
         emailChange.getByText(`${changedEmail} is now your address.`),

@@ -505,10 +505,6 @@ function RequestDetail({
             </button>
             {item && (
                 <>
-                    <p className="fine">
-                        {t("configuration", { id: item.configuration_id })} ·{" "}
-                        {item.timezone}
-                    </p>
                     {item.reason && (
                         <p className="submission-reason">{item.reason}</p>
                     )}
@@ -602,23 +598,20 @@ function RequestDetail({
                         </div>
                     )}
                     {item.can_withdraw && (
-                        <>
-                            <p className="fine">{t("withdrawHelp")}</p>
-                            <button
-                                className="button secondary"
-                                disabled={pending}
-                                onClick={() => {
-                                    void act("withdraw", null, () =>
-                                        api.post(
-                                            "/api/tenants/{tenant_id}/change-requests/{request_id}/withdraw/",
-                                            { path },
-                                        ),
-                                    ).catch(() => {});
-                                }}
-                            >
-                                {t("withdraw")}
-                            </button>
-                        </>
+                        <button
+                            className="button secondary"
+                            disabled={pending}
+                            onClick={() => {
+                                void act("withdraw", null, () =>
+                                    api.post(
+                                        "/api/tenants/{tenant_id}/change-requests/{request_id}/withdraw/",
+                                        { path },
+                                    ),
+                                ).catch(() => {});
+                            }}
+                        >
+                            {t("withdraw")}
+                        </button>
                     )}
                     {item.unread && item.status !== "pending" && (
                         <button
@@ -665,7 +658,23 @@ function ProductionProposal({
                     timeZoneName: "shortOffset",
                 })}
             </h4>
-            {row.action === "revert" && <p>{t("revert")}</p>}
+            {row.action === "revert" &&
+                (row.proposed ? (
+                    <p>
+                        {t("revertToProvider", {
+                            value: format.quantity(
+                                row.proposed.energy_mwh,
+                                "MWh",
+                                6,
+                            ),
+                        })}
+                    </p>
+                ) : (
+                    <>
+                        <p>{t("revert")}</p>
+                        <p className="fine">{t("revertLeavesEmpty")}</p>
+                    </>
+                ))}
             <div className="proposal-values">
                 <div>
                     <h5>{t(closed ? "atDecision" : "current")}</h5>

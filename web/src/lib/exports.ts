@@ -1,4 +1,9 @@
-import { csvFilename, type CsvExport, type CsvValue } from "./csv";
+import {
+    csvFilename,
+    plantFilename,
+    type CsvExport,
+    type CsvValue,
+} from "./csv";
 import { plantTimestamp } from "./format/time";
 import type { components } from "./schema";
 
@@ -45,25 +50,6 @@ function plantColumns<Row>(plant: PlantRef): Column<Row>[] {
 
 const list = (values: readonly string[] | undefined) =>
     values?.length ? values.join("; ") : null;
-
-// File names stay ASCII: Turkish letters lose their marks.
-function fileSlug(name: string): string {
-    return name
-        .toLocaleLowerCase("tr")
-        .replaceAll("ı", "i")
-        .normalize("NFKD")
-        .replace(/\p{M}/gu, "")
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-|-$/g, "");
-}
-
-// csvFilename cuts its joined parts at 150 characters, so only the plant slug gives way.
-function plantFilename(plant: string, kind: string, ...dates: string[]) {
-    const tail = [...dates, kind].filter(Boolean).join("-");
-    const room = 150 - `pyracast--${tail}`.length;
-    const slug = fileSlug(plant).slice(0, room).replace(/-$/, "") || "plant";
-    return csvFilename("pyracast", slug, ...dates, kind);
-}
 
 export function productionExport(
     plant: PlantRef,

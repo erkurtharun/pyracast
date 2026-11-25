@@ -104,7 +104,7 @@ test("one plant request saves location and technical details before approval", a
     });
     await page.clock.setFixedTime(new Date("2026-03-28T22:30:00Z"));
     await page.goto("/app/");
-    await page.getByRole("button", { name: "Add a plant" }).click();
+    await page.getByRole("button", { name: "Add plant", exact: true }).click();
     await page.getByLabel("Plant name", { exact: true }).fill("New solar park");
     await page.getByLabel("Latitude").fill("36.5");
     await page.getByLabel("Longitude").fill("30.2");
@@ -968,16 +968,16 @@ test("region collection schedule validates and saves distinct local times", asyn
         page.getByText("Next planned update").locator(".."),
     ).toContainText("Jan 1, 2026, 10:00 AM");
     await page.getByText("Recent update jobs", { exact: true }).click();
-    await expect(page.getByText(/Provider request failed/)).toBeVisible();
+    await expect(page.getByText(/Forecast update failed\./)).toBeVisible();
     await expect(
-        page.getByText(/Historical estimates · Succeeded/),
+        page.getByText(/Production calculated from satellite data · Done/),
     ).toBeVisible();
     await expect(
-        page.getByText(/Historical estimates · Partly updated/),
+        page.getByText(
+            /Production calculated from satellite data · Partly updated/,
+        ),
     ).toBeVisible();
-    await expect(page.getByText(/Daily account budget exhausted/)).toHaveCount(
-        0,
-    );
+    await expect(page.getByText(/Forecast update delayed/)).toHaveCount(0);
     for (const accountDetail of [
         "Requests used",
         "Usage details",

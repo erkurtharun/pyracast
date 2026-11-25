@@ -152,7 +152,7 @@ test("a busy workspace never replays a non-idempotent POST", async () => {
 });
 
 const unconfirmed =
-    "The server did not confirm the change. It may have been saved; check before you send it again.";
+    "It is not known whether it was saved. Check before you send it again.";
 const restoring = () =>
     api
         .post("/api/tenants/{tenant_id}/regions/{region_id}/restore/", {
@@ -235,9 +235,9 @@ for (const [name, preview] of [
             expect(failure).not.toBeInstanceOf(UnconfirmedError);
         }
         expect(failures.map((failure) => (failure as Error).message)).toEqual([
-            "Could not reach the server. Check your connection and try again.",
-            "The server returned an invalid response. Please try again.",
-            "Request failed (502). Please try again.",
+            "Pyracast could not be reached. Check your connection and try again.",
+            "Something went wrong. Try again.",
+            "Something went wrong. Try again.",
         ]);
     });
 
@@ -256,7 +256,7 @@ test("a change whose successful answer cannot be read is unconfirmed, a read wit
     expect(read).not.toBeInstanceOf(UnconfirmedError);
     expect(read).toMatchObject({
         status: 200,
-        message: "The server returned an invalid response. Please try again.",
+        message: "Something went wrong. Try again.",
     });
     expect(calls).toHaveLength(2);
 });
@@ -289,7 +289,7 @@ for (const status of [502, 504, 520, 521, 522, 523, 524])
         expect(read).not.toBeInstanceOf(UnconfirmedError);
         expect(read).toMatchObject({
             status,
-            message: `Request failed (${status}). Please try again.`,
+            message: "Something went wrong. Try again.",
         });
         expect(calls).toHaveLength(2);
     });
@@ -307,7 +307,7 @@ test("a change answered with an unreadable error that no gateway sends stays fai
     expect(failure).not.toBeInstanceOf(UnconfirmedError);
     expect(failure).toMatchObject({
         status: 500,
-        message: "Request failed (500). Please try again.",
+        message: "Something went wrong. Try again.",
     });
 });
 
@@ -388,7 +388,7 @@ test("a redirected change is unconfirmed and a redirected read failed, neither f
     expect(read).not.toBeInstanceOf(UnconfirmedError);
     expect(read).toMatchObject({
         message:
-            "Could not reach the server. Check your connection and try again.",
+            "Pyracast could not be reached. Check your connection and try again.",
     });
     expect(calls.map((call) => call.redirect)).toEqual(["error", "error"]);
 });
@@ -433,7 +433,7 @@ test("a read without an answer is localized", async () => {
     const error = await api.get("/api/tenants/").catch((failure) => failure);
     expect(error).toBeInstanceOf(ApiError);
     expect(error.message).toBe(
-        "Could not reach the server. Check your connection and try again.",
+        "Pyracast could not be reached. Check your connection and try again.",
     );
     expect(calls).toHaveLength(1);
 });
@@ -450,7 +450,7 @@ test("a successful answer that is not JSON is refused", async () => {
     expect(error).toBeInstanceOf(ApiError);
     expect(error).toMatchObject({
         status: 200,
-        message: "The server returned an invalid response. Please try again.",
+        message: "Something went wrong. Try again.",
     });
 });
 
@@ -831,9 +831,7 @@ test("leaving a sign-in stage after which the browser holds a signed-in session 
     );
     const error = await signOut().catch((failure) => failure);
     expect(error).toBeInstanceOf(ApiError);
-    expect(error.message).toBe(
-        "The session changed in another tab. The page now shows the current session.",
-    );
+    expect(error.message).toBe("You signed in or out in another tab.");
     expect(sessionState()).toMatchObject({
         ended: false,
         session: { csrf_token: "other" },

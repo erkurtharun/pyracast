@@ -47,10 +47,34 @@ function trimNameEdges(part: string): string {
     return part.slice(start, end);
 }
 
+const NAME_LIMIT = 150;
+
 // Windows refuses these characters and trailing dots or spaces in file names; plant names keep their letters.
 export function csvFilename(...parts: string[]): string {
     const safe = parts
         .map((part) => trimNameEdges(part.replace(/[<>:"/\\|?*\p{Cc}]/gu, "-")))
         .filter(Boolean);
-    return `${safe.join("-").slice(0, 150)}.csv`;
+    return `${safe.join("-").slice(0, NAME_LIMIT)}.csv`;
+}
+
+function asciiSlug(name: string): string {
+    return name
+        .toLocaleLowerCase("tr")
+        .replaceAll("ı", "i")
+        .normalize("NFKD")
+        .replace(/\p{M}/gu, "")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
+}
+
+// `pyracast-{plant}-{dates}-{kind}.csv` in ASCII; only the plant slug gives way to the name limit.
+export function plantFilename(
+    plant: string,
+    kind: string,
+    ...dates: string[]
+): string {
+    const tail = [...dates, kind].filter(Boolean).join("-");
+    const room = NAME_LIMIT - `pyracast--${tail}`.length;
+    const slug = asciiSlug(plant).slice(0, room).replace(/-$/, "") || "plant";
+    return csvFilename("pyracast", slug, tail);
 }

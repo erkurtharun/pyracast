@@ -955,7 +955,7 @@ test("production uses the server total and exposes invalid saved quality", async
     state.heads.set(8, 1);
     await openProduction(page);
     await expect(page.getByText("Daily total: —")).toBeVisible();
-    await expect(row(page, "08:00–09:00")).toContainText("Invalid");
+    await expect(row(page, "08:00–09:00")).toContainText("Invalid value");
     await page
         .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
         .click();

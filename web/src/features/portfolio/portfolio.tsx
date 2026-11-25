@@ -5,6 +5,7 @@ import { cadence, useApiList, useRefresh } from "@/lib/api/query";
 import { useFormat } from "@/lib/format/use-format";
 import { useNavigate } from "@/lib/leave-guard";
 import { routes } from "@/lib/routes";
+import type { components } from "@/lib/schema";
 import { PlantIcon } from "./plant-icon";
 import { PlantOnboarding } from "./plant-onboarding";
 import { matchesSearch, siteName } from "./portfolio-search";
@@ -12,9 +13,45 @@ import { Field, Select } from "@/ui/form";
 import { usePageTitle } from "@/ui/page-title";
 import { Empty, Notice, RefreshFailed } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
-import { ReminderLine } from "@/features/plant/reminder-line";
 import { useWorkspace } from "@/features/workspace/workspace-shell";
 import { DeletedNotice } from "@/features/trash/recent-deletion";
+
+type ReminderSummary = components["schemas"]["ReminderSummaryOutput"];
+type SiteStatus = components["schemas"]["RegionStatusEnum"];
+
+const unsent = new Set(["failed", "skipped", "cancelled"]);
+
+function ForecastEmailLine({
+    reminder,
+    status,
+}: {
+    reminder: ReminderSummary;
+    status: SiteStatus;
+}) {
+    const t = useTranslations("Dashboard");
+    const label = useLabel();
+    const { state } = reminder;
+    const outcome = reminder.last_delivery?.status;
+    const text = (): string | null => {
+        if (status === "rejected" || status === "suspended") return null;
+        if (state === "paused_by_user") return t("forecastEmailOff");
+        if (state === "waiting_for_approval" && status !== "pending")
+            return null;
+        if (state !== "sending")
+            return t("forecastEmail", { state: label("ReminderState", state) });
+        if (outcome === "uncertain")
+            return t("forecastEmail", {
+                state: label("NotificationDeliveryStatus", outcome),
+            });
+        return outcome && unsent.has(outcome)
+            ? t("forecastEmail", {
+                  state: label("NotificationDeliveryStatus", "failed"),
+              })
+            : null;
+    };
+    const line = text();
+    return line && <p className="fine">{line}</p>;
+}
 
 export function Portfolio() {
     const t = useTranslations("Dashboard");
@@ -160,11 +197,11 @@ export function Portfolio() {
                                         />
                                     </div>
                                     <h2>{siteName(site)}</h2>
-                                    <p>
-                                        {metadata &&
-                                            `${format.significant(metadata.dc_capacity_mw, 4)} MW DC · `}
-                                        {site.timezone}
-                                    </p>
+                                    {metadata && (
+                                        <p>
+                                            {`${format.significant(metadata.dc_capacity_mw, 4)} MWp`}
+                                        </p>
+                                    )}
                                     {site.attention && (
                                         <p className="attention">
                                             {t("attentionReason", {
@@ -176,9 +213,9 @@ export function Portfolio() {
                                         </p>
                                     )}
                                     {site.reminder && (
-                                        <ReminderLine
+                                        <ForecastEmailLine
                                             reminder={site.reminder}
-                                            timezone={site.timezone}
+                                            status={site.status}
                                         />
                                     )}
                                     <div className="region-card-bottom">
@@ -198,15 +235,17 @@ export function Portfolio() {
                     </div>
                 ) : (
                     <>
-                        <Empty
-                            title={
-                                rows.length ? t("noMatches") : t("firstPlant")
-                            }
-                        >
-                            {rows.length
-                                ? t("differentSearch")
-                                : t("addDetails")}
-                        </Empty>
+                        {rows.length ? (
+                            <Empty title={t("noMatches")}>
+                                {t("differentSearch")}
+                            </Empty>
+                        ) : canManage ? (
+                            <Empty title={t("firstPlant")}>
+                                {t("addDetails")}
+                            </Empty>
+                        ) : (
+                            <Empty title={t("noPlants")} />
+                        )}
                         {offerCreate && !rows.length && (
                             <div className="empty-action">
                                 <button

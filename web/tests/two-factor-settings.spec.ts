@@ -808,7 +808,7 @@ test("refreshing a masked CSRF token preserves displayed recovery codes", async 
     await replaceCodes(page);
     await expect(page.getByText("20000001", { exact: true })).toBeVisible();
     await page.getByText("Change email", { exact: true }).click();
-    await page.getByLabel("Email verification code").fill("ABCD-EFGH");
+    await page.getByLabel("Email code").fill("ABCD-EFGH");
     await page.getByRole("button", { name: "Verify new email" }).click();
     await expect(
         page.getByText("solar.refreshed", { exact: true }),
@@ -930,7 +930,7 @@ for (const lost of ["aborted", "cut"] as const)
         await replaceCodes(page);
         const alert = twoFactorPanel(page).getByRole("alert");
         await expect(alert).toHaveText(
-            "Change not confirmedThe server did not confirm the change. It may have been saved; check before you send it again.",
+            "Outcome unknownIt is not known whether it was saved. Check before you send it again.",
         );
         await page.getByLabel("Language", { exact: true }).selectOption("tr");
         await expect(page.locator("html")).toHaveAttribute("lang", "tr");
@@ -940,7 +940,7 @@ for (const lost of ["aborted", "cut"] as const)
                 .filter({ has: page.locator(".mfa-header") })
                 .getByRole("alert"),
         ).toHaveText(
-            "Değişiklik onaylanmadıSunucu değişikliği onaylamadı. Değişiklik kaydedilmiş olabilir; yeniden göndermeden önce kontrol edin.",
+            "Sonuç bilinmiyorKaydedilip kaydedilmediği bilinmiyor. Yeniden göndermeden önce kontrol edin.",
         );
     });
 

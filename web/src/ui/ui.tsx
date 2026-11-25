@@ -103,17 +103,10 @@ export function Tag({
 }) {
     return <span className={`tag tag-${tone}`}>{children}</span>;
 }
-export function JsonDetails({
-    data,
-    label,
-}: {
-    data: unknown;
-    label?: string;
-}) {
-    const t = useTranslations("Common");
+export function JsonDetails({ data, label }: { data: unknown; label: string }) {
     return (
         <details>
-            <summary>{label ?? t("technicalDetails")}</summary>
+            <summary>{label}</summary>
             <pre>{JSON.stringify(data, null, 2)}</pre>
         </details>
     );
@@ -124,7 +117,7 @@ export function Empty({
     page = false,
 }: {
     title: string;
-    children: ReactNode;
+    children?: ReactNode;
     page?: boolean;
 }) {
     const Heading = page ? "h1" : "h3";
@@ -140,7 +133,7 @@ export function Empty({
                 <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1" />
             </svg>
             <Heading>{title}</Heading>
-            <p>{children}</p>
+            {children && <p>{children}</p>}
         </div>
     );
 }

@@ -146,7 +146,6 @@ export function EmailChange({ email }: { email: string }) {
     return (
         <details className="account-disclosure">
             <summary>{t("changeEmail")}</summary>
-            <p className="fine">{t("currentEmail", { email })}</p>
             {error && <Notice error>{error}</Notice>}
             <StepUpPrompt stepUp={stepUp} email={email} onError={setError} />
             {!stepUp.pending && step.kind === "idle" && (
@@ -201,7 +200,6 @@ export function EmailChange({ email }: { email: string }) {
                         </ActionForm>
                     </fieldset>
                     {step.resent && <Notice>{t("emailCodeResent")}</Notice>}
-                    <p className="fine">{t("emailCodeResendLimit")}</p>
                     <AsyncButton
                         variant="secondary"
                         disabled={acting}

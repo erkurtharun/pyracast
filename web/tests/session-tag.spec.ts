@@ -286,7 +286,7 @@ test("V1: a request that waited behind another one or for its retry is not sent 
 const signedOutAnswer = () =>
     json({ status: 401, meta: { is_authenticated: false } }, 401);
 const notSent = {
-    message: "This request was not sent because signing out was in progress.",
+    message: "Not sent because you are signing out.",
     status: 0,
     code: null,
 };
@@ -373,7 +373,7 @@ test("a sign-out answered 200 with a signed-out body fails and keeps the documen
     const failed = await signOut().catch((failure) => failure);
     expect(failed).toBeInstanceOf(ApiError);
     expect(failed).toMatchObject({
-        message: "The server returned an invalid response. Please try again.",
+        message: "Something went wrong. Try again.",
     });
     expect(sessionState().retired).toBeUndefined();
     expect(sessionState()).toMatchObject({

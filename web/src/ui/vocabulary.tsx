@@ -1,6 +1,7 @@
 "use client";
 import { useTranslations } from "next-intl";
 import { useCallback } from "react";
+import { contactEmail } from "@/lib/public-metadata";
 import type { Vocabulary } from "@/lib/vocabulary";
 import { Tag, type Tone } from "./ui";
 
@@ -47,7 +48,7 @@ export function useLabel() {
     return useCallback(
         <G extends Group>(group: G, value: Vocabulary[G]) => {
             const key: string = `${group}.${value}`;
-            return t(key);
+            return t(key, { contact: contactEmail });
         },
         [t],
     );
