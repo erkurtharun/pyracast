@@ -124,10 +124,10 @@ function Bootstrap({
     retry: () => void;
 }) {
     const language = useTranslations("Language");
-    const page = useTranslations("AppError");
+    const errors = useTranslations("Errors");
     const error =
         failure?.kind === "catalogue"
-            ? page("description")
+            ? errors("unexpected")
             : failure?.kind === "language"
               ? language("failed")
               : failure?.message;

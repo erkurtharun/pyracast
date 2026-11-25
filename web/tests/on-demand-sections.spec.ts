@@ -467,7 +467,7 @@ test("a language hand-off whose catalogue cannot be loaded offers the retry that
     const turkish = await interceptScript(page, turkishCatalogue, "aborted");
     await page.goto("/app/?language=tr&signup=1");
     await expect(page.getByRole("main").getByRole("alert")).toHaveText(
-        "Bu sayfa gösterilirken bir sorun oluştu. Tekrar deneyin; sorun sürerse sayfayı yenileyin.",
+        "Bir sorun oluştu. Tekrar deneyin.",
     );
     await expect(
         page.getByRole("heading", { name: "Create your company account" }),
@@ -492,7 +492,7 @@ test("a language whose catalogue cannot be loaded is not saved and offers a relo
     ).toBeVisible();
     await page.getByLabel("Language", { exact: true }).selectOption("tr");
     await expect(page.getByRole("main").getByRole("alert")).toHaveText(
-        "The language could not be loaded. Reload the page to try again.",
+        "The language could not be loaded. Reload the page.",
     );
     await expect(page.getByLabel("Language", { exact: true })).toHaveValue(
         "en",
@@ -592,7 +592,7 @@ test("a language another tab saved clears this tab's failed save of it for good"
     ).toBeVisible();
     await page.getByLabel("Language", { exact: true }).selectOption("tr");
     await expect(
-        page.getByText("Language could not be saved. Please try again."),
+        page.getByText("The language could not be saved. Try again."),
     ).toBeVisible();
     language = "tr";
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
@@ -612,7 +612,7 @@ test("a language another tab saved clears this tab's failed save of it for good"
         "en",
     );
     await expect(
-        page.getByText("Language could not be saved. Please try again."),
+        page.getByText("The language could not be saved. Try again."),
     ).toHaveCount(0);
 });
 
@@ -629,9 +629,7 @@ test("a language changed in another tab whose catalogue cannot be loaded is repo
         page
             .getByRole("alert")
             .filter({ hasText: "The language could not be loaded." }),
-    ).toHaveText(
-        "The language could not be loaded. Reload the page to try again.",
-    );
+    ).toHaveText("The language could not be loaded. Reload the page.");
     await expect(page.getByLabel("Forecast date")).toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     turkish.release();
@@ -673,9 +671,7 @@ test("a language whose catalogue cannot be loaded keeps the workspace in its lan
         page
             .getByRole("alert")
             .filter({ hasText: "The language could not be loaded." }),
-    ).toHaveText(
-        "The language could not be loaded. Reload the page to try again.",
-    );
+    ).toHaveText("The language could not be loaded. Reload the page.");
     await expect(
         page.getByRole("button", { name: "Reload page", exact: true }),
     ).toBeVisible();
@@ -744,7 +740,7 @@ test("a language save refused after the session ended reports nothing on the scr
         page.getByRole("heading", { name: "Welcome back" }),
     ).toBeVisible();
     await expect(
-        page.getByText("Language could not be saved. Please try again."),
+        page.getByText("The language could not be saved. Try again."),
     ).toHaveCount(0);
     await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
 });
@@ -792,7 +788,7 @@ test("a catalogue that cannot be loaded offers a retry that loads the page again
     });
     await page.goto("/app/");
     await expect(page.getByRole("main").getByRole("alert")).toHaveText(
-        "Something went wrong while showing this page. Try again; if the problem continues, reload the page.",
+        "Something went wrong. Try again.",
     );
     blocked = false;
     await page.getByRole("button", { name: "Try again", exact: true }).click();

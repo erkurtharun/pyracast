@@ -505,10 +505,6 @@ function RequestDetail({
             </button>
             {item && (
                 <>
-                    <p className="fine">
-                        {t("configuration", { id: item.configuration_id })} ·{" "}
-                        {item.timezone}
-                    </p>
                     {item.reason && (
                         <p className="submission-reason">{item.reason}</p>
                     )}
@@ -602,23 +598,20 @@ function RequestDetail({
                         </div>
                     )}
                     {item.can_withdraw && (
-                        <>
-                            <p className="fine">{t("withdrawHelp")}</p>
-                            <button
-                                className="button secondary"
-                                disabled={pending}
-                                onClick={() => {
-                                    void act("withdraw", null, () =>
-                                        api.post(
-                                            "/api/tenants/{tenant_id}/change-requests/{request_id}/withdraw/",
-                                            { path },
-                                        ),
-                                    ).catch(() => {});
-                                }}
-                            >
-                                {t("withdraw")}
-                            </button>
-                        </>
+                        <button
+                            className="button secondary"
+                            disabled={pending}
+                            onClick={() => {
+                                void act("withdraw", null, () =>
+                                    api.post(
+                                        "/api/tenants/{tenant_id}/change-requests/{request_id}/withdraw/",
+                                        { path },
+                                    ),
+                                ).catch(() => {});
+                            }}
+                        >
+                            {t("withdraw")}
+                        </button>
                     )}
                     {item.unread && item.status !== "pending" && (
                         <button

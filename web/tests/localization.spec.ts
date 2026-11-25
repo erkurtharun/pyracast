@@ -185,7 +185,7 @@ test("failed public language selection offers a retry in the session language be
     });
     await page.goto("/app/?language=tr&signup=1");
     await expect(page.getByRole("main").getByRole("alert")).toHaveText(
-        "Language could not be saved. Please try again.",
+        "The language could not be saved. Try again.",
     );
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
@@ -222,7 +222,7 @@ test("focus reads wait while the language hand-off is pending or failed", async 
     await focus();
     release();
     await expect(page.getByRole("main").getByRole("alert")).toHaveText(
-        "Language could not be saved. Please try again.",
+        "The language could not be saved. Try again.",
     );
     await focus();
     await page.getByRole("button", { name: "Try again" }).click();
@@ -324,7 +324,7 @@ test("a failed save keeps the current language and offers an accessible error", 
     await page.goto("/app/");
     await page.getByLabel("Language", { exact: true }).selectOption("tr");
     await expect(page.getByRole("main").getByRole("alert")).toHaveText(
-        "Language could not be saved. Please try again.",
+        "The language could not be saved. Try again.",
     );
     await expect(page.getByLabel("Language", { exact: true })).toHaveValue(
         "en",
@@ -468,7 +468,7 @@ test("Turkish plant search and capacity formatting follow the selected language"
     await page.goto("/app/");
     await page.getByRole("searchbox", { name: "Santral ara" }).fill("ışık");
     await expect(page.getByRole("heading", { name: "IŞIK GES" })).toBeVisible();
-    await expect(page.getByText("1.235 MW DC", { exact: false })).toBeVisible();
+    await expect(page.getByText("1.235 MWp", { exact: true })).toBeVisible();
 });
 
 test("coded forecast errors are explained in the selected language", async ({
@@ -504,15 +504,11 @@ test("coded forecast errors are explained in the selected language", async ({
 test.describe("the session end notice", () => {
     test.use({ timezoneId: "Europe/Istanbul" });
     for (const [language, heading, notice] of [
-        [
-            "en",
-            "Plants",
-            "Your session ends at 10:00 PM. Save your work; you will need to sign in again.",
-        ],
+        ["en", "Plants", "Automatic sign-out at 10:00 PM. Save your work."],
         [
             "tr",
             "Santraller",
-            "Oturumunuz 22:00 saatinde sona erecek. Çalışmanızı kaydedin; yeniden oturum açmanız gerekecek.",
+            "Otomatik çıkış saati: 22:00. Çalışmanızı kaydedin.",
         ],
     ] as const) {
         test(`appears five minutes before the session ends in ${language}`, async ({

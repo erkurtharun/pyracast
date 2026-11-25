@@ -66,7 +66,7 @@ test("an address code that needs a confirmation opens the prompt and reports no 
     await page.goto("/app/");
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByText("Change email", { exact: true }).click();
-    await page.getByLabel("Email verification code").fill("ABCD-EFGH");
+    await page.getByLabel("Email code").fill("ABCD-EFGH");
     await page.getByRole("button", { name: "Verify new email" }).click();
     await expect(
         emailChange(page).getByRole("heading", {
@@ -148,9 +148,7 @@ test("an email change confirms the password in the shared prompt, resumes the re
         change.getByText(/Other devices are signed out/),
     ).toBeVisible();
     await change.getByLabel("New email address").fill("new@example.test");
-    await change
-        .getByRole("button", { name: "Send verification code" })
-        .click();
+    await change.getByRole("button", { name: "Send email code" }).click();
     await expect(
         change.getByRole("heading", { name: "Confirm your password" }),
     ).toBeVisible();
@@ -168,7 +166,7 @@ test("an email change confirms the password in the shared prompt, resumes the re
         { email: "new@example.test" },
     ]);
     expect(confirmations).toEqual([{ password: "current-password" }]);
-    await change.getByLabel("Email verification code").fill("ABCD-EFGH");
+    await change.getByLabel("Email code").fill("ABCD-EFGH");
     await change.getByRole("button", { name: "Verify new email" }).click();
     await expect(
         change.getByText("new@example.test is now your address."),
@@ -377,8 +375,8 @@ test("the email change runs one action at a time", async ({ page }) => {
     await page.goto("/app/account/");
     const change = emailChange(page);
     await change.getByText("Change email", { exact: true }).click();
-    await change.getByLabel("Email verification code").fill("ABCD-EFGH");
-    await change.getByRole("button", { name: "Send the code again" }).click();
+    await change.getByLabel("Email code").fill("ABCD-EFGH");
+    await change.getByRole("button", { name: "Send code again" }).click();
     await expect(
         change.getByRole("button", { name: "Working…", exact: true }),
     ).toBeDisabled();
@@ -418,12 +416,12 @@ test("a resend that finds the code expired starts the change again", async ({
     await page.goto("/app/account/");
     const change = emailChange(page);
     await change.getByText("Change email", { exact: true }).click();
-    await change.getByRole("button", { name: "Send the code again" }).click();
+    await change.getByRole("button", { name: "Send code again" }).click();
     await expect(
         change.getByText("The code is no longer valid. Request a new one."),
     ).toBeVisible();
     await expect(change.getByLabel("New email address")).toBeVisible();
-    await expect(change.getByLabel("Email verification code")).toHaveCount(0);
+    await expect(change.getByLabel("Email code")).toHaveCount(0);
 });
 
 test("the address form stays disabled while the confirmed request runs", async ({
@@ -456,9 +454,7 @@ test("the address form stays disabled while the confirmed request runs", async (
     const change = emailChange(page);
     await change.getByText("Change email", { exact: true }).click();
     await change.getByLabel("New email address").fill("new@example.test");
-    await change
-        .getByRole("button", { name: "Send verification code" })
-        .click();
+    await change.getByRole("button", { name: "Send email code" }).click();
     await change
         .getByLabel("Current password", { exact: true })
         .fill("current-password");
@@ -466,7 +462,7 @@ test("the address form stays disabled while the confirmed request runs", async (
     await arrived;
     await expect(change.getByLabel("New email address")).toBeDisabled();
     await expect(
-        change.getByRole("button", { name: "Send verification code" }),
+        change.getByRole("button", { name: "Send email code" }),
     ).toBeDisabled();
     release();
     await expect(

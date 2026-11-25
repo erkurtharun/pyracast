@@ -259,7 +259,6 @@ export function Outages({
                     <Notice>{unavailable}</Notice>
                 )}
             </div>
-            {!direct && <p className="fine">{proposals("approvalHelp")}</p>}
             <details>
                 <summary>{t("howToReportAnOutage")}</summary>
                 <p>{t("reportingHelp")}</p>

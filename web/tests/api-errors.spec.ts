@@ -99,7 +99,7 @@ for (const [name, body] of [
 ] as const) {
     test(`${name} becomes a generic failure with the status`, () => {
         const error = errorFromResponse(502, body);
-        expect(error.message).toBe("Request failed (502). Please try again.");
+        expect(error.message).toBe("Something went wrong. Try again.");
         expect(error.status).toBe(502);
         expect(error.code).toBeNull();
         expect(error.fields).toEqual({});
@@ -239,7 +239,7 @@ test.describe("authentication requests", () => {
         expect(error).toMatchObject({
             status: 400,
             code: null,
-            message: "Request failed (400). Please try again.",
+            message: "Something went wrong. Try again.",
             fields: {},
         });
     });

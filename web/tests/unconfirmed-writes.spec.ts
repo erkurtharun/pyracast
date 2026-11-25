@@ -36,20 +36,20 @@ type Language = "en" | "tr";
 
 const texts = {
     en: {
-        title: "Change not confirmed",
+        title: "Outcome unknown",
         repeatable:
-            "The server did not confirm the change. It may have been saved. Your entry is still here: sending it again unchanged saves it only once.",
+            "It is not known whether it was saved. Your entry is still here, and you can send it again.",
         general:
-            "The server did not confirm the change. It may have been saved; check before you send it again.",
-        refused: "We couldn’t save your changes",
+            "It is not known whether it was saved. Check before you send it again.",
+        refused: "Could not be saved.",
     },
     tr: {
-        title: "Değişiklik onaylanmadı",
+        title: "Sonuç bilinmiyor",
         repeatable:
-            "Sunucu değişikliği onaylamadı. Değişiklik kaydedilmiş olabilir. Girdiğiniz bilgiler hâlâ burada: değiştirmeden yeniden gönderirseniz yalnızca bir kez kaydedilir.",
+            "Kaydedilip kaydedilmediği bilinmiyor. Girdiğiniz bilgiler duruyor; yeniden gönderebilirsiniz.",
         general:
-            "Sunucu değişikliği onaylamadı. Değişiklik kaydedilmiş olabilir; yeniden göndermeden önce kontrol edin.",
-        refused: "Değişiklikler kaydedilemedi",
+            "Kaydedilip kaydedilmediği bilinmiyor. Yeniden göndermeden önce kontrol edin.",
+        refused: "Kaydedilemedi.",
     },
 } as const;
 
@@ -60,8 +60,8 @@ const labels = {
         edit: /^Edit 08:00/,
         save: "Save",
         suggest: /^Suggest correction for 08:00/,
-        add: "Add to request",
-        draft: "Correction request",
+        add: "Add to change request",
+        draft: "Change request",
         reason: "Reason for correction",
         send: "Send for approval",
         importCsv: "Import CSV",
@@ -79,11 +79,11 @@ const labels = {
         cancelEntry: "Cancel an incorrect entry",
         confirmCancel: "I confirm this incident was recorded incorrectly.",
         cancelOutage: "Cancel outage",
-        proposeResolution: "Submit resolution",
+        proposeResolution: "End outage",
         optionalReason: "Reason (optional)",
-        sent: "Sent for approval. Live data stays unchanged until a workspace administrator approves it.",
+        sent: "Sent for approval.",
         closed: (status: string) =>
-            `This request is already closed (${status}); this submission changed nothing.`,
+            `This change request is already closed. Status: ${status}. Nothing was changed.`,
         statuses: {
             approved: "Approved",
             rejected: "Rejected",
@@ -96,8 +96,8 @@ const labels = {
         edit: /^08:00.+aralığını düzenle$/,
         save: "Kaydet",
         suggest: /^08:00.+aralığı için düzeltme öner$/,
-        add: "Talebe ekle",
-        draft: "Düzeltme talebi",
+        add: "Değişiklik talebine ekle",
+        draft: "Değişiklik talebi",
         reason: "Düzeltme gerekçesi",
         send: "Onaya gönder",
         importCsv: "CSV aktar",
@@ -116,11 +116,11 @@ const labels = {
         cancelEntry: "Hatalı kaydı iptal et",
         confirmCancel: "Bu olayın hatalı kaydedildiğini onaylıyorum.",
         cancelOutage: "Kesintiyi iptal et",
-        proposeResolution: "Çözüm bildir",
+        proposeResolution: "Kesintiyi sonlandır",
         optionalReason: "Gerekçe (isteğe bağlı)",
-        sent: "Onaya gönderildi. Çalışma alanı yöneticisi onaylayana kadar canlı veriler değişmez.",
+        sent: "Onaya gönderildi.",
         closed: (status: string) =>
-            `Bu talep zaten kapandı (${status}); bu gönderim hiçbir şeyi değiştirmedi.`,
+            `Bu değişiklik talebi zaten kapandı. Durum: ${status}. Hiçbir şey değişmedi.`,
         statuses: {
             approved: "Onaylandı",
             rejected: "Reddedildi",
@@ -789,9 +789,7 @@ test("a member's lost resolution is told without the advice after a promotion, a
         () => direct,
     );
     await openPlant(page, "Outages");
-    await page
-        .getByRole("button", { name: "Submit resolution", exact: true })
-        .click();
+    await page.getByRole("button", { name: "End outage", exact: true }).click();
     const card = outageCard(page);
     const send = card.getByRole("button", {
         name: "Send for approval",
@@ -923,7 +921,7 @@ test("a lost proposal that arrived is held by the read that shows its pending re
     const { draft, send } = await stageProposal(page);
     await send.click();
     await expect(draft).toContainText(
-        "Intervals that already wait for a request of yours cannot be sent again.",
+        "Intervals in a change request of yours that waits for approval cannot be sent again.",
     );
     await expect(send).toBeDisabled();
     await expectUnconfirmed(draft, false);
@@ -937,9 +935,7 @@ test("a member's lost outage proposal that arrived is held by the read that show
     await signIn(page, { role: "viewer" });
     const server = await serveOutageProposals(page, answers("abort"));
     await openPlant(page, "Outages");
-    await page
-        .getByRole("button", { name: "Submit resolution", exact: true })
-        .click();
+    await page.getByRole("button", { name: "End outage", exact: true }).click();
     const card = outageCard(page);
     await card
         .getByRole("button", { name: "Send for approval", exact: true })
@@ -1000,14 +996,14 @@ test("a Refresh details started before a refused approval does not release the h
     release();
     await expect(detail).toContainText(earlier);
     await expect(detail).toContainText(
-        "The current data changed. Refresh and review it again before approving.",
+        "The current values changed. Refresh the details and check them before you approve.",
     );
     await expect(approve).toBeDisabled();
     expect(decisions).toEqual([{ review_fingerprint: "context-1" }]);
 });
 
 const unreachable =
-    "Could not reach the server. Check your connection and try again.";
+    "Pyracast could not be reached. Check your connection and try again.";
 
 test("a CSV preview whose answer was lost says the preview failed and Try again shows it", async ({
     page,
@@ -1056,7 +1052,7 @@ test("an invitation preview whose answer was lost says it could not be read and 
 
 async function proposeOutage(page: Page) {
     await page
-        .getByRole("button", { name: "Submit outage", exact: true })
+        .getByRole("button", { name: "Report outage", exact: true })
         .click();
     const form = page.getByRole("region", { name: "Report outage" });
     await form.getByLabel("Incident title").fill("Grid fault");
@@ -1579,7 +1575,9 @@ for (const language of ["en", "tr"] as const)
                 : route.fallback(),
         );
         await page.goto("/app/");
-        await page.getByRole("button", { name: "Add a plant" }).click();
+        await page
+            .getByRole("button", { name: "Add plant", exact: true })
+            .click();
         await page.getByLabel("Plant name", { exact: true }).fill("West plant");
         await page.getByLabel("Latitude").fill("37");
         await page.getByLabel("Longitude").fill("31");
@@ -1718,7 +1716,7 @@ test("an orphaned direct change names the write its repeat sends while it shows 
     await expect(orphan.getByRole("textbox")).toHaveValue("1,50");
     await expectUnconfirmed(orphan, false);
     await orphan
-        .getByRole("button", { name: "Save 0.5 MWh (Valid)", exact: true })
+        .getByRole("button", { name: "Save 0.5 MWh (Normal)", exact: true })
         .click();
     await expect(orphan).toHaveCount(0);
     expect(server.requests).toHaveLength(2);
@@ -1750,7 +1748,7 @@ test("Reload current values that finds the interval's bounds changed keeps the l
     );
     await expectUnconfirmed(orphan, true);
     await orphan
-        .getByRole("button", { name: "Save 0.5 MWh (Valid)", exact: true })
+        .getByRole("button", { name: "Save 0.5 MWh (Normal)", exact: true })
         .click();
     await expect(orphan).toHaveCount(0);
     expect(server.requests).toHaveLength(2);
@@ -1854,7 +1852,7 @@ test("an orphaned direct change whose outcome is unknown keeps its notice once t
         .click();
     const orphan = page.locator(".production-row-editor");
     const repeat = orphan.getByRole("button", {
-        name: "Save 0.5 MWh (Valid)",
+        name: "Save 0.5 MWh (Normal)",
         exact: true,
     });
     await expect(repeat).toBeVisible();
@@ -2084,7 +2082,7 @@ test("a lost resolution whose outage list is then refused is told beside the ref
     await expectUnconfirmed(card, true);
     await expect(section).not.toContainText("Not found.");
     await save.click();
-    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
+    await expect(page.getByText("Ended", { exact: true })).toBeVisible();
     expect(server.writes).toHaveLength(2);
     expect(server.writes[1]).toEqual(server.writes[0]);
     expect(server.applied()).toBe(1);
@@ -2125,7 +2123,7 @@ for (const action of ["Set", "Remove correction"] as const)
         ).toBeVisible();
         await editor
             .getByRole("button", {
-                name: action === "Set" ? "Save 0.5 MWh (Valid)" : action,
+                name: action === "Set" ? "Save 0.5 MWh (Normal)" : action,
                 exact: true,
             })
             .click();
@@ -2157,7 +2155,7 @@ test("an orphaned direct change whose repeat is lost after it was applied is rep
         "This interval changed and is no longer available.",
     );
     const repeat = editor.getByRole("button", {
-        name: "Save 0.5 MWh (Valid)",
+        name: "Save 0.5 MWh (Normal)",
         exact: true,
     });
     await repeat.click();

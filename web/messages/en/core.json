@@ -160,56 +160,56 @@
         "workspace": "Workspace",
         "noWorkspaces": "No workspaces",
         "navigation": "Main navigation",
-        "administration": "Administration",
+        "administration": "Pyracast console",
         "overview": "Plants",
         "recycleBin": "Recycle bin",
         "account": "Account",
         "changeEmail": "Change email",
-        "accountSettings": "Account settings",
+        "accountSettings": "Account",
         "signOut": "Sign out",
         "emailAddress": "Email address",
-        "sendVerification": "Send verification code",
-        "sessionExpired": "Your session has expired. Please sign in again.",
-        "sessionEndingSoon": "Your session ends at {time}. Save your work; you will need to sign in again.",
+        "sendVerification": "Send email code",
+        "sessionExpired": "You were signed out. Sign in again.",
+        "sessionEndingSoon": "Automatic sign-out at {time}. Save your work.",
         "newEmail": "New email address",
         "verifyEmail": "Verify new email",
-        "emailCode": "Email verification code",
+        "emailCode": "Email code",
         "loadingWorkspaces": "Loading your workspaces…",
         "loadingScreen": "Loading…",
         "noWorkspace": "No workspace yet",
-        "contactAdmin": "Ask your workspace administrator for an invitation, or write to Pyracast support at {contact}.",
-        "addPlant": "+ Add a plant",
+        "contactAdmin": "Ask a workspace administrator to invite you, or write to Pyracast: {contact}",
+        "addPlant": "Add plant",
         "plants": "Plants",
         "searchPlants": "Search plants",
-        "searchPlaceholder": "Plant name or timezone",
-        "approvalStatus": "Approval status",
+        "searchPlaceholder": "Plant name",
+        "approvalStatus": "Status",
         "allStatuses": "All statuses",
-        "loadingPlants": "Loading plants...",
-        "completeSetup": "Complete setup",
+        "loadingPlants": "Loading plants…",
+        "completeSetup": "Finish adding plant",
         "openPlant": "Open plant",
         "noMatches": "No matching plants",
         "firstPlant": "Start with your first plant",
-        "differentSearch": "Try a different name or approval status.",
-        "addDetails": "Add its location and technical details in one request.",
-        "currentEmail": "Current address: {email}. A new address replaces it after verification.",
+        "differentSearch": "Try a different name or status.",
+        "addDetails": "Add its location and technical details.",
         "members": "Members",
-        "readOnly": "Member · changes require approval",
+        "readOnly": "Member",
         "inbox": "Inbox",
-        "inboxCount": "Inbox, {count, plural, one {# update} other {# updates}}",
-        "workspaceUnavailable": "This workspace is not available to your account.",
+        "inboxCount": "Inbox, {count} unread",
+        "workspaceUnavailable": "You do not have access to this workspace.",
         "emailChangeSignsOut": "Other devices are signed out once the new address is verified.",
         "emailCodeSentTo": "Enter the code sent to {email}. It is valid for 10 minutes.",
         "emailCodeResent": "A new code was sent.",
-        "emailCodeResendLimit": "Codes can be sent again once a minute.",
-        "sendCodeAgain": "Send the code again",
+        "sendCodeAgain": "Send code again",
         "useAnotherAddress": "Use another address",
         "emailCodeExpired": "The code is no longer valid. Request a new one.",
         "emailChangeCancelled": "The address change was cancelled.",
         "emailChanged": "{email} is now your address.",
         "shownOf": "{shown} of {total} plants shown",
-        "needAttention": "{attention, plural, one {# plant needs attention.} other {# plants need attention.}}",
-        "attentionReason": "Needs attention: {reason}",
-        "awaitingSetup": "Waiting for an administrator to finish setup"
+        "needAttention": "{attention, plural, one {# plant needs action.} other {# plants need action.}}",
+        "attentionReason": "Needs action: {reason}",
+        "awaitingSetup": "The workspace administrator needs to finish adding this plant.",
+        "forecastEmailOff": "Forecast email off",
+        "forecastEmail": "Forecast email: {state}"
     },
     "Session": {
         "signingOut": "Signing out",
@@ -225,14 +225,13 @@
         "dock": "In Safari, choose File > Add to Dock."
     },
     "Common": {
-        "unexpected": "Something went wrong.",
-        "saveFailed": "We couldn’t save your changes",
+        "unexpected": "Something went wrong. Try again.",
+        "saveFailed": "Could not be saved.",
         "saving": "Saving…",
-        "saved": "Saved successfully.",
-        "technicalDetails": "Technical details",
-        "refreshFailed": "Could not refresh; showing data from {time}.",
+        "saved": "Saved.",
+        "refreshFailed": "Could not refresh. Last loaded: {time}.",
         "retry": "Try again",
-        "actionFailed": "The action could not be completed",
+        "actionFailed": "Could not be completed.",
         "working": "Working…",
         "changedField": "{field}: {before} → {after}"
     },
@@ -291,7 +290,7 @@
             "pending": "In review",
             "approved": "Approved",
             "suspended": "Suspended",
-            "rejected": "Rejected"
+            "rejected": "Not approved"
         },
         "LocationChangeStatus": {
             "pending": "In review",
@@ -300,26 +299,26 @@
             "withdrawn": "Withdrawn"
         },
         "Freshness": {
-            "fresh": "Fresh",
-            "stale": "Stale",
-            "missing": "No data",
-            "archived": "Archived"
+            "fresh": "Newest forecast data",
+            "stale": "Newer forecast data was not available.",
+            "missing": "No forecast data for this day.",
+            "archived": "Last forecast before sunrise"
         },
         "CalibrationStatus": {
-            "pending": "Waiting",
-            "running": "Running",
-            "ready": "Ready",
-            "insufficient": "Insufficient",
-            "rejected": "Rejected",
+            "pending": "Queued",
+            "running": "Calculating",
+            "ready": "Calculated",
+            "insufficient": "Not enough data",
+            "rejected": "Accuracy criteria not met",
             "failed": "Failed",
-            "superseded": "Superseded"
+            "superseded": "Outdated"
         },
         "ChangeRequestKind": {
             "production": "Production correction",
-            "incident": "Outage report"
+            "incident": "Outage"
         },
         "ChangeRequestStatus": {
-            "pending": "In review",
+            "pending": "Waiting for approval",
             "approved": "Approved",
             "rejected": "Rejected",
             "withdrawn": "Withdrawn"
@@ -329,94 +328,94 @@
             "panels": "Panels",
             "grid": "Grid",
             "other": "Other",
-            "multiple": "Multiple faults"
+            "multiple": "Several faults"
         },
         "ObservationQuality": {
-            "valid": "Valid",
+            "valid": "Normal",
             "outage": "Outage",
-            "curtailed": "Curtailed",
-            "invalid": "Invalid"
+            "curtailed": "Production curtailed",
+            "invalid": "Invalid value"
         },
         "CollectionEndpoint": {
             "forecasts": "Forecast",
-            "estimated_actuals": "Historical estimates",
-            "historical_import": "Historical import",
-            "scaled_forecasts": "Scaled forecast",
-            "scaled_estimated_actuals": "Scaled historical estimates"
+            "estimated_actuals": "Production calculated from satellite data",
+            "historical_import": "Imported production calculated from satellite data",
+            "scaled_forecasts": "Forecast",
+            "scaled_estimated_actuals": "Production calculated from satellite data"
         },
         "CollectionJobStatus": {
-            "pending": "Waiting",
+            "pending": "Queued",
             "running": "In progress",
-            "retry": "Retry scheduled",
-            "succeeded": "Succeeded",
+            "retry": "Will retry",
+            "succeeded": "Done",
             "failed": "Failed",
-            "stale": "Superseded or no longer eligible"
+            "stale": "No longer needed"
         },
         "CollectionJobError": {
-            "history_window_closed": "Morning retry window ended",
-            "attempts_exhausted": "Retry limit reached",
-            "forecast_superseded": "Replaced by the latest scheduled collection",
-            "binding_not_current": "The provider connection is not approved and current",
-            "schedule_disabled": "Data collection is paused",
-            "slot_not_configured": "This time is no longer in the schedule",
-            "schedule_changed": "Replaced after the schedule changed",
-            "history_incomplete": "Historical data is incomplete",
-            "history_already_archived": "History was already collected",
-            "provider_authentication_failed": "Connection credentials need administrator attention",
-            "provider_allowance_exhausted": "The provider account's daily allowance is used up; retrying after it resets",
-            "provider_access_denied": "The provider denied access to this site",
-            "provider_site_not_found": "The provider does not know this site",
-            "provider_throttled": "Waiting for the provider's request limit to reset",
-            "provider_server_error": "The provider had a server error",
-            "provider_unreachable": "The provider could not be reached",
-            "provider_invalid_response": "Unexpected provider data",
-            "provider_configuration_invalid": "The provider connection settings need administrator attention",
-            "account_unavailable": "The provider account is paused",
-            "history_budget_reserved": "Remaining budget is reserved for forecasts",
-            "quota_exhausted": "Daily account budget exhausted",
-            "provider_failure": "Provider request failed",
-            "provider_unexpected_failure": "Collection could not be completed",
-            "invalid_source_kind": "Unexpected provider data",
-            "calculation_failure": "Forecast calculation failed",
-            "lock_contention": "The system was busy; retrying",
-            "publication_failure": "Saving the collection failed; retrying"
+            "history_window_closed": "No satellite data for this day.",
+            "attempts_exhausted": "Forecast update failed.",
+            "forecast_superseded": "Replaced by a later update.",
+            "binding_not_current": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}",
+            "schedule_disabled": "Automatic forecast updates are turned off.",
+            "slot_not_configured": "This time is no longer a forecast update time.",
+            "schedule_changed": "Replaced after the forecast update times changed.",
+            "history_incomplete": "Data is missing for some hours.",
+            "history_already_archived": "Satellite data for this day was already received.",
+            "provider_authentication_failed": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}",
+            "provider_allowance_exhausted": "Forecast update delayed. Pyracast will try again.",
+            "provider_access_denied": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}",
+            "provider_site_not_found": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}",
+            "provider_throttled": "Forecast update delayed. Pyracast will try again.",
+            "provider_server_error": "Forecast update delayed. Pyracast will try again.",
+            "provider_unreachable": "Forecast update delayed. Pyracast will try again.",
+            "provider_invalid_response": "Forecast update failed.",
+            "provider_configuration_invalid": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}",
+            "account_unavailable": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}",
+            "history_budget_reserved": "Satellite data update delayed. Pyracast will try again.",
+            "quota_exhausted": "Forecast update delayed. Pyracast will try again.",
+            "provider_failure": "Forecast update failed.",
+            "provider_unexpected_failure": "Forecast update failed.",
+            "invalid_source_kind": "Forecast update failed.",
+            "calculation_failure": "The forecast could not be calculated.",
+            "lock_contention": "Forecast update delayed. Pyracast will try again.",
+            "publication_failure": "Forecast update delayed. Pyracast will try again."
         },
         "NotificationDeliveryStatus": {
             "pending": "Preparing",
-            "retry": "Retry scheduled",
+            "retry": "Will retry",
             "sending": "Sending",
-            "sent": "Accepted by mail service",
+            "sent": "Sent",
             "failed": "Not sent",
-            "uncertain": "Acceptance unconfirmed",
+            "uncertain": "Not known whether sent",
             "skipped": "Skipped",
             "cancelled": "Cancelled"
         },
         "NotificationDeliveryError": {
-            "missed_schedule": "The delivery window has ended.",
-            "delivery_deadline_exceeded": "The mail service did not accept the message within the delivery window.",
-            "cancelled_by_settings_change": "Cancelled because the reminder was turned off or this time was removed.",
-            "schedule_or_authority_changed": "Delivery settings or access changed.",
+            "missed_schedule": "Not sent because the send time had passed.",
+            "delivery_deadline_exceeded": "The email could not be sent in time.",
+            "cancelled_by_settings_change": "Cancelled because the forecast email was turned off or this send time was removed.",
+            "schedule_or_authority_changed": "Cancelled because the forecast email settings or access changed.",
             "no_recipients": "Not sent because no recipient is left.",
             "invalid_recipient": "Not sent because a saved recipient address is invalid.",
-            "recipient_limit_exceeded": "Not sent because the plant has more recipients than the limit allows.",
-            "definition_trashed": "Not sent because the plant was moved to the recycle bin.",
-            "interrupted_send": "Sending was interrupted. Check mail service acceptance before resending.",
-            "interrupted_connection": "The connection was interrupted before sending. A retry is scheduled.",
-            "mail_not_sent": "The mail service was unavailable. Retry is bounded by the delivery window.",
-            "mail_configuration_invalid": "The mail settings are invalid. Delivery will retry within the sending window.",
-            "mail_credentials_rejected": "Mail service credentials need attention from Pyracast support. Delivery will retry within the sending window.",
-            "mail_authorization_revoked": "The mail sender authorization was revoked. Pyracast support must authorize the sender again.",
-            "mail_rate_limited": "The mail service rate limit was reached. Retries are bounded by the sending window.",
-            "mail_rejected": "The mail service rejected the message. Check the recipient and mail settings.",
-            "mail_sender_forbidden": "The mail service does not permit this sender. Pyracast support must check the sender settings.",
-            "mail_preparation_failed": "Transmission permission could not be confirmed. Retries are bounded by the sending window.",
-            "mail_outcome_uncertain": "Check the mail service before resending to avoid a duplicate."
+            "recipient_limit_exceeded": "Not sent because there were too many recipients.",
+            "definition_trashed": "Not sent because the plant was deleted.",
+            "interrupted_send": "Sending was interrupted. Ask a recipient whether it arrived.",
+            "interrupted_connection": "Sending was interrupted.",
+            "mail_not_sent": "The email service could not be reached.",
+            "mail_configuration_invalid": "Pyracast could not send the email.",
+            "mail_credentials_rejected": "Pyracast could not send the email.",
+            "mail_authorization_revoked": "Pyracast could not send the email.",
+            "mail_rate_limited": "Too many emails were sent at once.",
+            "mail_rejected": "The email service rejected the email. Check the recipient addresses.",
+            "mail_sender_forbidden": "Pyracast could not send the email.",
+            "mail_preparation_failed": "Pyracast could not send the email.",
+            "mail_outcome_uncertain": "Ask a recipient whether it arrived."
         },
         "PreparedMessageKind": {
-            "current": "New forecast",
-            "saved_complete": "Saved forecast",
-            "saved_partial": "Partial forecast",
-            "unavailable": "No forecast available"
+            "current": "Forecast",
+            "saved_complete": "Last forecast before sunrise",
+            "saved_partial": "Data is missing for some hours.",
+            "unavailable": "No forecast data."
         },
         "WorkspaceRole": {
             "admin": "Workspace administrator",
@@ -425,72 +424,72 @@
         "InvitationState": {
             "pending": "Pending",
             "accepted": "Accepted",
-            "revoked": "Cancelled",
+            "revoked": "Withdrawn",
             "expired": "Expired",
-            "superseded": "Replaced"
+            "superseded": "Replaced by a newer invitation"
         },
         "ReminderState": {
-            "sending": "Sending",
-            "paused_by_user": "Paused",
-            "waiting_for_approval": "Waiting for approval",
-            "provider_attention": "Provider account needs attention",
+            "sending": "On",
+            "paused_by_user": "Off",
+            "waiting_for_approval": "Waiting for approval by Pyracast",
+            "provider_attention": "Paused",
             "no_recipients": "No recipients",
-            "invalid_recipient": "Invalid recipient",
-            "over_recipient_limit": "Over the recipient limit"
+            "invalid_recipient": "Invalid address",
+            "over_recipient_limit": "Too many recipients"
         },
         "CalibrationAssessment": {
-            "insufficient": "Insufficient data",
-            "provisional": "Provisional",
-            "evaluated": "Evaluated"
+            "insufficient": "Not enough data",
+            "provisional": "Preliminary",
+            "evaluated": "Final"
         },
         "IncidentStatus": {
-            "active": "Active",
-            "resolved": "Resolved",
-            "cancelled": "Cancelled"
+            "active": "Ongoing",
+            "resolved": "Ended",
+            "cancelled": "Entered in error"
         },
         "SelectionState": {
-            "active": "Active",
-            "candidate": "Candidate",
-            "previous_configuration": "Earlier configuration",
-            "not_ready": "Not ready"
+            "active": "In use",
+            "candidate": "Calculated",
+            "previous_configuration": "Outdated",
+            "not_ready": "Not usable"
         },
         "ActivationBlocker": {
-            "configuration_changed": "configuration changed",
-            "production_source_changed": "production source changed",
-            "outage_history_changed": "outage history changed",
-            "incumbent_changed": "active calibration changed",
-            "calibration_not_activatable": "not activatable"
+            "configuration_changed": "the technical details changed",
+            "production_source_changed": "the actual production changed",
+            "outage_history_changed": "the outages changed",
+            "incumbent_changed": "the calibration in use changed",
+            "calibration_not_activatable": "it cannot be used"
         },
         "AutomationCause": {
             "toggle": "turned off by a workspace administrator",
-            "manual_activation": "changed by a manual activation",
-            "reset": "turned off by a reset to the uncalibrated model",
-            "configuration_revised": "turned off because the plant configuration changed",
-            "workspace_disabled": "turned off by Pyracast support for this workspace"
+            "manual_activation": "a calibration was chosen by hand",
+            "reset": "forecasts were set to run without calibration",
+            "configuration_revised": "the technical details changed",
+            "workspace_disabled": "turned off by Pyracast for this workspace"
         },
         "CollectionState": {
-            "collecting": "Collecting",
-            "waiting_for_approval": "Waiting for approval",
-            "paused": "Paused",
-            "provider_attention": "Waiting for the provider"
+            "collecting": "Updating automatically",
+            "waiting_for_approval": "Waiting for approval by Pyracast",
+            "paused": "Not updating",
+            "provider_attention": "Delayed"
         },
         "CollectionInactiveReason": {
-            "not_approved": "Collection starts once the plant is approved.",
-            "not_validated": "Collection starts once the provider connection is validated.",
-            "binding_not_current": "Collection resumes once the provider connection is validated again.",
-            "schedule_disabled": "Data collection is turned off for this plant.",
-            "quota_too_low": "The provider allowance leaves no request for forecasts; only the daily history is collected.",
-            "provider_unavailable": "The provider is not accepting requests right now; collection continues automatically."
+            "not_approved": "Forecasts start once Pyracast approves the plant.",
+            "not_validated": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}",
+            "binding_not_current": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}",
+            "schedule_disabled": "Automatic forecast updates are turned off for this plant.",
+            "quota_too_low": "This plant has no forecast update times. Write to Pyracast: {contact}",
+            "provider_unavailable": "Forecast update delayed. Pyracast will try again."
         },
         "SiteAttention": {
-            "setup_incomplete": "Setup is not complete.",
-            "review_rejected": "Not approved. Edit the plant and resubmit it.",
-            "suspended": "Suspended. Forecasts are paused.",
-            "connection_unavailable": "The data connection needs Pyracast support."
+            "setup_incomplete": "Adding this plant is not finished.",
+            "review_rejected": "Pyracast did not approve this plant.",
+            "suspended": "Forecasts for this plant are stopped. Write to Pyracast: {contact}",
+            "connection_unavailable": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}"
         },
         "PlantEditBlock": {
-            "suspended": "The plant is suspended, so its technical details cannot change. Contact Pyracast support to resume it.",
-            "connection_unavailable": "The plant's data connection needs attention from Pyracast support, so its technical details cannot change yet."
+            "suspended": "The plant is suspended, so its technical details cannot be changed. Write to Pyracast: {contact}",
+            "connection_unavailable": "No new forecast data is arriving for this plant, so its technical details cannot be changed. Write to Pyracast: {contact}"
         }
     }
 }

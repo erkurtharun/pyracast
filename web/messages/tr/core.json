@@ -160,56 +160,56 @@
         "workspace": "Çalışma alanı",
         "noWorkspaces": "Çalışma alanı yok",
         "navigation": "Ana menü",
-        "administration": "Yönetim",
+        "administration": "Pyracast konsolu",
         "overview": "Santraller",
         "recycleBin": "Geri dönüşüm kutusu",
         "account": "Hesap",
         "changeEmail": "E-postayı değiştir",
-        "accountSettings": "Hesap ayarları",
+        "accountSettings": "Hesap",
         "signOut": "Çıkış yap",
         "emailAddress": "E-posta adresi",
-        "sendVerification": "Doğrulama kodu gönder",
-        "sessionExpired": "Oturumunuzun süresi doldu. Tekrar giriş yapın.",
-        "sessionEndingSoon": "Oturumunuz {time} saatinde sona erecek. Çalışmanızı kaydedin; yeniden oturum açmanız gerekecek.",
+        "sendVerification": "E-posta kodu gönder",
+        "sessionExpired": "Çıkış yapıldı. Yeniden giriş yapın.",
+        "sessionEndingSoon": "Otomatik çıkış saati: {time}. Çalışmanızı kaydedin.",
         "newEmail": "Yeni e-posta adresi",
         "verifyEmail": "Yeni e-postayı doğrula",
-        "emailCode": "E-posta doğrulama kodu",
+        "emailCode": "E-posta kodu",
         "loadingWorkspaces": "Çalışma alanlarınız yükleniyor…",
         "loadingScreen": "Yükleniyor…",
         "noWorkspace": "Henüz çalışma alanı yok",
-        "contactAdmin": "Davet için çalışma alanı yöneticinize başvurun ya da {contact} adresinden Pyracast desteğine yazın.",
-        "addPlant": "+ Santral ekle",
+        "contactAdmin": "Bir çalışma alanı yöneticisinden davet isteyin veya Pyracast'e yazın: {contact}",
+        "addPlant": "Santral ekle",
         "plants": "Santraller",
         "searchPlants": "Santral ara",
-        "searchPlaceholder": "Santral adı veya saat dilimi",
-        "approvalStatus": "Onay durumu",
+        "searchPlaceholder": "Santral adı",
+        "approvalStatus": "Durum",
         "allStatuses": "Tüm durumlar",
         "loadingPlants": "Santraller yükleniyor…",
-        "completeSetup": "Kurulumu tamamla",
+        "completeSetup": "Santral eklemeyi tamamla",
         "openPlant": "Santrali aç",
         "noMatches": "Eşleşen santral yok",
         "firstPlant": "İlk santralinizi ekleyin",
-        "differentSearch": "Farklı bir ad veya onay durumu deneyin.",
-        "addDetails": "Konumunu ve teknik bilgilerini tek seferde ekleyin.",
-        "currentEmail": "Mevcut adres: {email}. Yeni adres doğrulandıktan sonra bunun yerini alır.",
+        "differentSearch": "Farklı bir ad veya durum deneyin.",
+        "addDetails": "Konumunu ve teknik bilgilerini girin.",
         "members": "Üyeler",
-        "readOnly": "Üye · değişiklikler onay gerektirir",
+        "readOnly": "Üye",
         "inbox": "Gelen kutusu",
-        "inboxCount": "Gelen kutusu, {count} güncelleme",
-        "workspaceUnavailable": "Bu çalışma alanı hesabınız için kullanılamıyor.",
-        "emailChangeSignsOut": "Yeni adres doğrulandığında diğer cihazlarda oturum kapatılır.",
+        "inboxCount": "Gelen kutusu, {count} okunmamış",
+        "workspaceUnavailable": "Bu çalışma alanına erişiminiz yok.",
+        "emailChangeSignsOut": "Yeni adres doğrulandığında diğer cihazlarda çıkış yapılır.",
         "emailCodeSentTo": "{email} adresine gönderilen kodu girin. Kod 10 dakika geçerlidir.",
         "emailCodeResent": "Yeni bir kod gönderildi.",
-        "emailCodeResendLimit": "Kod dakikada bir yeniden gönderilebilir.",
         "sendCodeAgain": "Kodu yeniden gönder",
         "useAnotherAddress": "Başka bir adres kullan",
         "emailCodeExpired": "Kod artık geçerli değil. Yeni bir kod isteyin.",
         "emailChangeCancelled": "Adres değişikliği iptal edildi.",
         "emailChanged": "Adresiniz artık {email}.",
         "shownOf": "{total} santralden {shown} tanesi gösteriliyor",
-        "needAttention": "{attention, plural, one {# santral ilgi bekliyor.} other {# santral ilgi bekliyor.}}",
-        "attentionReason": "İlgi bekliyor: {reason}",
-        "awaitingSetup": "Kurulumu bir yöneticinin tamamlaması bekleniyor"
+        "needAttention": "{attention} santralde işlem gerekiyor.",
+        "attentionReason": "İşlem gerekiyor: {reason}",
+        "awaitingSetup": "Santral kaydını çalışma alanı yöneticisinin tamamlaması gerekiyor.",
+        "forecastEmailOff": "Tahmin e-postası kapalı",
+        "forecastEmail": "Tahmin e-postası: {state}"
     },
     "Session": {
         "signingOut": "Çıkış yapılıyor",
@@ -225,14 +225,13 @@
         "dock": "Safari'de Dosya > Dock'a Ekle'yi seçin."
     },
     "Common": {
-        "unexpected": "Bir sorun oluştu.",
-        "saveFailed": "Değişiklikler kaydedilemedi",
+        "unexpected": "Bir sorun oluştu. Tekrar deneyin.",
+        "saveFailed": "Kaydedilemedi.",
         "saving": "Kaydediliyor…",
         "saved": "Kaydedildi.",
-        "technicalDetails": "Teknik ayrıntılar",
-        "refreshFailed": "Yenilenemedi; {time} itibarıyla veriler gösteriliyor.",
+        "refreshFailed": "Yenilenemedi. Son yükleme: {time}.",
         "retry": "Tekrar dene",
-        "actionFailed": "İşlem tamamlanamadı",
+        "actionFailed": "Tamamlanamadı.",
         "working": "İşleniyor…",
         "changedField": "{field}: {before} → {after}"
     },
@@ -291,7 +290,7 @@
             "pending": "İncelemede",
             "approved": "Onaylandı",
             "suspended": "Askıya alındı",
-            "rejected": "Reddedildi"
+            "rejected": "Onaylanmadı"
         },
         "LocationChangeStatus": {
             "pending": "İncelemede",
@@ -300,123 +299,123 @@
             "withdrawn": "Geri çekildi"
         },
         "Freshness": {
-            "fresh": "Güncel",
-            "stale": "Güncelliğini yitirmiş",
-            "missing": "Veri yok",
-            "archived": "Arşiv"
+            "fresh": "En yeni tahmin verisi",
+            "stale": "Daha yeni tahmin verisi alınamadı.",
+            "missing": "Bu gün için tahmin verisi yok.",
+            "archived": "Gün doğumu öncesi son tahmin"
         },
         "CalibrationStatus": {
-            "pending": "Bekliyor",
-            "running": "Çalışıyor",
-            "ready": "Hazır",
-            "insufficient": "Yetersiz",
-            "rejected": "Reddedildi",
-            "failed": "Başarısız",
-            "superseded": "Yerini yenisi aldı"
+            "pending": "Sırada",
+            "running": "Hesaplanıyor",
+            "ready": "Hesaplandı",
+            "insufficient": "Yetersiz veri",
+            "rejected": "Doğruluk ölçütleri karşılanmadı",
+            "failed": "Hesaplanamadı",
+            "superseded": "Eskidi"
         },
         "ChangeRequestKind": {
             "production": "Üretim düzeltmesi",
-            "incident": "Kesinti bildirimi"
+            "incident": "Kesinti"
         },
         "ChangeRequestStatus": {
-            "pending": "İncelemede",
+            "pending": "Onay bekliyor",
             "approved": "Onaylandı",
             "rejected": "Reddedildi",
             "withdrawn": "Geri çekildi"
         },
         "IncidentKind": {
             "inverter": "İnverter",
-            "panels": "Paneller",
+            "panels": "Panel",
             "grid": "Şebeke",
             "other": "Diğer",
             "multiple": "Birden fazla arıza"
         },
         "ObservationQuality": {
-            "valid": "Geçerli",
+            "valid": "Normal",
             "outage": "Kesinti",
-            "curtailed": "Kısıtlanmış",
-            "invalid": "Geçersiz"
+            "curtailed": "Üretim kısıldı",
+            "invalid": "Geçersiz değer"
         },
         "CollectionEndpoint": {
             "forecasts": "Tahmin",
-            "estimated_actuals": "Geçmiş tahminleri",
-            "historical_import": "Geçmiş veri aktarımı",
-            "scaled_forecasts": "Ölçeklenmiş tahmin",
-            "scaled_estimated_actuals": "Ölçeklenmiş geçmiş tahminleri"
+            "estimated_actuals": "Uydu verisinden hesaplanan üretim",
+            "historical_import": "İçe aktarılan, uydu verisinden hesaplanan üretim",
+            "scaled_forecasts": "Tahmin",
+            "scaled_estimated_actuals": "Uydu verisinden hesaplanan üretim"
         },
         "CollectionJobStatus": {
-            "pending": "Bekliyor",
+            "pending": "Sırada",
             "running": "Devam ediyor",
-            "retry": "Yeniden deneme planlandı",
-            "succeeded": "Başarılı",
-            "failed": "Başarısız",
-            "stale": "Yerine yenisi geldi veya artık uygun değil"
+            "retry": "Yeniden denenecek",
+            "succeeded": "Tamamlandı",
+            "failed": "Tamamlanamadı",
+            "stale": "Artık gerekmiyor"
         },
         "CollectionJobError": {
-            "history_window_closed": "Sabah yeniden deneme süresi doldu",
-            "attempts_exhausted": "Yeniden deneme sınırına ulaşıldı",
-            "forecast_superseded": "Yerine en son planlanan veri toplama geçti",
-            "binding_not_current": "Sağlayıcı bağlantısı onaylı ve güncel değil",
-            "schedule_disabled": "Veri toplama duraklatıldı",
-            "slot_not_configured": "Bu saat artık planda yok",
-            "schedule_changed": "Plan değiştiği için yerine yenisi geldi",
-            "history_incomplete": "Geçmiş verileri eksik",
-            "history_already_archived": "Geçmiş zaten toplandı",
-            "provider_authentication_failed": "Bağlantı kimlik bilgileri için yönetici müdahalesi gerekiyor",
-            "provider_allowance_exhausted": "Sağlayıcı hesabının günlük hakkı doldu; sıfırlandıktan sonra yeniden denenecek",
-            "provider_access_denied": "Sağlayıcı bu konuma erişimi reddetti",
-            "provider_site_not_found": "Sağlayıcı bu konumu tanımıyor",
-            "provider_throttled": "Sağlayıcının istek sınırının sıfırlanması bekleniyor",
-            "provider_server_error": "Sağlayıcıda sunucu hatası oluştu",
-            "provider_unreachable": "Sağlayıcıya ulaşılamadı",
-            "provider_invalid_response": "Beklenmeyen sağlayıcı verisi",
-            "provider_configuration_invalid": "Sağlayıcı bağlantı ayarları için yönetici müdahalesi gerekiyor",
-            "account_unavailable": "Sağlayıcı hesabı duraklatıldı",
-            "history_budget_reserved": "Kalan kota tahminler için ayrıldı",
-            "quota_exhausted": "Günlük hesap kotası tükendi",
-            "provider_failure": "Sağlayıcı isteği başarısız",
-            "provider_unexpected_failure": "Veri toplama tamamlanamadı",
-            "invalid_source_kind": "Beklenmeyen sağlayıcı verisi",
-            "calculation_failure": "Tahmin hesabı başarısız",
-            "lock_contention": "Sistem meşguldü; yeniden denenecek",
-            "publication_failure": "Veri toplama kaydedilemedi; yeniden denenecek"
+            "history_window_closed": "Bu gün için uydu verisi yok.",
+            "attempts_exhausted": "Tahmin güncellenemedi.",
+            "forecast_superseded": "Daha sonraki bir güncelleme yerini aldı.",
+            "binding_not_current": "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: {contact}",
+            "schedule_disabled": "Tahminlerin otomatik güncellenmesi kapalı.",
+            "slot_not_configured": "Bu saat artık tahmin güncelleme saatleri arasında değil.",
+            "schedule_changed": "Tahmin güncelleme saatleri değiştiği için yerine yenisi planlandı.",
+            "history_incomplete": "Bazı saatlerin verisi eksik.",
+            "history_already_archived": "Bu günün uydu verisi zaten alınmıştı.",
+            "provider_authentication_failed": "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: {contact}",
+            "provider_allowance_exhausted": "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek.",
+            "provider_access_denied": "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: {contact}",
+            "provider_site_not_found": "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: {contact}",
+            "provider_throttled": "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek.",
+            "provider_server_error": "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek.",
+            "provider_unreachable": "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek.",
+            "provider_invalid_response": "Tahmin güncellenemedi.",
+            "provider_configuration_invalid": "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: {contact}",
+            "account_unavailable": "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: {contact}",
+            "history_budget_reserved": "Uydu verisi güncellemesi gecikti. Pyracast yeniden deneyecek.",
+            "quota_exhausted": "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek.",
+            "provider_failure": "Tahmin güncellenemedi.",
+            "provider_unexpected_failure": "Tahmin güncellenemedi.",
+            "invalid_source_kind": "Tahmin güncellenemedi.",
+            "calculation_failure": "Tahmin hesaplanamadı.",
+            "lock_contention": "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek.",
+            "publication_failure": "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek."
         },
         "NotificationDeliveryStatus": {
             "pending": "Hazırlanıyor",
-            "retry": "Yeniden deneme planlandı",
+            "retry": "Yeniden denenecek",
             "sending": "Gönderiliyor",
-            "sent": "E-posta hizmeti kabul etti",
+            "sent": "Gönderildi",
             "failed": "Gönderilmedi",
-            "uncertain": "Kabul edildiği doğrulanamadı",
+            "uncertain": "Gönderildiği belli değil",
             "skipped": "Atlandı",
             "cancelled": "İptal edildi"
         },
         "NotificationDeliveryError": {
-            "missed_schedule": "Gönderim süresi doldu.",
-            "delivery_deadline_exceeded": "E-posta hizmeti iletiyi gönderim süresi içinde kabul etmedi.",
-            "cancelled_by_settings_change": "Hatırlatma kapatıldığı veya bu saat kaldırıldığı için iptal edildi.",
-            "schedule_or_authority_changed": "Gönderim ayarları veya erişim değişti.",
+            "missed_schedule": "Gönderim saati geçtiği için gönderilmedi.",
+            "delivery_deadline_exceeded": "E-posta zamanında gönderilemedi.",
+            "cancelled_by_settings_change": "Tahmin e-postası kapatıldığı veya bu gönderim saati kaldırıldığı için iptal edildi.",
+            "schedule_or_authority_changed": "Tahmin e-postası ayarları veya erişim değiştiği için iptal edildi.",
             "no_recipients": "Gönderilecek alıcı kalmadığı için gönderilmedi.",
             "invalid_recipient": "Kayıtlı bir alıcı adresi geçersiz olduğu için gönderilmedi.",
-            "recipient_limit_exceeded": "Santralin alıcı sayısı sınırı aştığı için gönderilmedi.",
-            "definition_trashed": "Santral geri dönüşüm kutusuna taşındığı için gönderilmedi.",
-            "interrupted_send": "Gönderim kesildi. Yeniden göndermeden önce e-posta hizmetinin kabul durumunu kontrol edin.",
-            "interrupted_connection": "Gönderimden önce bağlantı kesildi. Yeniden deneme planlandı.",
-            "mail_not_sent": "E-posta hizmetine ulaşılamadı. Yeniden denemeler gönderim süresiyle sınırlıdır.",
-            "mail_configuration_invalid": "E-posta ayarları geçersiz. Gönderim süresi içinde yeniden denenecek.",
-            "mail_credentials_rejected": "E-posta hizmeti kimlik bilgileri için Pyracast desteğinin müdahalesi gerekiyor. Gönderim süresi içinde yeniden denenecek.",
-            "mail_authorization_revoked": "E-posta göndericisinin yetkisi kaldırıldı. Pyracast desteğinin göndericiyi yeniden yetkilendirmesi gerekiyor.",
-            "mail_rate_limited": "E-posta hizmetinin hız sınırına ulaşıldı. Yeniden denemeler gönderim süresiyle sınırlıdır.",
-            "mail_rejected": "E-posta hizmeti iletiyi reddetti. Alıcıyı ve e-posta ayarlarını kontrol edin.",
-            "mail_sender_forbidden": "E-posta hizmeti bu göndericiye izin vermiyor. Pyracast desteğinin gönderici ayarlarını kontrol etmesi gerekiyor.",
-            "mail_preparation_failed": "Gönderim izni doğrulanamadı. Yeniden denemeler gönderim süresiyle sınırlıdır.",
-            "mail_outcome_uncertain": "Yinelenen gönderimi önlemek için yeniden göndermeden önce e-posta hizmetini kontrol edin."
+            "recipient_limit_exceeded": "Alıcı sınırı aşıldığı için gönderilmedi.",
+            "definition_trashed": "Santral silindiği için gönderilmedi.",
+            "interrupted_send": "Gönderim yarıda kesildi. Ulaşıp ulaşmadığını bir alıcıya sorun.",
+            "interrupted_connection": "Gönderim yarıda kesildi.",
+            "mail_not_sent": "E-posta hizmetine ulaşılamadı.",
+            "mail_configuration_invalid": "Pyracast e-postayı gönderemedi.",
+            "mail_credentials_rejected": "Pyracast e-postayı gönderemedi.",
+            "mail_authorization_revoked": "Pyracast e-postayı gönderemedi.",
+            "mail_rate_limited": "Aynı anda çok fazla e-posta gönderildi.",
+            "mail_rejected": "E-posta hizmeti e-postayı reddetti. Alıcı adreslerini kontrol edin.",
+            "mail_sender_forbidden": "Pyracast e-postayı gönderemedi.",
+            "mail_preparation_failed": "Pyracast e-postayı gönderemedi.",
+            "mail_outcome_uncertain": "Ulaşıp ulaşmadığını bir alıcıya sorun."
         },
         "PreparedMessageKind": {
-            "current": "Yeni tahmin",
-            "saved_complete": "Kayıtlı tahmin",
-            "saved_partial": "Kısmi tahmin",
-            "unavailable": "Kullanılabilir tahmin yok"
+            "current": "Tahmin",
+            "saved_complete": "Gün doğumu öncesi son tahmin",
+            "saved_partial": "Bazı saatlerin verisi eksik.",
+            "unavailable": "Tahmin verisi yok."
         },
         "WorkspaceRole": {
             "admin": "Çalışma alanı yöneticisi",
@@ -425,72 +424,72 @@
         "InvitationState": {
             "pending": "Bekliyor",
             "accepted": "Kabul edildi",
-            "revoked": "İptal edildi",
+            "revoked": "Geri çekildi",
             "expired": "Süresi doldu",
-            "superseded": "Yenilendi"
+            "superseded": "Yerine yeni davet gönderildi"
         },
         "ReminderState": {
-            "sending": "Gönderiliyor",
-            "paused_by_user": "Duraklatıldı",
-            "waiting_for_approval": "Onay bekleniyor",
-            "provider_attention": "Sağlayıcı hesabı ilgi bekliyor",
+            "sending": "Açık",
+            "paused_by_user": "Kapalı",
+            "waiting_for_approval": "Pyracast onayı bekleniyor",
+            "provider_attention": "Duraklatıldı",
             "no_recipients": "Alıcı yok",
-            "invalid_recipient": "Geçersiz alıcı",
+            "invalid_recipient": "Geçersiz adres",
             "over_recipient_limit": "Alıcı sınırı aşıldı"
         },
         "CalibrationAssessment": {
             "insufficient": "Yetersiz veri",
-            "provisional": "Geçici",
-            "evaluated": "Değerlendirildi"
+            "provisional": "Ön sonuç",
+            "evaluated": "Kesin sonuç"
         },
         "IncidentStatus": {
-            "active": "Etkin",
-            "resolved": "Çözüldü",
-            "cancelled": "İptal edildi"
+            "active": "Devam ediyor",
+            "resolved": "Sona erdi",
+            "cancelled": "Hatalı kayıt"
         },
         "SelectionState": {
-            "active": "Etkin",
-            "candidate": "Aday",
-            "previous_configuration": "Önceki yapılandırma",
-            "not_ready": "Hazır değil"
+            "active": "Kullanımda",
+            "candidate": "Hesaplandı",
+            "previous_configuration": "Eskidi",
+            "not_ready": "Kullanılamaz"
         },
         "ActivationBlocker": {
-            "configuration_changed": "yapılandırma değişti",
-            "production_source_changed": "üretim kaynağı değişti",
-            "outage_history_changed": "kesinti geçmişi değişti",
-            "incumbent_changed": "etkin kalibrasyon değişti",
-            "calibration_not_activatable": "etkinleştirilemez"
+            "configuration_changed": "teknik bilgiler değişti",
+            "production_source_changed": "gerçekleşen üretim değişti",
+            "outage_history_changed": "kesinti kayıtları değişti",
+            "incumbent_changed": "kullanımdaki kalibrasyon değişti",
+            "calibration_not_activatable": "kullanılamaz"
         },
         "AutomationCause": {
             "toggle": "bir çalışma alanı yöneticisi kapattı",
-            "manual_activation": "elle etkinleştirme ile değişti",
-            "reset": "kalibrasyonsuz modele dönüşle kapatıldı",
-            "configuration_revised": "santral yapılandırması değiştiği için kapatıldı",
-            "workspace_disabled": "Pyracast desteği bu çalışma alanı için kapattı"
+            "manual_activation": "bir kalibrasyon elle seçildi",
+            "reset": "tahminlerde kalibrasyon kullanılmaması seçildi",
+            "configuration_revised": "teknik bilgiler değişti",
+            "workspace_disabled": "Pyracast bu çalışma alanı için kapattı"
         },
         "CollectionState": {
-            "collecting": "Veri toplanıyor",
-            "waiting_for_approval": "Onay bekleniyor",
-            "paused": "Duraklatıldı",
-            "provider_attention": "Sağlayıcı bekleniyor"
+            "collecting": "Otomatik güncelleniyor",
+            "waiting_for_approval": "Pyracast onayı bekleniyor",
+            "paused": "Güncellenmiyor",
+            "provider_attention": "Gecikiyor"
         },
         "CollectionInactiveReason": {
-            "not_approved": "Santral onaylandığında veri toplama başlar.",
-            "not_validated": "Sağlayıcı bağlantısı doğrulandığında veri toplama başlar.",
-            "binding_not_current": "Sağlayıcı bağlantısı yeniden doğrulandığında veri toplama sürer.",
-            "schedule_disabled": "Bu santral için veri toplama kapalı.",
-            "quota_too_low": "Sağlayıcı kullanım hakkı tahminlere istek bırakmıyor; yalnızca günlük geçmiş veriler toplanıyor.",
-            "provider_unavailable": "Sağlayıcı şu anda istek kabul etmiyor; veri toplama kendiliğinden sürecek."
+            "not_approved": "Pyracast santrali onayladığında tahminler başlar.",
+            "not_validated": "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: {contact}",
+            "binding_not_current": "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: {contact}",
+            "schedule_disabled": "Bu santral için tahminlerin otomatik güncellenmesi kapalı.",
+            "quota_too_low": "Bu santralin tahmin güncelleme saati yok. Pyracast'e yazın: {contact}",
+            "provider_unavailable": "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek."
         },
         "SiteAttention": {
-            "setup_incomplete": "Kurulum tamamlanmadı.",
-            "review_rejected": "Onaylanmadı. Santrali düzenleyip yeniden incelemeye gönderin.",
-            "suspended": "Askıya alındı. Tahminler duraklatıldı.",
-            "connection_unavailable": "Veri bağlantısı Pyracast desteğini bekliyor."
+            "setup_incomplete": "Santralin eklenmesi tamamlanmadı.",
+            "review_rejected": "Pyracast bu santrali onaylamadı.",
+            "suspended": "Bu santralin tahminleri durduruldu. Pyracast'e yazın: {contact}",
+            "connection_unavailable": "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: {contact}"
         },
         "PlantEditBlock": {
-            "suspended": "Santral askıya alındığı için teknik bilgileri değiştirilemez. Yeniden başlatmak için Pyracast destek ekibine yazın.",
-            "connection_unavailable": "Santralin veri bağlantısıyla Pyracast destek ekibinin ilgilenmesi gerekiyor; bu nedenle teknik bilgileri henüz değiştirilemez."
+            "suspended": "Santral askıya alındığı için teknik bilgileri değiştirilemez. Pyracast'e yazın: {contact}",
+            "connection_unavailable": "Bu santral için yeni tahmin verisi gelmediğinden teknik bilgileri değiştirilemez. Pyracast'e yazın: {contact}"
         }
     }
 }

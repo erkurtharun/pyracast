@@ -3,13 +3,21 @@ import type { Page } from "@playwright/test";
 import { mockApi, paged, plant, region, user } from "./support/workspace";
 
 const STATES = [
-    ["sending", "Sending"],
-    ["paused_by_user", "Paused"],
-    ["waiting_for_approval", "Waiting for approval"],
-    ["provider_attention", "Provider account needs attention"],
-    ["no_recipients", "No recipients"],
-    ["invalid_recipient", "Invalid recipient"],
-    ["over_recipient_limit", "Over the recipient limit"],
+    ["sending", "On", "Forecast email: Not sent"],
+    ["paused_by_user", "Off", "Forecast email off"],
+    [
+        "waiting_for_approval",
+        "Waiting for approval by Pyracast",
+        "Forecast email: Waiting for approval by Pyracast",
+    ],
+    ["provider_attention", "Paused", "Forecast email: Paused"],
+    ["no_recipients", "No recipients", "Forecast email: No recipients"],
+    ["invalid_recipient", "Invalid address", "Forecast email: Invalid address"],
+    [
+        "over_recipient_limit",
+        "Too many recipients",
+        "Forecast email: Too many recipients",
+    ],
 ] as const;
 
 const LAST = {
@@ -73,7 +81,7 @@ async function reminders(page: Page, state: string) {
     );
 }
 
-for (const [state, label] of STATES) {
+for (const [state, label, line] of STATES) {
     test(`the plant list and the reminders screen name the ${state} state with the latest outcome`, async ({
         page,
     }) => {
@@ -82,8 +90,7 @@ for (const [state, label] of STATES) {
         await reminders(page, state);
         await page.goto("/app/");
         const card = page.getByRole("button", { name: /East array/ });
-        await expect(card).toContainText(`Daily email: ${label}`);
-        await expect(card).toContainText("Last email: Not sent");
+        await expect(card.locator(".fine")).toHaveText([line]);
         await card.click();
         await page
             .getByRole("button", { name: "Irradiance", exact: true })
@@ -100,12 +107,12 @@ for (const [state, label] of STATES) {
             "Last email: Not sent",
         );
         await expect(panel.getByRole("status")).toContainText(
-            "The mail service rejected the message.",
+            "The email service rejected the email.",
         );
     });
 }
 
-test("a plant whose reminders were never saved shows no reminder line", async ({
+test("a plant whose forecast email was never saved shows no forecast email line", async ({
     page,
 }) => {
     await mockApi(page);
@@ -113,16 +120,36 @@ test("a plant whose reminders were never saved shows no reminder line", async ({
     await page.goto("/app/");
     const card = page.getByRole("button", { name: /East array/ });
     await expect(card).toBeVisible();
-    await expect(card).not.toContainText("Daily email");
+    await expect(card).not.toContainText("Forecast email");
 });
 
-test("a plant whose reminders never ran names its state without an outcome", async ({
+for (const [status, outcome] of [
+    ["sent", "was last sent"],
+    [null, "has not been sent yet"],
+] as const)
+    test(`a plant whose forecast email is on and ${outcome} shows no forecast email line`, async ({
+        page,
+    }) => {
+        await mockApi(page);
+        await plantList(page, {
+            state: "sending",
+            last_delivery: status && { ...LAST, status, last_error: "" },
+        });
+        await page.goto("/app/");
+        const card = page.getByRole("button", { name: /East array/ });
+        await expect(card).toContainText("Open plant");
+        await expect(card).not.toContainText("Forecast email");
+    });
+
+test("a plant whose forecast email is on and not known to have been sent says so", async ({
     page,
 }) => {
     await mockApi(page);
-    await plantList(page, { state: "sending", last_delivery: null });
+    await plantList(page, {
+        state: "sending",
+        last_delivery: { ...LAST, status: "uncertain", last_error: "" },
+    });
     await page.goto("/app/");
     const card = page.getByRole("button", { name: /East array/ });
-    await expect(card).toContainText("Daily email: Sending");
-    await expect(card).not.toContainText("Last email");
+    await expect(card).toContainText("Forecast email: Not known whether sent");
 });

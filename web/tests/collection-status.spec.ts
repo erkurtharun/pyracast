@@ -97,7 +97,9 @@ test("a collecting plant shows its state, next collection and requests of the da
 }) => {
     const status = await openCollection(page, "en", schedule({}));
 
-    await expect(status.getByText("Collecting", { exact: true })).toBeVisible();
+    await expect(
+        status.getByText("Updating automatically", { exact: true }),
+    ).toBeVisible();
     await expect(
         status.getByText("Next collection").locator(".."),
     ).toContainText("Jan 2, 2026, 12:00 AM");
@@ -112,52 +114,51 @@ const inactive = [
         language: "en",
         state: "paused",
         reason: "schedule_disabled",
-        label: "Paused",
-        sentence: "Data collection is turned off for this plant.",
+        label: "Not updating",
+        sentence: "Automatic forecast updates are turned off for this plant.",
         next: "Not scheduled",
     },
     {
         language: "tr",
         state: "paused",
         reason: "schedule_disabled",
-        label: "Duraklatıldı",
-        sentence: "Bu santral için veri toplama kapalı.",
+        label: "Güncellenmiyor",
+        sentence: "Bu santral için tahminlerin otomatik güncellenmesi kapalı.",
         next: "Planlanmadı",
     },
     {
         language: "tr",
         state: "provider_attention",
         reason: "provider_unavailable",
-        label: "Sağlayıcı bekleniyor",
-        sentence:
-            "Sağlayıcı şu anda istek kabul etmiyor; veri toplama kendiliğinden sürecek.",
+        label: "Gecikiyor",
+        sentence: "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek.",
         next: "2 Oca 2026",
     },
     {
         language: "en",
         state: "paused",
         reason: "not_validated",
-        label: "Paused",
+        label: "Not updating",
         sentence:
-            "Collection starts once the provider connection is validated.",
+            "No new forecast data is arriving for this plant. Write to Pyracast: info@pyracast.app",
         next: "Not scheduled",
     },
     {
         language: "tr",
         state: "paused",
         reason: "binding_not_current",
-        label: "Duraklatıldı",
+        label: "Güncellenmiyor",
         sentence:
-            "Sağlayıcı bağlantısı yeniden doğrulandığında veri toplama sürer.",
+            "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: info@pyracast.app",
         next: "Planlanmadı",
     },
     {
         language: "en",
         state: "collecting",
         reason: "quota_too_low",
-        label: "Collecting",
+        label: "Updating automatically",
         sentence:
-            "The provider allowance leaves no request for forecasts; only the daily history is collected.",
+            "This plant has no forecast update times. Write to Pyracast: info@pyracast.app",
         next: "Jan 2, 2026, 12:00 AM",
     },
 ] as const;
@@ -199,7 +200,7 @@ const plantStates = [
         status: "pending",
         state: "waiting_for_approval",
         reason: "not_approved",
-        label: "Waiting for approval",
+        label: "Waiting for approval by Pyracast",
         sentence:
             "Awaiting administrator approval. Your plant details are saved.",
         resubmit: false,
@@ -208,7 +209,7 @@ const plantStates = [
         status: "suspended",
         state: "paused",
         reason: "not_approved",
-        label: "Paused",
+        label: "Not updating",
         sentence:
             "Plant status: Suspended. Contact Pyracast support at info@pyracast.app to resume collection.",
         resubmit: false,
@@ -217,7 +218,7 @@ const plantStates = [
         status: "rejected",
         state: "paused",
         reason: "not_approved",
-        label: "Paused",
+        label: "Not updating",
         sentence: "Pyracast support did not approve this plant.",
         resubmit: true,
     },
@@ -225,16 +226,16 @@ const plantStates = [
         status: "approved",
         state: "paused",
         reason: "not_validated",
-        label: "Paused",
+        label: "Not updating",
         sentence:
-            "Collection starts once the provider connection is validated.",
+            "No new forecast data is arriving for this plant. Write to Pyracast: info@pyracast.app",
         resubmit: false,
     },
     {
         status: "approved",
         state: "collecting",
         reason: null,
-        label: "Collecting",
+        label: "Updating automatically",
         sentence: null,
         resubmit: false,
     },

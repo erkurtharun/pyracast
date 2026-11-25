@@ -31,7 +31,7 @@ const UNKNOWN =
 const KEPT = (text: string) => `${text} Your edits are kept.`;
 const LOST =
     "Nothing was saved: you were no longer an administrator of this workspace.";
-const SAVED_LINE = "Saved successfully.";
+const SAVED_LINE = "Saved.";
 const LOADING = "Loading email reminders…";
 const UNAVAILABLE = "The service is unavailable.";
 const NO_ADDRESS_SHOWN = "No address will appear in To or Copy.";
@@ -1565,7 +1565,7 @@ for (const cached of [true, false])
             role = "viewer";
             await tenantsAgain(page);
             await expect(
-                line(page, "Member · changes require approval"),
+                page.locator(".workspace-readonly", { hasText: /^Member$/ }),
             ).toBeVisible();
             await saveElsewhere(page, {
                 ...SAVED,

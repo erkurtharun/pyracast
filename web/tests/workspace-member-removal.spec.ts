@@ -65,7 +65,7 @@ for (const width of [320, 390]) {
         ).toHaveCount(1);
         await action.click();
         const confirmation = page.getByRole("region", {
-            name: "Confirm member removal",
+            name: "Remove from workspace",
         });
         await expect(confirmation).toContainText(viewer.email);
         await expect(confirmation).toContainText(
@@ -138,7 +138,7 @@ test("failed removal refreshes current membership and permits a fresh confirmati
         .getByRole("button", { name: `Remove from workspace: ${viewer.email}` })
         .click();
     await page
-        .getByRole("region", { name: "Confirm member removal" })
+        .getByRole("region", { name: "Remove from workspace" })
         .getByRole("button", { name: "Remove from workspace", exact: true })
         .click();
     await expect(page.locator(".notice[role=alert]")).toContainText(
@@ -150,7 +150,7 @@ test("failed removal refreshes current membership and permits a fresh confirmati
         .getByRole("button", { name: `Remove from workspace: ${viewer.email}` })
         .click();
     await expect(
-        page.getByRole("region", { name: "Confirm member removal" }),
+        page.getByRole("region", { name: "Remove from workspace" }),
     ).toBeVisible();
 });
 
@@ -179,11 +179,11 @@ test("lost administrator access refreshes workspace role and removes write contr
         .getByRole("button", { name: `Remove from workspace: ${viewer.email}` })
         .click();
     await page
-        .getByRole("region", { name: "Confirm member removal" })
+        .getByRole("region", { name: "Remove from workspace" })
         .getByRole("button", { name: "Remove from workspace", exact: true })
         .click();
     await expect(
-        page.getByText("Member · changes require approval", { exact: true }),
+        page.locator(".workspace-readonly", { hasText: /^Member$/ }),
     ).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Members", exact: true }),
@@ -250,14 +250,14 @@ test("switching workspace discards a pending confirmation and uses the new tenan
         .getByRole("combobox", { name: "Workspace", exact: true })
         .selectOption("9");
     await expect(
-        page.getByRole("region", { name: "Confirm member removal" }),
+        page.getByRole("region", { name: "Remove from workspace" }),
     ).toHaveCount(0);
     expect(requested).toBe("");
     await page
         .getByRole("button", { name: `Remove from workspace: ${viewer.email}` })
         .click();
     await page
-        .getByRole("region", { name: "Confirm member removal" })
+        .getByRole("region", { name: "Remove from workspace" })
         .getByRole("button", { name: "Remove from workspace", exact: true })
         .click();
     await expect.poll(() => requested).toBe("/api/tenants/9/members/2/");

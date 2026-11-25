@@ -66,7 +66,7 @@ test("a sign-out whose request fails stays signing out across history until Retr
     await expect(plants(page)).toBeVisible();
     await page.getByRole("button", { name: "Account", exact: true }).click();
     await expect(
-        page.getByRole("heading", { name: "Account settings", exact: true }),
+        page.getByRole("heading", { name: "Account", exact: true }),
     ).toBeVisible();
     await markDocument(page);
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
@@ -80,7 +80,7 @@ test("a sign-out whose request fails stays signing out across history until Retr
     await expect(page).toHaveURL("/app/account/");
     await expect(signingOut(page)).toBeVisible();
     await expect(
-        page.getByRole("heading", { name: "Account settings", exact: true }),
+        page.getByRole("heading", { name: "Account", exact: true }),
     ).toHaveCount(0);
     server.failing = false;
     await page.getByRole("button", { name: "Try again" }).click();
@@ -137,9 +137,7 @@ test("a sign-out answered 200 with a signed-out body stays signing out until Ret
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
     await expect(signingOut(page)).toBeVisible();
     await expect(
-        page.getByText(
-            "The server returned an invalid response. Please try again.",
-        ),
+        page.getByText("Something went wrong. Try again."),
     ).toBeVisible();
     await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
     expect(await isMarked(page)).toBe(true);
@@ -209,7 +207,7 @@ async function invitedTab(page: Page) {
 async function openWithInvitation(page: Page) {
     await page.goto("/app/invitation/#token=invite-secret");
     await expect(
-        page.getByRole("heading", { name: "Join workspace" }),
+        page.getByRole("heading", { name: "Invitation", exact: true }),
     ).toBeVisible();
     await page.goto("/app/w/1/");
     await expect(plants(page)).toBeVisible();
@@ -277,7 +275,7 @@ test("using another account signs out as a state of the document and ends on the
     const server = await signOutServer(page, account);
     await page.goto("/app/invitation/#token=invite-secret");
     await expect(
-        page.getByRole("heading", { name: "Join workspace" }),
+        page.getByRole("heading", { name: "Invitation", exact: true }),
     ).toBeVisible();
     await markDocument(page);
     await page

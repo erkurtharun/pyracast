@@ -21,7 +21,6 @@ export function RouteError({
     return (
         <section className="panel narrow" aria-labelledby="app-error-title">
             <h1 id="app-error-title">{t("title")}</h1>
-            <p>{t("description")}</p>
             {state.status === "failed" && <p role="alert">{state.message}</p>}
             <button
                 className="button"

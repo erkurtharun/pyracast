@@ -623,7 +623,7 @@ test("connecting returns to account settings and consumes an expired-confirmatio
         "/app/?social_callback=1&error=reauthentication_required&error_process=connect",
     );
     await expect(
-        page.getByRole("heading", { name: "Account settings", exact: true }),
+        page.getByRole("heading", { name: "Account", exact: true }),
     ).toBeVisible();
     await expect(
         page
@@ -633,7 +633,7 @@ test("connecting returns to account settings and consumes an expired-confirmatio
     await expect(page).not.toHaveURL(/error=/);
     await page.reload();
     await expect(
-        page.getByRole("heading", { name: "Account settings", exact: true }),
+        page.getByRole("heading", { name: "Account", exact: true }),
     ).toBeVisible();
     await expect(
         page.getByRole("region", { name: "Connected accounts" }),
@@ -871,7 +871,7 @@ test("a disconnection answered with a refusal that is not allauth's shows an err
         .getByRole("button", { name: "Disconnect solar@example.test" })
         .click();
     await expect(accounts.getByRole("alert")).toContainText(
-        "Request failed (401). Please try again.",
+        "Something went wrong. Try again.",
     );
     await expect(
         accounts.getByText("Account disconnected.", { exact: true }),
@@ -973,7 +973,7 @@ test("a provider sign-in with an invitation kept in the tab opens the invitation
     await page.goto(datedForecast);
     await continueWithGoogle(page);
     await expect(
-        page.getByRole("heading", { name: "Join workspace" }),
+        page.getByRole("heading", { name: "Invitation", exact: true }),
     ).toBeVisible();
     await expect(page).toHaveURL("/app/invitation/");
 });
@@ -985,7 +985,7 @@ test("a provider sign-in started at a workspace the reader does not belong to op
     await page.goto("/app/w/7/plants/11/forecast/?date=2026-11-25");
     await continueWithGoogle(page);
     await expect(
-        page.getByText("This workspace is not available to your account."),
+        page.getByText("You do not have access to this workspace."),
     ).toBeVisible();
     await expect(page).toHaveURL(
         "/app/w/7/plants/11/forecast/?date=2026-11-25",

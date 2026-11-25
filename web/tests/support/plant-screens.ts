@@ -925,13 +925,13 @@ export async function reviewRequest(
         en: {
             inbox: "Inbox",
             details: "Review details",
-            approve: "Approve and apply",
+            approve: "Approve",
             refresh: "Refresh details",
         },
         tr: {
             inbox: "Gelen kutusu",
             details: "Ayrıntıları incele",
-            approve: "Onayla ve uygula",
+            approve: "Onayla",
             refresh: "Ayrıntıları yenile",
         },
     }[language];
@@ -1004,7 +1004,10 @@ export async function reviewRequest(
         decisions,
         applied: () => applied,
         detail,
-        approve: detail.getByRole("button", { name: labels.approve }),
+        approve: detail.getByRole("button", {
+            name: labels.approve,
+            exact: true,
+        }),
         refresh: detail.getByRole("button", { name: labels.refresh }),
     };
 }

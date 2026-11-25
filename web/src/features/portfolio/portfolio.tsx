@@ -5,6 +5,7 @@ import { cadence, useApiList, useRefresh } from "@/lib/api/query";
 import { useFormat } from "@/lib/format/use-format";
 import { useNavigate } from "@/lib/leave-guard";
 import { routes } from "@/lib/routes";
+import type { components } from "@/lib/schema";
 import { PlantIcon } from "./plant-icon";
 import { PlantOnboarding } from "./plant-onboarding";
 import { matchesSearch, siteName } from "./portfolio-search";
@@ -12,9 +13,29 @@ import { Field, Select } from "@/ui/form";
 import { usePageTitle } from "@/ui/page-title";
 import { Empty, Notice, RefreshFailed } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
-import { ReminderLine } from "@/features/plant/reminder-line";
 import { useWorkspace } from "@/features/workspace/workspace-shell";
 import { DeletedNotice } from "@/features/trash/recent-deletion";
+
+type ReminderSummary = components["schemas"]["ReminderSummaryOutput"];
+
+function ForecastEmailLine({ reminder }: { reminder: ReminderSummary }) {
+    const t = useTranslations("Dashboard");
+    const label = useLabel();
+    const outcome = reminder.last_delivery?.status;
+    const text =
+        reminder.state === "paused_by_user"
+            ? t("forecastEmailOff")
+            : reminder.state !== "sending"
+              ? t("forecastEmail", {
+                    state: label("ReminderState", reminder.state),
+                })
+              : outcome === "failed" || outcome === "uncertain"
+                ? t("forecastEmail", {
+                      state: label("NotificationDeliveryStatus", outcome),
+                  })
+                : null;
+    return text && <p className="fine">{text}</p>;
+}
 
 export function Portfolio() {
     const t = useTranslations("Dashboard");
@@ -160,11 +181,11 @@ export function Portfolio() {
                                         />
                                     </div>
                                     <h2>{siteName(site)}</h2>
-                                    <p>
-                                        {metadata &&
-                                            `${format.significant(metadata.dc_capacity_mw, 4)} MW DC · `}
-                                        {site.timezone}
-                                    </p>
+                                    {metadata && (
+                                        <p>
+                                            {`${format.significant(metadata.dc_capacity_mw, 4)} MWp`}
+                                        </p>
+                                    )}
                                     {site.attention && (
                                         <p className="attention">
                                             {t("attentionReason", {
@@ -176,9 +197,8 @@ export function Portfolio() {
                                         </p>
                                     )}
                                     {site.reminder && (
-                                        <ReminderLine
+                                        <ForecastEmailLine
                                             reminder={site.reminder}
-                                            timezone={site.timezone}
                                         />
                                     )}
                                     <div className="region-card-bottom">

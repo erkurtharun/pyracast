@@ -94,7 +94,7 @@ test("a confirmation names its question, focuses the safe choice and returns foc
         })
         .click();
     const confirmation = page.getByRole("region", {
-        name: "Confirm member removal",
+        name: "Remove from workspace",
     });
     await expect(confirmation).toContainText(viewer.email);
     await expect(
@@ -140,7 +140,7 @@ test("a confirmation moved to another member focuses its safe choice again", asy
             })
             .click();
     const confirmation = page.getByRole("region", {
-        name: "Confirm member removal",
+        name: "Remove from workspace",
     });
     await expect(confirmation).toContainText(second.email);
     await expect(
@@ -356,12 +356,12 @@ test("the shell announces action outcomes through one live region that exists be
     await expect(region).toHaveText("");
     await page.getByRole("button", { name: "Members", exact: true }).click();
     const cancel = page.getByRole("button", {
-        name: "Cancel invitation: new@example.test",
+        name: "Withdraw invitation: new@example.test",
         exact: true,
     });
     await expect(cancel).toHaveClass(/secondary/);
     await cancel.click();
-    await expect(region).toHaveText("Invitation cancelled.");
+    await expect(region).toHaveText("Invitation withdrawn.");
     await expect(
         page.getByText("new@example.test", { exact: true }),
     ).toHaveCount(0);
@@ -402,10 +402,10 @@ test("the shell speaks a repeated outcome again", async ({ page }) => {
     await page.getByRole("button", { name: "Members", exact: true }).click();
     const region = page.locator("[data-live-region]");
     const cancel = page.getByRole("button", {
-        name: /^Cancel invitation: invitee\d+@example\.test$/,
+        name: /^Withdraw invitation: invitee\d+@example\.test$/,
     });
     await cancel.first().click();
-    await expect(region).toHaveText("Invitation cancelled.");
+    await expect(region).toHaveText("Invitation withdrawn.");
     await expect(cancel).toHaveCount(1);
     await region.evaluate((element) => {
         (window as unknown as { spoken: Node | null }).spoken =
@@ -422,7 +422,7 @@ test("the shell speaks a repeated outcome again", async ({ page }) => {
             ),
         )
         .toBe(true);
-    await expect(region).toHaveText("Invitation cancelled.");
+    await expect(region).toHaveText("Invitation withdrawn.");
 });
 
 test("a checkbox reports its field error like every other control", async ({

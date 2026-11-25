@@ -121,8 +121,9 @@ export function MemberList({
                     onConfirm={() => void remove(removal.member)}
                 >
                     <p className="member-removal-question">
-                        {t("removeQuestion", { email: removal.member.email })}
+                        {t("removeQuestion")}
                     </p>
+                    <p>{removal.member.email}</p>
                     <p>{t("removeHelp")}</p>
                 </ConfirmAction>
             )}

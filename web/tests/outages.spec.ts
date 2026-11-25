@@ -363,7 +363,7 @@ test("outage lifecycle preserves metadata, compares both scenarios and restores 
         .getByLabel("Resolved at", { exact: true })
         .fill("2026-11-11T14:00");
     await page.getByRole("button", { name: "Save resolution" }).click();
-    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
+    await expect(page.getByText("Ended", { exact: true })).toBeVisible();
     expect(state.incident()).toMatchObject({
         ends_at: "2026-11-11T11:00:00.000Z",
         revision: 3,
@@ -447,7 +447,7 @@ test("a creation saved again after its answer was lost keeps its key, also acros
     const save = page.getByRole("button", { name: "Save outage", exact: true });
     const unconfirmed = page
         .getByRole("alert")
-        .filter({ hasText: "did not confirm the change" });
+        .filter({ hasText: "It is not known whether it was saved." });
     await save.click();
     await expect(unconfirmed).toBeVisible();
     await page.getByLabel("Incident title").fill("Inverter tripped");
@@ -493,7 +493,7 @@ test("an edit saved again after its answer was lost closes as saved, shows the o
     await expect(
         page
             .getByRole("alert")
-            .filter({ hasText: "did not confirm the change" }),
+            .filter({ hasText: "It is not known whether it was saved." }),
     ).toBeVisible();
     await save.click();
     await expect(page.getByRole("region", { name: "Edit outage" })).toHaveCount(
@@ -540,7 +540,7 @@ test("an edit that ends an active outage, saved again after its answer was lost,
     await expect(
         page
             .getByRole("alert")
-            .filter({ hasText: "did not confirm the change" }),
+            .filter({ hasText: "It is not known whether it was saved." }),
     ).toBeVisible();
     await save.click();
     await expect(page.getByRole("region", { name: "Edit outage" })).toHaveCount(
@@ -611,7 +611,7 @@ test("an edit sent again after an unanswered try to an outage cancelled meanwhil
     await expect(
         page
             .getByRole("alert")
-            .filter({ hasText: "did not confirm the change" }),
+            .filter({ hasText: "It is not known whether it was saved." }),
     ).toBeVisible();
     state.elsewhere({ status: "cancelled" });
     reachable = true;
@@ -620,7 +620,7 @@ test("an edit sent again after an unanswered try to an outage cancelled meanwhil
     await expect(
         editor.getByRole("status").filter({
             hasText:
-                "This outage is now Cancelled, so your change cannot be applied.",
+                "This outage is now Entered in error, so your change cannot be applied.",
         }),
     ).toBeVisible();
     await expect(save).toHaveCount(0);
@@ -822,7 +822,9 @@ test("rejects future times and requires confirmation to cancel an incorrect inci
         .getByRole("button", { name: "Cancel outage", exact: true })
         .click();
     await page.getByText("1 cancelled entry", { exact: true }).click();
-    await expect(page.getByText("Cancelled", { exact: true })).toBeVisible();
+    await expect(
+        page.getByText("Entered in error", { exact: true }),
+    ).toBeVisible();
     expect(state.incident()?.revision).toBe(2);
 });
 
@@ -919,7 +921,7 @@ test("an ongoing outage is tagged as a warning and a resolved one is labelled", 
     await workspace(page);
     await create(page);
     const tag = page.locator("article.provenance .tag");
-    await expect(tag).toHaveText("Active");
+    await expect(tag).toHaveText("Ongoing");
     await expect(tag).toHaveClass(/tag-warning/);
     await page
         .getByRole("button", { name: "Resolve outage", exact: true })
@@ -928,7 +930,7 @@ test("an ongoing outage is tagged as a warning and a resolved one is labelled", 
         .getByLabel("Resolved at", { exact: true })
         .fill("2026-11-11T14:00");
     await page.getByRole("button", { name: "Save resolution" }).click();
-    await expect(tag).toHaveText("Resolved");
+    await expect(tag).toHaveText("Ended");
     await expect(tag).toHaveClass(/tag-neutral/);
 });
 
@@ -1096,7 +1098,7 @@ test("while a resolution is sent and the list reloads after it, no other proposa
     const inverter = outageCard(page, "Inverter offline");
     const other = outageCard(page, "Export limited");
     await inverter
-        .getByRole("button", { name: "Submit resolution", exact: true })
+        .getByRole("button", { name: "End outage", exact: true })
         .click();
     await inverter
         .getByRole("button", { name: "Send for approval", exact: true })
@@ -1109,19 +1111,19 @@ test("while a resolution is sent and the list reloads after it, no other proposa
         ).toBeDisabled();
         await expect(
             inverter.getByRole("button", {
-                name: "Suggest changes",
+                name: "Edit outage",
                 exact: true,
             }),
         ).toHaveCount(0);
         await expect(
-            inverter.getByText("Request cancellation", { exact: true }),
+            inverter.getByText("Mark as entered in error", { exact: true }),
         ).toHaveCount(0);
-        for (const name of ["Suggest changes", "Submit resolution"])
+        for (const name of ["Edit outage", "End outage"])
             await expect(
                 other.getByRole("button", { name, exact: true }),
             ).toBeDisabled();
         await expect(
-            page.getByRole("button", { name: "Submit outage", exact: true }),
+            page.getByRole("button", { name: "Report outage", exact: true }),
         ).toBeDisabled();
     };
     await quiet();
@@ -1131,7 +1133,7 @@ test("while a resolution is sent and the list reloads after it, no other proposa
     reload.open();
     await expect(page.getByText(/^Sent for approval\./)).toBeVisible();
     await expect(
-        other.getByRole("button", { name: "Suggest changes", exact: true }),
+        other.getByRole("button", { name: "Edit outage", exact: true }),
     ).toBeEnabled();
     expect(submissions).toHaveLength(1);
 });
@@ -1149,7 +1151,7 @@ test("an outage editor that is sending cannot be replaced by a new outage", asyn
     });
     await openOutages(page);
     await outageCard(page, "Inverter offline")
-        .getByRole("button", { name: "Suggest changes", exact: true })
+        .getByRole("button", { name: "Edit outage", exact: true })
         .click();
     const editor = page.getByRole("region", { name: "Edit outage" });
     await editor.getByLabel("Incident title").fill("Inverter replaced");
@@ -1158,7 +1160,7 @@ test("an outage editor that is sending cannot be replaced by a new outage", asyn
         .click();
     await answered.reached;
     const submit = page.getByRole("button", {
-        name: "Submit outage",
+        name: "Report outage",
         exact: true,
     });
     await expect(submit).toBeDisabled();
@@ -1191,7 +1193,7 @@ test("a resolution form whose outage comes to wait for the member's own request 
     await openOutages(page);
     const inverter = outageCard(page, "Inverter offline");
     await inverter
-        .getByRole("button", { name: "Submit resolution", exact: true })
+        .getByRole("button", { name: "End outage", exact: true })
         .click();
     const resolvedAt = inverter.getByLabel("Resolved at", { exact: true });
     await resolvedAt.fill("2026-11-10T14:00");
@@ -1199,7 +1201,7 @@ test("a resolution form whose outage comes to wait for the member's own request 
     held = 4;
     await readOnFocus(page);
     const pending = inverter.getByRole("link", {
-        name: "Waiting for approval: view the request for Inverter offline",
+        name: "Waiting for approval: view the change request for Inverter offline",
     });
     await expect(pending).toBeVisible();
     await expect(
@@ -1230,7 +1232,7 @@ test("a resolution form whose outage comes to wait for the member's own request 
     await readOnFocus(page);
     await expect(
         inverter.getByRole("button", {
-            name: "Submit resolution",
+            name: "End outage",
             exact: true,
         }),
     ).toBeVisible();
@@ -1269,7 +1271,7 @@ test("a conflict answer that already carries the member's own request holds the 
     });
     await openOutages(page);
     await outageCard(page, "Inverter offline")
-        .getByRole("button", { name: "Suggest changes", exact: true })
+        .getByRole("button", { name: "Edit outage", exact: true })
         .click();
     const editor = page.getByRole("region", { name: "Edit outage" });
     await editor.getByLabel("Incident title").fill("Inverter replaced");
@@ -1295,7 +1297,7 @@ test("a conflict answer that already carries the member's own request holds the 
     reload.open();
     await expect(
         page.getByRole("link", {
-            name: "Waiting for approval: view the request for Changed meanwhile",
+            name: "Waiting for approval: view the change request for Changed meanwhile",
         }),
     ).toBeVisible();
     await expect(
@@ -1338,7 +1340,7 @@ async function sessionLanguage(page: Page, account: AccountState) {
 }
 
 const cancelledText =
-    "This outage is now Cancelled, so your change cannot be applied.";
+    "This outage is now Entered in error, so your change cannot be applied.";
 
 function cancelledFour(): OutageRow {
     return {
@@ -1356,7 +1358,7 @@ test("a language change keeps what was typed into an open resolution and where t
     await openOutages(page);
     const inverter = outageCard(page, "Inverter offline");
     await inverter
-        .getByRole("button", { name: "Submit resolution", exact: true })
+        .getByRole("button", { name: "End outage", exact: true })
         .click();
     await inverter
         .getByLabel("Resolved at", { exact: true })
@@ -1393,7 +1395,7 @@ test("a language change while a resolution is sent keeps it sending, sends it on
     await openOutages(page);
     const inverter = outageCard(page, "Inverter offline");
     await inverter
-        .getByRole("button", { name: "Submit resolution", exact: true })
+        .getByRole("button", { name: "End outage", exact: true })
         .click();
     await inverter
         .getByRole("button", { name: "Send for approval", exact: true })
@@ -1429,7 +1431,7 @@ test("an open resolution whose outage someone else cancels stays in view, held, 
     await openOutages(page);
     const inverter = outageCard(page, "Inverter offline");
     await inverter
-        .getByRole("button", { name: "Submit resolution", exact: true })
+        .getByRole("button", { name: "End outage", exact: true })
         .click();
     const resolvedAt = inverter.getByLabel("Resolved at", { exact: true });
     await resolvedAt.fill("2026-11-10T14:00");
@@ -1466,7 +1468,9 @@ test("an open cancellation whose outage someone else cancels stays in view, held
     );
     await openOutages(page);
     const inverter = outageCard(page, "Inverter offline");
-    await inverter.getByText("Request cancellation", { exact: true }).click();
+    await inverter
+        .getByText("Mark as entered in error", { exact: true })
+        .click();
     const reason = inverter.getByLabel("Reason (optional)", { exact: true });
     await reason.fill("Entered twice");
     const confirmation = inverter.getByLabel(
@@ -1489,7 +1493,7 @@ test("an open cancellation whose outage someone else cancels stays in view, held
         }),
     ).toHaveCount(0);
     await expect(
-        inverter.getByText("Request cancellation", { exact: true }),
+        inverter.getByText("Mark as entered in error", { exact: true }),
     ).toBeFocused();
 });
 
@@ -1505,7 +1509,7 @@ test("an open resolution whose outage leaves the list stays in view, held, until
     await openOutages(page);
     const inverter = outageCard(page, "Inverter offline");
     await inverter
-        .getByRole("button", { name: "Submit resolution", exact: true })
+        .getByRole("button", { name: "End outage", exact: true })
         .click();
     const resolvedAt = inverter.getByLabel("Resolved at", { exact: true });
     await resolvedAt.fill("2026-11-10T14:00");
@@ -1560,7 +1564,9 @@ test("a conflict whose current version is cancelled keeps its messages in view a
     });
     await openOutages(page);
     const inverter = outageCard(page, "Inverter offline");
-    await inverter.getByText("Request cancellation", { exact: true }).click();
+    await inverter
+        .getByText("Mark as entered in error", { exact: true })
+        .click();
     const reason = inverter.getByLabel("Reason (optional)", { exact: true });
     await reason.fill("Entered twice");
     await inverter
@@ -1603,7 +1609,7 @@ test("closing or sending a workflow returns the focus to the control that opened
     const inverter = outageCard(page, "Inverter offline");
     const other = outageCard(page, "Export limited");
     const resolve = inverter.getByRole("button", {
-        name: "Submit resolution",
+        name: "End outage",
         exact: true,
     });
     await resolve.click();
@@ -1611,7 +1617,7 @@ test("closing or sending a workflow returns the focus to the control that opened
     await expect(resolve).toBeFocused();
 
     const suggest = other.getByRole("button", {
-        name: "Suggest changes",
+        name: "Edit outage",
         exact: true,
     });
     await suggest.click();
@@ -1622,7 +1628,7 @@ test("closing or sending a workflow returns the focus to the control that opened
     await expect(suggest).toBeFocused();
 
     const propose = page.getByRole("button", {
-        name: "Submit outage",
+        name: "Report outage",
         exact: true,
     });
     await propose.click();
@@ -1662,7 +1668,7 @@ test("the limit message is in the page once while it holds an open editor", asyn
     );
     await openOutages(page);
     await outageCard(page, "Inverter offline")
-        .getByRole("button", { name: "Suggest changes", exact: true })
+        .getByRole("button", { name: "Edit outage", exact: true })
         .click();
     const editor = page.getByRole("region", { name: "Edit outage" });
     limited = true;
@@ -1735,7 +1741,7 @@ test("a resolution whose outage someone else cancels while it is sent stays held
     await openOutages(page);
     const inverter = outageCard(page, "Inverter offline");
     await inverter
-        .getByRole("button", { name: "Submit resolution", exact: true })
+        .getByRole("button", { name: "End outage", exact: true })
         .click();
     const resolvedAt = inverter.getByLabel("Resolved at", { exact: true });
     await resolvedAt.fill("2026-11-10T14:00");
@@ -1747,7 +1753,7 @@ test("a resolution whose outage someone else cancels while it is sent stays held
     cancelled = true;
     await readOnFocus(page);
     await expect(
-        inverter.getByText("Cancelled", { exact: true }),
+        inverter.getByText("Entered in error", { exact: true }),
     ).toBeVisible();
     answered.open();
     await expect(
@@ -1800,7 +1806,7 @@ test("an administrator demoted while a failing save is sent is held on an outage
     role = "viewer";
     await readOnFocus(page);
     await expect(
-        page.getByRole("button", { name: "Submit outage", exact: true }),
+        page.getByRole("button", { name: "Report outage", exact: true }),
     ).toBeVisible();
     answered.open();
     await expect(
@@ -1849,7 +1855,7 @@ test("a conflict whose reload repeats the limit already listed while the change 
     });
     await openOutages(page);
     await outageCard(page, "Inverter offline")
-        .getByRole("button", { name: "Suggest changes", exact: true })
+        .getByRole("button", { name: "Edit outage", exact: true })
         .click();
     const editor = page.getByRole("region", { name: "Edit outage" });
     await editor.getByLabel("Incident title").fill("Inverter replaced");

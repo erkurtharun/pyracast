@@ -36,13 +36,13 @@ async function asViewer(page: Page) {
 
 async function openWizard(page: Page) {
     await page.goto("/app/");
-    await page.getByRole("button", { name: "Add a plant" }).click();
+    await page.getByRole("button", { name: "Add plant", exact: true }).click();
     await page.getByLabel("Plant name", { exact: true }).fill("West plant");
     await page.getByLabel("Latitude (°)").fill("37");
     await page.getByLabel("Longitude (°)").fill("31");
 }
 
-test("the portfolio marks each plant that needs attention and counts what a search shows", async ({
+test("the portfolio marks each plant that needs action and counts what a search shows", async ({
     page,
 }) => {
     await mockApi(page);
@@ -63,16 +63,16 @@ test("the portfolio marks each plant that needs attention and counts what a sear
     const cards = page.locator(".region-card");
     await expect(cards).toHaveCount(3);
     await expect(cards.filter({ hasText: "East array" })).not.toContainText(
-        "Needs attention",
+        "Needs action",
     );
     await expect(cards.filter({ hasText: "West array" })).toContainText(
-        "Needs attention: Not approved. Edit the plant and resubmit it.",
+        "Needs action: Pyracast did not approve this plant.",
     );
     await expect(cards.filter({ hasText: "North location" })).toContainText(
-        "Needs attention: Setup is not complete.",
+        "Needs action: Adding this plant is not finished.",
     );
     await expect(
-        page.getByText("2 plants need attention.", { exact: true }),
+        page.getByText("2 plants need action.", { exact: true }),
     ).toBeVisible();
     await page.getByLabel("Search plants").fill("west");
     await expect(cards).toHaveCount(1);
@@ -95,9 +95,9 @@ test("a member sees that an administrator finishes the setup", async ({
     await page.goto("/app/");
     const card = page.getByRole("button", { name: /North location/ });
     await expect(card).toContainText(
-        "Waiting for an administrator to finish setup",
+        "The workspace administrator needs to finish adding this plant.",
     );
-    await expect(card).not.toContainText("Complete setup");
+    await expect(card).not.toContainText("Finish adding plant");
     await card.click();
     await expect(
         page.getByText("Waiting for an administrator to finish setup"),
@@ -111,7 +111,7 @@ test("complete setup asks only for the technical details and shows the location 
     await mockApi(page);
     await sites(page, [location]);
     await page.goto("/app/");
-    await page.getByRole("button", { name: /Complete setup/ }).click();
+    await page.getByRole("button", { name: /Finish adding plant/ }).click();
     await expect(
         page.getByRole("heading", { name: "Complete plant setup" }),
     ).toBeVisible();
@@ -141,7 +141,7 @@ test("a suspended location without a plant says why its setup cannot be complete
     await page.getByRole("button", { name: /North location/ }).click();
     await expect(
         page.getByText(
-            "The plant is suspended, so its technical details cannot change. Contact Pyracast support to resume it.",
+            "The plant is suspended, so its technical details cannot be changed. Write to Pyracast: info@pyracast.app",
         ),
     ).toBeVisible();
     await expect(
@@ -243,7 +243,7 @@ test("pasting a coordinate pair into latitude fills both fields", async ({
 }) => {
     await mockApi(page, { empty: true });
     await page.goto("/app/");
-    await page.getByRole("button", { name: "Add a plant" }).click();
+    await page.getByRole("button", { name: "Add plant", exact: true }).click();
     await expect(
         page.getByText(
             "Paste a pair such as 41.0082, 28.9784 into Latitude to fill both.",
@@ -271,7 +271,7 @@ test("the zone list is prefilled from the device and offers the available zones"
 }) => {
     await mockApi(page, { empty: true });
     await page.goto("/app/");
-    await page.getByRole("button", { name: "Add a plant" }).click();
+    await page.getByRole("button", { name: "Add plant", exact: true }).click();
     const zone = page.getByLabel("Time zone");
     await expect(zone).toHaveValue(
         await page.evaluate(
@@ -378,7 +378,7 @@ test("a suspended plant shows its technical details read-only with the reason", 
     await page.goto("/app/w/1/plants/11/settings/");
     await expect(
         page.getByText(
-            "The plant is suspended, so its technical details cannot change. Contact Pyracast support to resume it.",
+            "The plant is suspended, so its technical details cannot be changed. Write to Pyracast: info@pyracast.app",
         ),
     ).toBeVisible();
     await expect(
@@ -470,7 +470,7 @@ test("a pasted single number with a decimal comma is not split into a pair", asy
 }) => {
     await mockApi(page, { empty: true });
     await page.goto("/app/");
-    await page.getByRole("button", { name: "Add a plant" }).click();
+    await page.getByRole("button", { name: "Add plant", exact: true }).click();
     const latitude = page.getByLabel("Latitude (°)");
     const split = await latitude.evaluate((element) => {
         const data = new DataTransfer();
@@ -630,16 +630,16 @@ test("a blocked location without a plant is opened, not offered for setup", asyn
     await page.goto("/app/");
     const card = page.getByRole("button", { name: /North location/ });
     await expect(card).toContainText(
-        "Needs attention: Suspended. Forecasts are paused.",
+        "Needs action: Forecasts for this plant are stopped. Write to Pyracast: info@pyracast.app",
     );
     await expect(card).toContainText("Open plant");
-    await expect(card).not.toContainText("Complete setup");
+    await expect(card).not.toContainText("Finish adding plant");
 });
 
 test("the zone list offers UTC and no empty choice", async ({ page }) => {
     await mockApi(page, { empty: true });
     await page.goto("/app/");
-    await page.getByRole("button", { name: "Add a plant" }).click();
+    await page.getByRole("button", { name: "Add plant", exact: true }).click();
     const zone = page.getByLabel("Time zone");
     await zone.selectOption("UTC");
     await expect(zone).toHaveValue("UTC");
@@ -654,7 +654,7 @@ test("a browser without a zone list asks for the zone as text", async ({
     });
     await mockApi(page, { empty: true });
     await page.goto("/app/");
-    await page.getByRole("button", { name: "Add a plant" }).click();
+    await page.getByRole("button", { name: "Add plant", exact: true }).click();
     await expect(page.getByRole("textbox", { name: "Time zone" })).toHaveValue(
         await page.evaluate(
             () => Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -689,7 +689,7 @@ test("an approved plant whose connection stopped says so where the portfolio ope
     ]);
     await page.goto("/app/");
     const marker =
-        "Needs attention: The data connection needs Pyracast support.";
+        "Needs action: No new forecast data is arriving for this plant. Write to Pyracast: info@pyracast.app";
     const card = page.getByRole("button", { name: /East array/ });
     await expect(card).toContainText(marker);
     await card.click();
@@ -727,7 +727,7 @@ async function enter(field: Locator, text: string, entry: Entry) {
 
 const labels = {
     en: {
-        addPlant: "Add a plant",
+        addPlant: "Add plant",
         name: "Plant name",
         latitude: "Latitude (°)",
         longitude: "Longitude (°)",
@@ -944,7 +944,7 @@ test("a text pasted into the wizard's latitude fills both fields only when it is
 }) => {
     await mockApi(page, { empty: true });
     await page.goto("/app/");
-    await page.getByRole("button", { name: "Add a plant" }).click();
+    await page.getByRole("button", { name: "Add plant", exact: true }).click();
     await expectPastedPairKept(page);
     await expectPastedCoordinates(page);
 });
@@ -1083,7 +1083,7 @@ test("a viewer opening a blocked location without a plant sees why it cannot be 
     await page.getByRole("button", { name: /North location/ }).click();
     await expect(
         page.getByText(
-            "The plant is suspended, so its technical details cannot change. Contact Pyracast support to resume it.",
+            "The plant is suspended, so its technical details cannot be changed. Write to Pyracast: info@pyracast.app",
         ),
     ).toBeVisible();
     await expect(

@@ -103,17 +103,10 @@ export function Tag({
 }) {
     return <span className={`tag tag-${tone}`}>{children}</span>;
 }
-export function JsonDetails({
-    data,
-    label,
-}: {
-    data: unknown;
-    label?: string;
-}) {
-    const t = useTranslations("Common");
+export function JsonDetails({ data, label }: { data: unknown; label: string }) {
     return (
         <details>
-            <summary>{label ?? t("technicalDetails")}</summary>
+            <summary>{label}</summary>
             <pre>{JSON.stringify(data, null, 2)}</pre>
         </details>
     );

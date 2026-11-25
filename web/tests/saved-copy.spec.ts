@@ -47,7 +47,7 @@ const removalPattern = /^[0-9a-f]{32}$/;
 const unchecked =
     "The figures saved on this device could not be checked. Try again.";
 const unreachable =
-    "Could not reach the server. Check your connection and try again.";
+    "Pyracast could not be reached. Check your connection and try again.";
 const untouched = {
     version: 1,
     holder: holderOf(),
@@ -1262,10 +1262,10 @@ async function stagedCorrection(page: Page) {
     const editor = page.locator(".production-row-editor");
     await editor.getByRole("textbox").first().fill("0,5");
     await editor
-        .getByRole("button", { name: "Add to request", exact: true })
+        .getByRole("button", { name: "Add to change request", exact: true })
         .click();
     await expect(
-        page.getByRole("region", { name: "Correction request", exact: true }),
+        page.getByRole("region", { name: "Change request", exact: true }),
     ).toBeVisible();
     return account;
 }

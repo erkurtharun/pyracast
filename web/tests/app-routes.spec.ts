@@ -163,7 +163,7 @@ test("an unknown workspace in the address shows no other workspace's plants", as
     await mockApi(page);
     await page.goto("/app/w/9/");
     await expect(
-        page.getByText("This workspace is not available to your account."),
+        page.getByText("You do not have access to this workspace."),
     ).toBeVisible();
     await expect(page.getByRole("button", { name: /East array/ })).toHaveCount(
         0,
@@ -216,7 +216,7 @@ test("the document keeps its title while the workspace changes address", async (
     await expect(page).toHaveURL(/\/plants\/\d+\/forecast\/$/);
     await page.getByRole("button", { name: "Account" }).click();
     await expect(page).toHaveURL("/app/account/");
-    await expect(page).toHaveTitle("Account settings | Pyracast");
+    await expect(page).toHaveTitle("Account | Pyracast");
     await titlesKeptSinceFirst();
     await titledFromStart("/app/w/1/plants/11/unknown/");
     await expect(
@@ -250,9 +250,7 @@ test("the document keeps its title while the workspace changes address", async (
 test("the workspace document carries no message catalog", async ({ page }) => {
     await mockApi(page);
     const html = await (await page.goto("/app/w/1/"))!.text();
-    expect(html).not.toContain(
-        "Language could not be saved. Please try again.",
-    );
+    expect(html).not.toContain("The language could not be saved. Try again.");
     await expect(
         page.getByRole("button", { name: /East array/ }),
     ).toBeVisible();
@@ -307,7 +305,7 @@ test("account settings have their own address", async ({ page }) => {
     await mockApi(page);
     await page.goto("/app/account/");
     await expect(
-        page.getByRole("heading", { name: "Account settings", exact: true }),
+        page.getByRole("heading", { name: "Account", exact: true }),
     ).toBeVisible();
     await page.getByRole("button", { name: /Plants/ }).click();
     await expect(page).toHaveURL("/app/w/1/");
@@ -333,7 +331,7 @@ test("no legacy entry path remains", async ({ page }) => {
             legacy,
         ).toBeVisible();
         await expect(
-            page.getByRole("heading", { name: "Join workspace" }),
+            page.getByRole("heading", { name: "Invitation", exact: true }),
         ).toHaveCount(0);
     }
 });
@@ -344,7 +342,7 @@ test("an invitation link opens the acceptance screen and drops the token from th
     await mockApi(page);
     await page.goto("/app/invitation/#token=invite-secret");
     await expect(
-        page.getByRole("heading", { name: "Join workspace" }),
+        page.getByRole("heading", { name: "Invitation", exact: true }),
     ).toBeVisible();
     await expect(page).toHaveURL("/app/invitation/");
 });
@@ -364,7 +362,7 @@ for (const anonymous of [false, true])
         if (anonymous) {
             await expect(
                 page.getByRole("button", {
-                    name: "Cancel invitation",
+                    name: "Withdraw invitation",
                     exact: true,
                 }),
             ).toBeVisible();
@@ -380,7 +378,7 @@ for (const anonymous of [false, true])
                 .click();
         }
         await expect(
-            page.getByRole("heading", { name: "Join workspace" }),
+            page.getByRole("heading", { name: "Invitation", exact: true }),
         ).toBeVisible();
         await expect(page).toHaveURL("/app/invitation/");
     });

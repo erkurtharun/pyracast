@@ -363,11 +363,11 @@ for (const [field, add, remove] of [
 }
 
 for (const [kind, label] of [
-    ["saved_complete", "Saved forecast"],
-    ["saved_partial", "Partial forecast"],
-    ["unavailable", "No forecast available"],
+    ["saved_complete", "Last forecast before sunrise"],
+    ["saved_partial", "Data is missing for some hours."],
+    ["unavailable", "No forecast data."],
 ] as const) {
-    test(`delivered ${kind} is distinguished from mail acceptance`, async ({
+    test(`delivered ${kind} is distinguished from the send outcome`, async ({
         page,
     }) => {
         await reminderApi(page, {
@@ -378,13 +378,13 @@ for (const [kind, label] of [
         await openReminders(page);
         await page.getByText("Recent deliveries", { exact: true }).click();
         await expect(
-            page.getByText("Accepted by mail service", { exact: true }),
+            page.getByRole("cell").getByText("Sent", { exact: true }),
         ).toBeVisible();
         await expect(page.getByText(label, { exact: true })).toBeVisible();
     });
 }
 
-test("uncertain acceptance explains the duplicate risk without exposing internal codes", async ({
+test("an email not known to have been sent asks to check with a recipient without exposing internal codes", async ({
     page,
 }) => {
     await reminderApi(page, {
@@ -401,13 +401,10 @@ test("uncertain acceptance explains the duplicate risk without exposing internal
     await openReminders(page);
     await page.getByText("Recent deliveries", { exact: true }).click();
     await expect(
-        page.getByText("Acceptance unconfirmed", { exact: true }),
+        page.getByText("Not known whether sent", { exact: true }),
     ).toBeVisible();
     await expect(
-        page.getByText(
-            "Check the mail service before resending to avoid a duplicate.",
-            { exact: true },
-        ),
+        page.getByText("Ask a recipient whether it arrived.", { exact: true }),
     ).toBeVisible();
     await expect(
         page.getByText("mail_outcome_uncertain", { exact: true }),
@@ -415,16 +412,10 @@ test("uncertain acceptance explains the duplicate risk without exposing internal
 });
 
 for (const [code, detail] of [
-    [
-        "mail_rate_limited",
-        "The mail service rate limit was reached. Retries are bounded by the sending window.",
-    ],
-    [
-        "mail_preparation_failed",
-        "Transmission permission could not be confirmed. Retries are bounded by the sending window.",
-    ],
+    ["mail_rate_limited", "Too many emails were sent at once."],
+    ["mail_preparation_failed", "Pyracast could not send the email."],
 ] as const) {
-    test(`${code} explains the retry reason without exposing internal codes`, async ({
+    test(`${code} names the reason without exposing internal codes`, async ({
         page,
     }) => {
         await reminderApi(page, {
@@ -645,9 +636,7 @@ test("a save refused after another change keeps the draft, reads again and the n
         expected_revision: 1,
     });
     await expect(conflict).toHaveCount(0);
-    await expect(
-        page.getByText("Saved successfully.", { exact: true }),
-    ).toBeFocused();
+    await expect(page.getByText("Saved.", { exact: true })).toBeFocused();
     await expect(address).toHaveValue("mine@example.test");
 });
 
@@ -687,9 +676,7 @@ test("after a save the reader's loading line stands in for the fields until the 
     try {
         await page.getByRole("button", { name: "Save reminders" }).click();
         const held = await following.request;
-        await expect(
-            page.getByText("Saved successfully.", { exact: true }),
-        ).toBeFocused();
+        await expect(page.getByText("Saved.", { exact: true })).toBeFocused();
         await expect(
             page
                 .getByRole("region", { name: "Email reminders" })
