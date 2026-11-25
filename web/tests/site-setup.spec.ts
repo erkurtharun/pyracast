@@ -906,23 +906,56 @@ async function expectPastedCoordinates(page: Page) {
             entry.text,
         ).toBe(entry.single === "refused");
     }
+    await latitude.fill("41.0082");
+    await longitude.fill("");
+    await latitude.evaluate((element: HTMLInputElement) =>
+        element.setSelectionRange(2, 2),
+    );
+    expect(await paste(latitude, "41.0082, 28.9784")).toBe(true);
+    await expect(longitude).toHaveValue("28.9784");
+    await expect(latitude).toHaveValue("41.0082");
+    expect(
+        await latitude.evaluate((element: HTMLInputElement) => [
+            element.selectionStart,
+            element.selectionEnd,
+        ]),
+    ).toEqual([2, 2]);
 }
 
-test("a text pasted into the wizard's latitude fills both fields only when it is a pair", async ({
+// A pair pasted as the form's first edit makes a shell destination ask; Stay keeps both figures.
+async function expectPastedPairKept(page: Page) {
+    const latitude = page.getByLabel("Latitude (°)");
+    await latitude.focus();
+    expect(await paste(latitude, "41.0082, 28.9784")).toBe(true);
+    const asked = new Promise<string>((resolve) =>
+        page.once("dialog", (dialog) => {
+            resolve(dialog.type());
+            void dialog.dismiss();
+        }),
+    );
+    await page.getByRole("button", { name: "Account", exact: true }).click();
+    expect(await asked).toBe("beforeunload");
+    await expect(latitude).toHaveValue("41.0082");
+    await expect(page.getByLabel("Longitude (°)")).toHaveValue("28.9784");
+}
+
+test("a text pasted into the wizard's latitude fills both fields only when it is a pair, leaves an equal latitude and its caret alone, and a pasted pair asks before leaving", async ({
     page,
 }) => {
     await mockApi(page, { empty: true });
     await page.goto("/app/");
     await page.getByRole("button", { name: "Add a plant" }).click();
+    await expectPastedPairKept(page);
     await expectPastedCoordinates(page);
 });
 
-test("a text pasted into a location request's latitude fills both fields only when it is a pair", async ({
+test("a text pasted into a location request's latitude fills both fields only when it is a pair, leaves an equal latitude and its caret alone, and a pasted pair asks before leaving", async ({
     page,
 }) => {
     await mockApi(page);
     await page.goto("/app/w/1/plants/11/settings/?view=location");
     await page.getByText("Request location change").click();
+    await expectPastedPairKept(page);
     await expectPastedCoordinates(page);
 });
 

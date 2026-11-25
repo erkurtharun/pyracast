@@ -1,8 +1,8 @@
 "use client";
-import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
+import { useNavigate } from "@/lib/leave-guard";
 
-// A link within the application: a plain primary click navigates through the router, any other click keeps the browser's behaviour.
+// A link within the application: a plain primary click navigates within it, any other click keeps the browser's behaviour.
 export function AppLink({
     href,
     className,
@@ -14,7 +14,7 @@ export function AppLink({
     label?: string;
     children: ReactNode;
 }) {
-    const router = useRouter();
+    const navigate = useNavigate();
     return (
         <a
             href={href}
@@ -31,7 +31,7 @@ export function AppLink({
                 )
                     return;
                 event.preventDefault();
-                router.push(href);
+                navigate(href);
             }}
         >
             {children}
