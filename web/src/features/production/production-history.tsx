@@ -8,6 +8,7 @@ import { cadence, useApiQuery } from "@/lib/api/query";
 import { productionExport } from "@/lib/exports";
 import { plantDay } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
+import { useLeaveGuard } from "@/lib/leave-guard";
 import { CsvDownload } from "@/ui/csv-download";
 import { useExportPlant } from "@/ui/export-plant";
 import {
@@ -36,11 +37,13 @@ import {
     canAct,
     controls,
     dropped,
+    editorUnsaved,
     initialScreen,
     locked,
     reduceScreen,
     repeatsAttempt,
     repeatsOrphan,
+    unsentInput,
     type Access,
     type ScreenEvent,
 } from "./history/screen";
@@ -49,6 +52,8 @@ import { ProductionImport } from "./production-import";
 
 type Bounds = Pick<Interval, "starts_at" | "ends_at">;
 
+export type ShownDay = { date: string; unsent: boolean };
+
 export function ProductionHistory({
     scope,
     configuration,
@@ -56,6 +61,8 @@ export function ProductionHistory({
     day: requestedDay,
     baseDay,
     onDay,
+    onKeepDay,
+    onShown,
     onSaved,
 }: {
     scope: PlantScope;
@@ -64,6 +71,8 @@ export function ProductionHistory({
     day?: string;
     baseDay: string | undefined;
     onDay: (day: string) => void;
+    onKeepDay: (day: string) => void;
+    onShown: (shown: ShownDay | null) => void;
     onSaved: () => Promise<unknown>;
 }) {
     const t = useTranslations("ProductionHistory");
@@ -74,9 +83,12 @@ export function ProductionHistory({
     const canManage = useCanManageWorkspace();
     const proposals = useTranslations("ChangeRequests");
     const plant = useExportPlant();
-    const [reconciled, setReconciled] = useState<History>();
+    const [reconciled, setReconciled] = useState<{
+        history: History;
+        at: number;
+    }>();
     // The server builds days in the zone it answers with; the last answer bounds the day picker.
-    const yesterday = plantDay(reconciled?.timezone ?? timezone, -1);
+    const yesterday = plantDay(reconciled?.history.timezone ?? timezone, -1);
     const shown = (day?: string) => (day && day <= yesterday ? day : yesterday);
     const date = shown(requestedDay);
     // A step taken while a day change loads continues from the day being navigated to.
@@ -118,21 +130,24 @@ export function ProductionHistory({
                 dropped(shownDay, next) ? t("access_dropped", { access }) : "",
             );
     }
-    if (reading.data && reading.data !== reconciled) {
+    // A read answering the same rows keeps their object, so each answered read is told by its time.
+    if (
+        reading.data &&
+        (reading.data !== reconciled?.history ||
+            reading.updatedAt !== reconciled.at)
+    ) {
         const fresh = reading.data;
-        setReconciled(fresh);
+        setReconciled({ history: fresh, at: reading.updatedAt });
         apply({ type: "rowsLoaded", day: date, history: fresh });
     }
     const history = reading.data;
     const derived = controls(screen, history?.intervals);
-    const drafting = draft !== null;
+    useLeaveGuard(draft !== null || editorUnsaved(editor));
+    const unsent = unsentInput(screen);
     useEffect(() => {
-        if (!drafting) return;
-        // A full page load drops the unsent draft, so the browser asks before leaving.
-        const keep = (event: BeforeUnloadEvent) => event.preventDefault();
-        window.addEventListener("beforeunload", keep);
-        return () => window.removeEventListener("beforeunload", keep);
-    }, [drafting]);
+        onShown({ date, unsent });
+        return () => onShown(null);
+    }, [onShown, date, unsent]);
     useEffect(() => {
         if (editor.status !== "closed" || !history || !pendingFocus.current)
             return;
@@ -193,6 +208,15 @@ export function ProductionHistory({
                   quality: label("ObservationQuality", write.change.quality),
               });
     const orphanRepeats = repeatsOrphan(screen);
+    const datedInterval = (key: string) => {
+        const [start = "", end = ""] = key.split("/");
+        const date = format.time(start, history?.timezone ?? timezone, {
+            year: "numeric",
+            month: "short",
+            day: "2-digit",
+        });
+        return `${date} ${time(start)}–${time(end)}`;
+    };
 
     // Applies an event decided on the shown state; null when the screen refuses it.
     function request(event: ScreenEvent) {
@@ -401,7 +425,7 @@ export function ProductionHistory({
                     )}
                     <ControlField
                         label={t("attempted_energy", {
-                            interval: editor.key.split("/").map(time).join("–"),
+                            interval: datedInterval(editor.key),
                         })}
                     >
                         <input value={editor.energy} readOnly />
@@ -437,7 +461,14 @@ export function ProductionHistory({
             {reading.loading ? (
                 <p role="status">{t("loading_production_history")}</p>
             ) : !history ? (
-                <ReadFailed resource={reading} />
+                <>
+                    {editor.status !== "closed" &&
+                        editor.status !== "orphaned" &&
+                        editor.attempt && (
+                            <UnconfirmedNotice repeatable={false} />
+                        )}
+                    <ReadFailed resource={reading} />
+                </>
             ) : (
                 <>
                     <div
@@ -552,7 +583,7 @@ export function ProductionHistory({
                     onEvent={apply}
                     onEdit={editStaged}
                     onRemove={unstage}
-                    onReturn={() => onDay(draft.day)}
+                    onReturn={() => onKeepDay(draft.day)}
                     onDiscard={() => {
                         if (request({ type: "discard" }))
                             finish(proposals("discarded"));

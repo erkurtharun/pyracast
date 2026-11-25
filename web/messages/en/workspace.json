@@ -90,6 +90,7 @@
         "saveConfiguration": "Save configuration",
         "productionViews": "Production views",
         "comparison": "Comparison",
+        "configurationChanged": "The plant's configuration changed; your unsent entries were discarded.",
         "approvalStatus": "Plant status: {status}. Contact Pyracast support at {contact} to resume collection.",
         "rejectedNotice": "Pyracast support did not approve this plant.",
         "reviewReason": "Decision of {date} (plant time): {reason}",

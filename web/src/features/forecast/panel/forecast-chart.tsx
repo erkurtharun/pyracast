@@ -22,8 +22,12 @@ export function ForecastChart({
 }) {
     const t = useTranslations("Forecast");
     const { number } = useFormat();
+    const digits = electrical ? 2 : 0;
     const [firstRow] = rows;
     const lastRow = rows.at(-1);
+    const title = electrical
+        ? t("power_across_the_day")
+        : t("irradiance_across_the_day");
     const max = Math.max(
         1,
         ...rows.map((row) =>
@@ -33,12 +37,7 @@ export function ForecastChart({
     return (
         <>
             <div className="chart-title">
-                <strong>
-                    {electrical
-                        ? t("power_across_the_day")
-                        : t("irradiance_across_the_day")}
-                </strong>
-                <span>{unit}</span>
+                <strong>{title}</strong>
             </div>
             {scenario && (
                 <div className="chart-legend">
@@ -52,17 +51,7 @@ export function ForecastChart({
                     </span>
                 </div>
             )}
-            <div
-                className="chart"
-                role="img"
-                aria-label={t(
-                    scenario
-                        ? "scenario_chart"
-                        : electrical
-                          ? "power_chart"
-                          : "irradiance_chart",
-                )}
-            >
+            <div className="chart" role="img" aria-label={title}>
                 {rows.map((row, index) => (
                     <div
                         className={`chart-column ${row[metric] == null ? "missing" : ""}`}
@@ -75,15 +64,16 @@ export function ForecastChart({
                             scenario
                                 ? t("scenario_tooltip", {
                                       time: time(row.start),
-                                      normal: number(row[metric]),
+                                      normal: number(row[metric], digits),
                                       affected: number(
                                           row.affected_mean_power_mw,
+                                          digits,
                                       ),
                                       unit,
                                   })
                                 : t("interval_tooltip", {
                                       time: time(row.start),
-                                      value: number(row[metric]),
+                                      value: number(row[metric], digits),
                                       unit,
                                   })
                         }

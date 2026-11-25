@@ -16,7 +16,7 @@ test("an empty production day downloads the import header and no fabricated row"
     await page.getByRole("button", { name: "Download CSV" }).click();
     const file = await download;
     expect(file.suggestedFilename()).toBe(
-        "production-East array-2026-01-07.csv",
+        "pyracast-east-array-2026-01-07-actual-production.csv",
     );
     const text = await readFile(await file.path(), "utf8");
     expect(text.replace(/^\uFEFF/, "").split("\r\n")).toEqual([

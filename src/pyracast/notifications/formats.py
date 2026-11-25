@@ -1,11 +1,12 @@
 import re
 from datetime import date, datetime, timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 from typing import cast
 
 from django.utils.formats import date_format, number_format
 from django.utils.translation import gettext as _
 from django.utils.translation import pgettext
+from openpyxl.compat import safe_string
 
 _TURKISH = str.maketrans("ıİşŞğĞüÜöÖçÇ", "iIsSgGuUoOcC")
 _SEPARATORS = re.compile(r"[^A-Za-z0-9]+")
@@ -35,8 +36,10 @@ def utc_offset(moment: datetime) -> str:
 
 
 def energy_number(value: float) -> str:
-    """Half up from the shortest decimal form, as Excel displays the full-precision cell."""
-    rounded = Decimal(repr(value)).quantize(_CENT, ROUND_HALF_UP) + 0
+    """Half up from the number the workbook cell stores, as Excel displays that cell."""
+    stored = Decimal(safe_string(value))
+    with localcontext(prec=max(28, stored.adjusted() + 4)):
+        rounded = stored.quantize(_CENT, ROUND_HALF_UP) + 0
     return number_format(rounded, decimal_pos=2, force_grouping=True)
 
 

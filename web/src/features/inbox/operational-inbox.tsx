@@ -565,6 +565,7 @@ function RequestDetail({
                             <ActionForm
                                 permitted={!pending}
                                 submit={t("reject")}
+                                unsaved={rejection !== ""}
                                 attempt={
                                     lost?.action === "reject"
                                         ? { repeats: rejects }
@@ -587,6 +588,7 @@ function RequestDetail({
                                             { path, body: { reason } },
                                         ),
                                     );
+                                    setRejection("");
                                 }}
                             >
                                 <TextAreaField

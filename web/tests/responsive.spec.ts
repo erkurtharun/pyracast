@@ -351,7 +351,7 @@ for (const width of [320, 390, 768, 1440]) {
             .getByRole("button", { name: "Irradiance", exact: true })
             .click();
         await page
-            .getByRole("img", { name: /Irradiance by interval/ })
+            .getByRole("img", { name: "Irradiance (W/m²)", exact: true })
             .waitFor();
         await fits(page, "Regional forecast", audit);
         await page
@@ -370,12 +370,10 @@ for (const width of [320, 390, 768, 1440]) {
         await page
             .getByRole("button", { name: "Generation", exact: true })
             .click();
-        await page.getByRole("img", { name: /Power by interval/ }).waitFor();
-        await expect(
-            page.getByText("Provisional production calibration", {
-                exact: true,
-            }),
-        ).toBeVisible();
+        await page
+            .getByRole("img", { name: "Average power (MW)", exact: true })
+            .waitFor();
+        await expect(page.getByText(/^Forecast data: /)).toBeVisible();
         await fits(page, "Plant forecast", audit);
         await page.screenshot({
             path: testInfo.outputPath("forecast.png"),

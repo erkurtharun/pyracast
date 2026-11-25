@@ -46,20 +46,22 @@ function plantColumns<Row>(plant: PlantRef): Column<Row>[] {
 const list = (values: readonly string[] | undefined) =>
     values?.length ? values.join("; ") : null;
 
-// csvFilename cuts its joined parts at 150 characters, so only the ASCII plant slug gives way.
+// File names stay ASCII: Turkish letters lose their marks.
+function fileSlug(name: string): string {
+    return name
+        .toLocaleLowerCase("tr")
+        .replaceAll("ı", "i")
+        .normalize("NFKD")
+        .replace(/\p{M}/gu, "")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
+}
+
+// csvFilename cuts its joined parts at 150 characters, so only the plant slug gives way.
 function plantFilename(plant: string, kind: string, ...dates: string[]) {
     const tail = [...dates, kind].filter(Boolean).join("-");
     const room = 150 - `pyracast--${tail}`.length;
-    const slug =
-        plant
-            .toLocaleLowerCase("tr")
-            .replaceAll("ı", "i")
-            .normalize("NFKD")
-            .replace(/\p{M}/gu, "")
-            .replace(/[^a-z0-9]+/g, "-")
-            .replace(/^-|-$/g, "")
-            .slice(0, room)
-            .replace(/-$/, "") || "plant";
+    const slug = fileSlug(plant).slice(0, room).replace(/-$/, "") || "plant";
     return csvFilename("pyracast", slug, ...dates, kind);
 }
 
@@ -277,28 +279,42 @@ function forecastValues(
     ];
 }
 
+export type ForecastFileNames = {
+    file: string;
+    forecast: string;
+    satellite: string;
+};
+
 export function forecastExport(
     plant: PlantRef,
     forecast: { date?: string; source_kind?: string | null },
     rows: readonly ForecastRow[],
-    { electrical, scenario }: { electrical: boolean; scenario: boolean },
+    {
+        electrical,
+        scenario,
+        names,
+    }: { electrical: boolean; scenario: boolean; names: ForecastFileNames },
 ): CsvExport {
     const stamp = (value: string) => plantTimestamp(value, plant.timezone);
+    const kind = (kinds: readonly string[] | undefined) =>
+        !kinds?.length
+            ? null
+            : kinds.every((value) => value === "estimated_actuals")
+              ? names.satellite
+              : names.forecast;
     const source: Column<ForecastRow>[] =
         forecast.source_kind === "mixed"
-            ? [["interval_source", (row) => list(row.source_kinds)]]
+            ? [["interval_source", (row) => kind(row.source_kinds)]]
             : [];
     return table(
-        csvFilename(
-            electrical ? "forecast" : "irradiance",
-            plant.name,
-            forecast.date ?? "",
-            forecast.source_kind ?? "",
-        ),
+        plantFilename(plant.name, names.file, forecast.date ?? ""),
         [
             ...plantColumns<ForecastRow>(plant),
             ["date", () => forecast.date ?? null],
-            ["source_kind", () => forecast.source_kind ?? null],
+            [
+                "source_kind",
+                () => kind(forecast.source_kind ? [forecast.source_kind] : []),
+            ],
             ["starts_at", (row) => stamp(row.start)],
             ["ends_at", (row) => stamp(row.end)],
             ...forecastValues(electrical, scenario),

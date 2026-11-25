@@ -1648,9 +1648,20 @@ test("an edit of a resolved outage lost after it was applied is advised and save
             status: "resolved",
             ends_at: "2026-11-09T10:00:00Z",
         },
+        { ...activeOutage, id: 52, title: "Grid fault" },
     ]);
     await openPlant(page, "Outages");
-    const { form, save } = await editOutage(page);
+    await outageCard(page)
+        .getByRole("button", { name: labels.en.editReport, exact: true })
+        .click();
+    await page.getByLabel(labels.en.title).fill("Inverter tripped");
+    const form = page.locator("form", {
+        has: page.getByLabel(labels.en.title),
+    });
+    const save = page.getByRole("button", {
+        name: labels.en.saveChanges,
+        exact: true,
+    });
     await save.click();
     await expectUnconfirmed(form, true);
     await outageReadsAnswered(page);
@@ -1660,6 +1671,13 @@ test("an edit of a resolved outage lost after it was applied is advised and save
     );
     await readAgainOnFocus(page);
     await reread;
+    await expect(
+        page
+            .locator("article", {
+                has: page.getByRole("heading", { name: "Grid fault" }),
+            })
+            .getByText(/^Configuration changed./),
+    ).toBeVisible();
     await expectUnconfirmed(form, true);
     await save.click();
     await expect(save).toHaveCount(0);
@@ -1773,6 +1791,45 @@ test("a failed Reload current values after a lost direct change is told beside i
     expect(server.applied()).toBe(1);
 });
 
+test("a failed Reload current values after a lost direct change is no longer told once a focus read answers the same rows, and the repeat applies once", async ({
+    page,
+}) => {
+    await page.clock.install({ time: now });
+    await signIn(page);
+    const server = await serveDirectProduction(page, answers("drop"));
+    await openPlant(page, "Production");
+    const { editor, save } = await editEight(page);
+    const reread = page.waitForResponse((response) =>
+        productionReads.test(response.url()),
+    );
+    await save.click();
+    await reread;
+    await expectUnconfirmed(editor, true);
+    const failing = (route: Route) =>
+        route.fulfill({
+            status: 500,
+            json: errorBody("server_error", "The server failed."),
+        });
+    await page.route(productionReads, failing);
+    await editor
+        .getByRole("button", { name: "Reload current values", exact: true })
+        .click();
+    await expect(editor).toContainText("The server failed.");
+    await page.unroute(productionReads, failing);
+    const recovered = page.waitForResponse(
+        (response) => productionReads.test(response.url()) && response.ok(),
+    );
+    await readAgainOnFocus(page);
+    await recovered;
+    await expect(editor).not.toContainText("The server failed.");
+    await expectUnconfirmed(editor, true);
+    await save.click();
+    await expect(editor).toHaveCount(0);
+    expect(server.requests).toHaveLength(2);
+    expect(server.requests[1]).toEqual(server.requests[0]);
+    expect(server.applied()).toBe(1);
+});
+
 test("an orphaned direct change whose outcome is unknown keeps its notice once the person can only propose, without sending it", async ({
     page,
 }) => {
@@ -1866,25 +1923,7 @@ test("a lost approval whose repeat is throttled keeps its notice beside the thro
     expect(applied()).toBe(1);
 });
 
-// Holds every script that reads the texts of `namespace` until `release`.
-async function holdScript(page: Page, namespace: string) {
-    let reach!: () => void;
-    const reached = new Promise<void>((resolve) => (reach = resolve));
-    let release!: () => void;
-    const released = new Promise<void>((resolve) => (release = resolve));
-    await page.route("**/_next/static/**/*.js", async (route) => {
-        const response = await route.fetch();
-        const body = await response.text();
-        if (body.includes(`("${namespace}")`)) {
-            reach();
-            await released;
-        }
-        await route.fulfill({ response, body });
-    });
-    return { reached, release: () => release() };
-}
-
-test("a lost import whose Confirm a view change on its way disables is told without the advice", async ({
+test("a lost import asks before the comparison loads its document, and after Stay its Confirm keeps the advice and applies once", async ({
     page,
 }) => {
     await page.clock.setFixedTime(now);
@@ -1895,16 +1934,21 @@ test("a lost import whose Confirm a view change on its way disables is told with
     const { importer, confirm } = await prepareImport(page);
     await confirm.click();
     await expectUnconfirmed(importer, true);
-    const comparison = await holdScript(page, "ForecastPerformance");
+    const asked = new Promise<string>((resolve) =>
+        page.once("dialog", (dialog) => {
+            resolve(dialog.type());
+            void dialog.dismiss();
+        }),
+    );
     await page.getByRole("button", { name: "Comparison", exact: true }).click();
-    await comparison.reached;
-    await expect(confirm).toBeDisabled();
-    await expectUnconfirmed(importer, false);
-    comparison.release();
-    await expect(
-        page.getByRole("heading", { name: "Comparison", exact: true }),
-    ).toBeVisible();
-    expect(server.requests).toHaveLength(1);
+    expect(await asked).toBe("beforeunload");
+    await expect(confirm).toBeEnabled();
+    await expectUnconfirmed(importer, true);
+    await confirm.click();
+    await expect(importer.getByText(labels.en.imported)).toBeVisible();
+    expect(server.requests).toHaveLength(2);
+    expect(server.requests[1]).toEqual(server.requests[0]);
+    expect(server.applied()).toBe(4);
 });
 
 test("a lost outage proposal whose reason changed without an input event is sent as a new proposal, told without the advice while it runs", async ({
@@ -1930,4 +1974,196 @@ test("a lost outage proposal whose reason changed without an input event is sent
     expect(second?.idempotency_key).not.toBe(first?.idempotency_key);
     expect(second).toMatchObject({ reason: "Meter replaced" });
     expect(server.created()).toBe(1);
+});
+
+const refused = (route: Route) =>
+    route.fulfill({
+        status: 404,
+        json: errorBody("not_found", "Not found."),
+    });
+
+test("a lost direct change whose Reload is refused is told beside the refusal, and the read that recovers shows the editor without it", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    const server = await serveDirectProduction(page, answers("drop"));
+    await openPlant(page, "Production");
+    const { editor, save } = await editEight(page);
+    const reread = page.waitForResponse((response) =>
+        productionReads.test(response.url()),
+    );
+    await save.click();
+    await reread;
+    await expectUnconfirmed(editor, true);
+    await page.route(productionReads, refused);
+    await editor
+        .getByRole("button", { name: "Reload current values", exact: true })
+        .click();
+    const workspace = page.locator(".production-workspace");
+    await expect(editor).toHaveCount(0);
+    await expect(workspace.getByText("Not found.")).toBeVisible();
+    await expectUnconfirmed(workspace, false);
+    await page.unroute(productionReads, refused);
+    await workspace.getByRole("button", { name: "Try again" }).click();
+    await expect(editor.getByRole("textbox").first()).toHaveValue("0,5");
+    await expect(workspace).not.toContainText("Not found.");
+    await expectUnconfirmed(editor, true);
+    await save.click();
+    await expect(editor).toHaveCount(0);
+    expect(server.requests).toHaveLength(2);
+    expect(server.requests[1]).toEqual(server.requests[0]);
+    expect(server.applied()).toBe(1);
+});
+
+test("a lost import whose preview then fails is told beside the failure, and Try again shows its Confirm with the advice", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    await serveProduction(page, [{ can_edit: true }]);
+    const server = await serveImport(page, answers("drop"), importHeads);
+    await openPlant(page, "Production");
+    const { importer, confirm } = await prepareImport(page);
+    await confirm.click();
+    await expectUnconfirmed(importer, true);
+    const failing = (route: Route) => route.abort("failed");
+    await page.route("**/production/preview/", failing);
+    await page
+        .getByRole("button", { name: labels.en.preview, exact: true })
+        .click();
+    await expect(confirm).toHaveCount(0);
+    await expect(
+        importer.getByRole("button", { name: "Try again" }),
+    ).toBeVisible();
+    await expectUnconfirmed(importer, false);
+    await page.unroute("**/production/preview/", failing);
+    await importer.getByRole("button", { name: "Try again" }).click();
+    await expectUnconfirmed(importer, true);
+    await confirm.click();
+    await expect(importer.getByText(labels.en.imported)).toBeVisible();
+    expect(server.requests).toHaveLength(2);
+    expect(server.requests[1]).toEqual(server.requests[0]);
+    expect(server.applied()).toBe(4);
+});
+
+test("a lost resolution whose outage list is then refused is told beside the refusal, and the list that recovers shows its form with the advice", async ({
+    page,
+}) => {
+    await page.clock.install({ time: now });
+    await signIn(page);
+    const server = await serveOutageWrites(page, answers("drop"), [
+        activeOutage,
+    ]);
+    await openPlant(page, "Outages");
+    const reread = page.waitForResponse(
+        (response) =>
+            outageReads.test(response.url()) && server.writes.length > 0,
+    );
+    const { card, save } = await resolveOutage(page);
+    await save.click();
+    await reread;
+    await expectUnconfirmed(card, true);
+    const refusing = (route: Route) =>
+        route.request().method() === "GET" ? refused(route) : route.fallback();
+    await page.route(outageReads, refusing);
+    await readAgainOnFocus(page);
+    const section = page.locator("section", {
+        has: page.getByRole("heading", { name: "Plant outages" }),
+    });
+    await expect(section.getByText("Not found.")).toBeVisible();
+    await expect(card).toHaveCount(0);
+    await expectUnconfirmed(section, false);
+    await page.unroute(outageReads, refusing);
+    await section.getByRole("button", { name: "Try again" }).click();
+    await expectUnconfirmed(card, true);
+    await expect(section).not.toContainText("Not found.");
+    await save.click();
+    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
+    expect(server.writes).toHaveLength(2);
+    expect(server.writes[1]).toEqual(server.writes[0]);
+    expect(server.applied()).toBe(1);
+});
+
+for (const action of ["Set", "Remove entered value"] as const)
+    test(`a lost ${action === "Set" ? "change" : "Remove entered value"} whose day stopped being shown at midnight names the plant date of its interval beside its repeat, and the repeat applies once`, async ({
+        page,
+    }) => {
+        const beforeMidnight = new Date(now.getTime() + 539 * 60_000);
+        await page.clock.install({ time: beforeMidnight });
+        await signIn(page);
+        const server = await serveDirectProduction(page, answers("drop"));
+        if (action === "Remove entered value") server.changeByOperator(0.9);
+        await openPlant(page, "Production");
+        const day = page.getByLabel("Day", { exact: true });
+        await expect(day).toHaveValue("2026-11-09");
+        await page.getByRole("button", { name: labels.en.edit }).click();
+        const editor = page.locator(".production-row-editor");
+        if (action === "Set") {
+            await editor.getByRole("textbox").first().fill("0,5");
+            await editor
+                .getByRole("button", { name: labels.en.save, exact: true })
+                .click();
+        } else
+            await editor
+                .getByRole("button", {
+                    name: /^Remove entered value for 08:00/,
+                })
+                .click();
+        await expectUnconfirmed(editor, true);
+        await page.clock.runFor(2 * 60_000);
+        await focusWindow(page);
+        await expect(day).toHaveValue("2026-11-10");
+        await expect(
+            editor.getByLabel("Your value for Nov 09, 2026 08:00–08:30 (MWh)", {
+                exact: true,
+            }),
+        ).toBeVisible();
+        await editor
+            .getByRole("button", {
+                name: action === "Set" ? "Save 0.5 MWh (Valid)" : action,
+                exact: true,
+            })
+            .click();
+        await expect(editor).toHaveCount(0);
+        expect(server.requests).toHaveLength(2);
+        expect(server.requests[1]).toEqual(server.requests[0]);
+        expect(server.applied()).toBe(1);
+    });
+
+test("an orphaned direct change whose repeat is lost after it was applied is replayed by its next repeat and applies once", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    const server = await serveSplitSlot(page, answers("drop", "cut"));
+    await openPlant(page, "Production");
+    const { editor, save } = await editEight(page);
+    const reread = page.waitForResponse((response) =>
+        productionReads.test(response.url()),
+    );
+    await save.click();
+    await reread;
+    await expectUnconfirmed(editor, true);
+    server.merge();
+    await editor
+        .getByRole("button", { name: "Reload current values", exact: true })
+        .click();
+    await expect(editor).toContainText(
+        "This interval changed and is no longer available.",
+    );
+    const repeat = editor.getByRole("button", {
+        name: "Save 0.5 MWh (Valid)",
+        exact: true,
+    });
+    await repeat.click();
+    await expect(repeat).toBeEnabled();
+    await expectUnconfirmed(editor, true);
+    expect(server.applied()).toBe(1);
+    await repeat.click();
+    await expect(editor).toHaveCount(0);
+    expect(server.requests).toHaveLength(3);
+    expect(server.requests[1]).toEqual(server.requests[0]);
+    expect(server.requests[2]).toEqual(server.requests[0]);
+    expect(server.applied()).toBe(1);
 });

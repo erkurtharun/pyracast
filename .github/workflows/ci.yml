@@ -349,7 +349,7 @@ jobs:
   web_ubuntu:
     name: Web (ubuntu-latest)
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     outputs:
       web-coverage: ${{ steps.web-coverage.outputs.artifact-id }}
     env: &web-environment
@@ -423,7 +423,7 @@ jobs:
   web_windows:
     name: Web (windows-latest)
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     env: *web-environment
     steps: *web-steps
 

@@ -1977,7 +1977,7 @@ test("a reason of only spaces is refused at its field in Turkish", async ({
     expect(submissions).toHaveLength(0);
 });
 
-test("a draft stays with its day when Back shows another day", async ({
+test("Back with a staged draft asks before the earlier day loads, and after Stay the draft stays sendable", async ({
     page,
 }) => {
     await member(page);
@@ -1989,30 +1989,83 @@ test("a draft stays with its day when Back shows another day", async ({
     await expect(day).toHaveValue("2026-11-08");
     await stage(page, "08:00", "0,5");
     const staged = draft(page);
-    const send = staged.getByRole("button", {
-        name: "Send for approval",
-        exact: true,
-    });
-
-    await page.goBack();
-    await expect(day).toHaveValue("2026-11-09");
-    await expect(staged).toContainText(
-        "This request is for 2026-11-08. Return to that day to send it, or discard it.",
+    await staged.getByLabel("Reason for correction").fill("Meter read on site");
+    await page.evaluate(() => Object.assign(window, { pyracastMarker: true }));
+    const asked = new Promise<string>((resolve) =>
+        page.once("dialog", (dialog) => {
+            resolve(dialog.type());
+            void dialog.dismiss();
+        }),
     );
-    await expect(staged.getByRole("listitem")).toHaveCount(1);
-    await expect(send).toBeDisabled();
-    await expect(
-        page.getByRole("button", { name: "Edit 08:00" }),
-    ).toBeDisabled();
-
-    await staged
-        .getByRole("button", { name: "Return to 2026-11-08", exact: true })
-        .click();
+    await page.goBack();
+    expect(await asked).toBe("beforeunload");
     await expect(day).toHaveValue("2026-11-08");
     await expect(staged).not.toContainText("This request is for");
-    await expect(staged.getByRole("listitem")).toHaveCount(1);
-    await expect(send).toBeEnabled();
+    await expect(
+        staged.getByRole("button", { name: "Send for approval", exact: true }),
+    ).toBeEnabled();
+    expect(await page.evaluate(() => "pyracastMarker" in window)).toBe(true);
 });
+
+for (const route of ["answers", "fails"] as const)
+    test(`the return to a draft's day changes only the address and loads nothing, also while the route ${route === "answers" ? "answers" : "would answer a server failure"}`, async ({
+        page,
+    }) => {
+        await member(page);
+        await serveDays(page, () => [{}, {}]);
+        await openPlant(page, "Production");
+        const day = page.getByLabel("Day", { exact: true });
+        await expect(day).toHaveValue("2026-11-09");
+        await showDay(page, "2026-11-08");
+        await expect(day).toHaveValue("2026-11-08");
+        await stage(page, "08:00", "0,5");
+        const staged = draft(page);
+        const send = staged.getByRole("button", {
+            name: "Send for approval",
+            exact: true,
+        });
+        await showDay(page, "2026-11-09");
+        await expect(day).toHaveValue("2026-11-09");
+        await expect(staged).toContainText(
+            "This request is for 2026-11-08. Return to that day to send it, or discard it.",
+        );
+        await expect(send).toBeDisabled();
+        const routerRequests: string[] = [];
+        page.on("request", (request) => {
+            if (request.headers()["rsc"]) routerRequests.push(request.url());
+        });
+        if (route === "fails")
+            await page.route("**/app/w/**", (held) =>
+                held.request().headers()["rsc"]
+                    ? held.fulfill({
+                          status: 503,
+                          contentType: "text/html",
+                          body: "<p>Unavailable</p>",
+                      })
+                    : held.fallback(),
+            );
+        await page.evaluate(() =>
+            Object.assign(window, { pyracastMarker: true }),
+        );
+        const asked: string[] = [];
+        page.on("dialog", (dialog) => {
+            asked.push(dialog.type());
+            void dialog.dismiss();
+        });
+        await staged
+            .getByRole("button", { name: "Return to 2026-11-08", exact: true })
+            .click();
+        await expect(day).toHaveValue("2026-11-08");
+        await expect(page).toHaveURL(/date=2026-11-08/);
+        await expect(staged).not.toContainText("This request is for");
+        await expect(staged.getByRole("listitem")).toHaveCount(1);
+        await expect(send).toBeEnabled();
+        expect(routerRequests).toEqual([]);
+        expect(asked).toEqual([]);
+        expect(await page.evaluate(() => "pyracastMarker" in window)).toBe(
+            true,
+        );
+    });
 
 test("a draft stays with its day when a link shows another day", async ({
     page,
