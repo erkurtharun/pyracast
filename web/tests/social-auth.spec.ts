@@ -1108,3 +1108,96 @@ test("a provider sign-in without session storage opens the workspace", async ({
     await expect(portfolio(page)).toBeVisible();
     await expect(page).toHaveURL("/app/w/1/");
 });
+
+async function holdDocumentNavigations(page: Page, path: RegExp) {
+    const requested: string[] = [];
+    await page.route(path, (route) => {
+        if (!route.request().isNavigationRequest()) return route.fallback();
+        requested.push(new URL(route.request().url()).pathname);
+        return route.abort();
+    });
+    return requested;
+}
+
+const startAddress = (page: Page) =>
+    page.getByRole("button", { name: "Continue with Google" });
+
+test("starting a provider sign-in keeps the workspace address of the tab", async ({
+    page,
+}) => {
+    await offerGoogleSignIn(page);
+    await page.goto(datedForecast);
+    const sent = await holdDocumentNavigations(
+        page,
+        /\/auth\/provider\/redirect$/,
+    );
+    await startAddress(page).click();
+    await expect.poll(() => storedReturn(page)).toBe(datedForecast);
+    expect(sent).toEqual(["/api/auth/browser/v1/auth/provider/redirect"]);
+});
+
+test("starting a provider sign-in outside the workspaces removes a kept address", async ({
+    page,
+}) => {
+    await offerGoogleSignIn(page);
+    await keepReturn(page, datedForecast);
+    await holdDocumentNavigations(page, /\/auth\/provider\/redirect$/);
+    await startAddress(page).click();
+    await expect.poll(() => storedReturn(page)).toBeNull();
+});
+
+test("starting a provider sign-in without session storage still sends the request", async ({
+    page,
+}) => {
+    await page.addInitScript(() =>
+        Object.defineProperty(window, "sessionStorage", {
+            get() {
+                throw new DOMException("Storage is blocked.", "SecurityError");
+            },
+        }),
+    );
+    await offerGoogleSignIn(page);
+    await page.goto(datedForecast);
+    const sent = await holdDocumentNavigations(
+        page,
+        /\/auth\/provider\/redirect$/,
+    );
+    await startAddress(page).click();
+    await expect
+        .poll(() => sent)
+        .toEqual(["/api/auth/browser/v1/auth/provider/redirect"]);
+});
+
+test("a failed provider return without session storage shows the callback error", async ({
+    page,
+}) => {
+    await page.addInitScript(() =>
+        Object.defineProperty(window, "sessionStorage", {
+            get() {
+                throw new DOMException("Storage is blocked.", "SecurityError");
+            },
+        }),
+    );
+    await offerGoogleSignIn(page);
+    await page.goto(
+        "/app/?social_callback=1&error=unknown&error_process=login",
+    );
+    await expect(page.locator(".notice.error")).toContainText(
+        "sign in with your existing method",
+    );
+});
+
+test("a provider return replaces its address with the one the sign-in started at", async ({
+    page,
+}) => {
+    await offerGoogleSignIn(page);
+    await page.goto(datedForecast);
+    const sent = await holdDocumentNavigations(
+        page,
+        /\/app\/w\/1\/plants\/11\/forecast\//,
+    );
+    await continueWithGoogle(page);
+    await expect(page).toHaveURL(datedForecast);
+    expect(sent.length).toBeGreaterThan(0);
+    expect(await storedReturn(page)).toBeNull();
+});
