@@ -3,6 +3,7 @@ from typing import Self
 
 from django.conf import settings
 from django.db import models
+from django.utils.translation import gettext_lazy
 
 from pyracast.db import choices_check, json_shape_check, lease_check
 from pyracast.mail.errors import MailFailure
@@ -170,11 +171,13 @@ class WorkspaceAdminChange(models.Model):
     )
     administrator = models.ForeignKey(
         settings.AUTH_USER_MODEL,
+        verbose_name=gettext_lazy("Workspace administrator"),
         on_delete=models.PROTECT,
         related_name="workspace_admin_assignments",
     )
     previous_administrator = models.ForeignKey(
         settings.AUTH_USER_MODEL,
+        verbose_name=gettext_lazy("Previous workspace administrator"),
         on_delete=models.PROTECT,
         null=True,
         related_name="previous_workspace_admin_assignments",
@@ -182,6 +185,8 @@ class WorkspaceAdminChange(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        verbose_name = gettext_lazy("workspace administrator change")
+        verbose_name_plural = gettext_lazy("workspace administrator changes")
         constraints = (
             models.CheckConstraint(
                 condition=~models.Q(administrator=models.F("previous_administrator")),
@@ -190,7 +195,9 @@ class WorkspaceAdminChange(models.Model):
         )
 
     def __str__(self) -> str:
-        return f"Administrator of workspace {self.tenant_id} set to {self.administrator_id}"
+        return (
+            f"Workspace administrator of workspace {self.tenant_id} set to {self.administrator_id}"
+        )
 
 
 class WorkspaceMemberRemoval(models.Model):
@@ -248,11 +255,17 @@ class OutboundMailKind(models.TextChoices):
     UNKNOWN_ACCOUNT = "account/email/unknown_account", "Account not found"
     ACCOUNT_ALREADY_EXISTS = "account/email/account_already_exists", "Account already exists"
     LOGIN_LOCKED = "account/email/login_locked", "Password sign-in paused"
-    PLANT_APPROVED = "plant_approved", "Plant approved"
-    PLANT_REJECTED = "plant_rejected", "Plant rejected"
-    PLANT_SUSPENDED = "plant_suspended", "Plant suspended"
-    WORKSPACE_ADMIN_ASSIGNED = "workspace_admin_assigned", "Administrator role received"
-    WORKSPACE_ADMIN_RELEASED = "workspace_admin_released", "Administrator role moved away"
+    PLANT_APPROVED = "plant_approved", gettext_lazy("Plant approved")
+    PLANT_REJECTED = "plant_rejected", gettext_lazy("Plant not approved")
+    PLANT_SUSPENDED = "plant_suspended", gettext_lazy("Plant suspended")
+    WORKSPACE_ADMIN_ASSIGNED = (
+        "workspace_admin_assigned",
+        gettext_lazy("Workspace administrator role received"),
+    )
+    WORKSPACE_ADMIN_RELEASED = (
+        "workspace_admin_released",
+        gettext_lazy("Workspace administrator role moved away"),
+    )
     PURGE_WARNING = "plant_purge_warning", "Plant deletion warning"
 
 
@@ -277,13 +290,13 @@ ANONYMOUS_MAIL = (OutboundMailKind.UNKNOWN_ACCOUNT, OutboundMailKind.ACCOUNT_ALR
 
 
 class OutboundMailStatus(models.TextChoices):
-    PENDING = "pending", "Pending"
-    RETRY = "retry", "Retry"
-    SENDING = "sending", "Sending"
-    SENT = "sent", "Sent"
-    FAILED = "failed", "Failed"
-    UNCERTAIN = "uncertain", "Uncertain"
-    SKIPPED = "skipped", "Skipped"
+    PENDING = "pending", gettext_lazy("Preparing")
+    RETRY = "retry", gettext_lazy("Will retry")
+    SENDING = "sending", gettext_lazy("Sending")
+    SENT = "sent", gettext_lazy("Sent")
+    FAILED = "failed", gettext_lazy("Not sent")
+    UNCERTAIN = "uncertain", gettext_lazy("Not known whether sent")
+    SKIPPED = "skipped", gettext_lazy("Skipped")
 
 
 OPEN_MAIL = (OutboundMailStatus.PENDING, OutboundMailStatus.RETRY, OutboundMailStatus.SENDING)

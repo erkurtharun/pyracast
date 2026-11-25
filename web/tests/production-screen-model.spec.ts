@@ -117,9 +117,19 @@ const onShownRow = (step: Step, event: (rows: Interval[]) => ScreenEvent) =>
 
 const events = {
     stage: (step: Step) =>
-        apply(step, { type: "stage", row: editorRow(step), action: "set" }),
+        apply(step, {
+            type: "stage",
+            row: editorRow(step),
+            action: "set",
+            rows: step.rows ?? [],
+        }),
     stageRevert: (step: Step) =>
-        apply(step, { type: "stage", row: editorRow(step), action: "revert" }),
+        apply(step, {
+            type: "stage",
+            row: editorRow(step),
+            action: "revert",
+            rows: step.rows ?? [],
+        }),
     editStaged: (step: Step) =>
         onShownRow(step, (rows) => ({
             type: "open",
@@ -251,7 +261,12 @@ const staged = apply(
     start,
     { type: "open", row: dayRows(DAY)[0]! },
     { type: "change", energy: "0,5" },
-    { type: "stage", row: dayRows(DAY)[0]!, action: "set" },
+    {
+        type: "stage",
+        row: dayRows(DAY)[0]!,
+        action: "set",
+        rows: dayRows(DAY),
+    },
 );
 const sendingStep = apply(
     staged,
@@ -262,7 +277,12 @@ const editingNine = apply(start, { type: "open", row: dayRows(DAY)[1]! });
 const failedNine = apply(
     editingNine,
     { type: "change", energy: "x" },
-    { type: "stage", row: dayRows(DAY)[1]!, action: "set" },
+    {
+        type: "stage",
+        row: dayRows(DAY)[1]!,
+        action: "set",
+        rows: dayRows(DAY),
+    },
 );
 const draftEditing = apply(staged, { type: "open", row: dayRows(DAY)[1]! });
 const admin: Step = {
@@ -789,7 +809,12 @@ test("a refusal names its item by key and leaves with that item's next edit or r
     const two = apply(
         staged,
         { type: "open", row: dayRows(DAY)[1]! },
-        { type: "stage", row: dayRows(DAY)[1]!, action: "set" },
+        {
+            type: "stage",
+            row: dayRows(DAY)[1]!,
+            action: "set",
+            rows: dayRows(DAY),
+        },
         { type: "reason", text: "Meter read on site" },
         { type: "send", rows: dayRows(DAY) },
         {
@@ -813,7 +838,12 @@ test("a refusal names its item by key and leaves with that item's next edit or r
             apply(
                 two,
                 { type: "open", row: dayRows(DAY)[0]! },
-                { type: "stage", row: dayRows(DAY)[0]!, action: "set" },
+                {
+                    type: "stage",
+                    row: dayRows(DAY)[0]!,
+                    action: "set",
+                    rows: dayRows(DAY),
+                },
             ),
         ),
     ).toEqual(["Unknown."]);
@@ -1484,7 +1514,7 @@ test("input counts as unsent while a staged proposal is not on its way or lost, 
     });
     const steps: ScreenEvent[] = [
         { type: "change", energy: "0,5" },
-        { type: "stage", row: row(DAY, 8), action: "set" },
+        { type: "stage", row: row(DAY, 8), action: "set", rows: [row(DAY, 8)] },
         { type: "reason", text: "verified" },
     ];
     const staged = steps.reduce(reduceScreen, proposing);

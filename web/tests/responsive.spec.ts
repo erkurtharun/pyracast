@@ -405,21 +405,28 @@ for (const width of [320, 390, 768, 1440]) {
             await page.getByRole("button", { name: tab, exact: true }).click();
             if (tab === "Calibration") {
                 await expect(
-                    page.getByText("Provisional production", { exact: true }),
+                    page.getByText("Real-time (EPİAŞ)", { exact: true }),
                 ).toHaveCount(1);
                 await page
                     .getByRole("button", { name: "View details" })
                     .click();
                 await expect(
-                    page.getByText("Provisional production", { exact: true }),
+                    page.getByText("Real-time (EPİAŞ)", { exact: true }),
                 ).toHaveCount(2);
+                const factor = page
+                    .locator(".calibration-detail .stat")
+                    .filter({
+                        has: page.getByText("Factor", { exact: true }),
+                    });
                 await expect(
-                    page.getByText("Assessment: Final. Factor: 1.1."),
+                    factor.getByText("Factor", { exact: true }),
                 ).toBeVisible();
+                await expect(factor.locator("strong")).toBeVisible();
+                await expect(factor.locator("strong")).toHaveText("1.1");
             }
             if (tab === "Production") {
                 const table = page.getByRole("table", {
-                    name: "Production intervals",
+                    name: "Actual production values",
                 });
                 const fullDay = page.getByRole("checkbox", {
                     name: "Show full day",
@@ -449,16 +456,18 @@ for (const width of [320, 390, 768, 1440]) {
                     table.locator(".production-value").first(),
                 ).toHaveText(/^0/);
                 await expect(
-                    page.getByText("1 missing interval", { exact: true }),
+                    page.getByText("1 interval without a value", {
+                        exact: true,
+                    }),
                 ).toBeVisible();
                 await expect(
-                    table.getByText("Provisional", { exact: true }),
+                    table.getByText("Real-time (EPİAŞ)", { exact: true }),
                 ).toBeVisible();
                 await expect(
                     table.getByText("Corrected", { exact: true }),
                 ).toBeVisible();
                 await expect(
-                    table.getByText("Provider: 1 MWh", { exact: true }),
+                    table.getByText("EPİAŞ value: 1 MWh", { exact: true }),
                 ).toBeVisible();
                 const overflow = await table.evaluate(
                     (node) =>
@@ -491,10 +500,10 @@ for (const width of [320, 390, 768, 1440]) {
                     })
                     .click();
                 await expect(
-                    page.getByLabel("Production CSV", { exact: true }),
+                    page.getByLabel("CSV file", { exact: true }),
                 ).toBeVisible();
                 await page
-                    .getByLabel("Production CSV", { exact: true })
+                    .getByLabel("CSV file", { exact: true })
                     .setInputFiles({
                         name: "production.csv",
                         mimeType: "text/csv",
@@ -504,7 +513,7 @@ for (const width of [320, 390, 768, 1440]) {
                     });
                 await page
                     .getByRole("button", {
-                        name: "Preview import",
+                        name: "Preview",
                         exact: true,
                     })
                     .click();

@@ -14,7 +14,6 @@ export function ProductionSourceDetails({ scope }: { scope: PlantScope }) {
     return (
         <details className="production-source">
             <summary>{t("source_details")}</summary>
-            <p>{t("source_policy")}</p>
             <Resource resource={connection} loading={t("loading_source")}>
                 {(source) => (
                     <>
@@ -25,11 +24,6 @@ export function ProductionSourceDetails({ scope }: { scope: PlantScope }) {
                                 : t("not_connected")}
                         </p>
                         {!source.connected && <p>{t("source_disconnected")}</p>}
-                        <p className="fine">
-                            {t("archived_days", {
-                                count: source.archived_days,
-                            })}
-                        </p>
                         {source.connected && source.last_error && (
                             <Notice error>{source.last_error}</Notice>
                         )}

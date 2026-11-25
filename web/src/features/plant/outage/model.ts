@@ -51,22 +51,22 @@ type Target =
 // `outage` is the version the workflow sends against; `form` counts restarts of its form after a discarded stale change.
 export type Workflow = Target & {
     phase: Phase;
-    attempt: Attempt | null;
     stale: Stale | null;
     form: number;
 };
 
 type Status = components["schemas"]["ChangeRequestStatusEnum"];
 
-// The one state of the outage screen: at most one open workflow, and the status a proposal was just answered with.
 export type OutageScreen = {
     workflow: Workflow | null;
     receipt: Status | null;
+    attempt: Attempt | null;
 };
 
 export const INITIAL_OUTAGES: OutageScreen = {
     workflow: null,
     receipt: null,
+    attempt: null,
 };
 
 export type OutageEvent =
@@ -74,6 +74,7 @@ export type OutageEvent =
     | { type: "close" }
     | { type: "discard" }
     | { type: "send"; payload: string; key: string; change: OutageChange }
+    | { type: "answered" }
     // The answer and the reload that follows it have both finished.
     | { type: "sent"; receipt: Status | null }
     | SendFailed
@@ -95,6 +96,7 @@ export type OutageControls = {
     editable: boolean;
     close: boolean;
     hold: Hold | null;
+    pending: "unanswered" | "confirmed" | null;
 };
 
 const atLimit = (live: Live) =>
@@ -157,6 +159,11 @@ export function outageControls(
         editable: free,
         close: !!workflow && !busy,
         hold: workflow?.phase.status === "held" ? workflow.phase.hold : null,
+        pending: busy
+            ? workflow?.phase.status === "saved"
+                ? "confirmed"
+                : "unanswered"
+            : null,
     };
 }
 
@@ -182,11 +189,11 @@ export function reduceOutages(
             if (!derived.acts || !allowed || isOpen(workflow, target))
                 return screen;
             return {
+                ...screen,
                 receipt: null,
                 workflow: {
                     ...target,
                     phase: { status: "idle" },
-                    attempt: null,
                     stale: null,
                     form: 0,
                 },
@@ -194,12 +201,12 @@ export function reduceOutages(
         }
         case "close":
             if (!workflow || sending(workflow)) return screen;
-            return { ...screen, workflow: null };
+            return { ...screen, workflow: null, attempt: null };
         case "discard":
             if (!workflow?.stale || sending(workflow)) return screen;
             // A held workflow cannot send, so discarding its change leaves nothing to start again.
             if (workflow.phase.status === "held")
-                return { ...screen, workflow: null };
+                return { ...screen, workflow: null, attempt: null };
             return {
                 ...screen,
                 workflow: { ...workflow, stale: null, form: workflow.form + 1 },
@@ -208,34 +215,40 @@ export function reduceOutages(
             if (workflow?.phase.status !== "idle") return screen;
             const { payload, key, change } = event;
             const sent =
-                workflow.attempt?.payload === payload
-                    ? workflow.attempt
+                screen.attempt?.payload === payload
+                    ? screen.attempt
                     : { payload, key, change };
             return {
+                ...screen,
                 receipt: null,
                 workflow: { ...workflow, phase: { status: "sending", sent } },
             };
         }
-        case "sent":
+        case "sent": {
             if (!sending(workflow)) return screen;
-            return { workflow: null, receipt: event.receipt };
+            const { attempt } = reduceOutages(screen, { type: "answered" });
+            return { workflow: null, receipt: event.receipt, attempt };
+        }
+        case "answered":
         case "sendFailed": {
             if (workflow?.phase.status !== "sending") return screen;
             const { sent } = workflow.phase;
+            const attempt = outstandingAfter(
+                screen.attempt,
+                sent,
+                event.type === "sendFailed" ? event.error : undefined,
+            );
             if (
-                workflow.attempt?.payload === sent.payload &&
-                lostAnswerApplied(event)
+                event.type === "answered" ||
+                (screen.attempt?.payload === sent.payload &&
+                    lostAnswerApplied(event))
             )
                 return {
                     ...screen,
+                    attempt,
                     workflow: { ...workflow, phase: { status: "saved" } },
                 };
             const { current } = event;
-            const attempt = outstandingAfter(
-                workflow.attempt,
-                sent,
-                event.error,
-            );
             // Only a conflict about the outage the workflow sends against moves it to that outage's current version.
             if (
                 workflow.kind === "create" ||
@@ -243,11 +256,8 @@ export function reduceOutages(
             )
                 return {
                     ...screen,
-                    workflow: {
-                        ...workflow,
-                        attempt,
-                        phase: { status: "idle" },
-                    },
+                    attempt,
+                    workflow: { ...workflow, phase: { status: "idle" } },
                 };
             const hold =
                 endingOf(workflow.kind, current) ??
@@ -256,9 +266,9 @@ export function reduceOutages(
                     : null);
             return {
                 ...screen,
+                attempt,
                 workflow: {
                     ...workflow,
-                    attempt,
                     outage: current,
                     stale: {
                         before: workflow.stale?.before ?? workflow.outage,

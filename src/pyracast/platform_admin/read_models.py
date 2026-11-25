@@ -91,7 +91,7 @@ OPERATION_SCOPES: frozenset[Scope] = frozenset(
 )
 LISTED_BECAUSE = {
     "invalid_reminder_recipients": gettext_lazy(
-        "A saved reminder recipient is not a valid address."
+        "A saved forecast email recipient is not a valid address."
     ),
     "unvalidated_provider_credentials": gettext_lazy(
         "The provider key changed and the connection is not validated."
@@ -415,10 +415,7 @@ def _delivery_row(row: Any) -> dict[str, Any]:
         "company": row.schedule.region.tenant.name,
         "recipient": ", ".join(delivery_addresses(row)),
         "status": row.status,
-        "status_label": {
-            "sent": _("Accepted by email service"),
-            "uncertain": _("Acceptance unknown"),
-        }.get(row.status, NotificationDeliveryStatus(row.status).label),
+        "status_label": NotificationDeliveryStatus(row.status).label,
         "scheduled_for": row.scheduled_for,
         "sent_at": row.sent_at,
         "last_error": row.last_error,

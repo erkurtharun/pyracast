@@ -5,6 +5,7 @@ import { qualityOf } from "@/lib/production";
 import {
     energyValue,
     intervalKey,
+    revertOutcome,
     type Draft,
     type Editor,
     type History,
@@ -45,7 +46,12 @@ export type ScreenEvent =
     | { type: "open"; row: Interval; reveal?: boolean }
     | { type: "change"; energy?: string; quality?: Quality }
     | { type: "cancel" }
-    | { type: "stage"; row: Interval; action: "set" | "revert" }
+    | {
+          type: "stage";
+          row: Interval;
+          action: "set" | "revert";
+          rows: readonly Interval[];
+      }
     | { type: "remove"; key: string }
     | { type: "discard" }
     | { type: "reason"; text: string }
@@ -404,7 +410,11 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
                           energy,
                           quality: open.quality,
                       }
-                    : { ...bounds, action: "revert" };
+                    : {
+                          ...bounds,
+                          action: "revert",
+                          outcome: revertOutcome(event.row, event.rows),
+                      };
             const base = draft ?? {
                 day: screen.day,
                 items: [],

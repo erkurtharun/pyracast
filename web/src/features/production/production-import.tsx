@@ -401,7 +401,6 @@ export function ProductionImport({
                     {t("import_complete", {
                         created: result.created,
                         existing: result.existing,
-                        total: result.count,
                     })}
                 </Notice>
             )}

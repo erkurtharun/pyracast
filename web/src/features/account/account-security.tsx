@@ -9,7 +9,7 @@ import { LinkedAccounts } from "./linked-accounts";
 import { SignedInDevices } from "./signed-in-devices";
 import { StepUpPrompt, stepUpMode, useStepUp } from "./step-up";
 import { TwoFactorSettings } from "./two-factor-settings";
-import { ActionForm, CheckboxField, Field } from "@/ui/form";
+import { ActionForm, CheckboxField, Field, type Submitted } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 
 // The server's password rules: at least 15 characters, at most 1,024.
@@ -36,25 +36,27 @@ function PasswordChange({
     const [error, setError] = useState<string>();
     const [shown, setShown] = useState(false);
 
-    async function changePassword(payload: Record<string, FormDataEntryValue>) {
+    async function changePassword(
+        payload: Record<string, FormDataEntryValue>,
+    ): Promise<Submitted> {
         setError(undefined);
         const result = await authRequest(
             "account/password/change",
             "POST",
             payload,
         );
-        if (result.status === 401) {
-            if (result.meta?.password_changed) {
-                rememberPasswordChange();
-                await loadSession();
-                return;
-            }
+        if (result.status === 401 && !result.meta?.password_changed) {
             const mode = stepUpMode(result);
             if (!mode) await refreshExpiredSession(t("sessionExpired"));
-            else stepUp.ask(mode, () => changePassword(payload));
+            else
+                stepUp.ask(mode, async () => {
+                    const follow = await changePassword(payload);
+                    await follow?.();
+                });
             return;
         }
-        await loadSession();
+        if (result.status === 401) rememberPasswordChange();
+        return loadSession;
     }
 
     return (

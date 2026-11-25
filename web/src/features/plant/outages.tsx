@@ -5,9 +5,10 @@ import type { Plant, PlantScope } from "@/lib/api";
 import { DisplayError, UnconfirmedError } from "@/lib/api/errors";
 import { useApiList } from "@/lib/api/query";
 import { outagesExport } from "@/lib/exports";
+import { useLeaveGuard } from "@/lib/leave-guard";
 import { CsvDownload } from "@/ui/csv-download";
 import { useExportPlant } from "@/ui/export-plant";
-import { UnconfirmedNotice } from "@/ui/form";
+import { UnconfirmedNotice, type Submitted } from "@/ui/form";
 import { Resource } from "@/ui/resource";
 import { Notice } from "@/ui/ui";
 import { useCodeLabel, useLabel, useReceipt } from "@/ui/vocabulary";
@@ -114,7 +115,7 @@ export function Outages({
         }
     }
     const configured = configuration?.id ?? null;
-    async function submit(entered: OutageChange) {
+    async function submit(entered: OutageChange): Promise<Submitted> {
         const next = reduceOutages(screen, {
             type: "send",
             payload: attemptPayload(entered, direct, configured),
@@ -145,7 +146,7 @@ export function Outages({
             });
             setScreen(failed);
             if (failed.workflow?.phase.status === "saved")
-                return finishSent(null);
+                return () => finishSent(null);
             if (!current) {
                 if (error instanceof UnconfirmedError) void reload();
                 throw error;
@@ -154,7 +155,8 @@ export function Outages({
             void reload();
             throw new DisplayError(t("staleEdit"));
         }
-        return finishSent(proposal?.status ?? null);
+        apply({ type: "answered" });
+        return () => finishSent(proposal?.status ?? null);
     }
     async function finishSent(receipt: OutageScreen["receipt"]) {
         try {
@@ -163,7 +165,8 @@ export function Outages({
             apply({ type: "sent", receipt });
         }
     }
-    const lost = workflow?.attempt;
+    const lost = screen.attempt;
+    useLeaveGuard(!!lost);
     const attempt =
         lost &&
         ((change: OutageChange) =>
@@ -278,7 +281,7 @@ export function Outages({
                     onClose={() => apply({ type: "close" })}
                 />
             )}
-            {carded?.attempt && !resource.data && (
+            {lost && !editing && !(carded && resource.data) && (
                 <UnconfirmedNotice repeatable={false} />
             )}
             <Resource resource={resource} loading={t("loadingOutages")}>

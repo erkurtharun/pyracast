@@ -5,10 +5,10 @@
 {% block backlink %}<a href="{% url 'admin:workspace_tenants' %}" class="back-link">{% translate "Workspaces" %}</a>{% endblock %}
 {% block lead %}
   <dl class="state-strip">
-    <div><dt>{% translate "Administrator" %}</dt><dd>
+    <div><dt>{% translate "Workspace administrator" %}</dt><dd>
       {% if administrator %}<a href="#members-title">{{ administrator }}</a>
       {% elif administrator_invitation %}<a href="#invitations-title">{% translate "Invitation pending" %}</a>
-      {% else %}<a href="{% url 'admin:workspace_invitation_new' tenant.pk %}?role=admin">{% translate "Invite an administrator" %}</a>{% endif %}
+      {% else %}<a href="{% url 'admin:workspace_invitation_new' tenant.pk %}?role=admin">{% translate "Invite workspace administrator" %}</a>{% endif %}
     </dd></div>
     <div><dt>{% translate "Plants" %}</dt><dd>
       {% if plants %}<a href="#plants-title">{% blocktranslate count counter=plants|length %}{{ counter }} plant{% plural %}{{ counter }} plants{% endblocktranslate %}</a>
@@ -29,7 +29,7 @@
           <thead><tr>
             <th scope="col">{% translate "Plant" %}</th>
             <th scope="col" class="cell-fit">{% translate "Review" context "review status" %}</th>
-            <th scope="col" class="cell-fit">{% translate "DC capacity" %}</th>
+            <th scope="col" class="cell-fit">{% translate "Panel capacity (MWp)" %}</th>
             <th scope="col" class="cell-fit">{% translate "Connection" %}</th>
           </tr></thead>
           <tbody>{% for plant in plants %}{% with summary=plant.summary %}<tr>
@@ -38,7 +38,7 @@
               <span class="row-meta">{{ summary.latitude }}°, {{ summary.longitude }}° · {{ summary.timezone }}</span>
             </span></th>
             <td data-label="{% translate "Review" context "review status" %}"><span class="badge badge--{{ summary.status|slugify }}">{{ summary.status_label }}</span></td>
-            <td data-label="{% translate "DC capacity" %}">{% if plant.capacity_mw is not None %}{{ plant.capacity_mw }} MW{% else %}<span class="muted">{% translate "Not set" %}</span>{% endif %}</td>
+            <td data-label="{% translate "Panel capacity (MWp)" %}">{% if plant.capacity_mw is not None %}{{ plant.capacity_mw }}{% else %}<span class="muted">{% translate "Not set" %}</span>{% endif %}</td>
             <td data-label="{% translate "Connection" %}"><span class="badge badge--{{ summary.connection|slugify }}">{% translate summary.connection %}</span></td>
           </tr>{% endwith %}{% endfor %}</tbody>
         </table>
@@ -65,17 +65,17 @@
               <span class="row-title-plain">{{ member.label }}</span>
               {% if not member.user.is_active %}<span class="row-meta">{% translate "Account deactivated" %}</span>{% endif %}
             </span></th>
-            <td data-label="{% translate "Role" %}"><span class="badge">{% if member.role == "admin" %}{% translate "Administrator" %}{% else %}{% translate "Member" %}{% endif %}</span></td>
+            <td data-label="{% translate "Role" %}"><span class="badge">{% if member.role == "admin" %}{% translate "Workspace administrator" %}{% else %}{% translate "Member" %}{% endif %}</span></td>
             <td data-label="{% translate "Last sign-in" %}">{% if member.user.last_login %}<time datetime="{{ member.user.last_login|date:'c' }}"><span class="nowrap">{{ member.user.last_login|date:"j M Y," }}</span> <span class="nowrap">{{ member.user.last_login|date:"H:i T" }}</span></time>{% else %}<span class="muted">{% translate "Never" context "last sign-in" %}</span>{% endif %}</td>
             <td class="cell-action">{% if member.role != "admin" %}<div class="cell-actions">
-              {% if member.user.is_active %}<a class="btn btn--quiet" href="{% url 'admin:workspace_tenant_administrator' tenant.pk %}?member={{ member.user.pk }}">{% translate "Make administrator" %}<span class="visually-hidden"> {{ member.label }}</span></a>{% endif %}
-              <a class="btn btn--quiet" href="{% url 'admin:workspace_member_removal' tenant.pk member.user.pk %}">{% translate "Remove" context "console" %}<span class="visually-hidden"> {{ member.label }}</span></a>
+              {% if member.user.is_active %}<a class="btn btn--quiet" href="{% url 'admin:workspace_tenant_administrator' tenant.pk %}?member={{ member.user.pk }}">{% translate "Make workspace administrator" %}<span class="visually-hidden"> {{ member.label }}</span></a>{% endif %}
+              <a class="btn btn--quiet" href="{% url 'admin:workspace_member_removal' tenant.pk member.user.pk %}">{% translate "Remove from workspace" %}<span class="visually-hidden"> {{ member.label }}</span></a>
             </div>{% endif %}</td>
           </tr>{% endfor %}</tbody>
         </table>
       </div>
-    {% elif administrator_invitation %}<p class="empty">{% translate "No members yet. The administrator appears here after accepting the invitation." %}</p>
-    {% else %}<p class="empty">{% translate "No members yet. Invite the customer's administrator first." %}</p>{% endif %}
+    {% elif administrator_invitation %}<p class="empty">{% translate "No members yet. The workspace administrator appears here after accepting the invitation." %}</p>
+    {% else %}<p class="empty">{% translate "No members yet. Invite the workspace administrator first." %}</p>{% endif %}
   </section>
 
   <section class="panel" aria-labelledby="invitations-title">
@@ -92,12 +92,12 @@
           </tr></thead>
           <tbody>{% for row in invitations %}{% with invitation=row.invitation %}<tr>
             <th scope="row" data-label="{% translate "Email address" %}"><span class="row-title-plain">{{ invitation.email }}</span></th>
-            <td data-label="{% translate "Role" %}"><span class="badge">{% if invitation.role == "admin" %}{% translate "Administrator" %}{% else %}{% translate "Member" %}{% endif %}</span></td>
+            <td data-label="{% translate "Role" %}"><span class="badge">{% if invitation.role == "admin" %}{% translate "Workspace administrator" %}{% else %}{% translate "Member" %}{% endif %}</span></td>
             <td data-label="{% translate "Delivery" %}"><span class="badge badge--{{ invitation.delivery_status }}">{{ row.delivery }}</span></td>
             <td data-label="{% translate "Expires" %}"><time datetime="{{ invitation.expires_at|date:'c' }}"><span class="nowrap">{{ invitation.expires_at|date:"j M Y," }}</span> <span class="nowrap">{{ invitation.expires_at|date:"H:i T" }}</span></time></td>
             <td class="cell-action"><div class="cell-actions">
               <form method="post" action="{% url 'admin:workspace_invitation_reissue' tenant.pk invitation.pk %}">{% csrf_token %}<button type="submit" class="btn btn--quiet">{% translate "Resend" %}<span class="visually-hidden"> {{ invitation.email }}</span></button></form>
-              <form method="post" action="{% url 'admin:workspace_invitation_revocation' tenant.pk invitation.pk %}">{% csrf_token %}<button type="submit" class="btn btn--quiet">{% translate "Revoke" %}<span class="visually-hidden"> {{ invitation.email }}</span></button></form>
+              <form method="post" action="{% url 'admin:workspace_invitation_revocation' tenant.pk invitation.pk %}">{% csrf_token %}<button type="submit" class="btn btn--quiet">{% translate "Withdraw" %}<span class="visually-hidden"> {{ invitation.email }}</span></button></form>
             </div></td>
           </tr>{% endwith %}{% endfor %}</tbody>
         </table>
@@ -109,10 +109,10 @@
     <div class="panel-head"><h2 id="settings-title">{% translate "Settings" %}</h2></div>
     <dl class="facts facts--compact">
       <div><dt>{% translate "Workspace name" %}</dt><dd><span>{{ tenant.name }}</span> <a class="text-link" href="{% url 'admin:workspace_tenant_name' tenant.pk %}">{% translate "Rename" %}</a></dd></div>
-      <div><dt>{% translate "Administrator" %}</dt><dd>
-        {% if administrator %}<span>{{ administrator }}</span> <a class="text-link" href="{% url 'admin:workspace_tenant_administrator' tenant.pk %}">{% translate "Change administrator" %}</a>
+      <div><dt>{% translate "Workspace administrator" %}</dt><dd>
+        {% if administrator %}<span>{{ administrator }}</span> <a class="text-link" href="{% url 'admin:workspace_tenant_administrator' tenant.pk %}">{% translate "Change workspace administrator" %}</a>
         {% elif administrator_invitation %}<span>{{ administrator_invitation }}</span> <span class="badge badge--pending">{% translate "Invitation pending" %}</span>
-        {% else %}<span class="badge badge--not-configured">{% translate "No administrator" %}</span> <a class="text-link" href="{% url 'admin:workspace_invitation_new' tenant.pk %}?role=admin">{% translate "Invite an administrator" %}</a>{% endif %}
+        {% else %}<span class="badge badge--not-configured">{% translate "No workspace administrator" %}</span> <a class="text-link" href="{% url 'admin:workspace_invitation_new' tenant.pk %}?role=admin">{% translate "Invite workspace administrator" %}</a>{% endif %}
       </dd></div>
     </dl>
   </section>

@@ -28,7 +28,7 @@ def test_plant_list_counts_and_names_statuses_in_whole_turkish_sentences() -> No
     html = _plants("tr")
     assert ">2 santral</h2>" in html
     assert "santrals" not in html
-    assert ">Onay bekliyor</span>" in html
+    assert ">\u0130ncelemede</span>" in html
     assert ">Ask\u0131ya al\u0131nd\u0131</span>" in html
     assert ">Suspended</span>" not in html
 
@@ -36,7 +36,7 @@ def test_plant_list_counts_and_names_statuses_in_whole_turkish_sentences() -> No
 def test_plant_list_counts_and_names_statuses_in_english() -> None:
     html = _plants("en")
     assert ">2 plants</h2>" in html
-    assert ">Awaiting approval</span>" in html
+    assert ">In review</span>" in html
     assert ">Suspended</span>" in html
 
 

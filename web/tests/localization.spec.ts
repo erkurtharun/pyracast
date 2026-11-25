@@ -458,7 +458,7 @@ test("CSV validation is localized while ISO timestamps, units and values remain 
     );
     expect(() =>
         parseProduction(csv.replace("1234.5", "-1"), csvTexts("tr")),
-    ).toThrow("Satır 2: enerji sıfır veya pozitif bir sayı olmalı.");
+    ).toThrow("Satır 2: enerjiyi sıfır veya pozitif bir sayı olarak yazın.");
 });
 
 test("Turkish plant search and capacity formatting follow the selected language", async ({

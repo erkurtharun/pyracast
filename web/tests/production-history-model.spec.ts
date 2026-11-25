@@ -5,6 +5,7 @@ import {
     energyValue,
     intervalKey,
     mostFrequentReason,
+    revertOutcome,
     sameInterval,
     saveFailure,
     shiftDay,
@@ -89,6 +90,58 @@ test("intervals match by instant, not by their offset spelling", () => {
             ends_at: "2026-11-09T08:30:00Z",
         }),
     ).toBe(false);
+});
+
+test("removing an entry names the EPİAŞ value only when that reading covers it exactly and no other entry overlaps the reading", () => {
+    const entry = (starts_at: string, ends_at: string) => ({
+        id: 1,
+        configuration_id: 31,
+        starts_at,
+        ends_at,
+        energy_mwh: 1,
+        quality: "valid" as const,
+        source: "meter",
+        recorded_by_id: 2,
+        created_at: "2026-11-09T12:00:00Z",
+        supersedes_id: null,
+        is_reverted: false,
+    });
+    const hour = provider("2026-11-09T08:00:00Z", "2026-11-09T09:00:00Z", 3);
+    const exact = row(8, {
+        observation: entry(hour.starts_at, hour.ends_at),
+        provider_originals: [hour],
+    });
+    expect(revertOutcome(exact, [exact, row(9)])).toEqual({
+        kind: "restore",
+        energy: 3,
+    });
+    const offset = row(9, {
+        starts_at: "2026-11-09T08:30:00Z",
+        ends_at: "2026-11-09T09:30:00Z",
+        observation: entry("2026-11-09T08:30:00Z", "2026-11-09T09:30:00Z"),
+    });
+    expect(revertOutcome(exact, [exact, offset])).toEqual({ kind: "remove" });
+    const half = (start: string, end: string) =>
+        row(8, {
+            starts_at: start,
+            ends_at: end,
+            observation: entry(start, end),
+            provider_originals: [hour],
+        });
+    const first = half("2026-11-09T08:00:00Z", "2026-11-09T08:30:00Z");
+    const second = half("2026-11-09T08:30:00Z", "2026-11-09T09:00:00Z");
+    expect(revertOutcome(first, [first, second])).toEqual({ kind: "remove" });
+    const spanning = row(8, {
+        starts_at: "2026-11-09T08:30:00Z",
+        ends_at: "2026-11-09T09:30:00Z",
+        observation: entry("2026-11-09T08:30:00Z", "2026-11-09T09:30:00Z"),
+        provider_originals: [
+            hour,
+            provider("2026-11-09T09:00:00Z", "2026-11-09T10:00:00Z", 4),
+        ],
+    });
+    expect(revertOutcome(spanning, [spanning])).toEqual({ kind: "remove" });
+    expect(revertOutcome(row(8), [row(8)])).toEqual({ kind: "none" });
 });
 
 test("only an implausible-value refusal offers to save anyway", () => {

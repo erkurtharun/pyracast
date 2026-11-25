@@ -128,7 +128,7 @@ def test_metadata_duration_and_csv_source_zone_preserve_file_evidence() -> None:
 
 def test_naive_timestamp_requires_explicit_source_zone_and_rejects_dst_ambiguity() -> None:
     content = document([row(period_end="2026-11-07T12:30:00")])
-    with pytest.raises(ValidationError, match="explicit source timezone"):
+    with pytest.raises(ValidationError, match="explicit file time zone"):
         parse_historical_upload(content, "history.json")
     parsed = parse_historical_upload(content, "history.json", source_timezone="Europe/Istanbul")
     assert parsed.power.intervals[0].end == datetime(2026, 11, 7, 9, 30, tzinfo=UTC)
@@ -426,7 +426,7 @@ def test_authorization_confirmation_current_configuration_and_binding_are_rechec
     with pytest.raises(PermissionDenied):
         import_historical_upload(system.member, *args[1:], settings_confirmed=True)
     plant = Plant.objects.create(region=system.region, name="Configured later")
-    with pytest.raises(ValidationError, match="configuration changed"):
+    with pytest.raises(ValidationError, match="technical details changed"):
         upload(system, expected_configuration_ids=())
     assert upload(system, expected_configuration_ids=((plant.pk, None),))
     SiteBinding.objects.filter(pk=system.binding.pk).update(

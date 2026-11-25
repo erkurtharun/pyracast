@@ -240,7 +240,7 @@ function TechnicalDetails({
                     }
                     throw error;
                 }
-                await onChanged();
+                return onChanged;
             }}
         >
             {draft.conflict && <ParameterConflict conflict={draft.conflict} />}

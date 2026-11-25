@@ -181,7 +181,7 @@ def test_the_console_rail_draws_the_brand_mark_beside_its_name() -> None:
         "bar": ARTWORK["colours"]["light"],
     }
     assert 'aria-hidden="true"' in rail
-    assert "Pyracast operations" in rail
+    assert "Pyracast console" in rail
 
 
 def test_a_successful_plant_setup_reports_success() -> None:

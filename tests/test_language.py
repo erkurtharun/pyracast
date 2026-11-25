@@ -332,7 +332,7 @@ def test_admin_switcher_requires_csrf_and_uses_account_preference() -> None:
         ("/admin/plants/", "Santraller"),
         ("/admin/operations/", "İşlemler"),
         ("/admin/settings/", "Ayarlar"),
-        (f"/admin/plants/{system.region.pk}/", "Santral bilgileri"),
+        (f"/admin/plants/{system.region.pk}/", '<h2 id="details-title">Santral</h2>'),
     ):
         page = client.get(path, HTTP_ACCEPT_LANGUAGE="en")
         assert page.status_code == 200
@@ -353,12 +353,12 @@ def test_admin_audit_activity_shows_each_action_label_translated_once() -> None:
         "region_approved": "Santral onayland\u0131",
         "region_suspended": "Santral ask\u0131ya al\u0131nd\u0131",
         "connection_validated": "Sağlay\u0131c\u0131 bağlant\u0131s\u0131 doğruland\u0131",
-        "region_renamed": "Santral konumu yeniden adland\u0131r\u0131ld\u0131",
-        "collection_schedule_updated": "Veri toplama program\u0131 güncellendi",
+        "region_renamed": "Santral yeniden adland\u0131r\u0131ld\u0131",
+        "collection_schedule_updated": "Tahmin güncelleme saatleri de\u011fi\u015fti",
         "historical_reference_imported": "Geçmiş referans verileri içe aktar\u0131ld\u0131",
         "reference_capacity_normalized": "Referans kapasitesi normalize edildi",
-        "region_trashed": "Santral konumu çöp kutusuna taş\u0131nd\u0131",
-        "region_restored": "Santral konumu geri yüklendi",
+        "region_trashed": "Santral geri dönüşüm kutusuna taş\u0131nd\u0131",
+        "region_restored": "Santral geri yüklendi",
         "location_change_requested": "Konum değişikliği talep edildi",
     }
     AuditEvent.objects.filter(region=system.region).delete()

@@ -606,7 +606,7 @@ def test_a_site_submission_records_one_creation_event_the_console_lists() -> Non
     assert [(event.action, event.actor_id, event.revision) for event in events] == [
         ("region_created", system.member.pk, 1)
     ]
-    assert recent_activity_context(region_id)[0]["action_label"] == "Plant submitted"
+    assert recent_activity_context(region_id)[0]["action_label"] == "Plant sent for approval"
 
 
 def test_a_site_submission_failing_after_its_location_records_no_creation_event(

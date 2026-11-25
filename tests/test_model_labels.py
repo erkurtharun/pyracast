@@ -89,9 +89,9 @@ def test_every_model_the_console_shows_has_its_own_label() -> None:
         (PlantEvent(action="plant_renamed", plant_id=4), "plant_renamed on plant 4"),
         (
             NotificationDelivery(pk=12, schedule_id=7, status="sent"),
-            "Delivery 12 of schedule 7: sent",
+            "Forecast email 12 of schedule 7: sent",
         ),
-        (ReminderSchedule(region_id=3), "Reminders of region 3"),
+        (ReminderSchedule(region_id=3), "Forecast email of region 3"),
         (ReminderRecipient(pk=5, schedule_id=7), "Recipient 5 of schedule 7"),
         (
             ReminderRecipientTie(recipient_id=5, membership_id=2),
@@ -107,7 +107,7 @@ def test_every_model_the_console_shows_has_its_own_label() -> None:
             "Location change 1 of region 3: pending",
         ),
         (DispatcherStatus(phase="collection"), "collection"),
-        (NotificationSettings(), "Email reminder settings"),
+        (NotificationSettings(), "Forecast email settings"),
     ],
     ids=lambda value: type(value).__name__ if isinstance(value, models.Model) else None,
 )

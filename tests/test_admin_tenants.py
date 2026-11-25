@@ -77,11 +77,11 @@ def test_workspace_admin_page_states_only_the_consequences_that_apply() -> None:
     client, _ = verified_admin()
     path = f"/admin/workspaces/{tenant.pk}/administrator/"
     page = client.get(path).content.decode()
-    assert f"{owner.email or owner.username} becomes a viewer." in page
+    assert f"New role of {owner.email or owner.username}: Member" in page
     assert 'aria-describedby="id_administrator_helptext"' in page
     Membership.objects.filter(user=owner).delete()
     unassigned = client.get(path).content.decode()
-    assert "becomes a viewer" not in unassigned
+    assert "New role of" not in unassigned
     assert "No invitation is open." in unassigned
 
 

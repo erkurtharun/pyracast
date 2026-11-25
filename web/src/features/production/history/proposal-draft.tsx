@@ -60,6 +60,7 @@ export function ProposalDraft({
     onSent: (status: Vocabulary["ChangeRequestStatus"]) => void;
 }) {
     const t = useTranslations("ChangeRequests");
+    const history = useTranslations("ProductionHistory");
     const format = useFormat();
     const label = useLabel();
     const attempt = useAttempt<ProposalBody>();
@@ -154,9 +155,15 @@ export function ProposalDraft({
                         <li key={item.key}>
                             <span>
                                 <strong>{interval}</strong>{" "}
-                                {item.action === "revert"
-                                    ? t("stagedProviderReading")
-                                    : `${format.quantity(item.energy, "MWh", 6)} · ${label("ObservationQuality", item.quality)}`}
+                                {item.action === "set"
+                                    ? `${format.quantity(item.energy, "MWh", 6)} · ${label("ObservationQuality", item.quality)}`
+                                    : item.outcome.kind === "restore"
+                                      ? t("stagedProviderReading", {
+                                            energy: format.number(
+                                                item.outcome.energy,
+                                            ),
+                                        })
+                                      : history("remove_correction")}
                             </span>
                             {controls.stale.has(item.key) && (
                                 <span className="field-error">

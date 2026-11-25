@@ -8,8 +8,8 @@
       <div><dt>{% translate "Intervals" %}</dt><dd>{{ preview.interval_count }} · {{ preview.period }} · {{ preview.unit }}</dd></div>
       <div><dt>{% translate "Coverage (UTC)" %}</dt><dd>{{ preview.coverage_start|timezone:"UTC"|date:"Y-m-d H:i T" }} – {{ preview.coverage_end|timezone:"UTC"|date:"Y-m-d H:i T" }}</dd></div>
       <div><dt>{% translate "Coverage (plant time)" %}</dt><dd>{{ preview.coverage_start|timezone:region.timezone|date:"Y-m-d H:i O" }} – {{ preview.coverage_end|timezone:region.timezone|date:"Y-m-d H:i O" }}</dd></div>
-      <div><dt>{% translate "Plant timezone" %}</dt><dd>{{ region.timezone }}</dd></div>
-      <div><dt>{% translate "Source timezone" %}</dt><dd>{{ source_timezone }}</dd></div>
+      <div><dt>{% translate "Plant time zone" %}</dt><dd>{{ region.timezone }}</dd></div>
+      <div><dt>{% translate "File time zone" %}</dt><dd>{{ source_timezone }}</dd></div>
       <div><dt>{% translate "Local days" %}</dt><dd>{{ preview.local_days|first|date:"Y-m-d" }} – {{ preview.local_days|last|date:"Y-m-d" }} ({{ preview.local_days|length }})</dd></div>
     </dl>
     {% if checks %}<ul class="checks">{% for label, passed in checks %}<li>{{ label }}: {% if passed %}{% translate "passed" %}{% else %}{% translate "failed" %}{% endif %}</li>{% endfor %}</ul>{% endif %}

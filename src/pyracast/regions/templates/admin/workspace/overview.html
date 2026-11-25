@@ -2,13 +2,12 @@
 {% load i18n %}
 {% block title %}{% translate "Overview" %}{% endblock %}
 {% block heading %}{% translate "Overview" %}{% endblock %}
-{% block lead %}<p class="lead">{% translate "Reviews and service status." %}</p>{% endblock %}
 {% block content %}
   <section aria-labelledby="totals-title">
     <h2 id="totals-title" class="visually-hidden">{% translate "Plant totals" %}</h2>
     <ul class="stats">
       <li><a class="stat stat--focus" href="{% url 'admin:workspace_plants' %}?status=pending">
-        <span class="stat-value">{{ counts.pending }}</span><span class="stat-label">{% translate "Awaiting approval" %}</span></a></li>
+        <span class="stat-value">{{ counts.pending }}</span><span class="stat-label">{% translate "In review" %}</span></a></li>
       <li><a class="stat" href="{% url 'admin:workspace_plants' %}?location_change=pending">
         <span class="stat-value">{{ counts.location_changes }}</span><span class="stat-label">{% translate "Location change requests" %}</span></a></li>
       <li><a class="stat" href="{% url 'admin:workspace_plants' %}?status=approved">
@@ -24,7 +23,7 @@
     <section class="panel" aria-labelledby="queue-title">
       <div class="panel-head">
         <h2 id="queue-title">{% translate "Review queue" %}</h2>
-        <a class="text-link" href="{% url 'admin:workspace_plants' %}?status=pending">{% translate "All awaiting approval" %}</a>
+        <a class="text-link" href="{% url 'admin:workspace_plants' %}?status=pending">{% translate "All plants in review" %}</a>
       </div>
       {% if review_plants %}
         <ul class="rows">

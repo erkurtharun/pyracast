@@ -121,7 +121,8 @@ function LocationRequests({
                                             },
                                         },
                                     );
-                                    await refresh.workspace(scope.tenant_id);
+                                    return () =>
+                                        refresh.workspace(scope.tenant_id);
                                 }}
                             >
                                 <div className="form-grid">

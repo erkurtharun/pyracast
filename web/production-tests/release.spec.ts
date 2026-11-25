@@ -285,7 +285,7 @@ test("after a release a changed value asks before each navigation without a payl
         .locator(".production-row-editor")
         .getByRole("button", { name: "Save", exact: true })
         .click();
-    await expect(page.getByText("Production saved.")).toBeVisible();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
     expect(receipts).toEqual([
         { build: "second", tag: firstAccount.tag, status: 200 },
     ]);

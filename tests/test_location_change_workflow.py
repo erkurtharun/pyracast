@@ -40,11 +40,9 @@ class Location(TypedDict):
 
 
 TARGET: Location = {"latitude": 41.5, "longitude": 30.5, "timezone": "UTC"}
-SETUP_CHANGED = (
-    "The plant setup changed after this page opened. Reload the plant and review it again."
-)
+SETUP_CHANGED = "The plant changed after this page opened. Reload the plant and review it again."
 SETUP_CHANGED_TR = (
-    "Bu sayfa aç\u0131ld\u0131ktan sonra santral kurulumu değişti. "
+    "Bu sayfa aç\u0131ld\u0131ktan sonra santral değişti. "
     "Santrali yeniden yükleyip tekrar inceleyin."
 )
 

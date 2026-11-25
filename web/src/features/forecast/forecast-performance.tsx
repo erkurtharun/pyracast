@@ -67,7 +67,7 @@ export function ForecastPerformance({
                 </div>
             </div>
             <ViewNav
-                label={t("performance_views")}
+                label={t("production_comparison")}
                 tabs
                 views={[
                     ["archived_forecast", t("forecast_accuracy")],
@@ -161,6 +161,15 @@ function PerformanceResults({
     const matched =
         resource.data?.days.filter((day) => day.status === "matched") ?? [];
     const historical = resource.data?.comparison === "historical_model";
+    const mode = historical ? "historical" : "forecast";
+    const modeName = t(historical ? "model_check" : "forecast_accuracy");
+    const realtimeDay = (day: (typeof matched)[number]) =>
+        day.provisional_snapshot_ids.length > 0;
+    const realtime = matched.some(realtimeDay);
+    const notCompared =
+        (resource.data?.requested_days ?? 0) -
+        (resource.data?.matched_days ?? 0);
+    const unavailableDates = t("unavailable_dates", { count: notCompared });
     const missingReasons = new Map<string, string[]>();
     for (const day of resource.data?.days ?? []) {
         if (day.status === "matched") continue;
@@ -180,9 +189,23 @@ function PerformanceResults({
                     <>
                         <div className="toolbar">
                             <CsvDownload
-                                build={() => performanceExport(plant, data)}
+                                build={() =>
+                                    performanceExport(plant, data, {
+                                        file: t("file"),
+                                        comparison: modeName,
+                                        forecast: t("forecast_kind"),
+                                        satellite: t("satellite_kind"),
+                                    })
+                                }
                             />
                         </div>
+                        {realtime && (
+                            <p className="fine">
+                                {t(
+                                    "_includes_provisional_reported_production_meter_boundary",
+                                )}
+                            </p>
+                        )}
                         {data.metrics && (
                             <>
                                 <div className="stats">
@@ -208,26 +231,14 @@ function PerformanceResults({
                                 )}
                                 <div className="stats">
                                     <Stat
-                                        label={t("missing_days")}
-                                        value={
-                                            data.missing_days ??
-                                            data.requested_days -
-                                                data.matched_days
-                                        }
-                                    />
-                                    {(data.excluded_days ?? 0) > 0 && (
-                                        <Stat
-                                            label={t("excluded_days")}
-                                            value={data.excluded_days}
-                                        />
-                                    )}
-                                    <Stat
                                         label={t("daylight_energy_error")}
                                         value={data.metrics?.daily_mae_mwh}
                                         unit="MWh"
                                     />
                                     <Stat
-                                        label={t("daylight_energy_bias")}
+                                        label={t("daylight_energy_bias", {
+                                            mode,
+                                        })}
                                         value={data.metrics?.daily_bias_mwh}
                                         unit="MWh"
                                     />
@@ -281,12 +292,6 @@ function PerformanceResults({
                                 {t(
                                     "current_configuration_calibration_from_its_training_period",
                                 )}
-                                {matched.some(
-                                    (day) => day.provisional_production,
-                                ) &&
-                                    t(
-                                        "_includes_provisional_reported_production_meter_boundary",
-                                    )}
                             </p>
                         )}
                         {!data.metrics && (
@@ -304,15 +309,11 @@ function PerformanceResults({
                                     })}
                                 </summary>
                                 <DailyAccuracyChart days={matched} />
-                                <ScrollRegion
-                                    label={t("daily_forecast_comparison")}
-                                >
+                                <ScrollRegion label={t("matched_days")}>
                                     <table>
                                         <caption>
-                                            {historical
-                                                ? t("historical_daylight_model")
-                                                : t("daylight_replay")}{" "}
                                             {t("date_range", {
+                                                mode: modeName,
                                                 start: data.start_date,
                                                 end: data.end_date,
                                             })}
@@ -321,19 +322,15 @@ function PerformanceResults({
                                             <tr>
                                                 <th>{t("date")}</th>
                                                 <th>{t("status")}</th>
-                                                <th>
-                                                    {historical
-                                                        ? t(
-                                                              "measured_reported_mwh",
-                                                          )
-                                                        : t("measured_mwh")}
-                                                </th>
+                                                <th>{t("measured_mwh")}</th>
                                                 <th>
                                                     {historical
                                                         ? t("model_mwh")
                                                         : t("predicted_mwh")}
                                                 </th>
-                                                <th>{t("error_mwh")}</th>
+                                                <th>
+                                                    {t("error_mwh", { mode })}
+                                                </th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -341,7 +338,7 @@ function PerformanceResults({
                                                 <tr key={day.date}>
                                                     <td>{day.date}</td>
                                                     <td>
-                                                        {day.provisional_production
+                                                        {realtimeDay(day)
                                                             ? t(
                                                                   "provisional_production",
                                                               )
@@ -367,15 +364,9 @@ function PerformanceResults({
                                 </ScrollRegion>
                             </details>
                         )}
-                        {missingReasons.size > 0 && (
+                        {missingReasons.size > 0 ? (
                             <details>
-                                <summary>
-                                    {t("unavailable_dates", {
-                                        count:
-                                            data.requested_days -
-                                            data.matched_days,
-                                    })}
-                                </summary>
+                                <summary>{unavailableDates}</summary>
                                 <ul>
                                     {[...missingReasons].map(
                                         ([reason, dates]) => (
@@ -389,6 +380,9 @@ function PerformanceResults({
                                     )}
                                 </ul>
                             </details>
+                        ) : (
+                            !data.metrics &&
+                            notCompared > 0 && <p>{unavailableDates}</p>
                         )}
                     </>
                 )}
