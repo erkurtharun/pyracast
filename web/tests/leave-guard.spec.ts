@@ -308,12 +308,14 @@ async function holdWorkspaceReads(page: Page) {
 }
 
 async function chooseHalfHours(page: Page) {
-    await page.getByLabel("Resolution").selectOption("30");
+    await page.getByLabel("Interval", { exact: true }).selectOption("30");
 }
 
 async function expectForecastInPage(page: Page) {
     await page.getByRole("button", { name: "Forecast", exact: true }).click();
-    await expect(page.getByLabel("Resolution")).toHaveValue("30");
+    await expect(page.getByLabel("Interval", { exact: true })).toHaveValue(
+        "30",
+    );
     expect(await marked(page)).toBe(true);
 }
 
@@ -327,15 +329,11 @@ test("a resolution whose save was answered while its follow-up reads run asks no
     await openPlant(page);
     await chooseHalfHours(page);
     await page.getByRole("button", { name: "Outages", exact: true }).click();
-    await page
-        .getByRole("button", { name: "Resolve outage", exact: true })
-        .click();
-    await page
-        .getByLabel("Resolved at", { exact: true })
-        .fill("2026-11-10T13:00");
+    await page.getByRole("button", { name: "End outage", exact: true }).click();
+    await page.getByLabel("End", { exact: true }).fill("2026-11-10T13:00");
     await markDocument(page);
     reads.hold();
-    await page.getByRole("button", { name: "Save resolution" }).click();
+    await page.getByRole("button", { name: "End outage" }).click();
     await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Saving…", exact: true }),
@@ -362,7 +360,7 @@ test("plant settings whose save was answered while their follow-up reads run ask
     await page.getByLabel("Plant name").fill("New name");
     await markDocument(page);
     reads.hold();
-    await page.getByRole("button", { name: "Save configuration" }).click();
+    await page.getByRole("button", { name: "Save technical details" }).click();
     await expect(
         page.getByRole("heading", { name: "New name", level: 1 }),
     ).toBeVisible();
@@ -387,13 +385,9 @@ test("a resolution whose save is unanswered loads another plant tab as a documen
         await route.fallback();
     });
     await openPlant(page, "Outages");
-    await page
-        .getByRole("button", { name: "Resolve outage", exact: true })
-        .click();
-    await page
-        .getByLabel("Resolved at", { exact: true })
-        .fill("2026-11-10T13:00");
-    await page.getByRole("button", { name: "Save resolution" }).click();
+    await page.getByRole("button", { name: "End outage", exact: true }).click();
+    await page.getByLabel("End", { exact: true }).fill("2026-11-10T13:00");
+    await page.getByRole("button", { name: "End outage" }).click();
     await expect(
         page.getByRole("button", { name: "Saving…", exact: true }),
     ).toBeVisible();
