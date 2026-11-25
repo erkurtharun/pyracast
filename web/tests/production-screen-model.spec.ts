@@ -820,14 +820,17 @@ test("a refusal names its item by key and leaves with that item's next edit or r
 });
 
 test("a general refusal that repeats the error is kept once", () => {
-    const error = new ApiError("Submit 1 to 100 production intervals.");
+    const error = new ApiError("Send 1 to 100 values in one change request.");
     const failed = apply(sendingStep, {
         type: "sendFailed",
         error,
         refusals: [],
         fields: {
             reason: "This field may not be blank.",
-            general: ["Submit 1 to 100 production intervals.", "Use MWh."],
+            general: [
+                "Send 1 to 100 values in one change request.",
+                "Use MWh.",
+            ],
         },
     });
     expect(failed.screen.draft?.send).toEqual({

@@ -522,7 +522,7 @@ test("a reset refused because the configuration changed meanwhile says so", asyn
             status: 409,
             json: errorBody(
                 "configuration_changed",
-                "The plant configuration is no longer current.",
+                "The plant's technical details changed. Reload the page and try again.",
             ),
         }),
     );
@@ -534,9 +534,12 @@ test("a reset refused because the configuration changed meanwhile says so", asyn
         .getByRole("button", { name: "Use forecasts without calibration" })
         .click();
     await expect(
-        page.getByText("The plant configuration is no longer current.", {
-            exact: true,
-        }),
+        page.getByText(
+            "The plant's technical details changed. Reload the page and try again.",
+            {
+                exact: true,
+            },
+        ),
     ).toBeVisible();
     await expect(page.getByText("Saved.", { exact: true })).toHaveCount(0);
 });

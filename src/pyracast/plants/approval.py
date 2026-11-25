@@ -37,7 +37,9 @@ DECLARATION_CHANGED = gettext_lazy(
     "The declared plant details changed after this page opened. "
     "The details shown now are the current ones; review them before approving."
 )
-NOT_RESUBMITTABLE = gettext_lazy("Only a rejected plant can be resubmitted for review.")
+NOT_RESUBMITTABLE = gettext_lazy(
+    "Only a plant that Pyracast did not approve can be sent for approval again."
+)
 REVIEW_REASON_MAX_LENGTH = 500
 
 

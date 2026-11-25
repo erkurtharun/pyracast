@@ -9,6 +9,7 @@ from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext
 
+from pyracast.errors import UNEXPECTED
 from pyracast.forecasts.actuals import (
     ACTUAL_COMPOSITION_POLICY,
     ArchivedActualSource,
@@ -84,7 +85,12 @@ def _selection_cutoff(day: date, zone: str, issuance_cutoff: time) -> datetime:
         cutoff.astimezone(ZoneInfo(zone)).replace(tzinfo=None) != local.replace(tzinfo=None)
         or local.replace(fold=0).utcoffset() != local.replace(fold=1).utcoffset()
     ):
-        raise ValidationError(gettext("The local issuance cutoff is ambiguous or does not exist."))
+        raise ValidationError(
+            gettext(
+                "This time does not exist on that day or occurs twice because of a clock "
+                "change. Choose another time."
+            )
+        )
     return cutoff
 
 
@@ -343,16 +349,14 @@ def _validated_range(
     today: date,
 ) -> tuple[date, date]:
     if comparison not in ("archived_forecast", "historical_model"):
-        raise ValidationError(gettext("Unknown comparison mode."))
+        raise ValidationError(UNEXPECTED)
     if issuance_cutoff is not None:
         if issuance_cutoff.tzinfo is not None:
-            raise ValidationError(gettext("Use a local issuance cutoff without a UTC offset."))
+            raise ValidationError(UNEXPECTED)
         if comparison != "archived_forecast":
-            raise ValidationError(
-                gettext("An issuance cutoff requires archived_forecast comparison.")
-            )
+            raise ValidationError(UNEXPECTED)
     if (start_date is None) != (end_date is None):
-        raise ValidationError(gettext("Both start_date and end_date are required."))
+        raise ValidationError(gettext("Enter both the start and the end date."))
     if start_date is None or end_date is None:
         end_date = today - timedelta(days=1)
         start_date = end_date - timedelta(days=29)
@@ -361,7 +365,9 @@ def _validated_range(
         or start_date < today - timedelta(days=366)
         or end_date >= today
     ):
-        raise ValidationError(gettext("Use 1 to 90 completed local days within the past year."))
+        raise ValidationError(
+            gettext("Choose a date range of 1 to 90 days, before today and within the past year.")
+        )
     return start_date, end_date
 
 

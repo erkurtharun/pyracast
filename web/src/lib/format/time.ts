@@ -1,6 +1,7 @@
 import { MISSING } from "./number";
 
 export type Instant = string | number | Date | null | undefined;
+export type PlantDays = readonly [first: string, last: string];
 
 const MEDIUM: Intl.DateTimeFormatOptions = {
     dateStyle: "medium",
@@ -109,12 +110,29 @@ function zoneOffset(locale: string, timeZone: string, at: Date) {
         .find((part) => part.type === "timeZoneName")?.value;
 }
 
-export function zoneLabel(
-    locale: string,
+export function zoneLabel(timeZone: string, at: Date = new Date()): string {
+    const offset = Math.round(offsetAt(at.getTime(), timeZone) / 60_000);
+    if (!offset) return "UTC";
+    const size = Math.abs(offset);
+    const minutes = size % 60;
+    return `UTC${offset < 0 ? "-" : "+"}${Math.floor(size / 60)}${minutes ? `:${pad(minutes)}` : ""}`;
+}
+
+export function daysZoneLabel(
     timeZone: string,
-    at: Date = new Date(),
+    [first, last]: PlantDays,
 ): string {
-    return `${timeZone} (${zoneOffset(locale, timeZone, at)})`;
+    const start = Date.parse(`${first}T00:00:00Z`);
+    const end = Date.parse(`${last}T00:00:00Z`);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start)
+        return zoneLabel(timeZone);
+    const labels = new Set<string>();
+    for (let day = start; day <= end; day += DAY_MS)
+        for (const wall of [day, day + DAY_MS - 60_000])
+            labels.add(
+                zoneLabel(timeZone, new Date(wall - offsetAt(wall, timeZone))),
+            );
+    return [...labels].join(" / ");
 }
 
 export function plantDay(

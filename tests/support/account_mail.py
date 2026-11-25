@@ -9,6 +9,7 @@ from itertools import product
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
+from zoneinfo import ZoneInfo
 
 import pytest
 import requests
@@ -50,38 +51,30 @@ CODE_COPY = {
         "This code expires in {minutes} minutes. Do not share it.",
     ),
     "tr": (
-        "Bu kodu, isteği başlatt\u0131ğ\u0131n\u0131z Pyracast penceresine girin.",
+        "Bu kodu, kod istediğiniz Pyracast penceresine girin.",
         "Bu kod {minutes} dakika içinde sona erer. Kodu paylaşmay\u0131n.",
     ),
 }
 CODE_SUBJECTS = {
     "en": {
-        "account/email/email_confirmation_signup": "Verify your email",
-        "account/email/email_confirmation": "Verify your email",
-        "account/email/password_reset_code": "Reset your password",
-        "account/email/login_code": "Confirm your identity",
+        "account/email/email_confirmation_signup": "Your Pyracast verification code",
+        "account/email/email_confirmation": "Your Pyracast verification code",
+        "account/email/password_reset_code": "Password reset code",
+        "account/email/login_code": "Your Pyracast verification code",
     },
     "tr": {
-        "account/email/email_confirmation_signup": "E-posta adresinizi doğrulay\u0131n",
-        "account/email/email_confirmation": "E-posta adresinizi doğrulay\u0131n",
-        "account/email/password_reset_code": "Parolan\u0131z\u0131 s\u0131f\u0131rlay\u0131n",
-        "account/email/login_code": "Kimliğinizi doğrulay\u0131n",
+        "account/email/email_confirmation_signup": "Pyracast doğrulama kodunuz",
+        "account/email/email_confirmation": "Pyracast doğrulama kodunuz",
+        "account/email/password_reset_code": "Şifre s\u0131f\u0131rlama kodu",
+        "account/email/login_code": "Pyracast doğrulama kodunuz",
     },
 }
-NOTICE_COPY = {
+# Each notice's heading and the sentence below it; None where the heading says it all.
+NOTICE_COPY: dict[str, dict[str, tuple[str, str | None]]] = {
     "en": {
-        "account/email/password_changed": (
-            "Your password was changed",
-            "The password of your Pyracast account was changed.",
-        ),
-        "account/email/password_set": (
-            "A password was set for your account",
-            "A password was set for your Pyracast account.",
-        ),
-        "account/email/password_reset": (
-            "Your password was reset",
-            "The password of your Pyracast account was reset.",
-        ),
+        "account/email/password_changed": ("Your password was changed", None),
+        "account/email/password_set": ("A password was set for your account", None),
+        "account/email/password_reset": ("Your password was reset", None),
         "account/email/email_changed": (
             "Your email address was changed",
             "Your Pyracast email address changed from {from_email} to {to_email}.",
@@ -90,26 +83,19 @@ NOTICE_COPY = {
             "An email address was removed",
             "{deleted_email} was removed from your Pyracast account.",
         ),
-        "mfa/email/totp_activated": (
-            "Two-factor authentication was turned on",
-            "Two-factor authentication with an authenticator app was turned on for your account.",
-        ),
-        "mfa/email/totp_deactivated": (
-            "Two-factor authentication was turned off",
-            "Two-factor authentication with an authenticator app was turned off for your account.",
-        ),
+        "mfa/email/totp_activated": ("Two-step verification was turned on", None),
+        "mfa/email/totp_deactivated": ("Two-step verification was turned off", None),
         "mfa/email/recovery_codes_generated": (
             "New recovery codes were generated",
-            "New recovery codes were generated for your account. "
             "The previous codes no longer work.",
         ),
         "socialaccount/email/account_connected": (
-            "A sign-in provider was connected",
-            "{provider} was connected to your Pyracast account for signing in.",
+            "A {provider} account was connected",
+            "You can now sign in to Pyracast with this account.",
         ),
         "socialaccount/email/account_disconnected": (
-            "A sign-in provider was disconnected",
-            "{provider} was disconnected from your Pyracast account.",
+            "A {provider} account was disconnected",
+            "You can no longer sign in to Pyracast with this account.",
         ),
         "account/email/unknown_account": (
             "Pyracast account not found",
@@ -121,50 +107,33 @@ NOTICE_COPY = {
         ),
     },
     "tr": {
-        "account/email/password_changed": (
-            "Parolan\u0131z değiştirildi",
-            "Pyracast hesab\u0131n\u0131z\u0131n parolas\u0131 değiştirildi.",
-        ),
-        "account/email/password_set": (
-            "Hesab\u0131n\u0131z için parola belirlendi",
-            "Pyracast hesab\u0131n\u0131z için bir parola belirlendi.",
-        ),
-        "account/email/password_reset": (
-            "Parolan\u0131z s\u0131f\u0131rland\u0131",
-            "Pyracast hesab\u0131n\u0131z\u0131n parolas\u0131 s\u0131f\u0131rland\u0131.",
-        ),
+        "account/email/password_changed": ("Şifreniz değiştirildi", None),
+        "account/email/password_set": ("Hesab\u0131n\u0131z için şifre belirlendi", None),
+        "account/email/password_reset": ("Şifreniz s\u0131f\u0131rland\u0131", None),
         "account/email/email_changed": (
             "E-posta adresiniz değiştirildi",
             "Pyracast e-posta adresiniz {from_email} yerine {to_email} olarak değişti.",
         ),
         "account/email/email_deleted": (
             "Bir e-posta adresi kald\u0131r\u0131ld\u0131",
-            "{deleted_email}, Pyracast hesab\u0131n\u0131zdan kald\u0131r\u0131ld\u0131.",
+            "{deleted_email} adresi Pyracast hesab\u0131n\u0131zdan kald\u0131r\u0131ld\u0131.",
         ),
-        "mfa/email/totp_activated": (
-            "\u0130ki ad\u0131ml\u0131 doğrulama aç\u0131ld\u0131",
-            "Hesab\u0131n\u0131z için doğrulama uygulamas\u0131yla "
-            "iki ad\u0131ml\u0131 doğrulama aç\u0131ld\u0131.",
-        ),
+        "mfa/email/totp_activated": ("\u0130ki ad\u0131ml\u0131 doğrulama aç\u0131ld\u0131", None),
         "mfa/email/totp_deactivated": (
             "\u0130ki ad\u0131ml\u0131 doğrulama kapat\u0131ld\u0131",
-            "Hesab\u0131n\u0131z için doğrulama uygulamas\u0131yla "
-            "iki ad\u0131ml\u0131 doğrulama kapat\u0131ld\u0131.",
+            None,
         ),
         "mfa/email/recovery_codes_generated": (
             "Yeni kurtarma kodlar\u0131 oluşturuldu",
-            "Hesab\u0131n\u0131z için yeni kurtarma kodlar\u0131 oluşturuldu. "
             "Önceki kodlar art\u0131k geçerli değil.",
         ),
         "socialaccount/email/account_connected": (
-            "Bir oturum açma sağlay\u0131c\u0131s\u0131 bağland\u0131",
-            "{provider}, oturum açmak için Pyracast hesab\u0131n\u0131za bağland\u0131.",
+            "Bir {provider} hesab\u0131 bağland\u0131",
+            "Art\u0131k bu hesapla Pyracast'e giriş yapabilirsiniz.",
         ),
         "socialaccount/email/account_disconnected": (
-            "Bir oturum açma sağlay\u0131c\u0131s\u0131n\u0131n "
-            "bağlant\u0131s\u0131 kald\u0131r\u0131ld\u0131",
-            "{provider} bağlant\u0131s\u0131 "
-            "Pyracast hesab\u0131n\u0131zdan kald\u0131r\u0131ld\u0131.",
+            "Bir {provider} hesab\u0131n\u0131n bağlant\u0131s\u0131 kald\u0131r\u0131ld\u0131",
+            "Art\u0131k bu hesapla Pyracast'e giriş yapamazs\u0131n\u0131z.",
         ),
         "account/email/unknown_account": (
             "Pyracast hesab\u0131 bulunamad\u0131",
@@ -180,12 +149,12 @@ NOTICE_COPY = {
 }
 ACTION_LABELS = {
     "en": {
-        "account/email/unknown_account": "Create an account",
+        "account/email/unknown_account": "Create account",
         "account/email/account_already_exists": "Reset password",
     },
     "tr": {
         "account/email/unknown_account": "Hesap oluştur",
-        "account/email/account_already_exists": "Parolay\u0131 s\u0131f\u0131rla",
+        "account/email/account_already_exists": "Şifreyi s\u0131f\u0131rla",
     },
 }
 SECURITY_COPY = {
@@ -204,9 +173,11 @@ SECURITY_COPY = {
             "Bu değişikliği siz yapmad\u0131ysan\u0131z hesab\u0131n\u0131z\u0131 "
             "hemen güvenceye al\u0131n:"
         ),
-        "link": "Hesab\u0131n\u0131z\u0131 güvenceye al\u0131n",
+        "link": "Hesab\u0131 güvenceye al",
     },
 }
+TIME_FORMATS = {"en": "j M Y, H:i", "tr": "j F Y, H:i"}
+TURKIYE = ZoneInfo("Europe/Istanbul")
 
 
 SIGNUP_CODE = "account/email/email_confirmation_signup"
@@ -914,10 +885,10 @@ class LocalAuthenticationCache(LocMemCache):
 
 
 def matrix_settings() -> dict[str, Any]:
-    # A non-UTC server zone proves that notices convert their time to UTC.
+    # A server zone other than Türkiye's proves that notices show Türkiye time.
     return {
         "MAILERS": {"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}},
-        "TIME_ZONE": "Europe/Istanbul",
+        "TIME_ZONE": "America/Sao_Paulo",
         "SOCIALACCOUNT_PROVIDERS": PROVIDERS,
     }
 
@@ -1220,6 +1191,9 @@ def assert_code_mail(
     )
     code = code_in(message)
     instruction, expiry = CODE_COPY[language]
+    heading = CODE_SUBJECTS[language][prefix]
+    assert str(message.body).startswith(f"Pyracast\n\n{heading}\n\n{instruction}\n\n")
+    assert re.findall(r"<h1[^>]*>(.*?)</h1>", html(message)) == [escape(heading)]
     for content in (str(message.body), html(message)):
         assert code in content
         assert instruction in content
@@ -1230,9 +1204,17 @@ def assert_notice(
     message: EmailMultiAlternatives, *, prefix: str, to: str, language: str, **values: str
 ) -> None:
     subject, sentence = NOTICE_COPY[language][prefix]
-    assert_account_mail(message, prefix=prefix, to=to, language=language, subject=subject)
-    assert sentence.format(**values) in str(message.body)
-    assert escape(sentence.format(**values)) in html(message)
+    heading = subject.format(**values)
+    lines = [heading] if sentence is None else [heading, sentence.format(**values)]
+    assert_account_mail(message, prefix=prefix, to=to, language=language, subject=heading)
+    assert str(message.body).startswith("\n\n".join(["Pyracast", *lines]) + "\n\n")
+    content = html(message)
+    assert content.count("<h1") == 1
+    shown = re.search(r"<h1[^>]*>(.*?)</h1>\s*<p[^>]*>(.*?)</p>", content, re.DOTALL)
+    assert shown is not None
+    assert shown[1] == escape(heading)
+    below = escape(lines[1]) if sentence else f"{SECURITY_COPY[language]['time']}: "
+    assert shown[2].startswith(below)
 
 
 def assert_security_details(
@@ -1243,7 +1225,8 @@ def assert_security_details(
     times = []
     with translation.override(language):
         while minute <= datetime.now(UTC):
-            times.append(f"{copy['time']}: {dateformat.format(minute, 'j F Y H:i')} UTC")
+            shown = dateformat.format(minute.astimezone(TURKIYE), TIME_FORMATS[language])
+            times.append(f"{copy['time']}: {shown} (UTC+3)")
             minute += timedelta(minutes=1)
     for content in (str(message.body), html(message)):
         assert any(time in content for time in times)

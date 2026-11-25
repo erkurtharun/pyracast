@@ -224,5 +224,5 @@ def test_historical_comparison_keeps_tenant_access_and_rejects_unknown_modes(
     assert client.get(url, {"comparison": "historical_model"}).status_code == 403
     client.force_login(system.member)
     assert client.get(url, {"comparison": "unknown"}).status_code == 400
-    with pytest.raises(ValidationError, match="Unknown comparison mode"):
+    with pytest.raises(ValidationError, match="Something went wrong"):
         forecast_performance(plant, comparison="unknown")

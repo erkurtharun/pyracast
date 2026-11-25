@@ -10,12 +10,12 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
-from django.utils.translation import gettext
+from django.utils.translation import gettext, gettext_lazy
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import WorkspaceRole
 from pyracast.db import read_snapshot
-from pyracast.errors import ConflictError, DomainError, ErrorCode
+from pyracast.errors import UNEXPECTED, ConflictError, DomainError, ErrorCode
 from pyracast.plants.availability import interval_is_covered, reference_intervals
 from pyracast.plants.events import record_plant_event
 from pyracast.plants.forecasting import power_limit
@@ -34,6 +34,15 @@ from pyracast.plants.preparation import request_preparation
 from pyracast.regions.models import Region
 
 PRODUCTION_BATCH_LIMIT = 2000
+ROW_TIME_INVALID = gettext_lazy("Row %(row)s: the date or time is not valid.")
+OVERLAPPING = gettext_lazy(
+    "Some values overlap in time with each other or with saved values. "
+    "Enter one value per interval."
+)
+DETAILS_CHANGED = gettext_lazy(
+    "The plant's technical details changed after these values were entered, "
+    "so they cannot be saved."
+)
 # Mean power above this multiple of the plant's power ceiling is implausible; the margin admits
 # cold, clear over-irradiance.
 PLAUSIBLE_CAPACITY_FACTOR = 1.25
@@ -104,8 +113,10 @@ class AuditContext:
 
 
 def validate_batch(unit: str, count: int) -> None:
-    if unit not in {"MWh", "kWh"} or not 1 <= count <= PRODUCTION_BATCH_LIMIT:
-        raise ValidationError(gettext("Use MWh or kWh and a batch of 1 to 2000 observations."))
+    if unit not in {"MWh", "kWh"}:
+        raise ValidationError(UNEXPECTED)
+    if not 1 <= count <= PRODUCTION_BATCH_LIMIT:
+        raise ValidationError(gettext("Save 1 to 2,000 values at a time."))
 
 
 def normalize_observation(
@@ -113,27 +124,29 @@ def normalize_observation(
 ) -> tuple[datetime, datetime, float, str, str]:
     start, end = observation.starts_at, observation.ends_at
     if start.utcoffset() is None or end.utcoffset() is None:
-        raise ValidationError(gettext("Observation timestamps must be timezone-aware."))
+        raise ValidationError(UNEXPECTED)
     start, end = start.astimezone(UTC), end.astimezone(UTC)
     if end - start not in {timedelta(minutes=30), timedelta(minutes=60)} or end > now:
-        raise ValidationError(gettext("Completed 30 or 60 minute observations are required."))
+        raise ValidationError(
+            gettext("Enter values only for half hours or hours that have already ended.")
+        )
     local = start.astimezone(zone)
     for stamp in (local, end.astimezone(zone)):
         if stamp.minute not in (0, 30) or stamp.second or stamp.microsecond:
-            raise ValidationError(gettext("Observations must align to local half-hour boundaries."))
+            raise ValidationError(
+                gettext("Start and end each value on the hour or half hour in plant time.")
+            )
     midnight = datetime.combine(local.date() + timedelta(days=1), datetime.min.time(), zone)
     if end > midnight.astimezone(UTC):
-        raise ValidationError(gettext("Observations must not cross local midnight."))
+        raise ValidationError(gettext("A value cannot run past midnight in plant time."))
     value = observation.energy
     if isinstance(value, bool) or not isfinite(value) or value < 0:
-        raise ValidationError(gettext("Observed energy must be finite and nonnegative."))
+        raise ValidationError(gettext("Enter zero or a positive number."))
     if observation.quality not in ObservationQuality.values:
-        raise ValidationError(gettext("Unsupported observation quality."))
+        raise ValidationError(UNEXPECTED)
     source = observation.source.strip()
     if not source or len(source) > 200:
-        raise ValidationError(
-            gettext("An observation source of at most 200 characters is required.")
-        )
+        raise ValidationError(UNEXPECTED)
     return start, end, value / 1000 if unit == "kWh" else value, observation.quality, source
 
 
@@ -151,9 +164,7 @@ def lock_production_configuration(
         pk=configuration_id, plant=plant
     )
     if not configuration_is_current(configuration):
-        raise ValidationError(
-            gettext("Production entry requires the current approved configuration.")
-        )
+        raise ValidationError(DETAILS_CHANGED)
     return configuration
 
 
@@ -186,7 +197,7 @@ def prepare_production_changes(
     is replayed whole or not at all."""
     validate_batch(unit, len(changes))
     if any(change.action not in {"set", "revert"} for change in changes):
-        raise ValidationError(gettext("Unknown production action."))
+        raise ValidationError(UNEXPECTED)
     now, zone = timezone.now(), ZoneInfo(configuration.binding.timezone)
     normalized = [
         normalize_observation(
@@ -203,9 +214,9 @@ def prepare_production_changes(
     first = spans[0][0].astimezone(zone).date()
     last = (max(end for _, end in spans) - timedelta(microseconds=1)).astimezone(zone).date()
     if (last - first).days >= 31:
-        raise ValidationError(gettext("A production batch must stay within 31 local days."))
+        raise ValidationError(gettext("Save values for at most 31 days at a time."))
     if any(following[0] < previous[1] for previous, following in pairwise(spans)):
-        raise ValidationError(gettext("Conflicting or overlapping observation."))
+        raise ValidationError(OVERLAPPING)
     heads = list(
         ProductionObservation.objects.filter(
             plant_id=configuration.plant_id,
@@ -228,12 +239,16 @@ def prepare_production_changes(
                 raise ConflictError(ErrorCode.PRODUCTION_REVISION_CHANGED)
             replayed = True
         if previous is not None and previous.configuration_id != configuration.pk:
-            raise ValidationError(gettext("Production belongs to a previous configuration."))
+            raise ValidationError(
+                gettext(
+                    "This value was saved with earlier technical details and cannot be changed."
+                )
+            )
         if change.action == "revert" and previous is None:
-            raise ValidationError(gettext("There is no manual production to revert."))
+            raise ValidationError(gettext("There is no entered value to remove."))
         overlapping = live[bisect_right(live_ends, start) : bisect_left(live_starts, end)]
         if any(row is not previous for row in overlapping):
-            raise ValidationError(gettext("Conflicting or overlapping observation."))
+            raise ValidationError(OVERLAPPING)
         if change.action == "revert" and previous is not None:
             value, quality, source = previous.energy_mwh, previous.quality, previous.source
         result.append(
@@ -495,13 +510,11 @@ def import_observations(
                     or overlap.source != source
                     or overlap.is_reverted
                 ):
-                    raise ValidationError(gettext("Conflicting or overlapping observation."))
+                    raise ValidationError(OVERLAPPING)
                 ids.append(overlap.pk)
                 continue
             if not configuration_is_current(configuration):
-                raise ValidationError(
-                    gettext("Production entry requires the current approved configuration.")
-                )
+                raise ValidationError(DETAILS_CHANGED)
             day = start.astimezone(zone).date()
             if day not in references:
                 references[day] = reference_intervals(configuration, day, now)

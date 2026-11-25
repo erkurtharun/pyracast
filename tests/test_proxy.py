@@ -278,7 +278,7 @@ def test_a_trusted_gateway_without_verifiable_headers_answers_the_proxy_refusal(
 ) -> None:
     trust(settings, edges=[])
 
-    with pytest.raises(PermissionDenied, match="could not be verified"):
+    with pytest.raises(PermissionDenied, match="Something went wrong"):
         TrustedProxyHeaders(proxy_response)(
             RequestFactory().get(
                 "/", REMOTE_ADDR=GATEWAY, HTTP_X_FORWARDED_PROTO="https", HTTP_X_REAL_IP="x"

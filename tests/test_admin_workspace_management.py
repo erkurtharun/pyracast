@@ -226,7 +226,8 @@ def test_workspace_creation_invites_its_administrator_in_the_chosen_language() -
         operator,
     )
     deliver_mail()
-    assert "çal\u0131şma alan\u0131n\u0131n yöneticisi yapar" in str(mail.outbox[-1].body)
+    role = "Davet edildiğiniz rol: Çal\u0131şma alan\u0131 yöneticisi\n"
+    assert role in str(mail.outbox[-1].body)
     html = client.get(response["Location"]).content.decode()
     assert "The invitation to boss@example.com is being sent" in html
     assert "Invitation pending" in html
@@ -327,7 +328,10 @@ def test_invitation_form_offers_the_administrator_role_only_without_an_administr
         {"email": "second@example.com", "role": "admin", "language": "en"},
     )
     assert stale.status_code == 400
-    assert "The workspace administrator changed. Reload before saving." in stale.content.decode()
+    assert (
+        "The workspace administrator changed. Reload the page and try again."
+        in stale.content.decode()
+    )
     viewer = client.post(
         f"/admin/workspaces/{tenant.pk}/invitations/new/",
         {"email": "second@example.com", "language": "tr"},
@@ -335,7 +339,7 @@ def test_invitation_form_offers_the_administrator_role_only_without_an_administr
     assert viewer.status_code == 302
     assert WorkspaceInvitation.objects.get(tenant=tenant).role == WorkspaceRole.VIEWER
     deliver_mail()
-    assert "salt okunur erişim" in str(mail.outbox[-1].body)
+    assert "Davet edildiğiniz rol: Üye\n" in str(mail.outbox[-1].body)
 
 
 def test_invitation_form_defaults_to_the_administrator_role_until_one_is_invited() -> None:
@@ -459,7 +463,10 @@ def test_pending_invitations_are_reissued_and_revoked_from_the_workspace_page() 
     assert "Invitation to guest@example.com revoked." in html
     assert "No pending invitations." in html
     client.post(f"{base}invitations/{replacement.pk}/reissue/")
-    assert "The invitation is invalid or expired." in client.get(base).content.decode()
+    assert (
+        "This invitation is no longer valid. Ask the workspace administrator for a new one."
+        in client.get(base).content.decode()
+    )
     assert WorkspaceInvitation.objects.count() == 2
 
 
@@ -485,7 +492,10 @@ def test_a_resend_waiting_for_an_administrator_change_does_not_revive_the_invita
     assert WorkspaceInvitation.objects.get().state_at(timezone.now()) == "revoked"
     deliver_mail()
     assert len(mail.outbox) == sent
-    assert "The invitation is invalid or expired." in client.get(base).content.decode()
+    assert (
+        "This invitation is no longer valid. Ask the workspace administrator for a new one."
+        in client.get(base).content.decode()
+    )
 
 
 def test_member_removal_states_its_consequences_and_keeps_the_administrator() -> None:

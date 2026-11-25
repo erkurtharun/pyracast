@@ -169,14 +169,14 @@ test("a refused reason and a refusal of the whole request are told apart from th
                     "changes.0.energy": "Too large.",
                     "changes.3": "Gone",
                     reason: "This field may not be blank.",
-                    changes: "Submit 1 to 100 production intervals.",
+                    changes: "Send 1 to 100 values in one change request.",
                     unit: "",
                 },
             }),
         ),
     ).toEqual({
         reason: "This field may not be blank.",
-        general: ["Submit 1 to 100 production intervals."],
+        general: ["Send 1 to 100 values in one change request."],
     });
     expect(fieldRefusals(new Error("offline"))).toEqual({ general: [] });
 });

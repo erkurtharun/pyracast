@@ -18,7 +18,7 @@ FLOWS = {
 REFUSALS = {
     Factor.MFA: (
         "mfa_reauthentication_required",
-        gettext_lazy("Confirm with your authenticator to continue."),
+        gettext_lazy("Enter your authenticator code or a recovery code."),
     ),
     Factor.PASSWORD: (
         "reauthentication_required",
@@ -26,7 +26,7 @@ REFUSALS = {
     ),
     Factor.CODE: (
         "reauthentication_required",
-        gettext_lazy("Confirm with a code sent to your email address to continue."),
+        gettext_lazy("Confirm with an email code to continue."),
     ),
 }
 

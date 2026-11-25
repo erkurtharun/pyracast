@@ -67,8 +67,7 @@ def stored_context(context: dict[str, Any]) -> dict[str, str]:
 
 
 LOGIN_LIMITED_MESSAGE = gettext_lazy(
-    "Too many sign-in attempts, or a verification code was sent recently. "
-    "Try again in a few minutes."
+    "Too many sign-in attempts, or an email code was sent a moment ago. Try again in a few minutes."
 )
 
 

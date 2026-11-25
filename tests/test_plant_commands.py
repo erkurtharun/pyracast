@@ -204,13 +204,48 @@ def test_production_import_reports_the_specific_refusal(
     viewer = User.objects.create_user(username="viewer")
     Membership.objects.create(user=viewer, tenant=system.tenant)
     params = dict(plant_id=plant.pk, configuration_id=plant.current_configuration_id, file=path)
-    with pytest.raises(CommandError, match="Workspace administrator required"):
+    with pytest.raises(CommandError, match="Only the workspace administrator can do this"):
         call_command("import_production", username="viewer", unit="MWh", **params)
     call_command("import_production", username="member", unit="MWh", stdout=StringIO(), **params)
     path.write_text(
         "starts_at,ends_at,energy\n2020-01-01T09:00:00Z,2020-01-01T09:30:00Z,2\n",
         encoding="utf-8",
     )
-    with pytest.raises(CommandError, match="Conflicting or overlapping observation"):
+    with pytest.raises(CommandError, match="Some values overlap in time"):
         call_command("import_production", username="member", unit="MWh", **params)
     assert ProductionObservation.objects.get().energy_mwh == 1
+
+
+@pytest.mark.parametrize("start", ["2020-02-30T09:00:00+03:00", "2020-01-01T09:00:00"])
+def test_production_import_names_the_row_whose_date_or_time_is_not_valid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, start: str
+) -> None:
+    system = make_system(approved=True)
+    call_command(
+        "configure_plant",
+        username="member",
+        region_id=system.region.pk,
+        name="Plant",
+        dc_capacity_mw=1.0,
+    )
+    plant = Plant.objects.get()
+    monkeypatch.chdir(tmp_path)
+    path = tmp_path / "meter.csv"
+    path.write_text(
+        "starts_at,ends_at,energy\n"
+        "2020-01-01T08:00:00Z,2020-01-01T08:30:00Z,1\n"
+        f"{start},2020-01-01T09:30:00Z,1\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        CommandError, match=r"^Observation import failed: Row 3: the date or time is not valid\.$"
+    ):
+        call_command(
+            "import_production",
+            username="member",
+            unit="MWh",
+            plant_id=plant.pk,
+            configuration_id=plant.current_configuration_id,
+            file=path,
+        )
+    assert not ProductionObservation.objects.exists()

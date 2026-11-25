@@ -286,7 +286,6 @@ const derivation: Record<string, { from: string; keeps?: Pairing }> = {
     "--amber-69": { from: "#f7f1e4" },
     "--amber-220": { from: "#e6d2a8" },
     "--amber-296": { from: "#efc778" },
-    "--amber-300": { from: "#d2c293" },
     "--amber-329-a0": { from: "#e8bd6e00" },
     "--amber-329-a20": { from: "#e8bd6e33" },
     "--amber-608": {

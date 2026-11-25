@@ -14,8 +14,10 @@ from django.db.models import BooleanField, Exists, OuterRef, Q, QuerySet, Value
 from django.template.loader import render_to_string
 from django.utils import timezone, translation
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy
 from django.views.decorators.debug import sensitive_variables
 
+from pyracast.accounts.account_mail import ACCOUNT_ZONE, mail_time
 from pyracast.accounts.addresses import plain_address
 from pyracast.accounts.audit import SecurityEvent, record_security_event, refusal_throttle
 from pyracast.accounts.authorization import authorize_workspace_admin
@@ -269,7 +271,10 @@ def compose_invitation(
             "workspace": invitation.tenant.name,
             "email": invitation.email,
             "action_url": f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/invitation/#token={token}",
-            "administrator": invitation.role == WorkspaceRole.ADMIN,
+            "role": _("Workspace administrator")
+            if invitation.role == WorkspaceRole.ADMIN
+            else _("Member"),
+            "expires": mail_time(invitation.expires_at, ACCOUNT_ZONE),
         }
         message = EmailMultiAlternatives(
             _("Pyracast workspace invitation"),
@@ -374,6 +379,14 @@ def accept_workspace_invitation(actor: User, token: str) -> Membership:
     return membership
 
 
+INVITATION_ACCEPTED = gettext_lazy("This invitation was already accepted. Reload the list.")
+
+
+def _closed_for_administrator(invitation: WorkspaceInvitation | None) -> DomainError:
+    accepted = invitation is not None and invitation.accepted_at is not None
+    return DomainError(ErrorCode.INVITATION_UNAVAILABLE, INVITATION_ACCEPTED if accepted else None)
+
+
 @transaction.atomic
 def revoke_workspace_invitation(
     actor: User, tenant_id: int, invitation_id: int, *, platform: bool = False
@@ -386,7 +399,7 @@ def revoke_workspace_invitation(
         .first()
     )
     if invitation is None or invitation.accepted_at is not None:
-        raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
+        raise _closed_for_administrator(invitation)
     if invitation.revoked_at is not None:
         return False
     invitation.revoked_at = timezone.now()
@@ -411,11 +424,13 @@ def reissue_workspace_invitation(
     language: str | None = None,
 ) -> WorkspaceInvitation:
     authorize_workspace_admin(actor, tenant_id, platform=platform)
-    invitation = (
-        WorkspaceInvitation.objects.filter(tenant_id=tenant_id, pk=invitation_id).open().first()
-    )
-    if invitation is None:
-        raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
+    invitation = WorkspaceInvitation.objects.filter(tenant_id=tenant_id, pk=invitation_id).first()
+    if (
+        invitation is None
+        or invitation.accepted_at is not None
+        or invitation.revoked_at is not None
+    ):
+        raise _closed_for_administrator(invitation)
     return invite_workspace_member(
         actor,
         tenant_id,

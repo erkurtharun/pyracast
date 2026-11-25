@@ -1,0 +1,129 @@
+{
+    "privacy": {
+        "title": "Gizlilik politikası",
+        "intro": "Pyracast hesap bilgilerinizi ve güneş enerjisi tahmin verilerini nasıl işler?",
+        "updated": "2026-11-25",
+        "sections": [
+            {
+                "id": "operator",
+                "title": "Pyracast'i kim işletiyor?",
+                "paragraphs": [
+                    "{name}, Pyracast'i işleten veri sorumlusudur. Konum: {address}, {country}. İletişim: {email}."
+                ]
+            },
+            {
+                "id": "information",
+                "title": "Pyracast'in işlediği bilgiler",
+                "paragraphs": [
+                    "Pyracast bilgileri sizden, çalışma alanı yöneticilerinden ve hizmet sağlayıcılarından; elektronik formlar, bağlı hizmetler ve otomatik güvenlik kayıtları yoluyla toplar."
+                ],
+                "bullets": [
+                    "Hesap kimlikleri, e-posta, varsa şifre özetleri, tercihler, üyelik ve güvenlik ayarları.",
+                    "Çalışma alanı ve santral bilgileri, konumlar, üretim, tahminler, kesintiler ve değişiklik geçmişi.",
+                    "Alıcı adresleri, gönderim saatleri, mesajlar ve gönderim kayıtları.",
+                    "Açık oturumlar, IP adresleri, kimlik doğrulama kayıtları ve işletim günlükleri."
+                ]
+            },
+            {
+                "id": "purposes",
+                "title": "Pyracast bilgileri neden kullanır?",
+                "paragraphs": [
+                    "Pyracast bilgileri erişimi yönetmek, tahmin sunmak, hizmet mesajları ve tahmin e-postaları göndermek, destek sağlamak ve hataları veya kötüye kullanımı incelemek için kullanır.",
+                    "İşlemenin hukuki sebepleri, uygulanabildiği ölçüde sözleşmenin ifası, haklarınız gözetilerek hizmet güvenliğini sağlamaya yönelik Pyracast'in meşru menfaati ve hukuki yükümlülükleridir."
+                ]
+            },
+            {
+                "id": "sign-in",
+                "title": "Google ve Microsoft ile giriş",
+                "paragraphs": [
+                    "Google veya Microsoft ile giriş yaparsanız, Pyracast girişinizi doğrulamak veya hesabınızı bağlamak için kimlik, e-posta ve temel profil bilgilerini alır. Pyracast bu hesabın kimliğini ve e-postasını saklar; giriş için kullanılan erişim veya yenileme belirteçlerini saklamaz. Giriş yapmak posta kutunuza erişim vermez.",
+                    "Hesabınızda şifre veya başka bir bağlı hesap varsa bağlantıyı kaldırabilirsiniz. Hesap → Bağlı hesaplar bölümünden bağlantıyı kaldırın. Bu işlem hesabınızı veya çalışma alanı kayıtlarını silmez."
+                ],
+                "links": [
+                    {
+                        "label": "Google API Hizmetleri Kullanıcı Verileri Politikası",
+                        "href": "https://developers.google.com/terms/api-services-user-data-policy"
+                    }
+                ]
+            },
+            {
+                "id": "sharing",
+                "title": "Bilgiler kimlere aktarılır?",
+                "paragraphs": [
+                    "Çalışma alanı üyeleri rollerinin izin verdiği kayıtlara erişir. İşletmeci hizmet yönetimi ve destek için kayıtlara erişir. Seçilen alıcılar, ayarlanan mesajları alır. Bir tahmin e-postası, alıcıların adreslerini o e-postanın diğer alıcılarına, çalışma alanı dışındakiler dahil, gösterebilir; kimin adresinin gösterileceğini çalışma alanı yöneticisi belirler.",
+                    "Barındırma, trafik güvenliği, e-posta, giriş ve tahmin veya üretim verisi hizmetleri sunan sağlayıcılar, ilgili işlevler için gereken bilgileri işler; bunlara ilgili santral kimlikleri ve koordinatları da dahildir. İşlemler yurt dışında da gerçekleşebilir. Kanunen gerekli bilgiler yetkili mercilerle paylaşılabilir."
+                ]
+            },
+            {
+                "id": "storage",
+                "title": "Çerezler ve tarayıcı depolaması",
+                "paragraphs": [
+                    "Çerezler ve tarayıcı depolaması; güvenli giriş, davetler ve dil tercihleri için kullanılır. Uygulamada reklam veya davranış analizi izleyicileri bulunmaz. Tarayıcı verilerini silebilirsiniz; bu işlemden sonra yeniden giriş yapmanız gerekebilir veya tercihleriniz sıfırlanabilir."
+                ]
+            },
+            {
+                "id": "retention",
+                "title": "Saklama ve silme",
+                "paragraphs": [
+                    "Kayıtlar; hizmet, paylaşılan çalışma alanları, güvenlik ve hukuki yükümlülükler için gerektiği sürece ve şu sınırlar içinde saklanır: açık oturumlar süresi dolduğunda silinir; tamamlanmamış hesap kayıtları 7 gün sonra silinir; giden e-postaların kopyaları gönderildikten veya gönderimi başarısız olduktan 7 gün sonra silinir; davetler kabul edildikten, geri çekildikten veya süresi dolduktan 90 gün sonra silinir; tahmin e-postalarının metni 90 gün sonra silinir; güvenlik kayıtları en fazla 365 gün saklanır. Silinen santraller 30 gün içinde geri yüklenebilir. Yedekler yedi gün sonra temizlenecek şekilde ayarlanır; canlı sistemden silinen veriler yedeklerin süresi dolana kadar yedeklerde kalır.",
+                    "Hesabınızın anonim hale getirilmesi talebinizi {email} adresine iletin. Pyracast kimliğinizi ve çalışma alanı sahipliğini doğrulayabilir. Anonim hale getirmede hesabın giriş bilgileri, adı, adresleri, iki adımlı doğrulaması, bağlı hesapları, açık oturumları, üyelikleri ve tercihleri; bu adresleri içeren davetler, e-postalar ve tahmin e-postası alıcı kayıtları da silinir. Çalışma alanıyla paylaşılan kayıtlar ve denetim kayıtları yalnızca anonim hale getirilmiş hesaba bağlı olarak kalır. Hesabın kimlik numarasını, bir isteğin IP adresini ve bazı olaylarda girilen e-posta adresinin anahtarlı özetini içeren, ancak ad ve okunabilir e-posta adresi içermeyen güvenlik kayıtları anonim hale getirmeyle silinmez ve en geç 365 gün sonra silinir. Üyeliği veya bağlantıları kaldırmak ortak kayıtları silmez. Pyracast saklanması gereken bilgilerin nedenlerini açıklar."
+                ]
+            },
+            {
+                "id": "rights",
+                "title": "Sorularınız ve haklarınız",
+                "paragraphs": [
+                    "Verilerinizin işlenip işlenmediğini, işlenme biçimini, amacını, amaca uygun kullanımını ve alıcılarını öğrenmek; bilgi, düzeltme veya silme talep etmek için {email} adresine başvurabilirsiniz. Uygulanabilir haklarınız; düzeltme veya silmenin alıcılara bildirilmesini istemeyi, otomatik analizle aleyhinize oluşan sonuca itirazı, hukuka aykırı işlemeden doğan zararın giderilmesini ve yetkili kuruma şikâyeti kapsar. KVKK başvuruları en geç 30 gün içinde sonuçlandırılır.",
+                    "Pyracast uygulamaları değiştikçe tarihli bu metni günceller."
+                ]
+            }
+        ]
+    },
+    "terms": {
+        "title": "Kullanım koşulları",
+        "intro": "Pyracast kullanımı ve güneş enerjisi tahminlerinin değerlendirilmesi.",
+        "updated": "2026-11-25",
+        "sections": [
+            {
+                "id": "service",
+                "title": "Hizmet",
+                "paragraphs": [
+                    "Pyracast'i {name} işletir. Adres: {address}, {country}. Hizmet veya bu koşullarla ilgili iletişim: {email}.",
+                    "Pyracast, güneş santrali bilgilerini, üretim tahminlerini ve enerji hesaplarını bir araya getirir. Özellikler ve veriler; santral onayına, yetkili erişime ve hizmetin kullanılabilirliğine bağlıdır."
+                ]
+            },
+            {
+                "id": "authorized-use",
+                "title": "Yetkili kullanım",
+                "paragraphs": [
+                    "Santral bilgilerini, üretim kayıtlarını ve alıcı adreslerini yalnızca yetkiniz varsa ekleyin veya kullanın. Beyanlarınızı doğru tutun; geçerli izinlere ve lisanslara uyun.",
+                    "Erişim kontrollerini aşmayın, kimlik bilgilerini kötüye kullanmayın, izinsiz başka çalışma alanlarına erişmeyin, hizmeti aksatmayın veya hukuka aykırı kullanmayın. Pyracast, kötüye kullanımı önlemek veya hizmeti korumak için makul ölçüde erişimi kısıtlayabilir. Hatalı bir kısıtlama için Pyracast'e yazın: {email}."
+                ]
+            },
+            {
+                "id": "accounts",
+                "title": "Hesaplar ve çalışma alanları",
+                "paragraphs": [
+                    "Giriş yöntemlerinizi koruyun; izinsiz erişim şüphenizi gecikmeden bildirin. Çalışma alanı yöneticileri üyelikleri, ortak ayarları ve tahmin e-postası alıcılarını yönetir. Yalnızca mesajları ve santral bilgilerini almaya yetkili alıcıları ekleyin.",
+                    "Bir üyenin çıkarılması ortak kayıtları silmez. Güvenlik ve bildirim ayarlarını uygulamadan yönetin. Hesabınızın anonim hale getirilmesi için Pyracast'e yazın: {email}."
+                ]
+            },
+            {
+                "id": "estimates",
+                "title": "Tahminleri değerlendirin",
+                "paragraphs": [
+                    "Tahminler ve enerji hesapları model çıktılarıdır; ölçülmüş üretim veya üretim ve finansal performans garantisi değildir. Hava koşulları, eksik girdiler, santral bilgileri, kesintiler ve kalibrasyon sonuçları etkiler. Birimleri, zaman bilgilerini, veri bütünlüğünü ve varsayımları kontrol edin.",
+                    "Önemli sonuçlar doğurabilecek kararlardan önce bilgileri işletim gereksinimlerinize ve bağımsız kaynaklara göre doğrulayın. Verilerin sürekli erişilebilirliği ve e-posta teslimi garanti edilmez."
+                ]
+            },
+            {
+                "id": "changes",
+                "title": "Değişiklikler ve sorular",
+                "paragraphs": [
+                    "Pyracast, hizmet değiştikçe tarihli bu koşulları güncelleyebilir. İşletmeciyle ayrı sözleşmeleriniz, kapsadıkları konularda geçerliliğini korur. Gizlilik politikası bilgilerin nasıl işlendiğini açıklar.",
+                    "Sorular, düzeltmeler veya erişim sorunları için {email} adresine yazın."
+                ]
+            }
+        ]
+    }
+}

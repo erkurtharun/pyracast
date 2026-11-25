@@ -29,7 +29,7 @@ test("renames a plant without changing its location", async ({ page }) => {
     await page.getByRole("button", { name: /East array/ }).click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByLabel("Plant name").fill("New name");
-    await page.getByRole("button", { name: "Save configuration" }).click();
+    await page.getByRole("button", { name: "Save technical details" }).click();
     await expect(page.getByRole("heading", { name: "New name" })).toBeVisible();
     await page.getByRole("button", { name: "Location", exact: true }).click();
     await expect(
@@ -94,17 +94,23 @@ test("requests a location change and preserves the current location", async ({
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Irradiance forecast", exact: true })
+        .click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Location", exact: true }).click();
-    await page.getByText("Request location change", { exact: true }).click();
+    await page.getByText("Change location", { exact: true }).click();
     await page.getByLabel("Latitude (°)").fill("37");
     await page.getByLabel("Longitude (°)").fill("31");
     await page.getByLabel("Reason (optional)").fill("Move");
-    await page.getByRole("button", { name: "Submit location request" }).click();
+    await page
+        .getByRole("button", { name: "Send location change to Pyracast" })
+        .click();
     await expect(page.getByText("Please try again.")).toBeVisible();
     await expect(page.getByLabel("Latitude (°)")).toHaveValue("37");
-    await page.getByRole("button", { name: "Submit location request" }).click();
+    await page
+        .getByRole("button", { name: "Send location change to Pyracast" })
+        .click();
     await expect(page.getByText("37°, 31° · Europe/Istanbul")).toBeVisible();
     await expect(
         page.getByText("Current location: 36.9°, 30.7° · Europe/Istanbul"),
@@ -155,9 +161,11 @@ test("a failed reload after a location request keeps the form until a retry show
         .click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Location", exact: true }).click();
-    await page.getByText("Request location change", { exact: true }).click();
+    await page.getByText("Change location", { exact: true }).click();
     await page.getByLabel("Latitude (°)").fill("37");
-    await page.getByRole("button", { name: "Submit location request" }).click();
+    await page
+        .getByRole("button", { name: "Send location change to Pyracast" })
+        .click();
     const notice = page
         .getByRole("alert")
         .filter({ hasText: "Could not refresh" });
@@ -191,7 +199,7 @@ async function openLocationSettings(page: Page) {
         .click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Location", exact: true }).click();
-    await page.getByText("Request location change", { exact: true }).click();
+    await page.getByText("Change location", { exact: true }).click();
 }
 
 test("withdraws a pending location request and offers the form again", async ({
@@ -216,12 +224,12 @@ test("withdraws a pending location request and offers the form again", async ({
         route.fulfill({ json: paged(rows) }),
     );
     await openLocationSettings(page);
-    await page.getByRole("button", { name: "Withdraw request" }).click();
+    await page.getByRole("button", { name: "Withdraw", exact: true }).click();
     await expect(
         page.getByText("Location change withdrawn on Jan 2, 2026."),
     ).toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Submit location request" }),
+        page.getByRole("button", { name: "Send location change to Pyracast" }),
     ).toBeVisible();
 });
 
@@ -251,13 +259,78 @@ test("a direct move of a never-approved plant refills the form with the stored l
     await openLocationSettings(page);
     await page.getByLabel("Latitude (°)").fill("37.1234567");
     await page.getByLabel("Reason (optional)").fill("Survey");
-    await page.getByRole("button", { name: "Submit location request" }).click();
+    await page
+        .getByRole("button", { name: "Send location change to Pyracast" })
+        .click();
     await expect(
         page.getByText("Location change approved on Jan 2, 2026."),
     ).toBeVisible();
     await expect(page.getByLabel("Latitude (°)")).toHaveValue("37.123457");
     await expect(page.getByLabel("Reason (optional)")).toHaveValue("");
 });
+
+const stoppedForecasts = [
+    {
+        status: "pending",
+        configuration: plant.current_configuration,
+        stopped: true,
+    },
+    {
+        status: "approved",
+        configuration: plant.current_configuration,
+        stopped: false,
+    },
+    { status: "pending", configuration: null, stopped: false },
+] as const;
+
+for (const item of stoppedForecasts)
+    test(`an approved location change says forecasts stop only while they are stopped: ${item.status} plant${item.configuration ? "" : " never approved"}`, async ({
+        page,
+    }) => {
+        await mockApi(page);
+        await page.route("**/api/tenants/1/sites/", (route) =>
+            route.fulfill({
+                json: paged([
+                    {
+                        ...region,
+                        status: item.status,
+                        plant: {
+                            ...plant,
+                            current_configuration: item.configuration,
+                        },
+                        reminder: null,
+                    },
+                ]),
+            }),
+        );
+        await page.route("**/location-change-requests/", (route) =>
+            route.fulfill({
+                json: paged([
+                    {
+                        ...pendingRequest,
+                        status: "approved",
+                        reviewed_at: "2026-01-03T00:00:00Z",
+                    },
+                ]),
+            }),
+        );
+        await openLocationSettings(page);
+        await expect(
+            page.getByText(
+                "Pyracast checks a changed location. Forecasts for the plant pause only while that check is open.",
+            ),
+        ).toBeVisible();
+        await expect(
+            page.getByText("Location change approved on Jan 3, 2026.", {
+                exact: true,
+            }),
+        ).toBeVisible();
+        await expect(
+            page.getByText(
+                "Forecasts stop until Pyracast approves the plant at its new location.",
+            ),
+        ).toHaveCount(item.stopped ? 1 : 0);
+    });
 
 test("shows the operator's decision and note on the latest request", async ({
     page,
@@ -278,16 +351,16 @@ test("shows the operator's decision and note on the latest request", async ({
     );
     await openLocationSettings(page);
     await expect(
-        page.getByText(
-            "Location change approved on Jan 3, 2026. Forecasts pause until the new connection is approved.",
-        ),
+        page.getByText("Location change approved on Jan 3, 2026.", {
+            exact: true,
+        }),
     ).toBeVisible();
     await expect(
         page.getByText("Note: Matches the grid connection record"),
     ).toBeVisible();
 });
 
-test("a rejected plant shows its reason in plant time and is resubmitted for review", async ({
+test("a rejected plant shows its reason and is sent for approval again", async ({
     page,
 }) => {
     await mockApi(page);
@@ -317,19 +390,22 @@ test("a rejected plant shows its reason in plant time and is resubmitted for rev
     await page.getByRole("button", { name: /East array/ }).click();
 
     const notice = page.getByRole("status").filter({
-        hasText: "Pyracast support did not approve this plant.",
+        hasText: "Pyracast did not approve this plant.",
     });
     await expect(notice).toContainText(
         "The declared capacity does not match the licence.",
     );
-    await expect(notice).toContainText("12:15");
-    await expect(notice).toContainText("(plant time)");
-    await notice.getByRole("button", { name: "Resubmit for review" }).click();
+    await expect(notice).toContainText(
+        "Correct the details and send the plant for approval again.",
+    );
+    await notice
+        .getByRole("button", { name: "Send for approval again" })
+        .click();
 
     await expect(
-        page.getByText("Awaiting administrator approval."),
+        page.getByText("Waiting for approval by Pyracast.", { exact: true }),
     ).toBeVisible();
     await expect(
-        page.getByText("Pyracast support did not approve this plant."),
+        page.getByText("Pyracast did not approve this plant."),
     ).toHaveCount(0);
 });

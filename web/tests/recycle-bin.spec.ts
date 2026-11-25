@@ -51,7 +51,20 @@ test("bin rows are titled with the plant name and a restored plant opens from th
     await expect(page).toHaveURL("/app/w/1/plants/11/forecast/");
 });
 
-const busy = errorBody("busy", "The workspace is busy. Try again in a moment.");
+test("an empty recycle bin says so in one sentence", async ({ page }) => {
+    await mockApi(page);
+    await bin(page, { deleted: false });
+    await page.goto("/app/w/1/trash/");
+    await expect(
+        page.getByText("No deleted plants.", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Nothing to restore.")).toHaveCount(0);
+});
+
+const busy = errorBody(
+    "busy",
+    "This could not be saved right now. Try again in a moment.",
+);
 
 test("a failed restore moves the focus to its reason", async ({ page }) => {
     await mockApi(page);
@@ -64,7 +77,9 @@ test("a failed restore moves the focus to its reason", async ({ page }) => {
         .getByRole("button", { name: `Restore ${plant.name}` })
         .press("Enter");
     await expect(
-        page.getByRole("alert").filter({ hasText: "The workspace is busy." }),
+        page
+            .getByRole("alert")
+            .filter({ hasText: "This could not be saved right now." }),
     ).toBeFocused();
 });
 
@@ -100,11 +115,9 @@ test("a failed move to the recycle bin moves the focus to its reason", async ({
         .getByRole("button", { name: "Delete plant", exact: true })
         .press("Enter");
     const confirmation = page.getByRole("region", {
-        name: "Delete plant confirmation",
+        name: "Delete plant",
     });
-    await confirmation
-        .getByRole("button", { name: "Move plant to recycle bin" })
-        .press("Enter");
+    await confirmation.getByRole("button", { name: "Delete" }).press("Enter");
     await expect(confirmation.getByRole("alert")).toBeFocused();
 });
 
@@ -119,7 +132,7 @@ test("cancelling the move to the recycle bin returns the focus to Delete plant",
     });
     await deletePlant.press("Enter");
     await page
-        .getByRole("region", { name: "Delete plant confirmation" })
+        .getByRole("region", { name: "Delete plant" })
         .getByRole("button", { name: "Cancel" })
         .press("Enter");
     await expect(deletePlant).toBeFocused();
@@ -137,7 +150,7 @@ test("a failed delete keeps the confirmation open with the reason and lets the p
             status: 503,
             json: errorBody(
                 "busy",
-                "The workspace is busy. Try again in a moment.",
+                "This could not be saved right now. Try again in a moment.",
             ),
         });
     });
@@ -146,14 +159,14 @@ test("a failed delete keeps the confirmation open with the reason and lets the p
         .getByRole("button", { name: "Delete plant", exact: true })
         .click();
     const confirmation = page.getByRole("region", {
-        name: "Delete plant confirmation",
+        name: "Delete plant",
     });
     const move = confirmation.getByRole("button", {
-        name: "Move plant to recycle bin",
+        name: "Delete",
     });
     await move.click();
     await expect(confirmation.getByRole("alert")).toContainText(
-        "The workspace is busy.",
+        "This could not be saved right now.",
     );
     await expect(move).toBeEnabled();
     await move.click();
@@ -170,9 +183,7 @@ test("undo after a delete restores the plant on the portfolio", async ({
     await page
         .getByRole("button", { name: "Delete plant", exact: true })
         .click();
-    await page
-        .getByRole("button", { name: "Move plant to recycle bin", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Delete", exact: true }).click();
     const notice = page.getByRole("status").filter({
         hasText: `${plant.name} is in the recycle bin.`,
     });
@@ -191,9 +202,7 @@ async function deleteFromSettings(page: Page) {
     await page
         .getByRole("button", { name: "Delete plant", exact: true })
         .click();
-    await page
-        .getByRole("button", { name: "Move plant to recycle bin", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Delete", exact: true }).click();
 }
 
 const deletionNotice = (page: Page) =>
@@ -211,7 +220,7 @@ test("a failed undo shows its alert outside the deletion's status", async ({
             status: 503,
             json: errorBody(
                 "busy",
-                "The workspace is busy. Try again in a moment.",
+                "This could not be saved right now. Try again in a moment.",
             ),
         }),
     );
@@ -219,7 +228,9 @@ test("a failed undo shows its alert outside the deletion's status", async ({
     await expect(deletionNotice(page)).toBeVisible();
     await page.getByRole("button", { name: "Undo" }).click();
     await expect(
-        page.getByRole("alert").filter({ hasText: "The workspace is busy." }),
+        page
+            .getByRole("alert")
+            .filter({ hasText: "This could not be saved right now." }),
     ).toBeVisible();
     await expect(page.getByRole("status").getByRole("alert")).toHaveCount(0);
     await expect(deletionNotice(page)).toBeVisible();

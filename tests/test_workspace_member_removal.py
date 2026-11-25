@@ -178,7 +178,7 @@ def test_removal_expires_known_email_invitations_but_allows_intentional_new_invi
             "revoked",
             "member_removed",
         )
-        with pytest.raises(ValidationError, match="invalid or expired"):
+        with pytest.raises(ValidationError, match="no longer valid"):
             accept_workspace_invitation(viewer, f"old-{index}")
     unrelated.refresh_from_db()
     foreign.refresh_from_db()

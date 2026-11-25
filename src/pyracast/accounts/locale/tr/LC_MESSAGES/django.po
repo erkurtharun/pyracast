@@ -6,22 +6,26 @@ msgstr ""
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
 
 msgid "Continue to sign in"
-msgstr "Oturum açmaya devam et"
+msgstr "Girişe devam et"
 
-msgid "Workspace administrator required."
-msgstr "Çalışma alanı yöneticisi yetkisi gereklidir."
+msgid "Only the workspace administrator can do this."
+msgstr "Bunu yalnızca çalışma alanı yöneticisi yapabilir."
 
 msgid "The workspace administrator cannot be removed."
 msgstr "Çalışma alanı yöneticisi çıkarılamaz."
 
-msgid "The workspace administrator changed. Reload before saving."
-msgstr "Çalışma alanı yöneticisi değişti. Kaydetmeden önce sayfayı yenileyin."
+msgid "The workspace administrator changed. Reload the page and try again."
+msgstr "Çalışma alanı yöneticisi değişti. Sayfayı yenileyip tekrar deneyin."
 
 msgid "Choose an active member of this workspace."
 msgstr "Bu çalışma alanının etkin bir üyesini seçin."
 
-msgid "The invitation is invalid or expired."
-msgstr "Davet geçersiz veya süresi dolmuş."
+msgid ""
+"This invitation is no longer valid. Ask the workspace administrator for a "
+"new one."
+msgstr ""
+"Bu davet artık geçerli değil. Çalışma alanı yöneticisinden yeni bir davet "
+"isteyin."
 
 msgid "This account already belongs to the workspace."
 msgstr "Bu hesap zaten çalışma alanının üyesi."
@@ -32,32 +36,29 @@ msgstr "Daveti kabul etmeden önce davet edilen e-posta adresini doğrulayın."
 msgid "Pyracast workspace invitation"
 msgstr "Pyracast çalışma alanı daveti"
 
-msgid "Workspace names cannot contain control or invisible characters."
-msgstr "Çalışma alanı adları kontrol veya görünmez karakter içeremez."
+msgid "The company name contains an invisible character. Type the name again."
+msgstr "Şirket adında görünmeyen bir karakter var. Adı yeniden yazın."
 
-msgid "Workspace names cannot contain web or email addresses."
-msgstr "Çalışma alanı adları web veya e-posta adresi içeremez."
+msgid "Enter the company name without a web or email address."
+msgstr "Şirket adını web veya e-posta adresi olmadan girin."
 
-msgid "A workspace name is required."
-msgstr "Çalışma alanı adı gereklidir."
+msgid "Enter the company name."
+msgstr "Şirket adını girin."
 
 msgid "Or copy this link into your browser:"
 msgstr "Ya da bu bağlantıyı tarayıcınıza kopyalayın:"
 
-msgid "Verify your email"
-msgstr "E-posta adresinizi doğrulayın"
+msgid "Your Pyracast verification code"
+msgstr "Pyracast doğrulama kodunuz"
 
 msgid "Enter this code in the Pyracast window where you requested it."
-msgstr "Bu kodu, isteği başlattığınız Pyracast penceresine girin."
-
-msgid "Confirm your email address to continue to Pyracast."
-msgstr "Pyracast'e devam etmek için e-posta adresinizi doğrulayın."
+msgstr "Bu kodu, kod istediğiniz Pyracast penceresine girin."
 
 msgid "If you did not request this, you can ignore this email."
 msgstr "Bu isteği siz yapmadıysanız bu e-postayı yok sayabilirsiniz."
 
-msgid "Reset your password"
-msgstr "Parolanızı sıfırlayın"
+msgid "Password reset code"
+msgstr "Şifre sıfırlama kodu"
 
 #, python-format
 msgid "You are invited to %(workspace)s."
@@ -71,11 +72,14 @@ msgstr ""
 "%(email)s adresiyle giriş yapın veya hesap oluşturun, ardından daveti kabul "
 "etmek için e-posta adresinizi doğrulayın."
 
-msgid ""
-"This invitation expires in seven days and grants read-only workspace access."
-msgstr ""
-"Bu davet yedi gün sonra sona erer ve çalışma alanına salt okunur erişim "
-"sağlar."
+msgid "Invited role"
+msgstr "Davet edildiğiniz rol"
+
+msgid "Invitation expires"
+msgstr "Davetin son geçerlilik zamanı"
+
+msgid "Workspace administrator"
+msgstr "Çalışma alanı yöneticisi"
 
 msgid "Workspace invitation"
 msgstr "Çalışma alanı daveti"
@@ -83,80 +87,58 @@ msgstr "Çalışma alanı daveti"
 msgid "Review invitation"
 msgstr "Daveti incele"
 
+msgctxt "account mail action"
 msgid "Reset password"
-msgstr "Parolayı sıfırla"
+msgstr "Şifreyi sıfırla"
 
-msgid "Confirm your identity"
-msgstr "Kimliğinizi doğrulayın"
-
-msgid "A reason of 1 to 500 characters is required."
-msgstr "1 ile 500 karakter arasında bir gerekçe gereklidir."
-
-msgid "Use a new request key for changed input."
-msgstr "Değiştirilen bilgiler için yeni bir talep anahtarı kullanın."
-
-msgid "Resolve or withdraw pending requests before submitting more."
-msgstr ""
-"Yeni talep göndermeden önce bekleyen talepleri sonuçlandırın veya geri "
-"çekin."
-
-msgid "Submit 1 to 100 production intervals."
-msgstr "1 ile 100 arasında üretim aralığı gönderin."
-
-msgid "The request already has a different outcome."
-msgstr "Talep zaten farklı bir sonuçla kapatıldı."
-
-msgid "The review context changed. Refresh and review again."
-msgstr "İnceleme verileri değişti. Sayfayı yenileyip yeniden inceleyin."
-
-msgid "Unknown incident request action."
-msgstr "Bilinmeyen kesinti talebi işlemi."
+msgid "Enter a reason of at most 500 characters."
+msgstr "En fazla 500 karakterlik bir gerekçe girin."
 
 msgid ""
-"Incident identity and expected revision are required for existing incidents."
+"Too many of your change requests are waiting for approval. Withdraw one or "
+"wait for a decision before sending another."
 msgstr ""
-"Mevcut kesintiler için kesinti kimliği ve beklenen revizyon gereklidir."
+"Onay bekleyen değişiklik talebiniz çok fazla. Yenisini göndermeden önce "
+"birini geri çekin veya karar verilmesini bekleyin."
 
-msgid "Unsupported incident request fields."
-msgstr "Desteklenmeyen kesinti talebi alanları."
+msgid "Send 1 to 100 values in one change request."
+msgstr "Bir değişiklik talebinde 1 ile 100 arasında değer gönderin."
 
-msgid "Request numbers must be finite."
-msgstr "Talepteki sayılar sonlu olmalıdır."
-
-msgid "Incident values are required for create and update."
-msgstr "Oluşturma ve güncelleme için kesinti bilgileri gereklidir."
-
-msgid "The plant configuration changed. Submit a new request."
-msgstr "Santral yapılandırması değişti. Yeni bir talep gönderin."
-
-msgid "Workspace members submit requests; administrators edit directly."
-msgstr ""
-"Çalışma alanı üyeleri talep gönderir; yöneticiler doğrudan düzenleme yapar."
+msgid "This change request was already approved, rejected or withdrawn."
+msgstr "Bu değişiklik talebi zaten onaylandı, reddedildi veya geri çekildi."
 
 msgid ""
-"Too many sign-in attempts, or a verification code was sent recently. Try "
-"again in a few minutes."
+"This change request or the plant changed after you opened it. Reload the "
+"page and check it again."
 msgstr ""
-"Çok fazla giriş denemesi yapıldı veya kısa süre önce bir doğrulama kodu "
-"gönderildi. Birkaç dakika sonra tekrar deneyin."
+"Bu değişiklik talebi veya santral siz açtıktan sonra değişti. Sayfayı "
+"yenileyip yeniden kontrol edin."
+
+msgid ""
+"The plant's technical details changed after this change request was sent, so"
+" it cannot be approved."
+msgstr ""
+"Bu değişiklik talebi gönderildikten sonra santralin teknik bilgileri "
+"değişti; talep onaylanamaz."
+
+msgid "As the workspace administrator, make this change directly."
+msgstr "Çalışma alanı yöneticisi olarak bu değişikliği doğrudan yapın."
+
+msgid ""
+"Too many sign-in attempts, or an email code was sent a moment ago. Try again"
+" in a few minutes."
+msgstr ""
+"Çok fazla giriş denemesi yapıldı veya az önce bir e-posta kodu gönderildi. "
+"Birkaç dakika sonra tekrar deneyin."
 
 msgid "Your password was changed"
-msgstr "Parolanız değiştirildi"
-
-msgid "The password of your Pyracast account was changed."
-msgstr "Pyracast hesabınızın parolası değiştirildi."
+msgstr "Şifreniz değiştirildi"
 
 msgid "A password was set for your account"
-msgstr "Hesabınız için parola belirlendi"
-
-msgid "A password was set for your Pyracast account."
-msgstr "Pyracast hesabınız için bir parola belirlendi."
+msgstr "Hesabınız için şifre belirlendi"
 
 msgid "Your password was reset"
-msgstr "Parolanız sıfırlandı"
-
-msgid "The password of your Pyracast account was reset."
-msgstr "Pyracast hesabınızın parolası sıfırlandı."
+msgstr "Şifreniz sıfırlandı"
 
 msgid "Your email address was changed"
 msgstr "E-posta adresiniz değiştirildi"
@@ -170,53 +152,35 @@ msgstr ""
 msgid "Your email address was verified"
 msgstr "E-posta adresiniz doğrulandı"
 
-msgid "The email address of your Pyracast account was verified."
-msgstr "Pyracast hesabınızın e-posta adresi doğrulandı."
-
 msgid "An email address was removed"
 msgstr "Bir e-posta adresi kaldırıldı"
 
 msgid "%(deleted_email)s was removed from your Pyracast account."
-msgstr "%(deleted_email)s, Pyracast hesabınızdan kaldırıldı."
+msgstr "%(deleted_email)s adresi Pyracast hesabınızdan kaldırıldı."
 
-msgid "Two-factor authentication was turned on"
+msgid "Two-step verification was turned on"
 msgstr "İki adımlı doğrulama açıldı"
 
-msgid ""
-"Two-factor authentication with an authenticator app was turned on for your "
-"account."
-msgstr "Hesabınız için doğrulama uygulamasıyla iki adımlı doğrulama açıldı."
-
-msgid "Two-factor authentication was turned off"
+msgid "Two-step verification was turned off"
 msgstr "İki adımlı doğrulama kapatıldı"
-
-msgid ""
-"Two-factor authentication with an authenticator app was turned off for your "
-"account."
-msgstr ""
-"Hesabınız için doğrulama uygulamasıyla iki adımlı doğrulama kapatıldı."
 
 msgid "New recovery codes were generated"
 msgstr "Yeni kurtarma kodları oluşturuldu"
 
-msgid ""
-"New recovery codes were generated for your account. The previous codes no "
-"longer work."
-msgstr ""
-"Hesabınız için yeni kurtarma kodları oluşturuldu. Önceki kodlar artık "
-"geçerli değil."
+msgid "The previous codes no longer work."
+msgstr "Önceki kodlar artık geçerli değil."
 
-msgid "A sign-in provider was connected"
-msgstr "Bir oturum açma sağlayıcısı bağlandı"
+msgid "A %(provider)s account was connected"
+msgstr "Bir %(provider)s hesabı bağlandı"
 
-msgid "%(provider)s was connected to your Pyracast account for signing in."
-msgstr "%(provider)s, oturum açmak için Pyracast hesabınıza bağlandı."
+msgid "You can now sign in to Pyracast with this account."
+msgstr "Artık bu hesapla Pyracast'e giriş yapabilirsiniz."
 
-msgid "A sign-in provider was disconnected"
-msgstr "Bir oturum açma sağlayıcısının bağlantısı kaldırıldı"
+msgid "A %(provider)s account was disconnected"
+msgstr "Bir %(provider)s hesabının bağlantısı kaldırıldı"
 
-msgid "%(provider)s was disconnected from your Pyracast account."
-msgstr "%(provider)s bağlantısı Pyracast hesabınızdan kaldırıldı."
+msgid "You can no longer sign in to Pyracast with this account."
+msgstr "Artık bu hesapla Pyracast'e giriş yapamazsınız."
 
 msgid "Pyracast account not found"
 msgstr "Pyracast hesabı bulunamadı"
@@ -228,7 +192,7 @@ msgstr ""
 "Birisi %(email)s adresini Pyracast'te kullanmayı denedi, ancak bu adresi "
 "kullanan bir hesap yok."
 
-msgid "Create an account"
+msgid "Create account"
 msgstr "Hesap oluştur"
 
 msgid "Your Pyracast account already exists"
@@ -260,67 +224,64 @@ msgid "If you did not make this change, secure your account now:"
 msgstr "Bu değişikliği siz yapmadıysanız hesabınızı hemen güvenceye alın:"
 
 msgid "Secure your account"
-msgstr "Hesabınızı güvenceye alın"
+msgstr "Hesabı güvenceye al"
 
 msgid "This code expires in %(minutes)s minute. Do not share it."
 msgid_plural "This code expires in %(minutes)s minutes. Do not share it."
 msgstr[0] "Bu kod %(minutes)s dakika içinde sona erer. Kodu paylaşmayın."
 msgstr[1] "Bu kod %(minutes)s dakika içinde sona erer. Kodu paylaşmayın."
 
-msgid ""
-"This invitation expires in seven days and makes you the workspace "
-"administrator."
-msgstr ""
-"Bu davet yedi gün sonra sona erer ve sizi çalışma alanının yöneticisi yapar."
-
-msgid "Confirm with your authenticator to continue."
-msgstr "Devam etmek için doğrulama uygulamanızla onaylayın."
+msgid "Enter your authenticator code or a recovery code."
+msgstr "Uygulama kodunuzu veya bir kurtarma kodunu girin."
 
 msgid "Confirm your password to continue."
 msgstr "Devam etmek için şifrenizi onaylayın."
 
-msgid "Confirm with a code sent to your email address to continue."
-msgstr "Devam etmek için e-posta adresinize gönderilen kodla onaylayın."
+msgid "Confirm with an email code to continue."
+msgstr "Devam etmek için e-posta koduyla onaylayın."
 
-msgid "Your second factor was reset"
-msgstr "İki adımlı doğrulamanız sıfırlandı"
+msgid "Pyracast removed your two-step verification"
+msgstr "Pyracast iki adımlı doğrulamanızı kaldırdı"
 
-msgid ""
-"An operator removed the second factors of your Pyracast account and ended its"
-" sessions."
-msgstr ""
-"Bir operatör Pyracast hesabınızın iki adımlı doğrulama yöntemlerini kaldırdı "
-"ve oturumlarını sonlandırdı."
+msgid "You were signed out on every device. Sign in again."
+msgstr "Tüm cihazlarda çıkış yapıldı. Yeniden giriş yapın."
 
 msgid "Password sign-in is paused"
-msgstr "Parolayla oturum açma duraklatıldı"
+msgstr "Şifreyle giriş duraklatıldı"
 
-msgid "After many failed sign-in attempts, password sign-in to your Pyracast account is paused for up to 24 hours. Resetting your password ends the pause."
-msgstr "Çok sayıda başarısız oturum açma denemesinden sonra Pyracast hesabınızda parolayla oturum açma en fazla 24 saat duraklatıldı. Parolanızı sıfırlamak duraklatmayı sona erdirir."
+msgid ""
+"After many failed sign-in attempts, signing in with your password is paused for "
+"up to 24 hours. Reset your password to sign in now."
+msgstr ""
+"Çok sayıda başarısız giriş denemesi nedeniyle şifreyle giriş en fazla 24 saat "
+"duraklatıldı. Hemen giriş yapmak için şifrenizi sıfırlayın."
 
-msgid "Add at least one delivery time to turn reminders on."
-msgstr "Hatırlatmaları açmak için en az bir gönderim saati ekleyin."
+msgid "Add at least one send time to turn on the forecast email."
+msgstr "Tahmin e-postasını açmak için en az bir gönderim saati ekleyin."
 
-msgid "Use each delivery time once."
+msgid "Use each send time once."
 msgstr "Her gönderim saatini bir kez kullanın."
 
-msgid "This plant allows fewer delivery times a day."
-msgstr "Bu santral günde daha az gönderim saatine izin verir."
+msgid "Add a recipient or turn on All members."
+msgstr "Bir alıcı ekleyin veya Tüm üyeler seçeneğini açın."
 
-msgid "Add a recipient or include the workspace members."
-msgstr "Bir alıcı ekleyin veya çalışma alanı üyelerini dahil edin."
+msgid ""
+"The forecast email settings changed in the meantime. Check them and save "
+"again."
+msgstr ""
+"Tahmin e-postası ayarları bu arada değişti. Kontrol edip yeniden kaydedin."
 
-msgid "This plant allows fewer recipient addresses."
-msgstr "Bu santral daha az alıcı adresine izin verir."
+msgid "The recipients changed in the meantime. Check them and save again."
+msgstr "Alıcılar bu arada değişti. Kontrol edip yeniden kaydedin."
 
-msgid "The email reminders changed. Reload before saving."
-msgstr "E-posta hatırlatıcıları değişti. Kaydetmeden önce yeniden yükleyin."
+msgid "The forecast email can be turned on once Pyracast approves the plant."
+msgstr "Tahmin e-postası, Pyracast santrali onayladıktan sonra açılabilir."
 
-msgid "The visible recipients changed. Review them again before saving."
-msgstr "Görünür alıcılar değişti. Kaydetmeden önce yeniden gözden geçirin."
+msgid ""
+"No new forecast data is arriving for this plant. The forecast email "
+"cannot be turned on."
+msgstr ""
+"Bu santral için yeni tahmin verisi gelmiyor. Tahmin e-postası açılamıyor."
 
-msgid "Reminders can be turned on once the plant is approved."
-msgstr "Hatırlatmalar santral onaylandıktan sonra açılabilir."
-
-msgid "Reminders can be turned on once the plant's forecast provider account is enabled."
-msgstr "Hatırlatmalar santralin tahmin sağlayıcı hesabı etkinleştirildikten sonra açılabilir."
+msgid "This invitation was already accepted. Reload the list."
+msgstr "Bu davet zaten kabul edildi. Listeyi yenileyin."

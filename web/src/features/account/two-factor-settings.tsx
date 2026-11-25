@@ -14,6 +14,7 @@ import {
     type AuthenticatorRecord,
     type AuthResult,
 } from "@/lib/auth-api";
+import { contactEmail } from "@/lib/public-metadata";
 import { refreshExpiredSession } from "./security-reauthentication";
 import { StepUpPrompt, stepUpMode, useStepUp } from "./step-up";
 import { AuthenticatorSetup } from "./authenticator-setup";
@@ -64,6 +65,7 @@ export function TwoFactorSettings({
     }>();
     const writeErrorMessage = useWriteErrorMessage();
     const stepHeadingRef = useRef<HTMLHeadingElement>(null);
+    const titleRef = useRef<HTMLHeadingElement>(null);
     const errorRef = useRef<HTMLDivElement>(null);
     const inFlight = useRef(false);
     const blobUrls = useRef<Set<{ url: string; timer: number }>>(new Set());
@@ -284,7 +286,7 @@ export function TwoFactorSettings({
             }, 1000),
         };
         blobUrls.current.add(entry);
-        setNotice("codesDownloaded");
+        setNotice(undefined);
     }
 
     const facts: Facts = "facts" in view ? view.facts : {};
@@ -301,10 +303,11 @@ export function TwoFactorSettings({
     return (
         <section className="panel narrow" aria-busy={busy || undefined}>
             <div className="mfa-header">
-                <h2>{t("twoFactor")}</h2>
+                <h2 ref={titleRef} tabIndex={-1}>
+                    {t("twoFactor")}
+                </h2>
                 <TwoFactorStatusTag view={view} mfaRequired={mfaRequired} />
             </div>
-            {view.kind === "disabled" && <p>{t("authenticatorHelp")}</p>}
             {notice && (
                 <div className="notice" role="status">
                     {t(notice)}
@@ -353,7 +356,9 @@ export function TwoFactorSettings({
                 <div className="mfa-actions">
                     {mfaRequired ? (
                         <div className="notice" role="status">
-                            {t("policySetupUnavailable")}
+                            {t("policySetupUnavailable", {
+                                contact: contactEmail,
+                            })}
                         </div>
                     ) : (
                         <button
@@ -416,8 +421,9 @@ export function TwoFactorSettings({
                     onDownload={() => download(view.codes)}
                     onAcknowledge={() => {
                         setError(undefined);
-                        setNotice("recoverySavedAck");
-                        show({ kind: "enabled", facts });
+                        setNotice(undefined);
+                        setView({ kind: "enabled", facts });
+                        requestAnimationFrame(() => titleRef.current?.focus());
                     }}
                 />
             )}

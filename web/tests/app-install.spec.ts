@@ -300,8 +300,7 @@ const copy = {
         name: "English",
         plants: "Plants",
         install: "Install app",
-        browserMenu:
-            "Open the browser menu and choose the command with Install in its name, such as Install this site as an app or Install and create shortcut. In some browsers it is inside a submenu.",
+        browserMenu: "Open the browser menu and choose Install.",
         homeScreen:
             "Tap Share, then Add to Home Screen. If Share is not shown, it is in the page menu.",
         dock: "In Safari, choose File > Add to Dock.",
@@ -310,8 +309,7 @@ const copy = {
         name: "Turkish",
         plants: "Santraller",
         install: "Uygulamayı yükle",
-        browserMenu:
-            "Tarayıcı menüsünü açın ve adında yükle sözcüğü geçen komutu seçin; örneğin Bu siteyi uygulama olarak yükleyin ya da Yükle ve kısayol oluştur. Bazı tarayıcılarda bu komut bir alt menüdedir.",
+        browserMenu: "Tarayıcı menüsünü açıp Yükle'yi seçin.",
         homeScreen:
             "Paylaş'a, ardından Ana Ekrana Ekle'ye dokunun. Paylaş görünmüyorsa sayfa menüsündedir.",
         dock: "Safari'de Dosya > Dock'a Ekle'yi seçin.",

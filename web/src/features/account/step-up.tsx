@@ -96,13 +96,13 @@ export function StepUpPrompt({
                       ? t("emailReauthTitle")
                       : t("reauthPasswordTitle")}
             </h3>
-            <p>
-                {pending.mode === "mfa"
-                    ? t("reauthMfaDescription")
-                    : pending.mode === "email"
-                      ? t("emailReauthDescription")
-                      : t("reauthPasswordDescription")}
-            </p>
+            {pending.mode !== "email" && (
+                <p>
+                    {pending.mode === "mfa"
+                        ? t("reauthMfaDescription")
+                        : t("reauthPasswordDescription")}
+                </p>
+            )}
             {pending.again && <Notice>{t("confirmAgain")}</Notice>}
             <ReauthenticationForm
                 key={pending.mode}

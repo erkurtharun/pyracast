@@ -14,6 +14,7 @@ from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, Wo
 from pyracast.errors import MESSAGES, ErrorCode
 from tests.support.workspaces import (
     ACCEPT,
+    ALREADY_ACCEPTED,
     PREVIEW,
     administered_workspace,
     invitation_token,
@@ -25,6 +26,10 @@ from tests.support.workspaces import (
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 
 CONTRACT_KEYS = {"code", "message", "fields", "retry_after", "request_id"}
+OWN_MESSAGES = {
+    "cancel_an_accepted_invitation": ALREADY_ACCEPTED["message"],
+    "resend_an_accepted_invitation": ALREADY_ACCEPTED["message"],
+}
 
 
 @dataclass(frozen=True)
@@ -281,7 +286,7 @@ def test_every_workspace_failure_answers_through_the_shared_error_contract(
         assert isinstance(body["message"], str)
         assert body["message"]
     else:
-        assert body["message"] == MESSAGES[code]
+        assert body["message"] == OWN_MESSAGES.get(failure, MESSAGES[code])
     if status in {429, 503}:
         assert response["Retry-After"] == str(body["retry_after"])
     else:

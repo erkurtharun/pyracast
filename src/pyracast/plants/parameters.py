@@ -20,8 +20,9 @@ if TYPE_CHECKING:
 
 TILT_MAX_DEGREES = 90
 AZIMUTH_LIMIT_DEGREES = 360
-CAPACITY_REFUSED = _("Capacities must be finite and positive.")
-ANGLE_REFUSED = _("Surface angles must be finite and inside the allowed bounds.")
+CAPACITY_REFUSED = _("Enter a number greater than zero.")
+TILT_REFUSED = _("Enter a panel tilt from 0 to 90°.")
+AZIMUTH_REFUSED = _("Enter a panel azimuth of at least 0° and less than 360°.")
 NUMBERS = (
     "dc_capacity_mw",
     "inverter_capacity_mw",
@@ -72,16 +73,16 @@ class PlantParameters:
             if not (optional and value is None) and not (_finite(value) and value > 0):
                 _refuse(field, CAPACITY_REFUSED)
         if self.measurement_basis not in MeasurementBasis.values:
-            _refuse("measurement_basis", _("Unsupported meter basis."))
+            _refuse("measurement_basis", _("Choose a meter point."))
         if self.mounting_type not in MountingType.values:
-            _refuse("mounting_type", _("Unsupported mounting type."))
+            _refuse("mounting_type", _("Choose a mounting."))
         tilt, azimuth = self.surface_tilt_degrees, self.surface_azimuth_degrees
         if tilt is not None and not (_finite(tilt) and 0 <= tilt <= TILT_MAX_DEGREES):
-            _refuse("surface_tilt_degrees", ANGLE_REFUSED)
+            _refuse("surface_tilt_degrees", TILT_REFUSED)
         if azimuth is not None and not (_finite(azimuth) and 0 <= azimuth < AZIMUTH_LIMIT_DEGREES):
-            _refuse("surface_azimuth_degrees", ANGLE_REFUSED)
+            _refuse("surface_azimuth_degrees", AZIMUTH_REFUSED)
         if self.mounting_type != MountingType.FIXED and (tilt is not None or azimuth is not None):
-            _refuse("mounting_type", _("Only fixed mounting permits surface angles."))
+            _refuse("mounting_type", _("Enter panel angles only for fixed mounting."))
         for field in NUMBERS:
             object.__setattr__(self, field, without_negative_zero(getattr(self, field)))
 

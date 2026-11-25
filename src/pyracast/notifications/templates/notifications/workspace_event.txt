@@ -1,8 +1,12 @@
-{% load i18n %}{% autoescape off %}Pyracast
+{% autoescape off %}Pyracast
+
+{{ title }}
 
 {{ sentence }}
-{% if reason %}
-{% translate "Reason" %}: {{ reason }}
+{% if details %}
+{% for label, value in details %}{{ label }}: {{ value }}
+{% endfor %}{% endif %}{% if next_step %}
+{{ next_step }}
 {% endif %}
 {{ action_label }}: {{ action_url }}
 

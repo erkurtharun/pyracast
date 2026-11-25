@@ -9,6 +9,9 @@ from pyracast.accounts.models import Tenant
 from pyracast.db import choices_check, json_shape_check
 
 NAME_MAX_LENGTH = 200
+NAME_INVISIBLE_CHARACTER = gettext_lazy(
+    "The plant name contains an invisible character. Type the name again."
+)
 
 
 class RegionStatus(models.TextChoices):

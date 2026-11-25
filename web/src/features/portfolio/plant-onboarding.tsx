@@ -4,10 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import type { Site } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { ApiError, displayMessage } from "@/lib/api/errors";
+import { writesStarted } from "@/lib/api/writes";
 import { useApiList, useRefresh } from "@/lib/api/query";
+import { MISSING } from "@/lib/format/number";
 import { deviceZone } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
-import { useLeaveGuard } from "@/lib/leave-guard";
+import { useLeaveGuard, useSubmissionGuard } from "@/lib/leave-guard";
 import type { components } from "@/lib/schema";
 import {
     Field,
@@ -39,7 +41,7 @@ type Trashed = components["schemas"]["TrashedRegionOutput"];
 type LocationRefusal = components["schemas"]["LocationRefusal"];
 type Submission =
     | { kind: "idle" }
-    | { kind: "saving" }
+    | { kind: "saving"; since: number }
     | { kind: "saved" }
     | {
           kind: "error";
@@ -50,7 +52,8 @@ type Submission =
 type Found = { row: Trashed; others: number };
 type Offer =
     | { kind: "none" }
-    | ({ kind: "offered" | "restoring" } & Found)
+    | ({ kind: "offered" } & Found)
+    | ({ kind: "restoring"; since: number } & Found)
     | ({ kind: "failed"; message: string } & Found);
 
 const stepLabels = {
@@ -117,12 +120,19 @@ function Wizard({
     onOpen,
 }: WizardProps & { existing?: Site; trashed: readonly Trashed[] }) {
     const t = useTranslations("PlantOnboarding");
+    const decision = useTranslations("PlantWorkspace");
+    const common = useTranslations("Common");
     const writeErrorMessage = useWriteErrorMessage();
     const format = useFormat();
     const refresh = useRefresh();
     const forget = useForgetDeletion();
     const reviewNumber = (value: unknown) =>
         value == null || value === "" ? "" : format.number(Number(value), 6);
+    const reviewAngle = (value: unknown) => {
+        const shown = reviewNumber(value);
+        return shown ? `${shown}°` : MISSING;
+    };
+    const refused = existing?.status === "rejected";
     const steps = onboardingSteps(!!existing);
     const last = steps.length - 1;
     const [step, setStep] = useState(0);
@@ -165,7 +175,14 @@ function Wizard({
     const saved = status.kind === "saved";
     const busy = saving || saved || offer.kind === "restoring";
     const [entered, setEntered] = useState(false);
-    const release = useLeaveGuard(!saved && (entered || busy));
+    useSubmissionGuard(
+        status.kind === "saving"
+            ? status.since
+            : offer.kind === "restoring"
+              ? offer.since
+              : null,
+    );
+    useLeaveGuard(!busy && entered);
     const fields = status.kind === "error" ? status.fields : {};
     const holder = status.kind === "error" ? status.holder : null;
     const failure =
@@ -216,7 +233,7 @@ function Wizard({
     async function restore(found: Found) {
         if (running.current) return;
         running.current = true;
-        setOffer({ ...found, kind: "restoring" });
+        setOffer({ ...found, kind: "restoring", since: writesStarted() });
         try {
             await api.post(
                 "/api/tenants/{tenant_id}/regions/{region_id}/restore/",
@@ -233,7 +250,6 @@ function Wizard({
         }
         forget(found.row.id);
         setStatus({ kind: "saved" });
-        release();
         await refresh.workspace(tenant);
         running.current = false;
         if (open.current) onOpen(found.row.id);
@@ -241,7 +257,7 @@ function Wizard({
     async function submit(data: FormData) {
         if (running.current) return;
         running.current = true;
-        setStatus({ kind: "saving" });
+        setStatus({ kind: "saving", since: writesStarted() });
         try {
             const body = configurationInput(data);
             const site = existing
@@ -276,7 +292,6 @@ function Wizard({
                   });
             running.current = false;
             setStatus({ kind: "saved" });
-            release();
             if (open.current) onCreated(site);
         } catch (error) {
             running.current = false;
@@ -300,11 +315,17 @@ function Wizard({
                             ? t("completePlantSetup")
                             : t("addASolarPlant")}
                     </h2>
-                    <p>
-                        {existing?.status === "rejected"
-                            ? t("rejectedSetup")
-                            : t("description")}
-                    </p>
+                    {existing && refused ? (
+                        <>
+                            <p>{decision("rejectedNotice")}</p>
+                            {existing.review_reason && (
+                                <p>{existing.review_reason}</p>
+                            )}
+                            <p>{decision("resubmitHelp")}</p>
+                        </>
+                    ) : (
+                        <p>{t("description")}</p>
+                    )}
                     {existing && (
                         <p className="fine">
                             {t("keptLocation", {
@@ -390,7 +411,6 @@ function Wizard({
                                         label={t("longitude")}
                                     />
                                 </div>
-                                <p className="fine">{t("locationHelp")}</p>
                                 {offer.kind !== "none" && (
                                     <div
                                         className="notice"
@@ -492,22 +512,16 @@ function Wizard({
                                 <div>
                                     <dt>{t("dcNameplate")}</dt>
                                     <dd>
-                                        {t("power", {
-                                            value: reviewNumber(
-                                                review.dc_capacity_mw,
-                                            ),
-                                        })}
+                                        {reviewNumber(review.dc_capacity_mw)}
                                     </dd>
                                 </div>
                                 <div>
                                     <dt>{t("inverterACCapacity")}</dt>
                                     <dd>
                                         {review.inverter_capacity_mw
-                                            ? t("power", {
-                                                  value: reviewNumber(
-                                                      review.inverter_capacity_mw,
-                                                  ),
-                                              })
+                                            ? reviewNumber(
+                                                  review.inverter_capacity_mw,
+                                              )
                                             : t("unknown")}
                                     </dd>
                                 </div>
@@ -515,11 +529,9 @@ function Wizard({
                                     <dt>{t("gridExportLimit")}</dt>
                                     <dd>
                                         {review.export_limit_mw
-                                            ? t("power", {
-                                                  value: reviewNumber(
-                                                      review.export_limit_mw,
-                                                  ),
-                                              })
+                                            ? reviewNumber(
+                                                  review.export_limit_mw,
+                                              )
                                             : t("unknown")}
                                     </dd>
                                 </div>
@@ -543,20 +555,22 @@ function Wizard({
                                               : t("mountingUnknown")}
                                         {review.mounting_type === "fixed"
                                             ? t("geometry", {
-                                                  tilt:
-                                                      reviewNumber(
-                                                          review.surface_tilt_degrees,
-                                                      ) || t("unknownGeometry"),
-                                                  azimuth:
-                                                      reviewNumber(
-                                                          review.surface_azimuth_degrees,
-                                                      ) || t("unknownGeometry"),
+                                                  tilt: reviewAngle(
+                                                      review.surface_tilt_degrees,
+                                                  ),
+                                                  azimuth: reviewAngle(
+                                                      review.surface_azimuth_degrees,
+                                                  ),
                                               })
                                             : ""}
                                     </dd>
                                 </div>
                             </dl>
-                            <Notice>{t("approvalNotice")}</Notice>
+                            <Notice>
+                                {refused
+                                    ? t("resubmitAfterSave")
+                                    : t("approvalNotice")}
+                            </Notice>
                         </div>
                         <div className="form-footer onboarding-actions">
                             {step > 0 && (
@@ -569,11 +583,15 @@ function Wizard({
                                 </button>
                             )}
                             <button className="button" type="submit">
-                                {saving
-                                    ? t("submitting")
-                                    : step === last
-                                      ? t("submitPlantForApproval")
-                                      : t("continue")}
+                                {step < last
+                                    ? t("continue")
+                                    : refused
+                                      ? saving
+                                          ? common("saving")
+                                          : decision("saveConfiguration")
+                                      : saving
+                                        ? t("submitting")
+                                        : t("submitPlantForApproval")}
                             </button>
                         </div>
                     </fieldset>

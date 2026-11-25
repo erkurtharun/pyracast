@@ -13,6 +13,7 @@ import {
     markDocument,
     openInvitations,
     outstandingSessionReads,
+    recordLeaving,
     refuseReload,
     secondAccount,
     serveSession,
@@ -721,6 +722,31 @@ test("Try again keeps the saved-figures notice instead of the sign-in form until
     await expect.poll(() => readCopy(page)).toEqual(absent);
 });
 
+test("another person's sign-in over a cleared copy reloads the page only once the copy's deletion is answered, so the flag is forgotten", async ({
+    page,
+}) => {
+    await refusedSignIn(page);
+    const deletion = await blockDeletion(page);
+    await markDocument(page);
+    const leaving = await recordLeaving(page);
+    await pauseClock(page);
+    await tryAgain(page).click();
+    await expect.poll(deletion.asked).toBe(true);
+    await expect(
+        page.getByRole("progressbar", { name: "Loading…" }),
+    ).toBeVisible();
+    expect(await isMarked(page)).toBe(true);
+    expect(await leaving()).toBe(false);
+    const loaded = page.waitForEvent("load");
+    await deletion.release();
+    await loaded;
+    expect(await isMarked(page)).toBe(false);
+    expect(await leaving()).toBe(true);
+    await page.clock.resume();
+    await expect(plants(page)).toBeVisible();
+    expect(await readCopy(page)).toEqual(absent);
+});
+
 test("a Try again whose session read fails shows that failure and Try again instead of the sign-in form", async ({
     page,
 }) => {
@@ -1278,10 +1304,10 @@ test("a covered window with saved figures offers them and asks before it leaves 
     const now = await page.evaluate(() => Date.now());
     await page.clock.pauseAt(now + idleLimit + tick);
     await expect(
-        page.getByRole("heading", { name: "Could not confirm your session" }),
+        page.getByRole("heading", { name: "Pyracast cannot be reached" }),
     ).toBeVisible();
     const showSaved = page.getByRole("button", {
-        name: "Show saved figures",
+        name: "Show last loaded figures",
         exact: true,
     });
     const questions: string[] = [];

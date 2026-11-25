@@ -2,7 +2,6 @@
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 import type { Region } from "@/lib/api";
-import { useFormat } from "@/lib/format/use-format";
 import { isLanguage, type Language } from "@/i18n/language";
 import { CheckboxField, Select } from "@/ui/form";
 import { Notice } from "@/ui/ui";
@@ -89,13 +88,7 @@ function DeliveryTimes({
                 {t("addTime")}
             </button>
             {limit != null && (
-                <span className="fine">
-                    {" "}
-                    {t("quotaCount", {
-                        count: rows.filter((row) => row.text).length,
-                        limit,
-                    })}
-                </span>
+                <span className="fine"> {t("dailyLimit", { limit })}</span>
             )}
         </fieldset>
     );
@@ -115,8 +108,6 @@ export function ReminderFields({
     children: ReactNode;
 }) {
     const t = useTranslations("Reminders");
-    const format = useFormat();
-    const limit = answer.daily_reminder_limit;
     return (
         <>
             <CheckboxField
@@ -130,7 +121,7 @@ export function ReminderFields({
             )}
             <DeliveryTimes
                 rows={fields.times}
-                limit={limit}
+                limit={answer.daily_reminder_limit}
                 change={change.times}
             />
             {children}
@@ -147,14 +138,6 @@ export function ReminderFields({
                 <option value="en">English</option>
                 <option value="tr">Türkçe</option>
             </Select>
-            <details>
-                <summary>{t("reminderDetails")}</summary>
-                <p className="fine">
-                    {t("reminderPolicy", {
-                        limit: limit == null ? "?" : format.number(limit),
-                    })}
-                </p>
-            </details>
         </>
     );
 }

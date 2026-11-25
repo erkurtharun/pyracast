@@ -106,7 +106,6 @@ export function ForecastSection({
                         <option value="60">{t("minutes60")}</option>
                     </Select>
                 )}
-                <span className="fine">{t("localDates")}</span>
             </div>
             {clampDate(date, bounds) !== date ? (
                 <Notice>{t("selectDateInRange", bounds)}</Notice>

@@ -36,7 +36,7 @@ const providers = [
     {
         id: "google",
         origin: "https://accounts.google.com",
-        login: "Continue with Google",
+        login: "Sign in with Google",
         connect: "Connect Google",
     },
     {
