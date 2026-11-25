@@ -252,7 +252,6 @@ export type Producers = Readonly<Record<string, readonly Producer[]>>;
 
 // Each code family's producers, from the repository root; a code no producer yields labels nothing.
 const PRODUCERS: Producers = {
-    "Calibrations.values": ["src/pyracast/plants/numerics.py"],
     "Calibrations.status_messages": [
         { module: "src/pyracast/plants/numerics.py", call: "FitResult" },
         {

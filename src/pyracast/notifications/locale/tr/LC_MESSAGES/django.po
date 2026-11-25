@@ -283,3 +283,6 @@ msgstr ""
 
 msgid "Open recycle bin"
 msgstr "Geri dönüşüm kutusunu aç"
+
+msgid "forecast email settings"
+msgstr "tahmin e-postası ayarları"

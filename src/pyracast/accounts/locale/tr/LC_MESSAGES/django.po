@@ -285,3 +285,18 @@ msgstr ""
 
 msgid "This invitation was already accepted. Reload the list."
 msgstr "Bu davet zaten kabul edildi. Listeyi yenileyin."
+
+msgid "Previous workspace administrator"
+msgstr "Önceki çalışma alanı yöneticisi"
+
+msgid "workspace administrator change"
+msgstr "çalışma alanı yöneticisi değişikliği"
+
+msgid "workspace administrator changes"
+msgstr "çalışma alanı yöneticisi değişiklikleri"
+
+msgid "Workspace administrator role received"
+msgstr "Çalışma alanı yöneticisi rolü alındı"
+
+msgid "Workspace administrator role moved away"
+msgstr "Çalışma alanı yöneticisi rolü devredildi"

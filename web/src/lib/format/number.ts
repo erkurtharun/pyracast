@@ -10,6 +10,22 @@ export function formatNumber(
         : MISSING;
 }
 
+export function formatSigned(
+    locale: string,
+    value: unknown,
+    fractionDigits: number,
+): string {
+    return typeof value === "number" && Number.isFinite(value)
+        ? new Intl.NumberFormat(locale, {
+              minimumFractionDigits: fractionDigits,
+              maximumFractionDigits: fractionDigits,
+              signDisplay: "exceptZero",
+          })
+              .format(value)
+              .replace("-", "−")
+        : MISSING;
+}
+
 export function formatSignificant(
     locale: string,
     value: unknown,

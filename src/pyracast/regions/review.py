@@ -29,7 +29,7 @@ STATUS_CHANGED = gettext_lazy(
     "The review status changed after this page opened. Reload the plant and review it again."
 )
 SETUP_CHANGED = gettext_lazy(
-    "The plant setup changed after this page opened. Reload the plant and review it again."
+    "The plant changed after this page opened. Reload the plant and review it again."
 )
 REVIEW_DECISIONS = (
     AuditAction.REGION_APPROVED,

@@ -61,7 +61,10 @@ def test_lowering_the_limit_below_a_plant_s_list_asks_for_confirmation_naming_it
     page = refused.content.decode()
     assert "Crowded park" in page
     assert "Tenant" in page
-    assert "pauses reminders" in page
+    assert (
+        "<li>This limit pauses the forecast email of the plants listed above. "
+        "Confirm to save it.</li>"
+    ) in page
     assert confirmed.status_code == 302
     assert limit() == 2
     assert "Crowded park" in after[after.index('id="over-limit-title"') :]

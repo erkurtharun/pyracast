@@ -242,5 +242,5 @@ class PlatformAdminSite(admin.AdminSite):
 
 
 site = PlatformAdminSite(name="admin")
-site.site_header = gettext_lazy("Pyracast operations")
+site.site_header = site.site_title = site.index_title = gettext_lazy("Pyracast console")
 register_records(site)

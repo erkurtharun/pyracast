@@ -68,7 +68,7 @@ def test_historical_health_reasons_are_visible_and_link_to_the_matching_records(
     text = overview.content.decode()
     assert "Recent outcomes need review" in text
     assert "Failed production collection" in text
-    assert "Notifications prepared with partial forecasts" in text
+    assert "Forecast emails prepared with partial forecasts" in text
     assert "Scheduled in the last 24 hours" in text
     for check in summary.checks:
         assert check.action_url in text

@@ -287,8 +287,8 @@ def _epias(page: PlantPage, operation: Callable[[Plant], Notice]) -> Notice | No
             if isinstance(error, DomainError)
             and error.code == ErrorCode.EPIAS_PLANT_IDENTITY_MISMATCH
             else _(
-                "The plant configuration is unavailable or changed. "
-                "Approve its current setup and reload before connecting."
+                "The plant's technical details are unavailable or changed. "
+                "Approve the current technical details and reload before connecting."
             ),
         )
     return None
@@ -401,7 +401,10 @@ def plant(request: HttpRequest, region_id: int, *, site: PlatformAdminSite) -> H
 
 
 DECISION_NOTICES = {
-    "reject": (gettext_lazy("Plant rejected."), gettext_lazy("This plant is already rejected.")),
+    "reject": (
+        gettext_lazy("Plant not approved."),
+        gettext_lazy("This plant is already marked not approved."),
+    ),
     "suspend": (
         gettext_lazy("Plant suspended."),
         gettext_lazy("This plant is already suspended."),

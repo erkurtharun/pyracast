@@ -264,7 +264,7 @@ def test_details_of_an_approved_plant_are_saved_as_a_new_configuration() -> None
         operator,
     )
     assert Region.objects.get(pk=system.region.pk).status == RegionStatus.APPROVED
-    assert "Plant details saved." in client.get(response["Location"]).content.decode()
+    assert "Plant saved." in client.get(response["Location"]).content.decode()
     unchanged = client.post(url, details(client, system.region, dc_capacity_mw="140"))
     assert unchanged.status_code == 302
     assert "Nothing changed." in client.get(unchanged["Location"]).content.decode()
@@ -398,7 +398,7 @@ def test_a_waiting_location_request_blocks_a_correction_and_is_linked() -> None:
     url = f"/admin/plants/{system.region.pk}/details/"
     link = f'href="/admin/plants/{system.region.pk}/#location-title"'
     page = client.get(url).content.decode()
-    assert "A location request is waiting for review." in page
+    assert "A location change request is waiting for review." in page
     assert link in page
     refused = client.post(url, details(client, system.region, latitude="40.5"))
     assert refused.status_code == 400

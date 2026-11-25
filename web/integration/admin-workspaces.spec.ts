@@ -28,7 +28,7 @@ test("a platform administrator creates a workspace, adds a plant and manages mem
     await expect(page.getByLabel(/^Workspace name/)).toBeFocused();
     await page.getByLabel(/^Workspace name/).fill("Browser console customer");
     await page
-        .getByLabel(/^Administrator email/)
+        .getByLabel(/^Workspace administrator email/)
         .fill("browser-owner@example.test");
     await page.getByRole("button", { name: "Create workspace" }).click();
     await expect(
@@ -86,13 +86,13 @@ test("a platform administrator creates a workspace, adds a plant and manages mem
     }
     await expect(latitude).toHaveValue("41,0082");
     await expect(page.getByLabel(/^Longitude/)).toHaveValue("28,9784");
-    await page.getByLabel(/^DC capacity/).fill("12");
-    const tilt = page.getByLabel(/^Tilt/);
+    await page.getByLabel(/^Panel capacity/).fill("12");
+    const tilt = page.getByLabel(/^Panel tilt/);
     await expect(tilt).toBeHidden();
-    await page.getByLabel(/^Mounting type/).selectOption("fixed");
+    await page.getByLabel(/^Mounting/).selectOption("fixed");
     await expect(tilt).toBeVisible();
     await tilt.fill("25");
-    await page.getByLabel(/^Azimuth/).fill("180");
+    await page.getByLabel(/^Panel azimuth/).fill("180");
     await checkPage(page, testInfo, "console-plant-form-mobile");
     await page.getByRole("button", { name: "Add plant" }).click();
     await expect(page).toHaveURL(/\/admin\/plants\/\d+\/$/);
@@ -102,9 +102,9 @@ test("a platform administrator creates a workspace, adds a plant and manages mem
             .filter({ hasText: "Plant Browser console plant created." }),
     ).toBeVisible();
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.getByRole("link", { name: "Edit details" }).click();
+    await page.getByRole("link", { name: "Edit plant" }).click();
     await expect(
-        page.getByRole("heading", { name: "Edit plant details", exact: true }),
+        page.getByRole("heading", { name: "Edit plant", exact: true }),
     ).toBeVisible();
     await checkPage(page, testInfo, "console-plant-details-desktop");
 
@@ -119,10 +119,12 @@ test("a platform administrator creates a workspace, adds a plant and manages mem
         }),
     ).toBeVisible();
     const member = process.env.BROWSER_REMOVABLE_MEMBER!;
-    await page.getByRole("link", { name: `Remove ${member}` }).click();
+    await page
+        .getByRole("link", { name: `Remove from workspace ${member}` })
+        .click();
     await page.setViewportSize({ width: 320, height: 800 });
     await checkPage(page, testInfo, "console-member-removal-mobile");
-    await page.getByRole("button", { name: "Remove member" }).click();
+    await page.getByRole("button", { name: "Remove from workspace" }).click();
     await expect(
         page
             .getByRole("status")

@@ -14,8 +14,8 @@ from pyracast.regions.models import NAME_MAX_LENGTH, active_region
 
 
 class MeasurementBasis(models.TextChoices):
-    NET_EXPORT = "net_export", gettext_lazy("Net export")
-    AC_GENERATION = "ac_generation", gettext_lazy("AC generation")
+    NET_EXPORT = "net_export", gettext_lazy("Energy delivered to the grid")
+    AC_GENERATION = "ac_generation", gettext_lazy("Inverter output")
 
 
 class MountingType(models.TextChoices):
@@ -55,7 +55,10 @@ class CalibrationAssessment(models.TextChoices):
 
 class PlantEventAction(models.TextChoices):
     SUBMISSION_SAVED = "submission_saved", "Submission saved"
-    CONFIGURATION_CREATED = "configuration_created", "Configuration created"
+    CONFIGURATION_CREATED = (
+        "configuration_created",
+        gettext_lazy("Technical details revision created"),
+    )
     PLANT_RENAMED = "plant_renamed", "Plant renamed"
     OBSERVATIONS_IMPORTED = "observations_imported", "Observations imported"
     PRODUCTION_CHANGED = "production_changed", "Production changed"
@@ -216,22 +219,30 @@ class PlantConfiguration(models.Model):
     plant = models.ForeignKey(Plant, on_delete=models.PROTECT, related_name="configurations")
     region = models.ForeignKey("regions.Region", on_delete=models.PROTECT)
     binding = models.ForeignKey("connections.SiteBinding", on_delete=models.PROTECT)
-    revision = models.PositiveIntegerField()
-    dc_capacity_mw = models.FloatField()
-    inverter_capacity_mw = models.FloatField(null=True)
-    export_limit_mw = models.FloatField(null=True)
+    revision = models.PositiveIntegerField(gettext_lazy("Technical details revision"))
+    dc_capacity_mw = models.FloatField(gettext_lazy("Panel capacity (MWp)"))
+    inverter_capacity_mw = models.FloatField(gettext_lazy("Inverter capacity (MW AC)"), null=True)
+    export_limit_mw = models.FloatField(gettext_lazy("Grid export limit (MW)"), null=True)
     mounting_type = models.CharField(
-        max_length=10, choices=MountingType, default=MountingType.UNKNOWN
+        gettext_lazy("Mounting"),
+        max_length=10,
+        choices=MountingType,
+        default=MountingType.UNKNOWN,
     )
-    surface_tilt_degrees = models.FloatField(null=True)
-    surface_azimuth_degrees = models.FloatField(null=True)
+    surface_tilt_degrees = models.FloatField(gettext_lazy("Panel tilt (°)"), null=True)
+    surface_azimuth_degrees = models.FloatField(gettext_lazy("Panel azimuth (°)"), null=True)
     measurement_basis = models.CharField(
-        max_length=20, choices=MeasurementBasis, default=MeasurementBasis.NET_EXPORT
+        gettext_lazy("Meter point"),
+        max_length=20,
+        choices=MeasurementBasis,
+        default=MeasurementBasis.NET_EXPORT,
     )
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        verbose_name = gettext_lazy("technical details")
+        verbose_name_plural = gettext_lazy("technical details")
         constraints = (
             models.UniqueConstraint(
                 fields=("plant", "revision"), name="%(class)s_plant_revision_uniq"

@@ -1,19 +1,19 @@
 {% extends "admin/workspace/form.html" %}
 {% load i18n %}
 {% block backlink %}<a class="back-link" href="{% url 'admin:workspace_tenant' tenant.pk %}">{{ tenant.name }}</a>{% endblock %}
-{% block lead %}<p class="lead">{% translate "The administrator can invite members and edit this workspace. Other members submit changes for the administrator's approval." %}</p>{% endblock %}
+{% block lead %}<p class="lead">{% translate "The workspace administrator can invite members and edit this workspace. Members send change requests for approval." %}</p>{% endblock %}
 {% block notes %}
   <section class="callout" aria-labelledby="impact-title">
     <h2 id="impact-title">{% translate "What a change does" %}</h2>
     <ul class="plain-list">
-      {% if impact.administrator %}<li>{% blocktranslate with member=impact.administrator.email|default:impact.administrator.username %}{{ member }} becomes a viewer.{% endblocktranslate %}{% if not impact.administrator.is_active %} <span class="badge badge--suspended">{% translate "Inactive account" %}</span>{% endif %}</li>{% endif %}
-      <li>{% if impact.plants %}{% translate "Automatic calibration stops on these plants; the new administrator can turn it on again:" %} {{ impact.plants|join:", " }}{% else %}{% translate "No plant uses automatic calibration." %}{% endif %}</li>
-      <li>{% if impact.invitations %}{% translate "These open invitations are revoked:" %} {{ impact.invitations|join:", " }}{% else %}{% translate "No invitation is open." %}{% endif %}</li>
+      {% if impact.administrator %}<li>{% blocktranslate with member=impact.administrator.email|default:impact.administrator.username %}New role of {{ member }}: Member{% endblocktranslate %}{% if not impact.administrator.is_active %} <span class="badge badge--suspended">{% translate "Inactive account" %}</span>{% endif %}</li>{% endif %}
+      <li>{% if impact.plants %}{% translate "Automatic calibration stops on these plants; the new workspace administrator can turn it on again:" %} {{ impact.plants|join:", " }}{% else %}{% translate "No plant uses automatic calibration." %}{% endif %}</li>
+      <li>{% if impact.invitations %}{% translate "These open invitations are withdrawn:" %} {{ impact.invitations|join:", " }}{% else %}{% translate "No invitation is open." %}{% endif %}</li>
     </ul>
   </section>
 {% endblock %}
 {% block fields %}
   {% include "admin/workspace/field.html" with field=form.administrator %}
 {% endblock %}
-{% block submit %}{% translate "Change administrator" %}{% endblock %}
+{% block submit %}{% translate "Change workspace administrator" %}{% endblock %}
 {% block cancel %}{% url 'admin:workspace_tenant' tenant.pk %}{% endblock %}

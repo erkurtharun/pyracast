@@ -2,7 +2,7 @@
 {% load i18n %}
 {% block backlink %}<a class="back-link" href="{% url 'admin:workspace_tenant' tenant.pk %}">{{ tenant.name }}</a>{% endblock %}
 {% block lead %}<p class="lead">{% translate "The invitation is valid for seven days and can be accepted only with this email address." %}</p>{% endblock %}
-{% block notes %}{% if needs_administrator %}<p class="callout">{% translate "This workspace has no administrator. Invite the administrator first." %}</p>{% endif %}{% endblock %}
+{% block notes %}{% if needs_administrator %}<p class="callout">{% translate "Invite the workspace administrator first." %}</p>{% endif %}{% endblock %}
 {% block fields %}
   {% include "admin/workspace/field.html" with field=form.email %}
   {% if offers_administrator %}{% include "admin/workspace/field.html" with field=form.role %}{% endif %}

@@ -4,6 +4,7 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.utils.text import capfirst
 from django.utils.translation import gettext_lazy
 
 from pyracast.accounts.models import Language, Membership
@@ -21,15 +22,17 @@ class NotificationSettings(models.Model):
     max_recipients = models.PositiveSmallIntegerField(
         default=5,
         validators=[MinValueValidator(1), MaxValueValidator(MAX_RECIPIENT_LIMIT)],
-        help_text=(
-            "Global recipient limit per plant reminder schedule. Lowering it pauses reminders "
-            "at plants exceeding the limit until their recipient lists are revised."
+        verbose_name=gettext_lazy("Recipients per plant"),
+        help_text=gettext_lazy(
+            "Lowering the limit pauses the forecast email of plants whose saved recipient list "
+            "is over it. The lists are kept. Once a list is shortened or the limit is raised, "
+            "the next forecast emails are sent at their scheduled times."
         ),
     )
 
     class Meta:
-        verbose_name = "email reminder settings"
-        verbose_name_plural = "email reminder settings"
+        verbose_name = gettext_lazy("forecast email settings")
+        verbose_name_plural = gettext_lazy("forecast email settings")
         constraints = (
             models.CheckConstraint(condition=models.Q(pk=1), name="%(class)s_id_chk"),
             models.CheckConstraint(
@@ -39,7 +42,7 @@ class NotificationSettings(models.Model):
         )
 
     def __str__(self) -> str:
-        return "Email reminder settings"
+        return capfirst(str(self._meta.verbose_name))
 
 
 class RecipientRole(models.TextChoices):
@@ -74,7 +77,7 @@ class ReminderSchedule(models.Model):
         )
 
     def __str__(self) -> str:
-        return f"Reminders of region {self.region_id}"
+        return f"Forecast email of region {self.region_id}"
 
 
 class Cardinality(models.Func):
@@ -176,7 +179,7 @@ class NotificationDeliveryError(models.TextChoices):
     NO_RECIPIENTS = "no_recipients", gettext_lazy("No recipients")
     INVALID_RECIPIENT = "invalid_recipient", gettext_lazy("Invalid recipient")
     RECIPIENT_LIMIT_EXCEEDED = "recipient_limit_exceeded", gettext_lazy("Recipient limit exceeded")
-    DEFINITION_TRASHED = "definition_trashed", gettext_lazy("Definition trashed")
+    DEFINITION_TRASHED = "definition_trashed", gettext_lazy("Plant in recycle bin")
     INTERRUPTED_SEND = "interrupted_send", gettext_lazy("Interrupted during sending")
     INTERRUPTED_CONNECTION = "interrupted_connection", gettext_lazy("Interrupted before sending")
     # Every MailFailure code is a member: send failures store error.code here.
@@ -220,12 +223,12 @@ class PreparedMessageKind(models.TextChoices):
 
 
 class NotificationDeliveryStatus(models.TextChoices):
-    PENDING = "pending", gettext_lazy("Pending")
-    RETRY = "retry", gettext_lazy("Retry")
+    PENDING = "pending", gettext_lazy("Preparing")
+    RETRY = "retry", gettext_lazy("Will retry")
     SENDING = "sending", gettext_lazy("Sending")
     SENT = "sent", gettext_lazy("Sent")
-    FAILED = "failed", gettext_lazy("Failed")
-    UNCERTAIN = "uncertain", gettext_lazy("Uncertain")
+    FAILED = "failed", gettext_lazy("Not sent")
+    UNCERTAIN = "uncertain", gettext_lazy("Not known whether sent")
     SKIPPED = "skipped", gettext_lazy("Skipped")
     CANCELLED = "cancelled", gettext_lazy("Cancelled")
 
@@ -308,7 +311,7 @@ class NotificationDelivery(models.Model):
         )
 
     def __str__(self) -> str:
-        return f"Delivery {self.pk} of schedule {self.schedule_id}: {self.status}"
+        return f"Forecast email {self.pk} of schedule {self.schedule_id}: {self.status}"
 
 
 class DeliveryRecipient(models.Model):
