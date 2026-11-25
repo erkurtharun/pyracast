@@ -141,7 +141,7 @@ test("a suspended location without a plant says why its setup cannot be complete
     await page.getByRole("button", { name: /North location/ }).click();
     await expect(
         page.getByText(
-            "Pyracast suspended this plant, so its technical details cannot be changed.",
+            "The plant is suspended, so its technical details cannot change. Contact Pyracast support to resume it.",
         ),
     ).toBeVisible();
     await expect(
@@ -378,7 +378,7 @@ test("a suspended plant shows its technical details read-only with the reason", 
     await page.goto("/app/w/1/plants/11/settings/");
     await expect(
         page.getByText(
-            "Pyracast suspended this plant, so its technical details cannot be changed.",
+            "The plant is suspended, so its technical details cannot change. Contact Pyracast support to resume it.",
         ),
     ).toBeVisible();
     await expect(
@@ -1050,7 +1050,7 @@ test("a viewer opening a blocked location without a plant sees why it cannot be 
     await page.getByRole("button", { name: /North location/ }).click();
     await expect(
         page.getByText(
-            "Pyracast suspended this plant, so its technical details cannot be changed.",
+            "The plant is suspended, so its technical details cannot change. Contact Pyracast support to resume it.",
         ),
     ).toBeVisible();
     await expect(
