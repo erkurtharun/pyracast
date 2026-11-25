@@ -474,7 +474,7 @@ test("records with equal tables add their counts and a zero baseline record adds
     expect(united({})).toEqual(file(name, []));
 });
 
-test("arms that some records of a group lack are counted as partial arms", () => {
+test("an arm some records of its group lack is counted once and among the arms a record lacks", () => {
     const one = file(
         name,
         [],
@@ -708,6 +708,66 @@ test("the else arm the converter writes without a location is one arm of its gro
         });
         expect(measured.coverage.b).toEqual({ 0: [1, 2] });
         expect(measured.statistics).toEqual(statistics({}));
+    }
+});
+
+test("a group identity one record repeats unites that source's groups only on equal ranges, each keeping its own implicit else", () => {
+    const ifs = (...groups: [number, number[]][]): FileCoverage => ({
+        ...compiled([]),
+        branchMap: Object.fromEntries(
+            groups.map(([column], index) => [
+                index,
+                {
+                    type: "IfStatement",
+                    loc: span(10, column, 12, 1),
+                    locations: [
+                        span(10, column + 6, 12, 1),
+                        { start: {}, end: {} },
+                    ],
+                },
+            ]),
+        ),
+        b: Object.fromEntries(
+            groups.map(([, counts], index) => [index, counts]),
+        ),
+    });
+    const elses = (coverage: FileCoverage) =>
+        Object.values(coverage.branchMap).map(({ loc, locations }) => [
+            loc!.start.column,
+            locations!.filter(({ start }) => start?.line === undefined).length,
+        ]);
+    const onlyBaselineRepeats = union({
+        browser: { [name]: { a: ifs([4, [1, 2]]) } },
+        server: { [name]: { b: ifs([12, [0, 3]]) } },
+        baseline: { [name]: { c: ifs([4, [5, 5]], [20, [5, 5]]) } },
+    });
+    expect(onlyBaselineRepeats.coverage.b).toEqual({
+        0: [1, 2],
+        1: [0, 3],
+        2: [0, 0],
+    });
+    expect(elses(onlyBaselineRepeats.coverage)).toEqual([
+        [4, 1],
+        [12, 1],
+        [20, 1],
+    ]);
+    expect(onlyBaselineRepeats.statistics).toEqual(statistics({ groups: 1 }));
+    for (const scripts of bothOrders(
+        ifs([4, [1, 0]], [20, [0, 1]]),
+        ifs([4, [2, 0]], [16, [0, 4]]),
+    )) {
+        const bothRepeat = union({ browser: { [name]: scripts } });
+        expect(bothRepeat.coverage.b).toEqual({
+            0: [3, 0],
+            1: [0, 4],
+            2: [0, 1],
+        });
+        expect(elses(bothRepeat.coverage)).toEqual([
+            [4, 1],
+            [16, 1],
+            [20, 1],
+        ]);
+        expect(bothRepeat.statistics).toEqual(statistics({ groups: 1 }));
     }
 });
 
@@ -1145,58 +1205,87 @@ test("a report whose only browser execution came from a script that is not the b
     });
 });
 
-test("the browser capture returns each script's text the browser answers after the coverage was taken", async () => {
-    const built = `${coverageOrigin}/_next/static/chunks/late.js`;
-    const refused = `${coverageOrigin}/_next/static/chunks/refused.js`;
-    const functions = wholeScript("late();\n");
+const lateScript = `${coverageOrigin}/_next/static/chunks/late.js`;
+const refusedScript = `${coverageOrigin}/_next/static/chunks/refused.js`;
+const lateFunctions = wholeScript("late();\n");
+
+function inspectedPage(refusing: string[] = []) {
     const parsed: ((event: { scriptId: string; url: string }) => void)[] = [];
     const sent: string[] = [];
     const profile = Promise.withResolvers<{ result: object[] }>();
     const source = Promise.withResolvers<void>();
+    const closed = Promise.withResolvers<never>();
+    closed.promise.catch(() => undefined);
+    let detached = false;
+    const refused = () => Promise.reject(new Error("Target closed"));
     const session = {
         on: (_: string, listener: (typeof parsed)[number]) =>
             void parsed.push(listener),
-        detach: () => Promise.resolve(void sent.push("detach")),
+        detach: () => {
+            sent.push("detach");
+            detached = true;
+            closed.reject(new Error("Session closed"));
+            return refusing.includes("detach") ? refused() : Promise.resolve();
+        },
         send: (method: string, params?: { scriptId: string }) => {
             sent.push(`${method} ${params?.scriptId ?? ""}`.trim());
+            if (detached || refusing.includes(method)) return refused();
             if (method === "Profiler.takePreciseCoverage")
                 return profile.promise;
             if (method !== "Debugger.getScriptSource")
                 return Promise.resolve({});
-            return source.promise.then(() => {
-                if (params!.scriptId === "2") throw new Error("No script");
-                return { scriptSource: "late();\n" };
-            });
+            return Promise.race([
+                source.promise.then(() => {
+                    if (params!.scriptId === "2") throw new Error("No script");
+                    return { scriptSource: "late();\n" };
+                }),
+                closed.promise,
+            ]);
         },
     };
-    const stop = await startBrowserCoverage(session as unknown as CDPSession);
-    for (const [scriptId, url] of [
-        ["1", built],
-        ["2", refused],
-        ["3", "https://example.com/a.js"],
-    ])
-        for (const listener of parsed)
-            listener({ scriptId: scriptId!, url: url! });
-    const stopped = stop();
-    profile.resolve({
-        result: ["1", "2", "3", "4"].map((scriptId) => ({
-            scriptId,
-            url: {
-                1: built,
-                2: refused,
-                3: "https://example.com/a.js",
-            }[scriptId],
-            functions,
-        })),
+    return {
+        session: session as unknown as CDPSession,
+        sent,
+        source,
+        parse: (scripts: Record<string, string>) => {
+            for (const [scriptId, url] of Object.entries(scripts))
+                for (const listener of parsed) listener({ scriptId, url });
+        },
+        answer: (scripts: Record<string, string>) =>
+            profile.resolve({
+                result: Object.entries(scripts).map(([scriptId, url]) => ({
+                    scriptId,
+                    url,
+                    functions: lateFunctions,
+                })),
+            }),
+    };
+}
+
+test("the browser capture returns each script's text the browser answers after the coverage was taken", async () => {
+    const page = inspectedPage();
+    const stop = await startBrowserCoverage(page.session);
+    page.parse({
+        1: lateScript,
+        2: refusedScript,
+        3: "https://example.com/a.js",
     });
-    await profile.promise;
-    expect(sent).not.toContain("Profiler.stopPreciseCoverage");
-    source.resolve();
+    const stopped = stop();
+    page.answer({
+        1: lateScript,
+        2: refusedScript,
+        3: "https://example.com/a.js",
+        4: "",
+    });
+    // One turn of the event loop runs every answer the fake has already given.
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(page.sent).not.toContain("Profiler.stopPreciseCoverage");
+    page.source.resolve();
     expect(await stopped).toEqual([
-        { url: built, source: "late();\n", functions },
-        { url: refused, source: undefined, functions },
+        { url: lateScript, source: "late();\n", functions: lateFunctions },
+        { url: refusedScript, source: undefined, functions: lateFunctions },
     ]);
-    expect(sent).toEqual([
+    expect(page.sent).toEqual([
         "Profiler.enable",
         "Profiler.startPreciseCoverage",
         "Debugger.enable",
@@ -1207,6 +1296,23 @@ test("the browser capture returns each script's text the browser answers after t
         "Profiler.stopPreciseCoverage",
         "detach",
     ]);
+});
+
+test("the browser capture keeps the coverage it took when the closing page refuses to stop the profiler or to detach", async () => {
+    for (const refusing of ["Profiler.stopPreciseCoverage", "detach"]) {
+        const page = inspectedPage([refusing]);
+        const stop = await startBrowserCoverage(page.session);
+        page.parse({ 1: lateScript });
+        page.answer({ 1: lateScript });
+        page.source.resolve();
+        expect(await stop()).toEqual([
+            { url: lateScript, source: "late();\n", functions: lateFunctions },
+        ]);
+        expect(page.sent.slice(-2)).toEqual([
+            "Profiler.stopPreciseCoverage",
+            "detach",
+        ]);
+    }
 });
 
 test("only a script's last line is its map directive, so a directive-shaped line in a later template literal credits nothing", async () => {

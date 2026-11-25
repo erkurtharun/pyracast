@@ -448,8 +448,11 @@ export async function startBrowserCoverage(session: CDPSession) {
                 ),
             ),
         );
-        await session.send("Profiler.stopPreciseCoverage");
-        await session.detach();
+        // The snapshot is complete: a page the scenario closed refuses this cleanup.
+        await session
+            .send("Profiler.stopPreciseCoverage")
+            .catch(() => undefined);
+        await session.detach().catch(() => undefined);
         return result.flatMap(({ scriptId, url, functions }) =>
             texts.has(scriptId)
                 ? [{ url, source: texts.get(scriptId), functions }]
