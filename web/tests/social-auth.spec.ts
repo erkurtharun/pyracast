@@ -1163,7 +1163,7 @@ test("a failed provider return removes the kept address and shows the callback e
         "/app/?social_callback=1&error=unknown&error_process=login",
     );
     await expect(page.locator(".notice.error")).toContainText(
-        "sign in with your existing method",
+        "sign in another way",
     );
     expect(await storedReturn(page)).toBeNull();
 });
@@ -1257,7 +1257,7 @@ test("a provider sign-in whose session read fails stays at the start address wit
     await expect(page).toHaveURL("/app/");
     release.resolve();
     await expect(page.locator(".notice.error")).toContainText(
-        "sign in with your existing method",
+        "sign in another way",
     );
     await expect(page).toHaveURL("/app/");
 });
@@ -1316,7 +1316,7 @@ test("a provider sign-in that ends at email verification leaves a later password
     );
     await page.getByLabel("Company name").fill("Sunfield Energy");
     await page
-        .getByRole("button", { name: "Complete your account", exact: true })
+        .getByRole("button", { name: "Create workspace", exact: true })
         .click();
     await page.getByLabel("Email code").fill("123456");
     await page
@@ -1410,7 +1410,7 @@ test("a failed provider return without session storage shows the callback error"
         "/app/?social_callback=1&error=unknown&error_process=login",
     );
     await expect(page.locator(".notice.error")).toContainText(
-        "sign in with your existing method",
+        "sign in another way",
     );
 });
 
