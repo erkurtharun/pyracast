@@ -77,7 +77,7 @@ let signingOut = false;
 let clearTabInvitation = () => {};
 let savedStore: Promise<SavedStore> | undefined;
 let savedWork: Promise<unknown> = Promise.resolve();
-let savedAnswered: Promise<unknown> = Promise.resolve();
+const pendingAnswers = new Set<Promise<unknown>>();
 let handoffFailed = false;
 const listeners = new Set<() => void>();
 const handoffListeners = new Set<() => void>();
@@ -333,16 +333,17 @@ async function boundedStore<T>(
         withSavedStore((store) => work(store, limit)),
         limit.reached.then(() => undefined),
     ]);
-    savedAnswered = Promise.all([savedAnswered, answer]);
+    pendingAnswers.add(answer);
     try {
         return await answer;
     } finally {
+        pendingAnswers.delete(answer);
         limit.clear();
     }
 }
 
-export function savedCopyAnswered(): Promise<void> {
-    return savedAnswered.then(() => undefined);
+export async function savedCopyAnswered() {
+    await Promise.all(pendingAnswers);
 }
 
 export function startSavedCopy() {

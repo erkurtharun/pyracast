@@ -13,6 +13,7 @@ import {
     markDocument,
     openInvitations,
     outstandingSessionReads,
+    recordLeaving,
     refuseReload,
     secondAccount,
     serveSession,
@@ -727,18 +728,23 @@ test("another person's sign-in over a cleared copy reloads the page only once th
 }) => {
     await refusedSignIn(page);
     const deletion = await blockDeletion(page);
-    let released = false;
-    const reloads: boolean[] = [];
-    await page.route("**/app/", (route) => {
-        if (route.request().isNavigationRequest()) reloads.push(released);
-        return route.fallback();
-    });
+    await markDocument(page);
+    const leaving = await recordLeaving(page);
+    await pauseClock(page);
     await tryAgain(page).click();
     await expect.poll(deletion.asked).toBe(true);
-    released = true;
+    await expect(
+        page.getByRole("progressbar", { name: "Loading…" }),
+    ).toBeVisible();
+    expect(await isMarked(page)).toBe(true);
+    expect(await leaving()).toBe(false);
+    const loaded = page.waitForEvent("load");
     await deletion.release();
+    await loaded;
+    expect(await isMarked(page)).toBe(false);
+    expect(await leaving()).toBe(true);
+    await page.clock.resume();
     await expect(plants(page)).toBeVisible();
-    expect(reloads).toEqual([true]);
     expect(await readCopy(page)).toEqual(absent);
 });
 

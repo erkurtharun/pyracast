@@ -497,7 +497,6 @@ export async function callStore(page: Page, operation: keyof LoadedStore) {
         );
 }
 
-// How often a loaded store reported the copy deleted to the start that asked for it.
 export function storeDeletions(page: Page) {
     return page.evaluate(
         () =>

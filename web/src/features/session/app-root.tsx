@@ -11,7 +11,7 @@ import {
 import { displayMessage } from "@/lib/api/errors";
 import { createQueryClient, QueryOwner } from "@/lib/api/query";
 import { captureInstallPrompt } from "@/lib/install-prompt";
-import { reloadPage } from "@/lib/on-demand";
+import { reloadAfter, reloadPage } from "@/lib/on-demand";
 import { routes } from "@/lib/routes";
 import { browserErrors } from "@/i18n/browser";
 import {
@@ -300,7 +300,7 @@ function useDocumentReload(ending: boolean, signedIn: boolean) {
     useEffect(() => {
         if (!ending) return;
         if (signedIn) openProviderLanding();
-        void savedCopyAnswered().then(reloadPage);
+        return reloadAfter(savedCopyAnswered());
     }, [ending, signedIn]);
 }
 
