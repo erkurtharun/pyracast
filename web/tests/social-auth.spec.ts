@@ -1,4 +1,4 @@
-import { expect, test } from "./support/test";
+import { expect, test, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
 import {
     accountWith,
@@ -7,7 +7,7 @@ import {
     sessionIdentity,
     user,
 } from "./support/workspace";
-import { allauthErrorBody } from "./support/errors";
+import { allauthErrorBody, errorBody } from "./support/errors";
 
 const socialOnly = accountWith({ has_usable_password: false });
 
@@ -879,4 +879,486 @@ test("a disconnection answered with a refusal that is not allauth's shows an err
     await expect(
         accounts.getByRole("button", { name: "Disconnect solar@example.test" }),
     ).toBeVisible();
+});
+
+const datedForecast = "/app/w/1/plants/11/forecast/?date=2026-11-25";
+const returnKey = "pyracast.providerReturn";
+
+async function offerGoogleSignIn(page: Page) {
+    await page.clock.setFixedTime(new Date("2026-11-19T12:00:00Z"));
+    const account = await mockApi(page, { anonymous: true });
+    await page.route("**/api/auth/browser/v1/config", (route) =>
+        route.fulfill({
+            json: {
+                status: 200,
+                data: { socialaccount: { providers: [{ id: "google" }] } },
+            },
+        }),
+    );
+    await page.route("**/api/auth/browser/v1/auth/provider/redirect", (route) =>
+        route.fulfill({
+            status: 302,
+            headers: { location: "/app/?social_callback=1" },
+        }),
+    );
+    await page.route(
+        "**/api/auth/browser/v1/auth/provider/complete",
+        (route) => {
+            account.current = firstAccount;
+            return route.fulfill({
+                json: { status: 200, meta: { is_authenticated: true } },
+            });
+        },
+    );
+    return account;
+}
+
+const continueWithGoogle = (page: Page) =>
+    page.getByRole("button", { name: "Continue with Google" }).click();
+
+async function keepReturn(page: Page, address: string) {
+    await page.goto("/app/");
+    await expect(
+        page.getByRole("button", { name: "Continue with Google" }),
+    ).toBeVisible();
+    await page.evaluate(
+        ({ key, value }) => window.sessionStorage.setItem(key, value),
+        { key: returnKey, value: address },
+    );
+}
+
+const storedReturn = (page: Page) =>
+    page.evaluate((key) => window.sessionStorage.getItem(key), returnKey);
+
+function sentNavigations(page: Page) {
+    const paths: string[] = [];
+    page.on("request", (request) => {
+        const { pathname } = new URL(request.url());
+        if (request.isNavigationRequest()) paths.push(`document ${pathname}`);
+        else if (request.headers().rsc === "1") paths.push(`RSC ${pathname}`);
+    });
+    return paths;
+}
+
+const portfolio = (page: Page) =>
+    page.getByRole("heading", { name: "Plants", exact: true });
+
+test("a provider sign-in started at a dated forecast opens that forecast through one navigation", async ({
+    page,
+}) => {
+    await offerGoogleSignIn(page);
+    await page.goto(datedForecast);
+    const navigations = sentNavigations(page);
+    await continueWithGoogle(page);
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-25");
+    await expect(page).toHaveURL(datedForecast);
+    expect(navigations).toEqual([
+        "document /api/auth/browser/v1/auth/provider/redirect",
+        "document /app/",
+        "document /app/w/1/plants/11/forecast/",
+    ]);
+    expect(await storedReturn(page)).toBeNull();
+});
+
+test("a provider sign-in with an invitation kept in the tab opens the invitation", async ({
+    page,
+}) => {
+    await page.addInitScript(() =>
+        window.sessionStorage.setItem(
+            "pyracast.workspaceInvitation",
+            "invite-secret",
+        ),
+    );
+    await offerGoogleSignIn(page);
+    await page.goto(datedForecast);
+    await continueWithGoogle(page);
+    await expect(
+        page.getByRole("heading", { name: "Join workspace" }),
+    ).toBeVisible();
+    await expect(page).toHaveURL("/app/invitation/");
+});
+
+test("a provider sign-in started at a workspace the reader does not belong to opens that address", async ({
+    page,
+}) => {
+    await offerGoogleSignIn(page);
+    await page.goto("/app/w/7/plants/11/forecast/?date=2026-11-25");
+    await continueWithGoogle(page);
+    await expect(
+        page.getByText("This workspace is not available to your account."),
+    ).toBeVisible();
+    await expect(page).toHaveURL(
+        "/app/w/7/plants/11/forecast/?date=2026-11-25",
+    );
+});
+
+test("a provider sign-in that needs the second factor opens the forecast it started at", async ({
+    page,
+}) => {
+    const account = await offerGoogleSignIn(page);
+    const pending = {
+        status: 401,
+        json: {
+            status: 401,
+            data: { flows: [{ id: "mfa_authenticate", is_pending: true }] },
+            meta: { is_authenticated: false },
+        },
+    };
+    let returned = false;
+    await page.route(
+        "**/api/auth/browser/v1/auth/provider/complete",
+        (route) => {
+            returned = true;
+            return route.fulfill(pending);
+        },
+    );
+    await page.route("**/api/auth/browser/v1/auth/session", (route) =>
+        route.request().method() === "GET" && returned && !account.current
+            ? route.fulfill(pending)
+            : route.fallback(),
+    );
+    await page.route(
+        "**/api/auth/browser/v1/auth/2fa/authenticate",
+        (route) => {
+            account.current = firstAccount;
+            return route.fulfill({
+                json: { status: 200, meta: { is_authenticated: true } },
+            });
+        },
+    );
+    await page.goto(datedForecast);
+    await continueWithGoogle(page);
+    await page.getByLabel("Authenticator or recovery code").fill("123456");
+    await page.getByRole("button", { name: "Verify code" }).click();
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-25");
+    await expect(page).toHaveURL(datedForecast);
+});
+
+test("a provider sign-in started at the start address opens the workspace over an address kept earlier", async ({
+    page,
+}) => {
+    await offerGoogleSignIn(page);
+    await keepReturn(page, datedForecast);
+    await continueWithGoogle(page);
+    await expect(portfolio(page)).toBeVisible();
+    await expect(page).toHaveURL("/app/w/1/");
+    expect(await storedReturn(page)).toBeNull();
+});
+
+test("a second provider return in the same tab opens the workspace", async ({
+    page,
+}) => {
+    const account = await offerGoogleSignIn(page);
+    await page.goto(datedForecast);
+    await continueWithGoogle(page);
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-25");
+    account.current = null;
+    await page.goto("/app/?social_callback=1");
+    await expect(portfolio(page)).toBeVisible();
+    await expect(page).toHaveURL("/app/w/1/");
+});
+
+for (const [name, address] of [
+    ["on another origin", "https://elsewhere.example/app/w/1/"],
+    ["without a scheme", "//elsewhere.example/app/w/1/"],
+    ["in the console", "/admin/"],
+    ["leaving the workspaces", "/app/w/../admin/"],
+    ["with a backslash", "/app/w/1/\\plants/"],
+    ["over 2,000 characters", `/app/w/1/?view=${"a".repeat(2_000)}`],
+    ["without the leading slash", datedForecast.slice(1)],
+    ["through a parent segment", `/app/w/..${datedForecast.slice(4)}`],
+    [
+        "through an encoded parent segment",
+        `/app/w/%2e%2e${datedForecast.slice(4)}`,
+    ],
+    ["that reaches the workspaces from outside", `/outside/..${datedForecast}`],
+    [
+        "over 2,000 characters once encoded",
+        `${datedForecast}&view=${"é".repeat(2_000 - datedForecast.length - 6)}`,
+    ],
+] as const) {
+    test(`a provider return ignores and removes a kept address ${name}`, async ({
+        page,
+    }) => {
+        await offerGoogleSignIn(page);
+        await keepReturn(page, address);
+        await page.goto("/app/?social_callback=1");
+        await expect(portfolio(page)).toBeVisible();
+        await expect(page).toHaveURL("/app/w/1/");
+        expect(await storedReturn(page)).toBeNull();
+    });
+}
+
+test("a failed provider return removes the kept address and shows the callback error", async ({
+    page,
+}) => {
+    await offerGoogleSignIn(page);
+    await keepReturn(page, datedForecast);
+    await page.goto(
+        "/app/?social_callback=1&error=unknown&error_process=login",
+    );
+    await expect(page.locator(".notice.error")).toContainText(
+        "sign in with your existing method",
+    );
+    expect(await storedReturn(page)).toBeNull();
+});
+
+test("a provider sign-in without session storage opens the workspace", async ({
+    page,
+}) => {
+    await page.addInitScript(() =>
+        Object.defineProperty(window, "sessionStorage", {
+            get() {
+                throw new DOMException("Storage is blocked.", "SecurityError");
+            },
+        }),
+    );
+    await offerGoogleSignIn(page);
+    await page.goto(datedForecast);
+    await continueWithGoogle(page);
+    await expect(portfolio(page)).toBeVisible();
+    await expect(page).toHaveURL("/app/w/1/");
+});
+
+test("a provider sign-in whose address cannot be written opens the workspace over an address kept earlier", async ({
+    page,
+}) => {
+    await offerGoogleSignIn(page);
+    await keepReturn(page, "/app/w/1/plants/11/forecast/?date=2026-11-20");
+    await page.goto(datedForecast);
+    await page.evaluate(() => {
+        Storage.prototype.setItem = () => {
+            throw new DOMException("Storage is full.", "QuotaExceededError");
+        };
+    });
+    await continueWithGoogle(page);
+    await expect(portfolio(page)).toBeVisible();
+    await expect(page).toHaveURL("/app/w/1/");
+    expect(await storedReturn(page)).toBeNull();
+});
+
+test("a provider return shows the launch card while its sign-in completes", async ({
+    page,
+}) => {
+    await offerGoogleSignIn(page);
+    const reached = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    await page.route(
+        "**/api/auth/browser/v1/auth/provider/complete",
+        async (route) => {
+            reached.resolve();
+            await release.promise;
+            await route.fallback();
+        },
+    );
+    await page.goto(datedForecast);
+    await continueWithGoogle(page);
+    await reached.promise;
+    await expect(
+        page.getByRole("progressbar", { name: "Loading…" }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("heading", { name: "Welcome back" }),
+    ).toHaveCount(0);
+    await expect(
+        page.getByRole("button", { name: "Continue with Google" }),
+    ).toHaveCount(0);
+    release.resolve();
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-25");
+});
+
+test("a provider sign-in whose session read fails stays at the start address with the callback error", async ({
+    page,
+}) => {
+    const account = await offerGoogleSignIn(page);
+    const reached = Promise.withResolvers<string | null>();
+    const release = Promise.withResolvers<void>();
+    await page.route("**/api/session/", async (route) => {
+        if (!account.current) return route.fallback();
+        reached.resolve(await route.request().headerValue("referer"));
+        await release.promise;
+        return route.fulfill({
+            status: 503,
+            json: errorBody(
+                "busy",
+                "Forecast service is temporarily unavailable.",
+            ),
+        });
+    });
+    await page.goto(datedForecast);
+    await continueWithGoogle(page);
+    const referrer = new URL((await reached.promise) ?? "");
+    expect(`${referrer.pathname}${referrer.search}`).toBe("/app/");
+    await expect(page).toHaveURL("/app/");
+    release.resolve();
+    await expect(page.locator(".notice.error")).toContainText(
+        "sign in with your existing method",
+    );
+    await expect(page).toHaveURL("/app/");
+});
+
+test("a provider sign-in that ends at email verification leaves a later password sign-in on the workspace", async ({
+    page,
+}) => {
+    await offerGoogleSignIn(page);
+    const pending = (id: string) => ({
+        status: 401,
+        json: {
+            status: 401,
+            data: { flows: [{ id, is_pending: true }] },
+            meta: { is_authenticated: false },
+        },
+    });
+    let stage: string | undefined;
+    await page.route(
+        "**/api/auth/browser/v1/auth/provider/complete",
+        (route) => {
+            stage = "provider_signup";
+            return route.fulfill(pending(stage));
+        },
+    );
+    await page.route("**/api/auth/browser/v1/auth/session", (route) =>
+        route.request().method() === "GET" && stage
+            ? route.fulfill(pending(stage))
+            : route.fallback(),
+    );
+    await page.route("**/api/auth/browser/v1/auth/provider/signup", (route) => {
+        if (route.request().method() === "GET")
+            return route.fulfill({
+                json: {
+                    status: 200,
+                    data: { email: [{ email: "new@example.test" }] },
+                },
+            });
+        stage = "verify_email";
+        return route.fulfill(pending(stage));
+    });
+    await page.route("**/api/auth/browser/v1/auth/email/verify", (route) => {
+        stage = undefined;
+        return route.fulfill({
+            status: 401,
+            json: {
+                status: 401,
+                data: { flows: [{ id: "login" }] },
+                meta: { is_authenticated: false },
+            },
+        });
+    });
+    await page.goto(datedForecast);
+    await continueWithGoogle(page);
+    await expect(page.getByLabel("Email", { exact: true })).toHaveValue(
+        "new@example.test",
+    );
+    await page.getByLabel("Company name").fill("Sunfield Energy");
+    await page
+        .getByRole("button", { name: "Complete your account", exact: true })
+        .click();
+    await page.getByLabel("Email code").fill("123456");
+    await page
+        .getByRole("button", { name: "Verify email", exact: true })
+        .click();
+    await expect(
+        page.getByText("Email verified. You can sign in now."),
+    ).toBeVisible();
+    await page
+        .getByLabel("Email", { exact: true })
+        .fill(firstAccount.user.email);
+    await page
+        .getByLabel("Password", { exact: true })
+        .fill("Test-only-cobalt-79!");
+    await page.locator("form").getByRole("button", { name: "Sign in" }).click();
+    await expect(portfolio(page)).toBeVisible();
+    await expect(page).toHaveURL("/app/w/1/");
+});
+
+async function holdDocumentNavigations(page: Page, path: RegExp) {
+    const requested: string[] = [];
+    await page.route(path, (route) => {
+        if (!route.request().isNavigationRequest()) return route.fallback();
+        requested.push(new URL(route.request().url()).pathname);
+        return route.abort("aborted");
+    });
+    return requested;
+}
+
+const startAddress = (page: Page) =>
+    page.getByRole("button", { name: "Continue with Google" });
+
+test("starting a provider sign-in keeps the workspace address of the tab", async ({
+    page,
+}) => {
+    await offerGoogleSignIn(page);
+    await page.goto(datedForecast);
+    const sent = await holdDocumentNavigations(
+        page,
+        /\/auth\/provider\/redirect$/,
+    );
+    await startAddress(page).click();
+    await expect.poll(() => storedReturn(page)).toBe(datedForecast);
+    expect(sent).toEqual(["/api/auth/browser/v1/auth/provider/redirect"]);
+});
+
+test("starting a provider sign-in outside the workspaces removes a kept address", async ({
+    page,
+}) => {
+    await offerGoogleSignIn(page);
+    await keepReturn(page, datedForecast);
+    await holdDocumentNavigations(page, /\/auth\/provider\/redirect$/);
+    await startAddress(page).click();
+    await expect.poll(() => storedReturn(page)).toBeNull();
+});
+
+test("starting a provider sign-in without session storage still sends the request", async ({
+    page,
+}) => {
+    await page.addInitScript(() =>
+        Object.defineProperty(window, "sessionStorage", {
+            get() {
+                throw new DOMException("Storage is blocked.", "SecurityError");
+            },
+        }),
+    );
+    await offerGoogleSignIn(page);
+    await page.goto(datedForecast);
+    const sent = await holdDocumentNavigations(
+        page,
+        /\/auth\/provider\/redirect$/,
+    );
+    await startAddress(page).click();
+    await expect
+        .poll(() => sent)
+        .toEqual(["/api/auth/browser/v1/auth/provider/redirect"]);
+});
+
+test("a failed provider return without session storage shows the callback error", async ({
+    page,
+}) => {
+    await page.addInitScript(() =>
+        Object.defineProperty(window, "sessionStorage", {
+            get() {
+                throw new DOMException("Storage is blocked.", "SecurityError");
+            },
+        }),
+    );
+    await offerGoogleSignIn(page);
+    await page.goto(
+        "/app/?social_callback=1&error=unknown&error_process=login",
+    );
+    await expect(page.locator(".notice.error")).toContainText(
+        "sign in with your existing method",
+    );
+});
+
+test("a provider return replaces its address with the one the sign-in started at", async ({
+    page,
+}) => {
+    await offerGoogleSignIn(page);
+    await page.goto(datedForecast);
+    const sent = await holdDocumentNavigations(
+        page,
+        /\/app\/w\/1\/plants\/11\/forecast\//,
+    );
+    await continueWithGoogle(page);
+    await expect.poll(() => sent).toEqual(["/app/w/1/plants/11/forecast/"]);
+    expect(await storedReturn(page)).toBeNull();
 });

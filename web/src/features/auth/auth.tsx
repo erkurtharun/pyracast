@@ -7,12 +7,24 @@ import { authRequest, type AuthResult } from "@/lib/auth-api";
 import { loadSession, signOut, useSessionState } from "@/lib/session-client";
 import { isLanguage } from "@/i18n/language";
 import { publicPath } from "@/lib/public-metadata";
-import { addressWithout, appQuery, callbackParams, routes } from "@/lib/routes";
+import {
+    addressWithout,
+    appQuery,
+    callbackParams,
+    routes,
+    type SocialCallback,
+} from "@/lib/routes";
 import { ActionForm } from "@/ui/form";
 import { Notice } from "@/ui/ui";
+import {
+    confirmProviderSignIn,
+    forgetProviderLanding,
+    receiveProviderReturn,
+} from "./provider-return";
 import { SocialProviderButtons } from "./social-provider-buttons";
 import { LanguageSelect } from "@/ui/language-select";
 import { clearWorkspaceInvitation } from "@/features/workspace/workspace-invitation";
+import { LaunchCard } from "@/features/session/app-root";
 import { AuthFields } from "./steps/auth-fields";
 import { AuthStory } from "./steps/auth-story";
 import {
@@ -36,8 +48,9 @@ async function completeProviderLogin(): Promise<ProviderCompletion> {
     try {
         const result = await authRequest("auth/provider/complete", "POST");
         if (result.meta?.is_authenticated) {
-            await loadSession();
-            return "signedIn";
+            confirmProviderSignIn();
+            const session = await loadSession();
+            return session.user ? "signedIn" : "pending";
         }
         return result.data?.flows?.some((flow) => flow.is_pending)
             ? "pending"
@@ -45,6 +58,23 @@ async function completeProviderLogin(): Promise<ProviderCompletion> {
     } catch {
         return "refused";
     }
+}
+
+async function completeProviderReturn(outcome: SocialCallback) {
+    if (outcome === "none") return undefined;
+    receiveProviderReturn(outcome === "succeeded");
+    if (outcome === "failed") return undefined;
+    const completed = await completeProviderLogin();
+    if (completed === "refused") forgetProviderLanding();
+    return completed;
+}
+
+function continuesProviderReturn(mode: Mode | undefined) {
+    return mode === "socialSignup" || mode === "mfa";
+}
+
+function callbackOutcome() {
+    return appQuery(new URL(window.location.href).searchParams).socialCallback;
 }
 
 export function Auth({
@@ -73,6 +103,9 @@ export function Auth({
     const [codeSentAt, setCodeSentAt] = useState(0);
     const [address, setAddress] = useState("");
     const [refusal, setRefusal] = useState<Refusal | null>(null);
+    const [completing, setCompleting] = useState(
+        () => callbackOutcome() === "succeeded",
+    );
     const headingRef = useRef<HTMLHeadingElement>(null);
     const pending = isPending(mode);
 
@@ -81,12 +114,14 @@ export function Auth({
     }, [refusal]);
 
     function enter(next: Mode, notice: AuthMessage = "") {
+        if (!continuesProviderReturn(next)) forgetProviderLanding();
         setMode(next);
         setMessage(notice);
         setRefusal(null);
     }
 
     async function leave() {
+        forgetProviderLanding();
         await signOut();
         setAddress("");
         enter("login");
@@ -94,6 +129,7 @@ export function Auth({
 
     async function finish(result: AuthResult) {
         if (result.meta?.is_authenticated) {
+            confirmProviderSignIn();
             await loadSession();
             return;
         }
@@ -114,13 +150,11 @@ export function Auth({
     useEffect(() => {
         let active = true;
         const callback = new URL(window.location.href);
-        const outcome = appQuery(callback.searchParams).socialCallback;
+        const outcome = callbackOutcome();
         const callbackError = (callbackErrorRef.current ??=
             outcome === "failed");
         const completion = (completionRef.current ??=
-            outcome === "succeeded"
-                ? completeProviderLogin()
-                : Promise.resolve(undefined));
+            completeProviderReturn(outcome));
         let refused = false;
         if (outcome !== "none")
             window.history.replaceState(
@@ -137,6 +171,8 @@ export function Auth({
                 setSocialError(callbackError || refused);
                 if (takePasswordChanged()) setMessage("passwordChanged");
                 const next = modeForPendingFlow(result);
+                if (!continuesProviderReturn(next)) forgetProviderLanding();
+                setCompleting(false);
                 if (next === "socialSignup") {
                     authRequest<{ email?: { email: string }[] }>(
                         "auth/provider/signup",
@@ -158,13 +194,17 @@ export function Auth({
                     );
             })
             .catch(() => {
-                if (active) setSocialError(callbackError || refused);
+                forgetProviderLanding();
+                if (!active) return;
+                setSocialError(callbackError || refused);
+                setCompleting(false);
             });
         return () => {
             active = false;
         };
     }, []);
 
+    if (completing) return <LaunchCard />;
     const titles: Record<Mode, string> = {
         login: t("welcome"),
         register: t("registerTitle"),
