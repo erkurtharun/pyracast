@@ -1041,7 +1041,6 @@ details[open] > summary {
 details details {
     margin-top: var(--space-2);
 }
-pre,
 .csv-example {
     padding: var(--space-3-5);
     border: 1px solid var(--line);

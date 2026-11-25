@@ -103,6 +103,7 @@ export function Calibrations({ scope }: { scope: PlantScope }) {
         ? automation.data.configuration_id
         : null;
     const selected = detail.status === "loaded" ? detail.data : undefined;
+    const inUse = automation.error ? null : calibrationInUse(automation.data);
     return (
         <>
             <CalibrationAutomationPanel
@@ -146,6 +147,9 @@ export function Calibrations({ scope }: { scope: PlantScope }) {
                 {automation.data && (
                     <CalibrationSelection
                         status={automation.data}
+                        loadedAt={
+                            automation.error ? automation.updatedAt : null
+                        }
                         action={action}
                         canManage={canManage}
                         onAction={setAction}
@@ -180,7 +184,7 @@ export function Calibrations({ scope }: { scope: PlantScope }) {
                         data.results.length ? (
                             <CalibrationRunList
                                 runs={data.results}
-                                inUse={calibrationInUse(automation.data)}
+                                inUse={inUse}
                                 canManage={canManage}
                                 busy={pending}
                                 onDetails={(run: Run) =>
@@ -208,6 +212,7 @@ export function Calibrations({ scope }: { scope: PlantScope }) {
                 {selected && (
                     <CalibrationRunDetail
                         run={selected}
+                        inUse={selected.id === inUse}
                         action={action}
                         automation={automation.data}
                         canManage={canManage}

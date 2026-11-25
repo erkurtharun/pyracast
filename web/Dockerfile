@@ -21,8 +21,7 @@ RUN apt-get update && apt-get upgrade --no-install-recommends -y \
     && cp -L /usr/share/doc/libatomic1/copyright /runtime/usr/share/doc/libatomic1/ \
     && dpkg-query --status libatomic1 > /runtime/var/lib/dpkg/status.d/libatomic1 \
     && zstd_version=$(dpkg-query --show --showformat='${Version}' libzstd1) \
-    && if dpkg --compare-versions "$zstd_version" lt 1.5.7+dfsg-1+deb13u1; then \
-      echo "libzstd1 $zstd_version is older than 1.5.7+dfsg-1+deb13u1" >&2; exit 1; fi \
+    && dpkg --compare-versions "$zstd_version" ge 1.5.7+dfsg-1+deb13u1 \
     && cd /tmp && apt-get download "libzstd1=$zstd_version" \
     && dpkg-deb --extract libzstd1_*_amd64.deb /runtime \
     && dpkg-deb --info libzstd1_*_amd64.deb md5sums > /runtime/var/lib/dpkg/status.d/libzstd1.md5sums \
