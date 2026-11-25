@@ -34,6 +34,41 @@ function asks(page: Page) {
     });
 }
 
+// Asks right after the commit in which the text appears or goes, before any later task of the page runs.
+async function asksOnce(
+    page: Page,
+    text: { shown: string } | { gone: string },
+) {
+    await page.evaluate((text) => {
+        const answer = new Promise<boolean>((resolve) => {
+            const observer = new MutationObserver(() => {
+                const content = document.body.textContent ?? "";
+                if (
+                    "shown" in text
+                        ? !content.includes(text.shown)
+                        : content.includes(text.gone)
+                )
+                    return;
+                observer.disconnect();
+                const leaving = new Event("beforeunload", { cancelable: true });
+                window.dispatchEvent(leaving);
+                resolve(leaving.defaultPrevented);
+            });
+            observer.observe(document.body, {
+                subtree: true,
+                childList: true,
+                characterData: true,
+            });
+        });
+        Object.assign(window, { pyracastShownAnswer: answer });
+    }, text);
+    return () =>
+        page.evaluate(
+            () =>
+                Reflect.get(window, "pyracastShownAnswer") as Promise<boolean>,
+        );
+}
+
 async function markDocument(page: Page) {
     await page.evaluate(() => {
         Object.assign(window, { pyracastMarker: true });
@@ -292,13 +327,18 @@ test("a form whose submission is running asks until it is answered", async ({
     expect(await asks(page)).toBe(false);
 });
 
-// Holds every read of `url` sent while armed until `release`; `pass` lets later reads through and keeps the held ones.
+// Holds every read of `url` sent while armed until `release`; `held` settles once one is held, `pass` lets later reads through.
 async function holdReads(page: Page, url: string) {
     let armed = false;
     let release = () => {};
+    let entered = () => {};
     const released = new Promise<void>((resolve) => (release = resolve));
+    const held = new Promise<void>((resolve) => (entered = resolve));
     await page.route(url, async (route) => {
-        if (armed && route.request().method() === "GET") await released;
+        if (armed && route.request().method() === "GET") {
+            entered();
+            await released;
+        }
         await route.fallback();
     });
     return {
@@ -308,6 +348,7 @@ async function holdReads(page: Page, url: string) {
         pass: () => {
             armed = false;
         },
+        held,
         release,
     };
 }
@@ -341,6 +382,7 @@ test("a resolution whose save was answered while its follow-up reads run asks no
     await markDocument(page);
     reads.arm();
     await page.getByRole("button", { name: "End outage", exact: true }).click();
+    await reads.held;
     await expect(page.getByText("Ended", { exact: true })).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Saving…", exact: true }),
@@ -368,6 +410,7 @@ test("plant settings whose save was answered while their follow-up reads run ask
     await markDocument(page);
     reads.arm();
     await page.getByRole("button", { name: "Save technical details" }).click();
+    await reads.held;
     await expect(
         page.getByRole("heading", { name: "New name", level: 1 }),
     ).toBeVisible();
@@ -516,6 +559,7 @@ test("an answered invitation lets another view open in the page while its reads 
         .getByRole("button", { name: "Send invitation", exact: true })
         .click();
     await followed;
+    await reads.held;
     await expect(saving(page)).toBeVisible();
     const resent = page.waitForRequest("**/invitations/3/resend/");
     await resend.click();
@@ -548,10 +592,15 @@ test("a resolution repeated after its lost answer asks until the repeat is answe
     await repeated;
     await expect(saving(page)).toBeVisible();
     expect(await asks(page)).toBe(true);
+    await expect(page.getByText("Outcome unknown")).toBeVisible();
+    const settled = await asksOnce(page, { gone: "Outcome unknown" });
     releaseRepeat();
+    expect(await settled()).toBe(false);
+    await reads.held;
     await expect(page.getByText("Ended", { exact: true })).toBeVisible();
     await expect(saving(page)).toBeVisible();
-    await expect.poll(() => asks(page)).toBe(false);
+    expect(await asks(page)).toBe(false);
+    await expect(saving(page)).toBeVisible();
     reads.release();
     await expect(saving(page)).toHaveCount(0);
 });
@@ -576,6 +625,7 @@ test("an outage report whose answer was lost keeps asking while another report i
     await title.fill("Inverter fault");
     reads.arm();
     await save.click();
+    await reads.held;
     await expect(
         page.getByRole("heading", { name: "Inverter fault", exact: true }),
     ).toBeVisible();
@@ -604,9 +654,13 @@ test("an outage edit repeated after its lost answer, whose conflict shows the ed
     await expect(page.getByText("Outcome unknown")).toBeVisible();
     expect(await asks(page)).toBe(true);
     reads.arm();
+    const settled = await asksOnce(page, { gone: "Outcome unknown" });
     await save.click();
+    expect(await settled()).toBe(false);
+    await reads.held;
     await expect(saving(page)).toBeVisible();
-    await expect.poll(() => asks(page)).toBe(false);
+    expect(await asks(page)).toBe(false);
+    await expect(saving(page)).toBeVisible();
     reads.release();
     await expect(
         page.getByRole("heading", { name: "Inverter replaced", exact: true }),
@@ -633,6 +687,7 @@ test("a resolution form shown again while the reads after its answered save run 
     await expect(page.getByText("Not found.")).toBeVisible();
     refuse(false);
     await page.getByRole("button", { name: "Try again", exact: true }).click();
+    await reads.held;
     await expect(page.getByText("Ended", { exact: true })).toBeVisible();
     await expect(saving(page)).toBeVisible();
     await expectForecastInPage(page);
@@ -677,6 +732,7 @@ test("a reload while the reads after an answered resolution run asks nothing and
     await markDocument(page);
     reads.arm();
     await saveResolution(page);
+    await reads.held;
     await expect(page.getByText("Ended", { exact: true })).toBeVisible();
     await expect(saving(page)).toBeVisible();
     const asked = questions(page);
@@ -736,8 +792,8 @@ test("a password change the server confirmed asks nothing while the session is r
         .fill("a-new-and-long-password");
     session.arm();
     await password.getByRole("button", { name: "Change password" }).click();
-    await expect(saving(page)).toBeVisible();
-    await expect.poll(() => asks(page)).toBe(false);
+    await session.held;
+    expect(await asks(page)).toBe(false);
     session.release();
 });
 
@@ -777,7 +833,9 @@ test("a removed collection time asks until the schedule is saved, without typing
     expect(await asks(page)).toBe(false);
     await page.getByRole("button", { name: "Remove update time 2" }).click();
     expect(await asks(page)).toBe(true);
+    const shown = await asksOnce(page, { shown: "Saved." });
     await page.getByRole("button", { name: "Save", exact: true }).click();
+    expect(await shown()).toBe(false);
     await expect(
         page.getByRole("button", { name: "Remove update time 2" }),
     ).toHaveCount(0);
@@ -869,13 +927,10 @@ test("a first time added to an empty saved schedule asks", async ({ page }) => {
 });
 
 async function saveReminders(page: Page) {
-    const saved = page.waitForResponse(
-        (response) =>
-            response.request().method() === "PUT" &&
-            response.url().endsWith("/reminders/"),
-    );
+    const saved = page.getByText("Saved.", { exact: true });
+    await expect(saved).toHaveCount(0);
     await page.getByRole("button", { name: "Save", exact: true }).click();
-    await saved;
+    await expect(saved).toBeVisible();
 }
 
 for (const removed of ["Remove email address 2", "Remove send time 1"])
@@ -891,14 +946,14 @@ for (const removed of ["Remove email address 2", "Remove send time 1"])
             .click();
         await page.getByLabel("Send time 2", { exact: true }).fill("17:30");
         await saveReminders(page);
-        await expect.poll(() => asks(page)).toBe(false);
+        expect(await asks(page)).toBe(false);
         const remove = page.getByRole("button", { name: removed, exact: true });
         await expect(remove).toBeVisible();
         await remove.click();
         await expect(remove).toHaveCount(0);
         expect(await asks(page)).toBe(true);
         await saveReminders(page);
-        await expect.poll(() => asks(page)).toBe(false);
+        expect(await asks(page)).toBe(false);
     });
 
 test("the plant wizard asks while it holds entered figures across its steps until it is closed", async ({
@@ -944,7 +999,8 @@ test("a plant the wizard created opens in the page without a question", async ({
     );
     await page.getByRole("button", { name: "Send for approval" }).click();
     await created;
-    await expect.poll(() => asks(page)).toBe(false);
+    await sites.held;
+    expect(await asks(page)).toBe(false);
     sites.release();
     await expect(
         page.getByRole("heading", { name: "West plant" }),
@@ -1004,7 +1060,8 @@ test("a plant the wizard restored opens in the page without a question", async (
     );
     await page.getByRole("button", { name: `Restore ${plant.name}` }).click();
     await restored;
-    await expect.poll(() => asks(page)).toBe(false);
+    await sites.held;
+    expect(await asks(page)).toBe(false);
     sites.release();
     await expect(page).toHaveURL("/app/w/1/plants/11/forecast/");
     expect(await marked(page)).toBe(true);
@@ -1283,6 +1340,7 @@ test("with a changed value Forward and Back each load a document after the brows
     await serveOutageWrites(page, answers());
     const server = await serveDirectProduction(page, answers());
     await openPlant(page, "Production");
+    await expect(page).toHaveURL(/\/production\//);
     await page.getByRole("button", { name: "Outages", exact: true }).click();
     await expect(page).toHaveURL(/\/outages\//);
     await page.goBack();

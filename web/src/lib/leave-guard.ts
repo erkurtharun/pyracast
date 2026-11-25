@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect } from "react";
+import { useCallback, useLayoutEffect } from "react";
 import { whenWritesChange, writesUnanswered } from "./api/writes";
 
 const entries = new Set<() => boolean>();
@@ -42,8 +42,9 @@ function register(holds: () => boolean) {
     };
 }
 
+// Registered in the commit that shows the state: a passive effect can run after a question already meets that state.
 export function useLeaveGuard(unsaved: boolean) {
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (unsaved) return register(() => true);
     }, [unsaved]);
 }
@@ -62,7 +63,7 @@ export function submission(): Submission {
 }
 
 export function useSubmissionGuard(running: Submission | null) {
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (running) return register(running.holds);
     }, [running]);
 }

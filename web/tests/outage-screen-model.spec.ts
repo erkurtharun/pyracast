@@ -257,7 +257,6 @@ function phase({ screen, live }: Step) {
 const start: Step = { screen: INITIAL_OUTAGES, live: member() };
 const directStart: Step = { screen: INITIAL_OUTAGES, live: admin() };
 
-// Other content saved while the first write's answer is still lost.
 const lostFirst = events.lost(events.send(events.openUpdate(directStart)));
 const savedOther = events.answered(
     run(lostFirst, {
@@ -654,7 +653,6 @@ const expected: Record<StateName, Record<EventName, string>> = {
         sent: "direct:none",
         demote: "update4/saved=",
     },
-    // A save of other content ends neither the write whose answer was lost nor, with the workflow, its key.
     "direct:update4/saved+lost": {
         ...same("direct:update4/saved+lost"),
         ...unchanged("direct:update4/saved+lost", true),

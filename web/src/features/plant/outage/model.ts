@@ -57,8 +57,6 @@ export type Workflow = Target & {
 
 type Status = components["schemas"]["ChangeRequestStatusEnum"];
 
-// The one state of the outage screen: at most one open workflow, the status a proposal was just answered with, and
-// the write whose answer was lost, until an answer to it or a closed form ends it.
 export type OutageScreen = {
     workflow: Workflow | null;
     receipt: Status | null;
