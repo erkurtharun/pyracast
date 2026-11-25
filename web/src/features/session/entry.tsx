@@ -10,7 +10,7 @@ import {
 } from "react";
 import { keys } from "@/lib/api/keys";
 import { QueryOwner, useApiList } from "@/lib/api/query";
-import { appQuery, routes } from "@/lib/routes";
+import { appQuery, localPath, routes } from "@/lib/routes";
 import { useSessionState } from "@/lib/session-client";
 import { storedInvitation } from "@/features/workspace/workspace-invitation";
 import { chooseWorkspace } from "@/features/workspace/workspace-choice";
@@ -18,26 +18,8 @@ import { LaunchCard } from "./app-root";
 import { RequireUser } from "./require-user";
 
 const consoleRoot = "/admin/";
-const unprintable = /\\|(?! )[\p{C}\p{Z}]/u;
 
 type Target = { href: string; document?: boolean };
-
-// The server validates the return address too; this check keeps a crafted link on this
-// origin and inside the console after the browser has normalised it.
-function consoleDestination(next: string | null) {
-    if (
-        !next ||
-        next !== next.trim() ||
-        unprintable.test(next) ||
-        !URL.canParse(next, window.location.origin)
-    )
-        return consoleRoot;
-    const target = new URL(next, window.location.origin);
-    return target.origin === window.location.origin &&
-        target.pathname.startsWith(consoleRoot)
-        ? `${target.pathname}${target.search}`
-        : consoleRoot;
-}
 
 function destination(canAdmin: boolean): Target | undefined {
     const { search } = window.location;
@@ -48,7 +30,12 @@ function destination(canAdmin: boolean): Target | undefined {
     if (storedInvitation()) return { href: routes.invitation() };
     if (canAdmin)
         return {
-            href: consoleDestination(params.get("next")),
+            href:
+                localPath(
+                    params.get("next") ?? "",
+                    consoleRoot,
+                    window.location.origin,
+                ) ?? consoleRoot,
             document: true,
         };
     return undefined;
