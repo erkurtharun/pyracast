@@ -153,17 +153,23 @@ test("configuration scripts are linted as JavaScript modules", async () => {
     ).toEqual(["no-unused-vars"]);
 });
 
+const fixture = "tests/support/test.ts";
+const clockRule = async (source: string[]) => {
+    // Earlier probes lint other text as the shared fixture, and the type checker keeps the last text it saw.
+    await eslint.lintText(readFileSync(fixture, "utf8"), {
+        filePath: path.join(web, fixture),
+    });
+    const [result] = await eslint.lintText(source.join("\n") + "\n", {
+        filePath: path.join(web, "tests/browser-workers.spec.ts"),
+    });
+    return result!.messages
+        .filter((message) => message.ruleId === "pyracast/browser-clock")
+        .map((message) => message.line);
+};
+
 test("a browser case cannot reach the real date past the shared clock", async () => {
-    const refused = async (source: string[]) => {
-        const [result] = await eslint.lintText(source.join("\n") + "\n", {
-            filePath: path.join(web, "tests/browser-workers.spec.ts"),
-        });
-        return result!.messages
-            .filter((message) => message.ruleId === "pyracast/browser-clock")
-            .map((message) => message.line);
-    };
     expect(
-        await refused([
+        await clockRule([
             'import { test } from "@playwright/test";',
             'test("probe", async ({ page }) => {',
             '    await page.goto("/");',
@@ -177,7 +183,7 @@ test("a browser case cannot reach the real date past the shared clock", async ()
         ]),
     ).toEqual([2, 6]);
     expect(
-        await refused([
+        await clockRule([
             'import { test, instant } from "./support/test";',
             'test("probe", async ({ page, browser }) => {',
             "    await page.clock.install();",
@@ -194,4 +200,49 @@ test("a browser case cannot reach the real date past the shared clock", async ()
             "});",
         ]),
     ).toEqual([3, 4, 6, 7, 10, 11]);
+});
+
+test("a clock time, script switch or fixture the rule cannot resolve is refused", async () => {
+    expect(
+        await clockRule([
+            'import { test, instant } from "./support/test";',
+            "const options = { timezoneId: 'UTC' };",
+            'test("probe", async ({ page, browser }) => {',
+            "    await page.clock.install({ time: undefined });",
+            "    await page.clock.install({ time: void 0 });",
+            "    await page.clock.install({ time: null });",
+            "    await page.clock.install({ time: instant, ...options });",
+            "    await page.clock.install({ ...options, time: instant });",
+            "    await page.clock.install({ time: instant as Date });",
+            "    await browser.newContext({ javaScriptEnabled: false, ...options });",
+            "    await browser.newContext({ ...options, javaScriptEnabled: false });",
+            "    await browser.newPage({ javaScriptEnabled: false, javaScriptEnabled: true });",
+            "});",
+            "test.use({ ...options });",
+            "test.use({ clock: [async ({}, run) => run(), { auto: true }] });",
+            "test.extend({ clock: async ({}, run) => run() });",
+            "test.use(options);",
+            'test.use({ timezoneId: "Europe/Istanbul" });',
+            "test.describe.configure({ mode: 'serial' });",
+        ]),
+    ).toEqual([4, 5, 6, 7, 10, 12, 14, 15, 16, 17]);
+});
+
+test("only a callback a clocked page runs may read the date", async () => {
+    expect(
+        await clockRule([
+            'import { test } from "./support/test";',
+            'test("probe", async ({ page, context }) => {',
+            "    const shell = await context.newPage();",
+            "    await shell.evaluate(() => Date.now());",
+            '    await page.getByRole("table").evaluate(() => new Date());',
+            "    await page.mainFrame().evaluate(() => Date.now());",
+            "    await context.addInitScript(() => Date.now());",
+            '    const worker = await page.waitForEvent("worker");',
+            "    await worker.evaluate(() => new Date());",
+            "    const helper = { evaluate: (read: () => number) => read() };",
+            "    helper.evaluate(() => Date.now());",
+            "});",
+        ]),
+    ).toEqual([9, 11]);
 });
