@@ -605,7 +605,9 @@ test("reloading a conflict preserves the draft when the native interval disappea
     );
     await page.getByRole("button", { name: "Reload current values" }).click();
     await expect(
-        page.getByLabel("Attempted production for 08:00–09:00 (MWh)"),
+        page.getByLabel(
+            "Attempted production for Nov 09, 2026 08:00–09:00 (MWh)",
+        ),
     ).toHaveValue("2.5");
     await expect(
         page.getByRole("alert").filter({
@@ -667,7 +669,9 @@ test("importing a different native interval preserves an open draft for recovery
         .click();
     await page.getByRole("button", { name: "Confirm import (1)" }).click();
     await expect(
-        page.getByLabel("Attempted production for 08:00–09:00 (MWh)"),
+        page.getByLabel(
+            "Attempted production for Nov 09, 2026 08:00–09:00 (MWh)",
+        ),
     ).toHaveValue("2.5");
     await expect(
         page.getByRole("button", { name: "Save", exact: true }),

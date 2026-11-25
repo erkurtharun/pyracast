@@ -272,13 +272,22 @@ def test_a_clock_change_day_adds_the_offset_even_when_only_daylight_rows_are_exp
     assert [hourly.cell(row, 5).value for row in (2, 3)] == [offset, offset]
 
 
-def test_a_long_plant_name_wraps_in_a_row_tall_enough_to_show_it() -> None:
-    name = "A" * 100
+@pytest.mark.parametrize(
+    ("name", "lines"),
+    [
+        ("A" * 100, 7),
+        ("AAAA\n" * 19 + "AAAAA", 20),
+        ("North plant\n\nEast", 3),
+        ("\n" * 99 + "A", 100),
+    ],
+    ids=["one long line", "twenty short lines", "an empty line", "more lines than a row holds"],
+)
+def test_a_long_plant_name_wraps_in_a_row_tall_enough_to_show_it(name: str, lines: int) -> None:
     summary, _ = _sheets(replace(_report(), plant_name=name))
     assert summary["A1"].value == name
     assert summary["A1"].alignment.wrap_text
     assert summary["A1"].alignment.vertical == "top"
-    assert 7 * 18 <= summary.row_dimensions[1].height <= 409
+    assert min(409, lines * 18) <= summary.row_dimensions[1].height <= 409
 
 
 def test_values_keep_full_precision_and_a_missing_value_is_never_zero() -> None:

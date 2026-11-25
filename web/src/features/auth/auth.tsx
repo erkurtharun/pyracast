@@ -277,6 +277,7 @@ export function Auth({
                             <StageGuide mode={mode} address={address} />
                             <ActionForm
                                 key={mode}
+                                guard={false}
                                 permitted
                                 success={null}
                                 errorTitle={

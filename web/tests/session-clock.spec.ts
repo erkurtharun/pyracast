@@ -327,7 +327,10 @@ test("a cached workspace list shown again keeps a set cover", async ({
     page,
 }) => {
     await signedInOnClock(page);
-    await openSettingsForm(page);
+    await page.goto("/app/");
+    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await expect(page.getByLabel(capacity)).toBeVisible();
     await page.getByRole("button", { name: "Account", exact: true }).click();
     await expect(page).toHaveURL("/app/account/");
     await page.route("**/api/**", abort);

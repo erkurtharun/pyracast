@@ -14,6 +14,7 @@ import {
     type RefObject,
 } from "react";
 import { ApiError, displayMessage, UnconfirmedError } from "@/lib/api/errors";
+import { useLeaveGuard } from "@/lib/leave-guard";
 import { useAnnounce } from "./live-region";
 import { Notice } from "./ui";
 import { useCanManageWorkspace } from "./workspace-access";
@@ -426,6 +427,8 @@ export function ActionForm({
     variant = "primary",
     onEdit,
     attempt,
+    guard = true,
+    unsaved = false,
 }: {
     children: ReactNode;
     submit: string;
@@ -440,6 +443,8 @@ export function ActionForm({
     variant?: Variant;
     // The owner's write whose answer was lost, while it keeps it: whether a submission of `data` sends it again.
     attempt?: { repeats: (data: FormData) => boolean } | null;
+    guard?: boolean;
+    unsaved?: boolean;
 }) {
     const t = useTranslations("Common");
     const errors = useTranslations("Errors");
@@ -450,7 +455,17 @@ export function ActionForm({
     const [state, setState] = useState<FormState>({ status: "idle" });
     // Whether the form as it now stands, valid and submittable, would send the owner's attempt.
     const [sendsRepeat, setSendsRepeat] = useState(false);
+    const [edited, setEdited] = useState(false);
     const busy = pending ?? state.status === "pending";
+    useLeaveGuard(
+        guard &&
+            (edited ||
+                unsaved ||
+                busy ||
+                !!attempt ||
+                (state.status === "error" &&
+                    state.error instanceof UnconfirmedError)),
+    );
     const running = useRef(false);
     const errorRef = useRef<HTMLDivElement>(null);
     const formRef = useRef<HTMLFormElement>(null);
@@ -487,6 +502,7 @@ export function ActionForm({
             ref={formRef}
             className={canSubmit ? undefined : "readonly-form"}
             onChange={(event) => {
+                setEdited(true);
                 onEdit?.(new FormData(event.currentTarget));
                 if (state.status === "success") setState({ status: "idle" });
                 measure();
@@ -503,6 +519,7 @@ export function ActionForm({
                     try {
                         await onSubmit(data);
                         setState({ status: "success" });
+                        setEdited(false);
                     } catch (error) {
                         const fields =
                             error instanceof ApiError ? error.fields : {};
