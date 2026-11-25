@@ -238,8 +238,7 @@ test("the document keeps its title while the workspace changes address", async (
                 json: {
                     timezone: region.timezone,
                     freshness: "fresh",
-                    result: {},
-                    production_diagnostic: { days: null },
+                    result: { intervals: {} },
                 },
             }),
     );
@@ -289,8 +288,7 @@ test("a plant screen that fails to render keeps the workspace around its error",
                 json: {
                     timezone: region.timezone,
                     freshness: "fresh",
-                    result: {},
-                    production_diagnostic: { days: null },
+                    result: { intervals: {} },
                 },
             }),
     );

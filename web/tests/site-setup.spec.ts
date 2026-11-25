@@ -670,7 +670,7 @@ for (const role of ["admin", "viewer"] as const)
             ),
         ).toHaveCount(role === "admin" ? 1 : 0);
         await expect(
-            page.getByText("No forecast for this day yet"),
+            page.getByText("No forecast data for this day."),
         ).toHaveCount(0);
     });
 

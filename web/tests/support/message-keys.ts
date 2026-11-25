@@ -277,20 +277,6 @@ const PRODUCERS: Producers = {
         },
     ],
     "ForecastPerformance.reasons": ["src/pyracast/plants/performance.py"],
-    "Forecast.qualityFlags": [
-        "src/pyracast/calculation.py",
-        "src/pyracast/forecasts/intraday.py",
-        "src/pyracast/forecasts/sources.py",
-        "src/pyracast/irradiance/__init__.py",
-        "src/pyracast/plants/automatic_forecast.py",
-        "src/pyracast/plants/current_forecast.py",
-        "src/pyracast/plants/forecast_sources.py",
-        "src/pyracast/plants/forecasting.py",
-        "src/pyracast/plants/history.py",
-        "src/pyracast/plants/incident_forecasts.py",
-        "src/pyracast/plants/numerics.py",
-        "web/src/features/forecast/panel/model.ts",
-    ],
     "Outages.proposalReasons": [
         {
             module: "src/pyracast/change_requests/policy.py",

@@ -80,10 +80,10 @@ test("a customer manages one plant site through the real API", async ({
 
     await page.getByLabel("Forecast date").fill(process.env.BROWSER_DATE!);
     await expect(
-        page.getByRole("heading", { name: "Irradiance" }),
+        page.getByRole("heading", { name: "Irradiance forecast" }),
     ).toBeVisible();
     await expect(
-        page.getByRole("img", { name: /Irradiance by interval/ }),
+        page.getByRole("img", { name: "Irradiance (W/m²)", exact: true }),
     ).toBeVisible();
     await expect(page.getByText("kWh/m²").first()).toBeVisible();
     await page.screenshot({
@@ -101,23 +101,34 @@ test("a customer manages one plant site through the real API", async ({
         .getByLabel("Forecast date")
         .fill(process.env.BROWSER_HISTORY_DATE!);
     await expect(
-        page.getByText("Satellite/model estimates, not meter readings."),
+        page.getByRole("heading", {
+            name: "Irradiance calculated from satellite data",
+        }),
     ).toBeVisible();
     await page
         .getByRole("button", { name: "Generation forecast", exact: true })
         .click();
     await page.getByLabel("Forecast date").fill(process.env.BROWSER_DATE!);
     await page.getByLabel("Interval", { exact: true }).selectOption("60");
-    await expect(
-        page.getByText("View interval data (12 intervals)"),
-    ).toBeVisible();
-    await page.getByText("View interval data (12 intervals)").click();
+    async function expectTableRows(date: string, name: string, rows: number) {
+        const panel = page
+            .locator("section.panel")
+            .filter({ has: page.getByText(date, { exact: true }) });
+        const toggle = panel.getByText("Show table", { exact: true });
+        await toggle.click();
+        await expect(
+            panel.getByRole("table", { name }).getByRole("row"),
+        ).toHaveCount(rows + 1);
+        await toggle.click();
+    }
+    await expectTableRows(process.env.BROWSER_DATE!, "Hourly values", 12);
+    await page.getByText("Show table", { exact: true }).click();
     await expect(
         page
-            .getByRole("table", { name: "Forecast intervals" })
+            .getByRole("table", { name: "Hourly values" })
             .getByRole("columnheader"),
-    ).toHaveText(["Time interval", "Energy (MWh)"]);
-    await page.getByText("View interval data (12 intervals)").click();
+    ).toHaveText(["Time", "Forecast (MWh)"]);
+    await page.getByText("Show table", { exact: true }).click();
     async function daylightForecast(resolution: 30 | 60) {
         const response = await page.request.get(`${plantUrl}forecast/`, {
             params: {
@@ -143,14 +154,12 @@ test("a customer manages one plant site through the real API", async ({
     }
     const hourlyDaylight = await daylightForecast(60);
     const daylightEnergy = new Intl.NumberFormat("en", {
-        maximumFractionDigits: 3,
+        maximumFractionDigits: 2,
     }).format(hourlyDaylight.energy_mwh);
     await expect(
-        page.locator(".stat").filter({ hasText: /^Estimated energy/ }),
+        page.locator(".stat").filter({ hasText: /^Daily total/ }),
     ).toContainText(`${daylightEnergy} MWh`);
-    await expect(
-        page.locator(".stat").filter({ hasText: /^Coverage/ }),
-    ).toContainText("100 %");
+    await expect(page.locator(".stat")).toHaveCount(1);
     async function expectFullForecastCsv(fullCount: 24 | 48) {
         const download = page.waitForEvent("download");
         await page
@@ -186,14 +195,12 @@ test("a customer manages one plant site through the real API", async ({
     }
     await expectFullForecastCsv(24);
     await page.getByLabel("Interval", { exact: true }).selectOption("30");
-    await expect(
-        page.getByText("View interval data (24 intervals)"),
-    ).toBeVisible();
+    await expectTableRows(process.env.BROWSER_DATE!, "Half-hourly values", 24);
     expect((await daylightForecast(30)).energy_mwh).toBe(
         hourlyDaylight.energy_mwh,
     );
     await expect(
-        page.locator(".stat").filter({ hasText: /^Estimated energy/ }),
+        page.locator(".stat").filter({ hasText: /^Daily total/ }),
     ).toContainText(`${daylightEnergy} MWh`);
     await expectFullForecastCsv(48);
     // Outage times are entered on the plant's wall clock, whatever zone the browser runs in.
@@ -230,23 +237,24 @@ test("a customer manages one plant site through the real API", async ({
     ).toBeVisible();
     await page.getByRole("button", { name: "Forecast", exact: true }).click();
     await expect(
-        page.locator(".stat").getByText("Normal capacity", { exact: true }),
+        page.locator(".stat").getByText("Without outage", { exact: true }),
     ).toBeVisible();
     await expect(
-        page.locator(".stat").getByText("With outages", { exact: true }),
+        page.locator(".stat").getByText("With outage", { exact: true }),
     ).toBeVisible();
     await expect(
-        page.locator(".stat").filter({ hasText: /^Normal capacity/ }),
+        page.locator(".stat").filter({ hasText: /^Without outage/ }),
     ).toContainText(`${daylightEnergy} MWh`);
     await expect(
         page
             .locator(".stat")
-            .filter({ hasText: /^With outages/ })
+            .filter({ hasText: /^With outage/ })
             .locator("strong"),
     ).toHaveText("0 MWh");
     const outageDownload = page.waitForEvent("download");
     await page
-        .getByRole("button", { name: "Download both scenarios CSV" })
+        .getByRole("button", { name: "Download CSV", exact: true })
+        .first()
         .click();
     const outageCsv = Papa.parse<Record<string, string>>(
         await readFile(await (await outageDownload).path(), "utf8"),
@@ -336,44 +344,41 @@ test("a customer manages one plant site through the real API", async ({
     await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Forecast", exact: true }).click();
     await expect(
-        page.getByText("Estimated energy", { exact: true }),
+        page.locator(".stat").getByText("Daily total", { exact: true }),
     ).toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Download both scenarios CSV" }),
+        page.locator(".stat").getByText("With outage", { exact: true }),
     ).toHaveCount(0);
     await expectFullForecastCsv(48);
     await page.getByLabel("Forecast date").fill(process.env.BROWSER_TODAY!);
-    await page.getByText("Source & quality", { exact: true }).click();
+    await expect(page.getByText(/^Forecast data: /)).toBeVisible();
+    await expect(page.getByText(/^Model: /)).toHaveCount(0);
+    await expectTableRows(process.env.BROWSER_TODAY!, "Half-hourly values", 48);
     await expect(
-        page.getByText(
-            `Model: reference-power-transfer-v1. Configuration ${createdPlant.current_configuration.id}.`,
-            { exact: false },
-        ),
-    ).toBeVisible();
-    await expect(
-        page.getByText("View interval data (48 intervals)"),
-    ).toBeVisible();
-    await expect(
-        page.getByRole("heading", { name: "No configuration for this day" }),
+        page.getByRole("heading", {
+            name: "No technical details for this day.",
+        }),
     ).toHaveCount(0);
     await expect(page.getByText("configuration_unavailable")).toHaveCount(0);
     await page
         .getByLabel("Forecast date")
         .fill(process.env.BROWSER_HISTORY_DATE!);
     await expect(
-        page.getByText("Satellite/model estimates, not meter readings."),
+        page.getByRole("heading", {
+            name: "Production calculated from satellite data",
+        }),
     ).toBeVisible();
-    await expect(
-        page.getByText("View interval data (24 intervals)"),
-    ).toBeVisible();
+    await expectTableRows(
+        process.env.BROWSER_HISTORY_DATE!,
+        "Half-hourly values",
+        24,
+    );
     await page.screenshot({
         path: testInfo.outputPath("plant-history-desktop.png"),
         fullPage: true,
     });
     await page.getByLabel("Forecast date").fill(process.env.BROWSER_DATE!);
-    await expect(
-        page.getByText("View interval data (24 intervals)"),
-    ).toBeVisible();
+    await expectTableRows(process.env.BROWSER_DATE!, "Half-hourly values", 24);
 
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await expect(page.getByLabel("EPİAŞ plant ID")).toHaveCount(0);
