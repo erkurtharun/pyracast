@@ -2,55 +2,46 @@
 
 import { useTranslations } from "next-intl";
 import { Select } from "@/ui/form";
-import type { DataSource } from "./date-bounds";
+import type { DataChoice } from "./date-bounds";
 
 export type { DataSource } from "./date-bounds";
 
-const SOURCES = [
-    ["auto", "automatic"],
-    ["forecast", "forecast_outlook"],
-    ["archived_forecast", "archived_forecast"],
-    ["estimated_actuals", "estimated_actuals"],
-] as const satisfies readonly (readonly [DataSource, string])[];
+const CHOICES = [
+    "forecast",
+    "archived_forecast",
+    "estimated_actuals",
+] as const satisfies readonly DataChoice[];
 
 export function DataSourceControl({
     value,
+    electrical,
     onChange,
 }: {
-    value: DataSource;
-    onChange: (source: DataSource) => void;
+    value: DataChoice;
+    electrical: boolean;
+    onChange: (choice: DataChoice) => void;
 }) {
     const t = useTranslations("DataSource");
-
+    const label = (choice: DataChoice) =>
+        choice === "estimated_actuals" && !electrical
+            ? t("estimated_irradiance")
+            : t(choice);
     return (
-        <>
-            <Select
-                label={t("data_source")}
-                value={value}
-                onChange={(event) =>
-                    onChange(
-                        SOURCES.find(
-                            ([source]) => source === event.target.value,
-                        )?.[0] ?? "auto",
-                    )
-                }
-            >
-                {SOURCES.map(([source, label]) => (
-                    <option key={source} value={source}>
-                        {t(label)}
-                    </option>
-                ))}
-            </Select>
-            {value === "estimated_actuals" && (
-                <span className="fine">
-                    {t("elapsed_intervals_model_estimates_not_meter_readings")}
-                </span>
-            )}
-            {value === "archived_forecast" && (
-                <span className="fine">
-                    {t("archived_forecast_description")}
-                </span>
-            )}
-        </>
+        <Select
+            label={t("data_source")}
+            value={value}
+            onChange={(event) =>
+                onChange(
+                    CHOICES.find((choice) => choice === event.target.value) ??
+                        "forecast",
+                )
+            }
+        >
+            {CHOICES.map((choice) => (
+                <option key={choice} value={choice}>
+                    {label(choice)}
+                </option>
+            ))}
+        </Select>
     );
 }

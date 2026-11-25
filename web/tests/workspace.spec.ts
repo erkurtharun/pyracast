@@ -36,7 +36,7 @@ test("mock contract: signs in with CSRF, selects region, and signs out", async (
         .click();
     await page.getByRole("button", { name: "Irradiance", exact: true }).click();
     await expect(
-        page.getByRole("heading", { name: "No forecast for this day yet" }),
+        page.getByRole("heading", { name: "No forecast data for this day." }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Sign out" }).click();
     await expect(
@@ -245,12 +245,12 @@ test("missing plant configuration explains the selected day", async ({
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
     await expect(
-        page.getByRole("heading", { name: "No configuration for this day" }),
+        page.getByRole("heading", {
+            name: "No technical details for this day.",
+        }),
     ).toBeVisible();
     await expect(
-        page.getByText(
-            "No configuration existed before the selected day began. Choose a later date.",
-        ),
+        page.getByText("Choose a later date.", { exact: true }),
     ).toBeVisible();
     await expect(page.getByText("configuration_unavailable")).toHaveCount(0);
 });
@@ -452,13 +452,13 @@ test("open regional and plant forecasts refresh after new data arrives", async (
     await irradiance.click();
     await expect(irradiance).toHaveAttribute("aria-current", "page");
     await expect(
-        page.getByRole("heading", { name: "No forecast for this day yet" }),
+        page.getByRole("heading", { name: "No forecast data for this day." }),
     ).toBeVisible();
     reason = "estimated_actuals_unavailable";
     await page.clock.fastForward(30_000);
     await expect(
         page.getByRole("heading", {
-            name: "No estimated actuals for this day",
+            name: "No satellite data for this day.",
         }),
     ).toBeVisible();
     // The Generation view mounts with its cached answer and revalidates it; the tick below
@@ -471,13 +471,15 @@ test("open regional and plant forecasts refresh after new data arrives", async (
     await generation.click();
     await expect(generation).toHaveAttribute("aria-current", "page");
     await expect(
-        page.getByRole("heading", { name: "No configuration for this day" }),
+        page.getByRole("heading", {
+            name: "No technical details for this day.",
+        }),
     ).toBeVisible();
     reason = "estimated_actuals_unavailable";
     await page.clock.fastForward(30_000);
     await expect(
         page.getByRole("heading", {
-            name: "No estimated actuals for this day",
+            name: "No satellite data for this day.",
         }),
     ).toBeVisible();
 });
@@ -623,24 +625,46 @@ test("a forecast view chosen while another section loads applies to the forecast
 
 for (const source of ["estimated_actuals", "archived_forecast"] as const)
     for (const picked of ["2026-03-29", ""] as const)
-        test(`${source} chosen while ${picked ? "a later date" : "a cleared date"} loads limits the date being navigated to`, async ({
+        test(`${source} chosen while ${picked ? "a later date" : "a cleared date"} loads keeps the date being navigated to`, async ({
             page,
         }) => {
+            const reads: URL[] = [];
+            page.on("request", (request) => {
+                const url = new URL(request.url());
+                if (url.pathname.endsWith("/plants/21/forecast/"))
+                    reads.push(url);
+            });
             await openPlant(page, "forecast/?date=2026-03-27");
             const day = page.getByLabel("Forecast date");
+            const choice = page.getByLabel("Data", { exact: true });
             await expect(day).toHaveValue("2026-03-27");
             const forecast = await holdNavigation(page, "forecast");
             await day.fill(picked);
             await forecast.requested;
-            await page.getByLabel("Data source").selectOption(source);
-            await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-28$/);
+            await choice.selectOption(source);
             await forecast.release();
-            await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-28$/);
-            await expect(day).toHaveValue("2026-03-28");
+            await expect(page).toHaveURL(
+                picked ? /\/forecast\/\?date=2026-03-29$/ : /\/forecast\/$/,
+            );
+            await expect(day).toHaveValue("2026-03-29");
             await expect(day).toHaveAttribute("max", "2026-03-28");
+            await expect(choice).toHaveValue(source);
+            await expect(
+                page.getByText(
+                    "Choose a local day from 2025-03-27 to 2026-03-28 for this data source.",
+                    { exact: true },
+                ),
+            ).toBeVisible();
+            expect(
+                reads.filter(
+                    (url) =>
+                        url.searchParams.get("data_source") === source &&
+                        (url.searchParams.get("date") ?? "") > "2026-03-28",
+                ),
+            ).toEqual([]);
             await day.fill("2026-03-26");
             await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-26$/);
-            await expect(page.getByLabel("Data source")).toHaveValue(source);
+            await expect(choice).toHaveValue(source);
         });
 
 test("a second day step taken while the first loads continues from the day being navigated to", async ({
@@ -783,7 +807,9 @@ test("generation-only controls rest while the irradiance view loads", async ({
     await expect(controls).not.toHaveAttribute("aria-busy", "true");
     await expect(page.getByLabel("Resolution")).toHaveCount(0);
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-29");
-    await expect(page.getByLabel("Data source")).toHaveValue("auto");
+    await expect(page.getByLabel("Data", { exact: true })).toHaveValue(
+        "forecast",
+    );
 });
 
 test("the outgoing production view's disclosures stay closed while the comparison loads", async ({
@@ -984,34 +1010,95 @@ test("region collection schedule validates and saves distinct local times", asyn
     ).toBeVisible();
 });
 
-test("regional and plant data sources identify estimated actuals and retain archived forecasts", async ({
+test("on a past day the data choice names satellite data only once satellite figures are shown", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(new Date("2026-03-28T12:00:00Z"));
+    await mockApi(page);
+    let answer: "failure" | "empty" | "satellite" = "failure";
+    await page.route("**/plants/21/forecast/**", (route) => {
+        if (answer === "failure")
+            return route.fulfill({
+                status: 503,
+                json: errorBody("busy", "Forecast service is busy."),
+            });
+        return route.fulfill({
+            json: {
+                date: "2026-03-27",
+                timezone: region.timezone,
+                freshness: "archived",
+                source_kind: "estimated_actuals",
+                ...(answer === "empty"
+                    ? {
+                          result: null,
+                          unavailable_reason: "estimated_actuals_unavailable",
+                      }
+                    : {
+                          unavailable_reason: null,
+                          result: {
+                              complete: true,
+                              energy_mwh: 7,
+                              coverage_fraction: 1,
+                              intervals: [],
+                          },
+                      }),
+            },
+        });
+    });
+    await page.goto("/app/w/1/plants/11/forecast/?date=2026-03-27");
+    const choice = page.getByLabel("Data", { exact: true });
+    const panel = page.locator("section.panel");
+    await expect(panel.getByRole("alert")).toContainText(
+        "Forecast service is busy.",
+    );
+    await expect(choice).toHaveValue("forecast");
+    answer = "empty";
+    await panel.getByRole("button", { name: "Try again" }).click();
+    await expect(
+        panel.getByRole("heading", { name: "No satellite data for this day." }),
+    ).toBeVisible();
+    await expect(choice).toHaveValue("forecast");
+    answer = "satellite";
+    await page.clock.fastForward(30_000);
+    await expect(
+        panel.getByRole("heading", {
+            name: "Production calculated from satellite data",
+        }),
+    ).toBeVisible();
+    await expect(choice).toHaveValue("estimated_actuals");
+});
+
+test("the data choice names what each view shows and keeps the date", async ({
     page,
 }) => {
     await page.clock.setFixedTime(new Date("2026-03-28T12:00:00Z"));
     await mockApi(page);
     const sources: string[] = [];
     const plantRequests: URL[] = [];
-    const generation = page.locator(".stat", { hasText: "Estimated energy" });
+    const generation = page.locator(".stat", { hasText: "Daily total" });
+    const choice = page.getByLabel("Data", { exact: true });
+    const day = page.getByLabel("Forecast date");
+    const heading = page.locator("section.panel h2");
     await page.route("**/api/**/forecast/**", async (route) => {
         const url = new URL(route.request().url());
         const source = url.searchParams.get("data_source") ?? "missing";
         sources.push(source);
         if (url.pathname.includes("/plants/")) plantRequests.push(url);
         const date = url.searchParams.get("date")!;
-        const day = Number(date.slice(-2));
+        const number = Number(date.slice(-2));
         await route.fulfill({
             json: {
                 timezone: region.timezone,
                 freshness: "fresh",
                 source_kind:
-                    source === "forecast" || date >= "2026-03-28"
+                    source === "archived_forecast" || date >= "2026-03-28"
                         ? "forecast"
                         : "estimated_actuals",
                 result: {
                     complete: true,
                     intervals: [],
                     energy_kwh_m2: 4,
-                    energy_mwh: 100 + day + day / 100,
+                    energy_mwh: 100 + number + number / 100,
                 },
             },
         });
@@ -1021,61 +1108,66 @@ test("regional and plant data sources identify estimated actuals and retain arch
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
     await page.getByRole("button", { name: "Irradiance", exact: true }).click();
-    await page.getByLabel("Forecast date").fill("2026-03-27");
-    await expect(
-        page.getByText("Satellite/model estimates, not meter readings."),
-    ).toBeVisible();
-    expect(sources).toContain("auto");
-    await page.getByLabel("Data source").selectOption("forecast");
-    await expect.poll(() => sources.at(-1)).toBe("forecast");
-    await page.getByLabel("Forecast date").fill("2026-03-28");
-    await page.getByLabel("Data source").selectOption("estimated_actuals");
-    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-28");
-    await expect(page.getByLabel("Forecast date")).toHaveAttribute(
-        "max",
-        "2026-03-28",
+    await expect(choice.locator("option")).toHaveText([
+        "Forecast",
+        "Last forecast before sunrise",
+        "Irradiance calculated from satellite data",
+    ]);
+    await day.fill("2026-03-27");
+    await expect(heading).toHaveText(
+        "Irradiance calculated from satellite data",
     );
+    await expect(choice).toHaveValue("estimated_actuals");
+    expect(sources.at(-1)).toBe("auto");
+    await choice.selectOption("archived_forecast");
+    await expect.poll(() => sources.at(-1)).toBe("archived_forecast");
+    await expect(heading).toHaveText("Irradiance forecast");
+    await expect(choice).toHaveValue("archived_forecast");
+    await expect(day).toHaveValue("2026-03-27");
+    await day.fill("2026-03-28");
+    await choice.selectOption("estimated_actuals");
+    await expect(day).toHaveValue("2026-03-28");
+    await expect(day).toHaveAttribute("max", "2026-03-28");
     await expect.poll(() => sources.at(-1)).toBe("estimated_actuals");
     await page.getByRole("button", { name: "Generation", exact: true }).click();
-    await expect(page.getByLabel("Data source")).toHaveValue(
-        "estimated_actuals",
-    );
-    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-28");
+    await expect(choice).toHaveValue("estimated_actuals");
+    await expect(choice.locator("option")).toHaveText([
+        "Forecast",
+        "Last forecast before sunrise",
+        "Production calculated from satellite data",
+    ]);
+    await expect(day).toHaveValue("2026-03-28");
     await expect
         .poll(() => plantRequests.at(-1)?.searchParams.get("date"))
         .toBe("2026-03-28");
-    await page.getByLabel("Data source").selectOption("auto");
-    await page.getByLabel("Forecast date").fill("2026-03-29");
-    await page.getByLabel("Data source").selectOption("estimated_actuals");
-    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-28");
-    await page.getByLabel("Data source").selectOption("auto");
-    await page.getByLabel("Forecast date").fill("2026-03-29");
+    const asked = plantRequests.length;
+    await day.fill("2026-03-29");
+    await expect(day).toHaveValue("2026-03-29");
+    await expect(choice).toHaveValue("estimated_actuals");
+    expect(plantRequests).toHaveLength(asked);
+    await choice.selectOption("forecast");
+    await expect(day).toHaveValue("2026-03-29");
     await expect(page.getByLabel("Resolution")).toHaveValue("60");
-    await expect
-        .poll(() =>
-            plantRequests.at(-1)?.searchParams.get("resolution_minutes"),
-        )
-        .toBe("60");
-    await expect
-        .poll(() => plantRequests.at(-1)?.searchParams.get("data_source"))
-        .toBe("auto");
-    await expect(
-        page.getByText("Satellite/model estimates, not meter readings."),
-    ).toHaveCount(0);
+    await expect(heading).toHaveText("Generation forecast");
+    await expect(choice).toHaveValue("forecast");
     await expect(generation).toContainText("129.29");
-    await page.getByLabel("Forecast date").fill("2026-03-27");
+    expect(
+        plantRequests
+            .map((url) => url.search)
+            .filter((search) => search.includes("date=2026-03-29")),
+    ).toEqual(["?date=2026-03-29&resolution_minutes=60&data_source=auto"]);
+    await day.fill("2026-03-27");
     await expect(generation).toContainText("127.27");
-    await expect(
-        page.getByText("Satellite/model estimates, not meter readings."),
-    ).toBeVisible();
+    await expect(heading).toHaveText(
+        "Production calculated from satellite data",
+    );
+    await expect(choice).toHaveValue("estimated_actuals");
     await page.getByLabel("Resolution").selectOption("30");
     await expect
         .poll(() =>
             plantRequests.at(-1)?.searchParams.get("resolution_minutes"),
         )
         .toBe("30");
-    await page.getByLabel("Data source").selectOption("forecast");
-    await expect.poll(() => sources.at(-1)).toBe("forecast");
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await page
         .getByText("Source and correction details", { exact: true })
@@ -1115,7 +1207,7 @@ test("forecast crops edge zeros, retains gaps and downloads the full safe CSV", 
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
     await page.getByRole("button", { name: "Irradiance", exact: true }).click();
-    await page.getByText("View interval data (3 intervals)").click();
+    await page.getByText("Show table", { exact: true }).click();
     const table = page.getByRole("table");
     await expect(table.getByRole("row")).toHaveCount(4);
     await expect(table.getByRole("cell", { name: /^07:00–/ })).toBeVisible();
@@ -1145,7 +1237,7 @@ test("forecast crops edge zeros, retains gaps and downloads the full safe CSV", 
         plant_name: "East array",
         timezone: region.timezone,
         date: "2026-01-01",
-        source_kind: "forecast",
+        source_kind: "Forecast",
         starts_at: "2026-01-01T06:00:00+03:00",
         ends_at: "2026-01-01T07:00:00+03:00",
         ghi_wm2: "0",
@@ -1191,7 +1283,7 @@ test("all-zero forecasts remain visible as measured zero values", async ({
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
     await page.getByRole("button", { name: "Irradiance", exact: true }).click();
-    await page.getByText("View interval data (3 intervals)").click();
+    await page.getByText("Show table", { exact: true }).click();
     await expect(
         page.getByRole("table").getByRole("cell", { name: "0", exact: true }),
     ).toHaveCount(2);
@@ -1382,14 +1474,12 @@ test("mock contract: follows tenant pagination and keeps missing intervals visib
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
     await page.getByRole("button", { name: "Irradiance", exact: true }).click();
-    await expect(page.getByRole("status")).toContainText(
-        "Some forecast data is missing.",
+    await expect(page.getByRole("status")).toHaveText(
+        "Data is missing for some hours.",
     );
-    await page.getByText("Source & quality", { exact: true }).click();
-    await expect(
-        page.getByText("synthetic fixture", { exact: true }),
-    ).toBeVisible();
-    await page.getByText("View interval data (3 intervals)").click();
+    await expect(page.getByText(/^Forecast data: /)).toBeVisible();
+    await expect(page.getByText(/synthetic fixture/)).toHaveCount(0);
+    await page.getByText("Show table", { exact: true }).click();
     await expect(
         page.getByRole("cell", { name: "500", exact: true }),
     ).toBeVisible();

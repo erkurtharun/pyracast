@@ -46,7 +46,7 @@ test("wide content supports keyboard scrolling and adapts to viewport width", as
         table.style.minWidth = "700px";
     });
     await expect(scroll).toHaveAttribute("role", "region");
-    await expect(scroll).toHaveAccessibleName("Forecast intervals");
+    await expect(scroll).toHaveAccessibleName("Half-hourly values");
     await expect(scroll).toHaveAttribute("tabindex", "0");
     await summary.focus();
     await page.keyboard.press("Tab");
@@ -61,12 +61,12 @@ test("wide content supports keyboard scrolling and adapts to viewport width", as
     await expect(scroll).not.toHaveAttribute("role");
     await expect(scroll).not.toHaveAttribute("aria-label");
     await expect(details.getByRole("table")).toHaveAccessibleName(
-        "Forecast intervals",
+        "Half-hourly values",
     );
 
     await page.setViewportSize({ width: 390, height: 900 });
     await expect(scroll).toHaveAttribute("tabindex", "0");
-    await expect(scroll).toHaveAccessibleName("Forecast intervals");
+    await expect(scroll).toHaveAccessibleName("Half-hourly values");
 });
 
 test("scroll regions follow table content width and closed details reopening", async ({
@@ -77,7 +77,7 @@ test("scroll regions follow table content width and closed details reopening", a
     const scroll = details.locator(".table-scroll");
     await expect(scroll).toBeHidden();
     await expect(
-        page.getByRole("region", { name: "Forecast intervals" }),
+        page.getByRole("region", { name: "Half-hourly values" }),
     ).toHaveCount(0);
     await summary.click();
     await expect(scroll).not.toHaveAttribute("tabindex");
@@ -86,17 +86,17 @@ test("scroll regions follow table content width and closed details reopening", a
         table.style.minWidth = `${minimumWidth}px`;
     }, width + 200);
     await expect(scroll).toHaveAttribute("tabindex", "0");
-    await expect(scroll).toHaveAccessibleName("Forecast intervals");
+    await expect(scroll).toHaveAccessibleName("Half-hourly values");
     expect(await scroll.evaluate((element) => element.clientWidth)).toBe(width);
 
     await summary.click();
     await expect(scroll).toBeHidden();
     await expect(
-        page.getByRole("region", { name: "Forecast intervals" }),
+        page.getByRole("region", { name: "Half-hourly values" }),
     ).toHaveCount(0);
     await summary.click();
     await expect(scroll).toHaveAttribute("tabindex", "0");
-    await expect(scroll).toHaveAccessibleName("Forecast intervals");
+    await expect(scroll).toHaveAccessibleName("Half-hourly values");
     await scroll.locator("table").evaluate((table) => {
         table.style.removeProperty("min-width");
     });
@@ -113,7 +113,7 @@ test("simplified forecast intervals fit mobile without an extra scroll tab stop"
     const scroll = details.locator(".table-scroll");
     await summary.click();
     await expect(details.getByRole("columnheader")).toHaveText([
-        "Time interval",
+        "Time",
         "Irradiance (W/m²)",
     ]);
     expect(
