@@ -13,15 +13,16 @@ import {
 } from "./model";
 
 const FIELD_LABELS = {
-    kind: "kind",
-    title: "title",
-    starts_at: "starts",
-    ends_at: "ends",
-    available_dc_mw: "available_dc_mw",
-    available_inverter_mw: "available_inverter_mw",
-    available_export_mw: "available_export_mw",
+    status: "status",
+    kind: "outageType",
+    title: "incidentTitle",
+    starts_at: "startedAt",
+    ends_at: "resolvedAt",
+    available_dc_mw: "availablePanelDCCapacityMW",
+    available_inverter_mw: "availableInverterACCapacityMW",
+    available_export_mw: "availableGridExportCapacityMW",
     notes: "notes",
-} as const satisfies Record<Exclude<OutageField, "status">, string>;
+} as const satisfies Record<OutageField, string>;
 
 // Says what changed; why a held workflow cannot send any more is its hold notice's to say.
 export function StaleChanges({
@@ -40,8 +41,6 @@ export function StaleChanges({
     const format = useFormat();
     const label = useLabel();
     const { before, current } = stale;
-    const fieldLabel = (field: OutageField) =>
-        field === "status" ? t("status") : proposals(FIELD_LABELS[field]);
     const show = (outage: Outage, field: OutageField) => {
         if (field === "status") return label("IncidentStatus", outage.status);
         if (field === "kind") return label("IncidentKind", outage.kind);
@@ -64,7 +63,7 @@ export function StaleChanges({
             <ChangedFields
                 changes={changedFields(before, current).map((field) => ({
                     field,
-                    label: fieldLabel(field),
+                    label: t(FIELD_LABELS[field]),
                     before: show(before, field),
                     after: show(current, field),
                 }))}

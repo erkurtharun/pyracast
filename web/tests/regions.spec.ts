@@ -224,7 +224,7 @@ test("withdraws a pending location request and offers the form again", async ({
         route.fulfill({ json: paged(rows) }),
     );
     await openLocationSettings(page);
-    await page.getByRole("button", { name: "Withdraw request" }).click();
+    await page.getByRole("button", { name: "Withdraw", exact: true }).click();
     await expect(
         page.getByText("Location change withdrawn on Jan 2, 2026."),
     ).toBeVisible();
@@ -269,6 +269,69 @@ test("a direct move of a never-approved plant refills the form with the stored l
     await expect(page.getByLabel("Reason (optional)")).toHaveValue("");
 });
 
+const stoppedForecasts = [
+    {
+        status: "pending",
+        configuration: plant.current_configuration,
+        stopped: true,
+    },
+    {
+        status: "approved",
+        configuration: plant.current_configuration,
+        stopped: false,
+    },
+    { status: "pending", configuration: null, stopped: false },
+] as const;
+
+for (const item of stoppedForecasts)
+    test(`an approved location change says forecasts stop only while they are stopped: ${item.status} plant${item.configuration ? "" : " never approved"}`, async ({
+        page,
+    }) => {
+        await mockApi(page);
+        await page.route("**/api/tenants/1/sites/", (route) =>
+            route.fulfill({
+                json: paged([
+                    {
+                        ...region,
+                        status: item.status,
+                        plant: {
+                            ...plant,
+                            current_configuration: item.configuration,
+                        },
+                        reminder: null,
+                    },
+                ]),
+            }),
+        );
+        await page.route("**/location-change-requests/", (route) =>
+            route.fulfill({
+                json: paged([
+                    {
+                        ...pendingRequest,
+                        status: "approved",
+                        reviewed_at: "2026-01-03T00:00:00Z",
+                    },
+                ]),
+            }),
+        );
+        await openLocationSettings(page);
+        await expect(
+            page.getByText(
+                "Pyracast checks a changed location. Forecasts for the plant pause only while that check is open.",
+            ),
+        ).toBeVisible();
+        await expect(
+            page.getByText("Location change approved on Jan 3, 2026.", {
+                exact: true,
+            }),
+        ).toBeVisible();
+        await expect(
+            page.getByText(
+                "Forecasts stop until Pyracast approves the plant at its new location.",
+            ),
+        ).toHaveCount(item.stopped ? 1 : 0);
+    });
+
 test("shows the operator's decision and note on the latest request", async ({
     page,
 }) => {
@@ -288,9 +351,9 @@ test("shows the operator's decision and note on the latest request", async ({
     );
     await openLocationSettings(page);
     await expect(
-        page.getByText(
-            "Location change approved on Jan 3, 2026. Forecasts stop until Pyracast approves the plant at its new location.",
-        ),
+        page.getByText("Location change approved on Jan 3, 2026.", {
+            exact: true,
+        }),
     ).toBeVisible();
     await expect(
         page.getByText("Note: Matches the grid connection record"),

@@ -3,11 +3,13 @@ import { useLocale } from "next-intl";
 import { useMemo } from "react";
 import { formatNumber, formatQuantity, formatSignificant } from "./number";
 import {
+    daysZoneLabel,
     deviceZone,
     formatTime,
     intervalTimeFormatter,
     zoneLabel,
     type Instant,
+    type PlantDays,
 } from "./time";
 
 // Workspace events (inbox, invitations, recycle bin) are read in the device zone, so they name its offset.
@@ -37,7 +39,8 @@ export function useFormat() {
             ) => formatTime(locale, value, timeZone, options),
             deviceTime: (value: Instant) =>
                 formatTime(locale, value, deviceZone(), DEVICE_TIME),
-            zone: (timeZone: string) => zoneLabel(timeZone),
+            zone: (timeZone: string, days?: PlantDays) =>
+                days ? daysZoneLabel(timeZone, days) : zoneLabel(timeZone),
             intervals: (timeZone: string, timestamps: Iterable<string>) =>
                 intervalTimeFormatter(locale, timeZone, timestamps),
         }),

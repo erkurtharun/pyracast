@@ -51,6 +51,16 @@ test("bin rows are titled with the plant name and a restored plant opens from th
     await expect(page).toHaveURL("/app/w/1/plants/11/forecast/");
 });
 
+test("an empty recycle bin says so in one sentence", async ({ page }) => {
+    await mockApi(page);
+    await bin(page, { deleted: false });
+    await page.goto("/app/w/1/trash/");
+    await expect(
+        page.getByText("No deleted plants.", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Nothing to restore.")).toHaveCount(0);
+});
+
 const busy = errorBody("busy", "The workspace is busy. Try again in a moment.");
 
 test("a failed restore moves the focus to its reason", async ({ page }) => {

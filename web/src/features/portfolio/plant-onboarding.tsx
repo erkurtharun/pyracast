@@ -5,6 +5,7 @@ import type { Site } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { ApiError, displayMessage } from "@/lib/api/errors";
 import { useApiList, useRefresh } from "@/lib/api/query";
+import { MISSING } from "@/lib/format/number";
 import { deviceZone } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
 import type { components } from "@/lib/schema";
@@ -116,12 +117,18 @@ function Wizard({
 }: WizardProps & { existing?: Site; trashed: readonly Trashed[] }) {
     const t = useTranslations("PlantOnboarding");
     const decision = useTranslations("PlantWorkspace");
+    const common = useTranslations("Common");
     const writeErrorMessage = useWriteErrorMessage();
     const format = useFormat();
     const refresh = useRefresh();
     const forget = useForgetDeletion();
     const reviewNumber = (value: unknown) =>
         value == null || value === "" ? "" : format.number(Number(value), 6);
+    const reviewAngle = (value: unknown) => {
+        const shown = reviewNumber(value);
+        return shown ? `${shown}°` : MISSING;
+    };
+    const refused = existing?.status === "rejected";
     const steps = onboardingSteps(!!existing);
     const last = steps.length - 1;
     const [step, setStep] = useState(0);
@@ -292,7 +299,7 @@ function Wizard({
                             ? t("completePlantSetup")
                             : t("addASolarPlant")}
                     </h2>
-                    {existing?.status === "rejected" ? (
+                    {existing && refused ? (
                         <>
                             <p>{decision("rejectedNotice")}</p>
                             {existing.review_reason && (
@@ -531,20 +538,22 @@ function Wizard({
                                               : t("mountingUnknown")}
                                         {review.mounting_type === "fixed"
                                             ? t("geometry", {
-                                                  tilt:
-                                                      reviewNumber(
-                                                          review.surface_tilt_degrees,
-                                                      ) || t("unknownGeometry"),
-                                                  azimuth:
-                                                      reviewNumber(
-                                                          review.surface_azimuth_degrees,
-                                                      ) || t("unknownGeometry"),
+                                                  tilt: reviewAngle(
+                                                      review.surface_tilt_degrees,
+                                                  ),
+                                                  azimuth: reviewAngle(
+                                                      review.surface_azimuth_degrees,
+                                                  ),
                                               })
                                             : ""}
                                     </dd>
                                 </div>
                             </dl>
-                            <Notice>{t("approvalNotice")}</Notice>
+                            <Notice>
+                                {refused
+                                    ? t("resubmitAfterSave")
+                                    : t("approvalNotice")}
+                            </Notice>
                         </div>
                         <div className="form-footer onboarding-actions">
                             {step > 0 && (
@@ -557,11 +566,15 @@ function Wizard({
                                 </button>
                             )}
                             <button className="button" type="submit">
-                                {saving
-                                    ? t("submitting")
-                                    : step === last
-                                      ? t("submitPlantForApproval")
-                                      : t("continue")}
+                                {step < last
+                                    ? t("continue")
+                                    : refused
+                                      ? saving
+                                          ? common("saving")
+                                          : decision("saveConfiguration")
+                                      : saving
+                                        ? t("submitting")
+                                        : t("submitPlantForApproval")}
                             </button>
                         </div>
                     </fieldset>

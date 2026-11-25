@@ -117,6 +117,7 @@ test("one plant request saves location and technical details before approval", a
     await expect(
         page.getByLabel("Panel azimuth (°, optional)"),
     ).toHaveAccessibleDescription("Clockwise from north.");
+    await expect(page.getByText("Capacity and mounting guide")).toHaveCount(0);
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     expect(writes).toBe(0);
     await expect(
@@ -144,8 +145,15 @@ test("one plant request saves location and technical details before approval", a
         ),
     ).toBeVisible();
     await expect(page.getByLabel("Forecast date")).toHaveCount(0);
+    for (const removed of [
+        "Next steps",
+        "Pyracast checks the plant details and connects its data source.",
+        "After approval, forecasts appear here and are collected on schedule.",
+    ])
+        await expect(page.getByText(removed)).toHaveCount(0);
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(page.getByLabel("Panel capacity (MWp)")).toHaveValue("130");
+    await expect(page.getByText("Capacity and mounting guide")).toHaveCount(0);
     expect(writes).toBe(1);
 });
 
@@ -922,6 +930,7 @@ test("region collection schedule validates and saves distinct local times", asyn
             "Production calculated from satellite data is updated daily at 03:00. Turning off automatic updates stops it too.",
         ),
     ).toBeVisible();
+    await expect(page.getByText(/in plant time/)).toHaveCount(0);
     expect(reads).toBe(1);
     await page.getByText("Update details", { exact: true }).click();
     await expect(
@@ -930,7 +939,7 @@ test("region collection schedule validates and saves distinct local times", asyn
         ),
     ).toBeVisible();
     await expect(
-        page.getByText("Forecast data", { exact: true }).locator(".."),
+        page.getByText("Last update", { exact: true }).locator(".."),
     ).toContainText("Not yet");
     await expect(
         page.getByText("Next planned update").locator(".."),
@@ -980,7 +989,7 @@ test("region collection schedule validates and saves distinct local times", asyn
         "11:00",
     );
     await expect(
-        page.getByText("Forecast data", { exact: true }).locator(".."),
+        page.getByText("Last update", { exact: true }).locator(".."),
     ).toContainText("Jan 1, 2026, 9:00 AM");
     expect(reads).toBe(2);
     await page.getByRole("button", { name: "Add time" }).click();
@@ -2110,4 +2119,34 @@ test("a failed portfolio refresh keeps the plant cards until access is denied", 
         page.getByText("You are not a member of this workspace."),
     ).toBeVisible();
     await expect(card).toHaveCount(0);
+});
+
+test("the plant header names the offset of the day on screen and the present offset elsewhere", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/api/tenants/1/sites/", (route) =>
+        route.fulfill({
+            json: paged([
+                {
+                    ...region,
+                    timezone: "Europe/Berlin",
+                    plant,
+                    reminder: null,
+                },
+            ]),
+        }),
+    );
+    const header = page.locator(".plant-time");
+    await page.goto("/app/w/1/plants/11/forecast/?date=2026-07-15");
+    await expect(header).toHaveText("Plant time: UTC+2");
+    await expect(page.getByText("Dates in plant time")).toHaveCount(0);
+    await page.goto("/app/w/1/plants/11/forecast/?date=2026-03-29");
+    await expect(header).toHaveText("Plant time: UTC+1 / UTC+2");
+    await page.goto("/app/w/1/plants/11/production/?date=2026-08-03");
+    await expect(header).toHaveText("Plant time: UTC+2");
+    await page.goto("/app/w/1/plants/11/production/?view=comparison");
+    await expect(header).toHaveText("Plant time: UTC+2 / UTC+1");
+    await page.goto("/app/w/1/plants/11/settings/");
+    await expect(header).toHaveText("Plant time: UTC+1");
 });

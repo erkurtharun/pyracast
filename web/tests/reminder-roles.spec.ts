@@ -2038,7 +2038,7 @@ test("focus on Forecast email history goes to the panel heading when a loss disc
     await expect(panelHeading(page)).toBeFocused();
 });
 
-test("the review takes focus, says that people who join or change their address later follow the same rule, confines the keyboard to its own controls, returns focus to Save on Escape and fits a narrow screen", async ({
+test("the review takes focus, states its rule, marks an address outside the workspace, confines the keyboard to its own controls, returns focus to Save on Escape and fits a narrow screen", async ({
     page,
 }) => {
     const LONG =
@@ -2453,8 +2453,9 @@ test("a plant without a schedule opens unticked with Default for every row and t
         .locator("summary", { hasText: "Forecast email history" })
         .click();
     await expect(
-        page.getByText("No forecast emails yet", { exact: true }),
+        page.getByText("No forecast emails yet.", { exact: true }),
     ).toBeVisible();
+    await expect(page.getByText("Planned emails appear here.")).toHaveCount(0);
 });
 
 test("a member whose address is typed is chosen once on the typed row and its choice is sent in both lists", async ({
@@ -2541,7 +2542,7 @@ test("a schedule hidden by a departure says so in the saved view, keeps the choi
     await expect(listed(savedView(page))).toHaveText(["To", ADMIN]);
 });
 
-test("the forecast email history shows its columns and the roles recorded for sent and uncertain emails to the administrator", async ({
+test("the forecast email history shows its columns, the data time of a stale late email without an age or late mark and the roles recorded for sent and uncertain emails to the administrator", async ({
     page,
 }) => {
     const whole = {
@@ -2558,7 +2559,14 @@ test("the forecast email history shows its columns and the roles recorded for se
         includeMembers: true,
         hidden: false,
         deliveries: [
-            { status: "sent", ...whole },
+            {
+                status: "sent",
+                ...whole,
+                stale: true,
+                late: true,
+                collected_at: "2026-01-01T06:30:00Z",
+                source_age_seconds: 5400,
+            },
             {
                 status: "uncertain",
                 sent_at: null,
@@ -2596,6 +2604,13 @@ test("the forecast email history shows its columns and the roles recorded for se
         `${ADMIN}${MEMBER}`,
         `${ADMIN}${MEMBER}`,
     ]);
+    const late = history.locator("tbody tr").first();
+    const data = late.locator("td:nth-child(4)");
+    await expect(data).toContainText("Jan 1, 2026, 9:30 AM");
+    await expect(data.getByText("Stale", { exact: true })).toBeVisible();
+    await expect(late.locator("td:nth-child(6)")).toHaveText("—");
+    await expect(history).not.toContainText("Late delivery");
+    await expect(history).not.toContainText("1h 30m");
 });
 
 for (const hidden of [true, false]) {

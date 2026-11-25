@@ -701,6 +701,107 @@ test("a stale edit keeps what was typed, shows what changed and saves only when 
     });
 });
 
+const conflictWords = {
+    en: {
+        edit: "Edit outage",
+        save: "Save",
+        row: "Inverter capacity still in service (MW): 0 MW → 1.5 MW",
+        apply: "Someone else changed it meanwhile. Try again to apply your change to the current version, or discard your change.",
+        gone: ["Available inverter", "Save again"],
+        revision: "now revision 2",
+    },
+    tr: {
+        edit: "Kesintiyi düzenle",
+        save: "Kaydet",
+        row: "Devrede kalan inverter gücü (MW): 0 MW → 1,5 MW",
+        apply: "Bu arada başka biri değiştirdi. Değişikliğinizi güncel sürüme uygulamak için tekrar deneyin ya da değişikliğinizi bırakın.",
+        gone: ["Kullanılabilir evirici", "yeniden kaydedin"],
+        revision: "şimdi 2. sürüm",
+    },
+};
+
+for (const language of ["en", "tr"] as const)
+    test(`an outage conflict names a changed capacity as the form does and asks to try again (${language})`, async ({
+        page,
+    }) => {
+        const state = await workspace(page);
+        await create(page);
+        if (language === "tr") {
+            await page.route("**/api/session/", (route) =>
+                route.fulfill({
+                    json: {
+                        user: {
+                            id: 1,
+                            username: "user",
+                            email: "user@example.test",
+                        },
+                        csrf_token: "token",
+                        language: "tr",
+                    },
+                }),
+            );
+            await page.clock.runFor(5_000);
+            await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+            await expect(page.locator("html")).toHaveAttribute("lang", "tr");
+        }
+        const words = conflictWords[language];
+        await page
+            .getByRole("button", { name: words.edit, exact: true })
+            .click();
+        state.elsewhere({ available_inverter_mw: 1.5 });
+        await page
+            .getByRole("button", { name: words.save, exact: true })
+            .click();
+        await expect(page.getByText(words.row, { exact: true })).toBeVisible();
+        await expect(
+            page.getByText(words.apply, { exact: true }),
+        ).toBeVisible();
+        for (const old of words.gone)
+            await expect(page.getByText(old)).toHaveCount(0);
+        await expect(page.getByText(words.revision)).toHaveCount(0);
+    });
+
+test("an outage card rounds a capacity still in service to two decimals while the editor keeps the entered value", async ({
+    page,
+}) => {
+    await workspace(page);
+    await create(page);
+    await page
+        .getByRole("button", { name: "Edit outage", exact: true })
+        .click();
+    await page.getByLabel("Effect").selectOption("reduced");
+    await page
+        .getByLabel("Panel capacity still in service (MW)")
+        .fill("2.345678");
+    await page.getByRole("button", { name: "Save" }).click();
+    const panels = page
+        .locator("dl > div")
+        .filter({ hasText: "Panel capacity still in service" })
+        .locator("dd");
+    await expect(panels).toHaveJSProperty("textContent", "2.35\u00a0MW");
+    await page
+        .getByRole("button", { name: "Edit outage", exact: true })
+        .click();
+    await expect(
+        page.getByLabel("Panel capacity still in service (MW)"),
+    ).toHaveValue("2.345678");
+});
+
+test("the capacities of a partial outage are described as left blank when unknown", async ({
+    page,
+}) => {
+    await workspace(page);
+    await create(page);
+    await page
+        .getByRole("button", { name: "Edit outage", exact: true })
+        .click();
+    await page.getByLabel("Effect").selectOption("reduced");
+    await expect(
+        page.getByRole("group", { name: "Partial outage" }),
+    ).toHaveAccessibleDescription("Leave blank if unknown.");
+    await expect(page.getByText("Leave blank if unknown.")).toHaveCount(1);
+});
+
 test("the outage export waits for the list reloaded after a stale edit", async ({
     page,
 }) => {

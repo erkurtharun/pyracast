@@ -11,7 +11,7 @@ import {
 import { flushSync } from "react-dom";
 import type { Region, RegionScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
-import { ApiError, answerLost } from "@/lib/api/errors";
+import { ApiError, DisplayError, answerLost } from "@/lib/api/errors";
 import { ActionForm, CheckboxField, useErrorMessage } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import {
@@ -160,7 +160,7 @@ function SavedView({
             <p className="recipient-count fine">
                 {t("quotaCount", { count, limit: answer.recipient_limit })}
             </p>
-            {count > answer.recipient_limit && (
+            {answer.state === "over_recipient_limit" && (
                 <Notice>
                     {t("recipientLimitExceeded", {
                         limit: answer.recipient_limit,
@@ -577,6 +577,12 @@ export function ReminderEditor({
 }) {
     const t = useTranslations("Reminders");
     const errorMessage = useErrorMessage();
+    const tooMany = (error: unknown) =>
+        error instanceof ApiError && error.code === "recipient_limit_exceeded"
+            ? new DisplayError(
+                  t("chooseAtMost", { limit: answer.recipient_limit }),
+              )
+            : error;
     const [review, setReview] = useState(CLOSED);
     const wrapper = useRef<HTMLDivElement>(null);
     const { draft } = desk.panel;
@@ -649,7 +655,7 @@ export function ReminderEditor({
             const ending = endingOf(error, hidden);
             if (!ending) {
                 setReview(CLOSED);
-                throw error;
+                throw tooMany(error);
             }
             return desk.finish(ending, draft);
         }
@@ -677,7 +683,7 @@ export function ReminderEditor({
             return setReview({
                 status: "failed",
                 ...reviewed,
-                message: errorMessage(error),
+                message: errorMessage(tooMany(error)),
             });
         }
         desk.finish(SAVED, reviewed.draft);

@@ -111,6 +111,62 @@ test("a collecting plant shows its state, next collection and requests of the da
     await expect(status.getByRole("status")).toHaveCount(0);
 });
 
+const lastUpdate = {
+    en: {
+        label: "Last update",
+        time: "Jan 1, 2026, 12:05 PM",
+        forecastData: "Forecast data",
+    },
+    tr: {
+        label: "Son güncelleme",
+        time: "1 Oca 2026 12:05",
+        forecastData: "Tahmin verisi",
+    },
+};
+
+for (const language of ["en", "tr"] as const)
+    test(`a satellite update after a forecast update is shown as the last update (${language})`, async ({
+        page,
+    }) => {
+        const job = {
+            status: "succeeded",
+            retry_until: null,
+            attempts: 1,
+            last_error: "",
+        } as const;
+        const status = await openCollection(
+            page,
+            language,
+            schedule({
+                last_success_at: "2026-01-01T09:05:00Z",
+                recent_jobs: [
+                    {
+                        ...job,
+                        id: 2,
+                        endpoint: "estimated_actuals",
+                        scheduled_for: "2026-01-01T09:00:00Z",
+                        available_at: "2026-01-01T09:00:00Z",
+                    },
+                    {
+                        ...job,
+                        id: 1,
+                        endpoint: "forecasts",
+                        scheduled_for: "2026-01-01T06:00:00Z",
+                        available_at: "2026-01-01T06:00:00Z",
+                    },
+                ],
+            }),
+        );
+        const names = lastUpdate[language];
+
+        await expect(
+            status.getByText(names.label, { exact: true }).locator(".."),
+        ).toContainText(names.time);
+        await expect(
+            status.getByText(names.forecastData, { exact: true }),
+        ).toHaveCount(0);
+    });
+
 const inactive = [
     {
         language: "en",

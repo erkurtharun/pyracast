@@ -1,7 +1,16 @@
 import type { Locator } from "@playwright/test";
 import { test, expect, type Page } from "./support/test";
 import { errorBody } from "./support/errors";
-import { mockApi, paged, plant, region, tenantRow } from "./support/workspace";
+import {
+    accountWith,
+    answer,
+    mockApi,
+    paged,
+    plant,
+    region,
+    sessionIdentity,
+    tenantRow,
+} from "./support/workspace";
 import { coordinatePastes } from "./support/coordinate-pastes";
 
 const site = { ...region, plant, reminder: null };
@@ -30,6 +39,40 @@ async function asViewer(page: Page) {
             json: paged([
                 tenantRow({ id: 1, name: "Sunfield Energy", role: "viewer" }),
             ]),
+        }),
+    );
+}
+
+type Language = "en" | "tr";
+
+const roleWords = {
+    en: {
+        unfinished:
+            "The workspace administrator needs to finish adding this plant.",
+        refused: "Pyracast did not approve this plant.",
+        correct: "send the plant for approval again",
+        decided: "Decision of",
+    },
+    tr: {
+        unfinished:
+            "Santral kaydını çalışma alanı yöneticisinin tamamlaması gerekiyor.",
+        refused: "Pyracast bu santrali onaylamadı.",
+        correct: "yeniden onaya gönderin",
+        decided: "tarihli karar",
+    },
+} as const;
+
+async function asMember(page: Page, language: Language) {
+    const account = await mockApi(page);
+    await asViewer(page);
+    if (language === "en") return;
+    account.current = accountWith({ language_preference: "tr" });
+    await page.route("**/api/session/", (route) =>
+        route.fulfill({
+            json: answer("SessionOutput", {
+                ...sessionIdentity(account.current),
+                language: "tr",
+            }),
         }),
     );
 }
@@ -107,63 +150,72 @@ test("a member sees that an administrator finishes the setup", async ({
     await expect(page.getByLabel("Panel capacity (MWp)")).toHaveCount(0);
 });
 
-test("a member sees why Pyracast did not approve a plant whose adding is unfinished", async ({
+test("a member opening an unfinished plant in Turkish reads that the administrator finishes adding it", async ({
     page,
 }) => {
-    await mockApi(page);
-    await asViewer(page);
-    await sites(page, [
-        {
-            ...location,
-            status: "rejected",
-            attention: "review_rejected",
-            reviewed_at: "2026-01-02T09:00:00Z",
-            review_reason: "The coordinates point to the sea.",
-        },
-    ]);
+    await asMember(page, "tr");
+    await sites(page, [location]);
     await page.goto("/app/w/1/plants/13/forecast/");
-    const notice = page.locator(".notice").filter({
-        hasText: "Pyracast did not approve this plant.",
-    });
-    await expect(notice).toContainText("The coordinates point to the sea.");
-    await expect(notice).not.toContainText("send the plant for approval again");
     await expect(
-        page.getByRole("button", { name: "Send for approval again" }),
-    ).toHaveCount(0);
-    await expect(
-        page.getByText(
-            "The workspace administrator needs to finish adding this plant.",
-        ),
-    ).toHaveCount(0);
+        page.getByText(roleWords.tr.unfinished, { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Panel kurulu gücü (MWp)")).toHaveCount(0);
 });
 
-test("a member sees why Pyracast did not approve a plant without the action to send it again", async ({
-    page,
-}) => {
-    await mockApi(page);
-    await asViewer(page);
-    await sites(page, [
-        {
-            ...site,
-            status: "rejected",
-            attention: "review_rejected",
-            edit_blocked_reason: null,
-            reviewed_at: "2026-01-02T09:00:00Z",
-            review_reason: "The declared capacity does not match the licence.",
-        },
-    ]);
-    await page.goto("/app/w/1/plants/11/forecast/");
-    const notice = page.locator(".notice").filter({
-        hasText: "Pyracast did not approve this plant.",
+for (const language of ["en", "tr"] as const)
+    test(`a member sees why Pyracast did not approve a plant whose adding is unfinished (${language})`, async ({
+        page,
+    }) => {
+        const words = roleWords[language];
+        await asMember(page, language);
+        await sites(page, [
+            {
+                ...location,
+                status: "rejected",
+                attention: "review_rejected",
+                reviewed_at: "2026-01-02T09:00:00Z",
+                review_reason: "The coordinates point to the sea.",
+            },
+        ]);
+        await page.goto("/app/w/1/plants/13/forecast/");
+        const notice = page.locator(".notice").filter({
+            hasText: words.refused,
+        });
+        await expect(notice).toContainText("The coordinates point to the sea.");
+        await expect(notice).not.toContainText(words.correct);
+        await expect(notice).not.toContainText(words.decided);
+        await expect(notice.getByRole("button")).toHaveCount(0);
+        await expect(page.getByText(words.unfinished)).toHaveCount(0);
     });
-    await expect(notice).toContainText(
-        "The declared capacity does not match the licence.",
-    );
-    await expect(notice).not.toContainText("send the plant for approval again");
-    await expect(
-        page.getByRole("button", { name: "Send for approval again" }),
-    ).toHaveCount(0);
-});
+
+for (const language of ["en", "tr"] as const)
+    test(`a member sees why Pyracast did not approve a plant without the action to send it again (${language})`, async ({
+        page,
+    }) => {
+        const words = roleWords[language];
+        await asMember(page, language);
+        await sites(page, [
+            {
+                ...site,
+                status: "rejected",
+                attention: "review_rejected",
+                edit_blocked_reason: null,
+                reviewed_at: "2026-01-02T09:00:00Z",
+                review_reason:
+                    "The declared capacity does not match the licence.",
+            },
+        ]);
+        await page.goto("/app/w/1/plants/11/forecast/");
+        const notice = page.locator(".notice").filter({
+            hasText: words.refused,
+        });
+        await expect(notice).toContainText(
+            "The declared capacity does not match the licence.",
+        );
+        await expect(notice).not.toContainText(words.correct);
+        await expect(notice).not.toContainText(words.decided);
+        await expect(notice.getByRole("button")).toHaveCount(0);
+    });
 
 test("finishing a plant that Pyracast did not approve shows the reason and asks to send it again", async ({
     page,
@@ -193,6 +245,112 @@ test("finishing a plant that Pyracast did not approve shows the reason and asks 
             "Correct the details and send the plant for approval again.",
             { exact: true },
         ),
+    ).toBeVisible();
+});
+
+test("finishing a plant Pyracast did not approve saves its technical details and the plant page sends it again", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const refused = {
+        ...location,
+        status: "rejected",
+        attention: "review_rejected",
+        reviewed_at: "2026-01-02T09:00:00Z",
+        review_reason: "The declared capacity does not match the licence.",
+    };
+    const added = { ...plant, region_id: 13 };
+    let current: Record<string, unknown> = refused;
+    const writes: string[] = [];
+    page.on("request", (request) => {
+        const path = new URL(request.url()).pathname;
+        if (path.startsWith("/api/") && request.method() !== "GET")
+            writes.push(`${request.method()} ${path}`);
+    });
+    await page.route("**/api/tenants/1/sites/", (route) =>
+        route.request().method() === "GET"
+            ? route.fulfill({ json: paged([current]) })
+            : route.fallback(),
+    );
+    await page.route("**/api/tenants/1/regions/13/plants/", (route) => {
+        current = { ...refused, plant: added };
+        return route.fulfill({ json: added });
+    });
+    await page.route("**/api/tenants/1/regions/13/resubmit/", (route) => {
+        expect(route.request().postDataJSON()).toEqual({
+            expected_revision: 1,
+        });
+        current = { ...current, status: "pending", attention: null };
+        return route.fulfill({
+            json: answer("RegionOutput", {
+                ...region,
+                id: 13,
+                name: "North location",
+                status: "pending",
+            }),
+        });
+    });
+    await page.goto("/app/w/1/plants/13/forecast/");
+    const wizard = page.locator("section.onboarding");
+    await wizard.getByLabel("Panel capacity (MWp)").fill("5");
+    await wizard.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(
+        wizard.getByText(
+            "After saving, choose Send for approval again on the plant page.",
+            { exact: true },
+        ),
+    ).toBeVisible();
+    await expect(
+        wizard.getByText(
+            "Pyracast checks the plant; forecasts start after approval.",
+        ),
+    ).toHaveCount(0);
+    await expect(
+        wizard.getByRole("button", { name: "Send for approval", exact: true }),
+    ).toHaveCount(0);
+    await wizard
+        .getByRole("button", { name: "Save technical details" })
+        .click();
+
+    const notice = page.getByRole("status").filter({
+        hasText: "Pyracast did not approve this plant.",
+    });
+    await expect(notice).toContainText(
+        "The declared capacity does not match the licence.",
+    );
+    await expect(page.locator("section.onboarding")).toHaveCount(0);
+    expect(writes).toEqual(["POST /api/tenants/1/regions/13/plants/"]);
+    await notice
+        .getByRole("button", { name: "Send for approval again" })
+        .click();
+
+    await expect(
+        page.getByText("Waiting for approval by Pyracast.", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByText("Pyracast did not approve this plant."),
+    ).toHaveCount(0);
+    expect(writes).toEqual([
+        "POST /api/tenants/1/regions/13/plants/",
+        "POST /api/tenants/1/regions/13/resubmit/",
+    ]);
+});
+
+test("the review of a fixed mounting shows a missing panel angle as missing, without its unit", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await sites(page, [location]);
+    await page.goto("/app/w/1/plants/13/forecast/");
+    const wizard = page.locator("section.onboarding");
+    await wizard.getByLabel("Panel capacity (MWp)").fill("5");
+    await wizard.getByLabel("Mounting", { exact: true }).selectOption("fixed");
+    await wizard.getByLabel("Panel azimuth (°, optional)").fill("180");
+    await wizard.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(
+        wizard.getByText("Fixed · panel tilt — · panel azimuth 180°", {
+            exact: true,
+        }),
     ).toBeVisible();
 });
 

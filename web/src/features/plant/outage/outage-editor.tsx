@@ -1,6 +1,6 @@
 "use client";
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { DisplayError } from "@/lib/api/errors";
 import { fromPlantInput, toPlantInput } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
@@ -122,6 +122,7 @@ export function OutageEditor({
     const format = useFormat();
     const label = useLabel();
     const [impact, setImpact] = useState(capacityImpact(outage));
+    const blankHelp = useId();
     const [openedAt] = useState(Date.now);
     const section = useRef<HTMLElement>(null);
     const closeButton = useRef<HTMLButtonElement>(null);
@@ -248,7 +249,12 @@ export function OutageEditor({
                 </Select>
                 {impact === "reduced" && (
                     <>
-                        <div className="form-grid">
+                        <div
+                            className="form-grid"
+                            role="group"
+                            aria-label={t("reducedCapacity")}
+                            aria-describedby={blankHelp}
+                        >
                             <Field
                                 label={t("availablePanelDCCapacityMW")}
                                 name="available_dc_mw"
@@ -284,7 +290,9 @@ export function OutageEditor({
                                 defaultValue={outage?.available_export_mw ?? ""}
                             />
                         </div>
-                        <p className="fine">{t("remainingCapacityHelp")}</p>
+                        <p id={blankHelp} className="fine">
+                            {t("remainingCapacityHelp")}
+                        </p>
                     </>
                 )}
                 <p className="fine">{t("reportingHelp")}</p>

@@ -17,7 +17,8 @@ import { useFormat } from "@/lib/format/use-format";
 import { useApiQuery, useRefresh } from "@/lib/api/query";
 import { ActionForm } from "@/ui/form";
 import { Resource } from "@/ui/resource";
-import { Empty } from "@/ui/ui";
+import { contactEmail } from "@/lib/public-metadata";
+import { Notice } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import { sectionUnavailable } from "@/lib/on-demand";
@@ -203,9 +204,7 @@ function DeliveryHistory({
                     </table>
                 </ScrollRegion>
             ) : (
-                <Empty title={t("noDeliveriesYet")}>
-                    {t("scheduledDeliveriesAppearHere")}
-                </Empty>
+                <p>{t("noDeliveriesYet")}</p>
             )}
         </details>
     );
@@ -394,6 +393,14 @@ function ReminderPanel({
                     t("noEmailYet")
                 )}
             </p>
+            {answer.state === "provider_attention" && (
+                <Notice>
+                    <p>
+                        <strong>{t("emailPaused")}</strong>
+                    </p>
+                    <p>{t("noNewForecastData", { contact: contactEmail })}</p>
+                </Notice>
+            )}
             {addresses ? (
                 <ReminderEditor
                     answer={answer}

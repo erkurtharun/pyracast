@@ -6,6 +6,7 @@ import {
     formatSignificant,
 } from "../src/lib/format/number";
 import {
+    daysZoneLabel,
     formatTime,
     fromPlantInput,
     intervalTimeFormatter,
@@ -137,4 +138,22 @@ test("an entered plant time is read in the plant zone and a missing hour is refu
     );
     expect(fromPlantInput("", "Europe/Berlin")).toBeNull();
     expect(fromPlantInput("2026-02-30T10:00", "Europe/Berlin")).toBeNull();
+});
+
+test("the offset of plant days names each offset of a day with a clock change", () => {
+    expect(daysZoneLabel("Europe/Berlin", ["2026-07-15", "2026-07-15"])).toBe(
+        "UTC+2",
+    );
+    expect(daysZoneLabel("Europe/Berlin", ["2026-03-29", "2026-03-29"])).toBe(
+        "UTC+1 / UTC+2",
+    );
+    expect(daysZoneLabel("Europe/Berlin", ["2026-10-25", "2026-10-25"])).toBe(
+        "UTC+2 / UTC+1",
+    );
+    expect(daysZoneLabel("Europe/Berlin", ["2026-10-11", "2026-11-09"])).toBe(
+        "UTC+2 / UTC+1",
+    );
+    expect(daysZoneLabel("Europe/Istanbul", ["2026-03-29", "2026-10-25"])).toBe(
+        "UTC+3",
+    );
 });

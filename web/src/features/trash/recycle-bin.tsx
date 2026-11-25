@@ -10,7 +10,7 @@ import { routes } from "@/lib/routes";
 import { useErrorMessage } from "@/ui/form";
 import { usePageTitle } from "@/ui/page-title";
 import { Resource } from "@/ui/resource";
-import { Empty, Notice } from "@/ui/ui";
+import { Notice } from "@/ui/ui";
 import { useForgetDeletion } from "./recent-deletion";
 
 type DeletedRegion = components["schemas"]["TrashedRegionOutput"];
@@ -162,9 +162,7 @@ export function RecycleBin({ tenant }: { tenant: number }) {
                                 ))}
                             </ul>
                         ) : (
-                            <Empty title={t("noDeletedPlants")}>
-                                {t("nothingToRestore")}
-                            </Empty>
+                            <p>{t("noDeletedPlants")}</p>
                         )
                     }
                 </Resource>

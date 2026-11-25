@@ -259,6 +259,28 @@ test("an oversized automatic group preserves every member and can be turned off"
     });
 });
 
+for (const state of ["over_recipient_limit", "waiting_for_approval"] as const)
+    test(`a saved list above the limit says sending is paused for its size only in that state: ${state}`, async ({
+        page,
+    }) => {
+        await reminderApi(page, {
+            recipients: Array.from(
+                { length: 6 },
+                (_, index) => `person${index}@example.test`,
+            ),
+            enabled: true,
+            state,
+        });
+        await openReminders(page);
+        await expect(page.getByText("6 / 5", { exact: true })).toBeVisible();
+        await expect(
+            page.getByText(
+                "Sending is paused: more than 5 recipients. Remove addresses or turn off All members.",
+                { exact: true },
+            ),
+        ).toHaveCount(state === "over_recipient_limit" ? 1 : 0);
+    });
+
 test("turning on a new oversized automatic group shows the limit and the server refuses the save", async ({
     page,
 }) => {
@@ -276,8 +298,11 @@ test("turning on a new oversized automatic group shows the limit and the server 
     await page.getByLabel("All members", { exact: true }).check();
     await page.getByRole("button", { name: "Save" }).click();
     await expect(page.locator(".notice[role=alert]")).toContainText(
-        "This plant allows at most 5 distinct recipient addresses in total.",
+        "Choose at most 5 recipients.",
     );
+    await expect(
+        page.getByText("Sending is paused", { exact: false }),
+    ).toHaveCount(0);
     expect(saves).toBe(1);
     await expect(page.getByLabel("All members", { exact: true })).toBeChecked();
 });
@@ -871,6 +896,7 @@ test("a reduced limit preserves all saved addresses until repaired", async ({
             "three@example.test",
         ],
         limit: 2,
+        enabled: true,
     });
     await openReminders(page);
     await expect(
@@ -879,10 +905,9 @@ test("a reduced limit preserves all saved addresses until repaired", async ({
     await expect(
         page.getByLabel("Email address 3", { exact: true }),
     ).toHaveValue("three@example.test");
-    await page.getByLabel("Send forecast email for this plant").check();
     await page.getByRole("button", { name: "Save" }).click();
     await expect(page.locator(".notice[role=alert]")).toContainText(
-        "This plant allows at most 2 distinct recipient addresses in total.",
+        "Choose at most 2 recipients.",
     );
     await page
         .getByRole("button", { name: "Remove email address 2", exact: true })
@@ -962,6 +987,7 @@ test("an oversized list can be reduced in stages while sending remains paused", 
             { length: 7 },
             (_, index) => `person${index}@example.test`,
         ),
+        enabled: true,
     });
     await openReminders(page);
     await page

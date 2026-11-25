@@ -226,11 +226,17 @@ test("saves from older revisions in a row keep every edit and name what changed"
     await expect(page.locator("main").getByRole("alert")).toContainText(
         conflictMessage,
     );
-    await expect(page.getByText("Panel capacity (MWp): 5 → 6")).toBeVisible();
+    const first = page.getByText("Panel capacity (MWp): 5 → 6", {
+        exact: true,
+    });
+    const second = page.getByText("Panel capacity (MWp): 5 → 8", {
+        exact: true,
+    });
+    await expect(first).toBeVisible();
     await expect(capacity).toHaveValue("6");
     await expect(exportLimit).toHaveValue("3");
     await save.click();
-    await expect(page.getByText("Panel capacity (MWp): 5 → 8")).toBeVisible();
+    await expect(second).toBeVisible();
     await expect(capacity).toHaveValue("8");
     await expect(exportLimit).toHaveValue("3");
     await save.click();
@@ -241,9 +247,8 @@ test("saves from older revisions in a row keep every edit and name what changed"
         export_limit_mw: 3,
     });
     await expect(page.locator("main").getByRole("alert")).toHaveCount(0);
-    await expect(
-        page.getByText(/Panel capacity (MWp) capacity \(MW\): 5 →/),
-    ).toHaveCount(0);
+    await expect(first).toHaveCount(0);
+    await expect(second).toHaveCount(0);
 });
 
 test("a value both sides changed keeps the typed one beside the server's", async ({
