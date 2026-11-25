@@ -60,7 +60,10 @@ for (const electrical of [true, false]) {
             .click();
         if (!electrical)
             await page
-                .getByRole("button", { name: "Irradiance", exact: true })
+                .getByRole("button", {
+                    name: "Irradiance forecast",
+                    exact: true,
+                })
                 .click();
         await expect(page.getByRole("status")).toContainText(
             "Some forecast data is missing.",
@@ -140,7 +143,9 @@ test("irradiance distinguishes available source hours from ambiguous zero power"
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Irradiance forecast", exact: true })
+        .click();
     await expect(page.getByRole("status")).toContainText(
         "Some forecast data is missing.",
     );
@@ -202,7 +207,9 @@ test("switching forecast views waits for data with the matching units", async ({
     await expect(
         page.getByRole("heading", { name: "Electrical generation" }),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Irradiance forecast", exact: true })
+        .click();
     await observed;
     try {
         await expect(
@@ -275,7 +282,7 @@ for (const width of [320, 390]) {
             .getByRole("button", { name: /East array|Antalya solar park/ })
             .click();
         await page
-            .getByRole("button", { name: "Irradiance", exact: true })
+            .getByRole("button", { name: "Irradiance forecast", exact: true })
             .click();
         await expect(
             page.getByText("Mixed forecast updates", { exact: true }),

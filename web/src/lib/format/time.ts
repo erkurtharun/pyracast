@@ -109,12 +109,12 @@ function zoneOffset(locale: string, timeZone: string, at: Date) {
         .find((part) => part.type === "timeZoneName")?.value;
 }
 
-export function zoneLabel(
-    locale: string,
-    timeZone: string,
-    at: Date = new Date(),
-): string {
-    return `${timeZone} (${zoneOffset(locale, timeZone, at)})`;
+export function zoneLabel(timeZone: string, at: Date = new Date()): string {
+    const offset = Math.round(offsetAt(at.getTime(), timeZone) / 60_000);
+    if (!offset) return "UTC";
+    const size = Math.abs(offset);
+    const minutes = size % 60;
+    return `UTC${offset < 0 ? "-" : "+"}${Math.floor(size / 60)}${minutes ? `:${pad(minutes)}` : ""}`;
 }
 
 export function plantDay(

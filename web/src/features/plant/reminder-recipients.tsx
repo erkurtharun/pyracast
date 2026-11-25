@@ -179,7 +179,6 @@ function SavedView({
             {visible && (
                 <>
                     <Groups answer={answer} />
-                    <p>{t("summarySentence")}</p>
                     {!shown.to.length && !shown.cc.length && (
                         <p className={styles.warning}>
                             {t("allHiddenWarning")}
@@ -246,7 +245,6 @@ function ReviewDialog({
             <p id={`${id}-sentence`}>{t("reviewSentence")}</p>
             <Groups answer={review.answer} />
             {!to.length && !cc.length && <p>{t("noAddressShown")}</p>}
-            <p>{t("reviewLater")}</p>
             {review.status === "failed" && (
                 <div
                     className="notice error"
@@ -362,31 +360,21 @@ function RecipientSection({
     return (
         <fieldset className="reminder-recipients">
             <legend>{t("emailRecipients")}</legend>
-            <p className="fine">{t("groupPrivacy")}</p>
             <CheckboxField
                 label={t("hideRecipients")}
                 name="hide_recipients"
                 checked={form.hide}
                 onChange={(hide) => update((now) => ({ ...now, hide }))}
             />
-            {visible ? (
-                <>
-                    <p className="fine">{t("addressingRule")}</p>
-                    <p className="fine">{t("roleKey")}</p>
-                </>
-            ) : (
-                <p className="fine">{t("hiddenHelper")}</p>
-            )}
+            {visible && <p className="fine">{t("addressingRule")}</p>}
             <CheckboxField
                 label={t("includeWorkspaceMembers")}
                 name="include_workspace_members"
                 checked={form.include}
                 onChange={(include) => update((now) => ({ ...now, include }))}
             />
-            <p className="fine">{t("membershipSync")}</p>
             {shownMembers ? (
                 <>
-                    <p className="fine">{t("newMembersDefault")}</p>
                     <h3 className={styles.listHeading}>
                         {t("workspaceMembers", {
                             count: addresses.members.length,

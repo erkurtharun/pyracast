@@ -60,11 +60,7 @@ export function StaleChanges({
     };
     return (
         <div className="notice" role="status">
-            <p>
-                {controls.editable
-                    ? t("staleApply", { revision: current.revision })
-                    : t("staleChanged", { revision: current.revision })}
-            </p>
+            <p>{controls.editable ? t("staleApply") : t("staleChanged")}</p>
             <ChangedFields
                 changes={changedFields(before, current).map((field) => ({
                     field,

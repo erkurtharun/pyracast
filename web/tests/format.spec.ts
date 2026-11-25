@@ -65,13 +65,23 @@ test("times render in the zone they are given and name it only when asked", () =
     expect(formatTime("en", null, "UTC")).toBe(MISSING);
 });
 
-test("a zone label names the zone and its offset at the given instant", () => {
+test("a zone label names the plant's offset from UTC at the given instant", () => {
+    expect(zoneLabel("Europe/Istanbul", new Date("2026-01-07T09:00:00Z"))).toBe(
+        "UTC+3",
+    );
+    expect(zoneLabel("Europe/Berlin", new Date("2026-07-07T09:00:00Z"))).toBe(
+        "UTC+2",
+    );
+    expect(zoneLabel("Europe/Berlin", new Date("2026-01-07T09:00:00Z"))).toBe(
+        "UTC+1",
+    );
+    expect(zoneLabel("Asia/Kolkata", new Date("2026-01-07T09:00:00Z"))).toBe(
+        "UTC+5:30",
+    );
     expect(
-        zoneLabel("en", "Europe/Istanbul", new Date("2026-01-07T09:00:00Z")),
-    ).toBe("Europe/Istanbul (GMT+3)");
-    expect(
-        zoneLabel("en", "Europe/Berlin", new Date("2026-07-07T09:00:00Z")),
-    ).toBe("Europe/Berlin (GMT+2)");
+        zoneLabel("America/St_Johns", new Date("2026-01-07T09:00:00Z")),
+    ).toBe("UTC-3:30");
+    expect(zoneLabel("UTC", new Date("2026-01-07T09:00:00Z"))).toBe("UTC");
 });
 
 test("a plant day is the calendar date in the plant zone, shifted by whole days", () => {

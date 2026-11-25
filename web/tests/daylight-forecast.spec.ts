@@ -221,7 +221,7 @@ async function openForecast(
         .click();
     if (!electrical)
         await page
-            .getByRole("button", { name: "Irradiance", exact: true })
+            .getByRole("button", { name: "Irradiance forecast", exact: true })
             .click();
 }
 

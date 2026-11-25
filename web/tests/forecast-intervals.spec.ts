@@ -150,7 +150,10 @@ async function openForecast(
     if (!electrical)
         await page
             .getByRole("button", {
-                name: options.language === "tr" ? "Işınım" : "Irradiance",
+                name:
+                    options.language === "tr"
+                        ? "Işınım tahmini"
+                        : "Irradiance forecast",
                 exact: true,
             })
             .click();
@@ -251,7 +254,9 @@ for (const electrical of [true, false]) {
         await expect(table.getByRole("row").nth(2)).toContainText("Forecast");
         await expect(page.locator(".interval-notes")).toHaveCount(0);
         if (electrical) {
-            await page.getByLabel("Resolution").selectOption("30");
+            await page
+                .getByLabel("Interval", { exact: true })
+                .selectOption("30");
             await page.getByText("View interval data (4 intervals)").click();
             await expect(table.getByRole("row").nth(3)).toContainText(
                 "Estimated + forecast",
@@ -291,7 +296,9 @@ test("generation intervals show energy without redundant visible power columns",
     page,
 }) => {
     await openForecast(page);
-    await expect(page.getByLabel("Resolution")).toHaveValue("60");
+    await expect(page.getByLabel("Interval", { exact: true })).toHaveValue(
+        "60",
+    );
     await expect(page.getByText(/CSV includes all/)).toHaveCount(0);
     await expect(
         page.getByRole("checkbox", { name: "Show full day", exact: true }),
@@ -316,7 +323,7 @@ test("generation intervals show energy without redundant visible power columns",
     await expect(
         page.getByRole("img", { name: /^Power by interval/ }),
     ).toBeVisible();
-    await page.getByLabel("Resolution").selectOption("30");
+    await page.getByLabel("Interval", { exact: true }).selectOption("30");
     await expect(
         page.getByText("View interval data (4 intervals)"),
     ).toBeVisible();

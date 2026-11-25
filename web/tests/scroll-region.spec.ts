@@ -31,7 +31,9 @@ async function openForecast(page: Page, width: number) {
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Irradiance forecast", exact: true })
+        .click();
     return page.locator("details.interval-details");
 }
 

@@ -1339,9 +1339,11 @@ export async function openReminders(page: Page) {
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Irradiance forecast", exact: true })
+        .click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page
-        .getByRole("button", { name: "Email reminders", exact: true })
+        .getByRole("button", { name: "Forecast email", exact: true })
         .click();
 }

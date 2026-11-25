@@ -37,7 +37,7 @@ export function useFormat() {
             ) => formatTime(locale, value, timeZone, options),
             deviceTime: (value: Instant) =>
                 formatTime(locale, value, deviceZone(), DEVICE_TIME),
-            zone: (timeZone: string) => zoneLabel(locale, timeZone),
+            zone: (timeZone: string) => zoneLabel(timeZone),
             intervals: (timeZone: string, timestamps: Iterable<string>) =>
                 intervalTimeFormatter(locale, timeZone, timestamps),
         }),

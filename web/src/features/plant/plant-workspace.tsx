@@ -78,7 +78,6 @@ export function PlantWorkspace({
     const portfolio = routes.portfolio(scope.tenant_id);
     const changed = () => refresh.workspace(scope.tenant_id);
     const configuration = currentPlant.current_configuration;
-    // The review notice lists what happens next; an empty forecast would only repeat it.
     const awaitsFirstApproval = region.status === "pending" && !configuration;
     usePageTitle(`${t(tab)} · ${currentPlant.name}`);
     return (
@@ -109,7 +108,7 @@ export function PlantWorkspace({
             <p className="fine plant-time">
                 {t("plantTime", { zone: format.zone(timezone) })}
             </p>
-            <ReviewNotice region={region} scope={scope} timezone={timezone} />
+            <ReviewNotice region={region} scope={scope} />
             <ViewNav
                 tabs
                 label={t("plantSections")}

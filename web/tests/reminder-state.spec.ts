@@ -86,15 +86,15 @@ for (const [state, label] of STATES) {
         await expect(card).toContainText("Last email: Not sent");
         await card.click();
         await page
-            .getByRole("button", { name: "Irradiance", exact: true })
+            .getByRole("button", { name: "Irradiance forecast", exact: true })
             .click();
         await page
             .getByRole("button", { name: "Settings", exact: true })
             .click();
         await page
-            .getByRole("button", { name: "Email reminders", exact: true })
+            .getByRole("button", { name: "Forecast email", exact: true })
             .click();
-        const panel = page.getByRole("region", { name: "Email reminders" });
+        const panel = page.getByRole("region", { name: "Forecast email" });
         await expect(panel.getByText(label, { exact: true })).toBeVisible();
         await expect(panel.getByRole("status")).toContainText(
             "Last email: Not sent",

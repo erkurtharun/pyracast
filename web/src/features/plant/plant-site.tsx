@@ -6,6 +6,7 @@ import { cadence, useApiList, useRefresh } from "@/lib/api/query";
 import { isPlantSection, plantAddress, routes } from "@/lib/routes";
 import { PlantOnboarding } from "@/features/portfolio/plant-onboarding";
 import { PlantWorkspace } from "./plant-workspace";
+import { ReviewNotice } from "./review-notice";
 import { Notice, ReadFailed, RefreshFailed } from "@/ui/ui";
 import { useLabel } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
@@ -79,6 +80,11 @@ export function PlantSite({
                     onCancel={back}
                     onCreated={() => void refresh.workspace(tenant.id)}
                     onOpen={(id) => router.push(routes.plant(tenant.id, id))}
+                />
+            ) : site.status === "rejected" ? (
+                <ReviewNotice
+                    region={site}
+                    scope={{ tenant_id: tenant.id, region_id: site.id }}
                 />
             ) : (
                 <Notice>{t("plantUnavailable")}</Notice>

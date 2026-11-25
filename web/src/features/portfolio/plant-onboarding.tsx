@@ -115,6 +115,7 @@ function Wizard({
     onOpen,
 }: WizardProps & { existing?: Site; trashed: readonly Trashed[] }) {
     const t = useTranslations("PlantOnboarding");
+    const decision = useTranslations("PlantWorkspace");
     const writeErrorMessage = useWriteErrorMessage();
     const format = useFormat();
     const refresh = useRefresh();
@@ -291,11 +292,17 @@ function Wizard({
                             ? t("completePlantSetup")
                             : t("addASolarPlant")}
                     </h2>
-                    <p>
-                        {existing?.status === "rejected"
-                            ? t("rejectedSetup")
-                            : t("description")}
-                    </p>
+                    {existing?.status === "rejected" ? (
+                        <>
+                            <p>{decision("rejectedNotice")}</p>
+                            {existing.review_reason && (
+                                <p>{existing.review_reason}</p>
+                            )}
+                            <p>{decision("resubmitHelp")}</p>
+                        </>
+                    ) : (
+                        <p>{t("description")}</p>
+                    )}
                     {existing && (
                         <p className="fine">
                             {t("keptLocation", {
@@ -380,7 +387,6 @@ function Wizard({
                                         label={t("longitude")}
                                     />
                                 </div>
-                                <p className="fine">{t("locationHelp")}</p>
                                 {offer.kind !== "none" && (
                                     <div
                                         className="notice"
@@ -482,22 +488,16 @@ function Wizard({
                                 <div>
                                     <dt>{t("dcNameplate")}</dt>
                                     <dd>
-                                        {t("power", {
-                                            value: reviewNumber(
-                                                review.dc_capacity_mw,
-                                            ),
-                                        })}
+                                        {reviewNumber(review.dc_capacity_mw)}
                                     </dd>
                                 </div>
                                 <div>
                                     <dt>{t("inverterACCapacity")}</dt>
                                     <dd>
                                         {review.inverter_capacity_mw
-                                            ? t("power", {
-                                                  value: reviewNumber(
-                                                      review.inverter_capacity_mw,
-                                                  ),
-                                              })
+                                            ? reviewNumber(
+                                                  review.inverter_capacity_mw,
+                                              )
                                             : t("unknown")}
                                     </dd>
                                 </div>
@@ -505,11 +505,9 @@ function Wizard({
                                     <dt>{t("gridExportLimit")}</dt>
                                     <dd>
                                         {review.export_limit_mw
-                                            ? t("power", {
-                                                  value: reviewNumber(
-                                                      review.export_limit_mw,
-                                                  ),
-                                              })
+                                            ? reviewNumber(
+                                                  review.export_limit_mw,
+                                              )
                                             : t("unknown")}
                                     </dd>
                                 </div>

@@ -396,8 +396,8 @@ test("member outage reports remain proposals and use explicit action envelopes",
         name: "Report outage",
         exact: true,
     });
-    await editor.getByLabel("Incident title").fill("New outage");
-    await editor.getByLabel("Capacity impact").selectOption("unknown");
+    await editor.getByLabel("Title").fill("New outage");
+    await editor.getByLabel("Effect").selectOption("unknown");
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({
         path: testInfo.outputPath("outage-proposal-320.png"),
@@ -421,7 +421,7 @@ test("member outage reports remain proposals and use explicit action envelopes",
     await page
         .getByRole("button", { name: "Suggest changes", exact: true })
         .click();
-    await page.getByLabel("Incident title").fill("Corrected title");
+    await page.getByLabel("Title").fill("Corrected title");
     await page
         .getByRole("button", { name: "Send for approval", exact: true })
         .click();
@@ -1699,11 +1699,11 @@ function activeOutage(): OutageRow {
 for (const [reason, explanation] of [
     [
         "configuration_unavailable",
-        "Outages can be reported once the plant configuration is approved.",
+        "You can report outages after Pyracast approves the technical details.",
     ],
     [
         "pending_request_limit",
-        "Too many of your requests for this plant await approval. Withdraw one or wait for a decision before proposing another outage or a change to one.",
+        "Too many of your change requests for this plant are waiting for approval. Withdraw one or wait for a decision before you send another.",
     ],
 ] as const) {
     test(`a member sees why a new outage cannot be submitted: ${reason}`, async ({
@@ -1746,7 +1746,7 @@ test("the sent notice of an outage proposal clears on the next action", async ({
     await page
         .getByRole("button", { name: "Suggest changes", exact: true })
         .click();
-    await page.getByLabel("Incident title").fill("Corrected title");
+    await page.getByLabel("Title").fill("Corrected title");
     await page
         .getByRole("button", { name: "Send for approval", exact: true })
         .click();
@@ -2328,9 +2328,7 @@ test("an open outage editor cannot send once its outage waits for the member's o
     const inverter = proposalControls(page, "Inverter offline");
     await inverter[0].click();
     const editor = page.getByRole("region", { name: "Edit outage" });
-    await expect(editor.getByLabel("Incident title")).toHaveValue(
-        "Inverter offline",
-    );
+    await expect(editor.getByLabel("Title")).toHaveValue("Inverter offline");
     for (const control of inverter) await expect(control).toHaveCount(0);
     for (const control of proposalControls(page, "Export limited"))
         await expect(control).toBeVisible();
@@ -2338,33 +2336,27 @@ test("an open outage editor cannot send once its outage waits for the member's o
     held = 9;
     await readOnFocus(page);
     await expect(editor.getByRole("status")).toHaveText(
-        "A request of yours for this outage now waits for approval. Withdraw it before proposing another change.",
+        "Your change request for this outage is waiting for approval. Withdraw it before you send another change.",
     );
     await expect(
         editor.getByRole("button", { name: "Send for approval", exact: true }),
     ).toHaveCount(0);
-    await editor
-        .getByRole("button", { name: "Close editor", exact: true })
-        .click();
+    await editor.getByRole("button", { name: "Close", exact: true }).click();
     await expect(editor).toHaveCount(0);
 
     held = null;
     await readOnFocus(page);
     await proposalControls(page, "Export limited")[0].click();
-    await expect(editor.getByLabel("Incident title")).toHaveValue(
-        "Export limited",
-    );
+    await expect(editor.getByLabel("Title")).toHaveValue("Export limited");
     reason = "pending_request_limit";
     await readOnFocus(page);
     await expect(editor.getByRole("status")).toHaveText(
-        "Too many of your requests for this plant await approval. Withdraw one or wait for a decision before proposing another outage or a change to one.",
+        "Too many of your change requests for this plant are waiting for approval. Withdraw one or wait for a decision before you send another.",
     );
     await expect(
         editor.getByRole("button", { name: "Send for approval", exact: true }),
     ).toHaveCount(0);
-    await editor
-        .getByRole("button", { name: "Close editor", exact: true })
-        .click();
+    await editor.getByRole("button", { name: "Close", exact: true }).click();
     await expect(editor).toHaveCount(0);
     expect(submissions).toHaveLength(0);
 });

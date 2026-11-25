@@ -284,13 +284,11 @@ export function OutageEditor({
                                 defaultValue={outage?.available_export_mw ?? ""}
                             />
                         </div>
-                        <details>
-                            <summary>{t("capacityEntryHelp")}</summary>
-                            <p className="fine">{t("remainingCapacityHelp")}</p>
-                            <p className="fine">{t("capacityHelp")}</p>
-                        </details>
+                        <p className="fine">{t("remainingCapacityHelp")}</p>
                     </>
                 )}
+                <p className="fine">{t("reportingHelp")}</p>
+                <p className="fine">{t("editingHelp")}</p>
                 <TextAreaField
                     label={t("notesOptional")}
                     name="notes"

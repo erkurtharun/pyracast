@@ -348,7 +348,7 @@ for (const width of [320, 390, 768, 1440]) {
             .getByRole("button", { name: /East array|Antalya solar park/ })
             .click();
         await page
-            .getByRole("button", { name: "Irradiance", exact: true })
+            .getByRole("button", { name: "Irradiance forecast", exact: true })
             .click();
         await page
             .getByRole("img", { name: /Irradiance by interval/ })
@@ -357,7 +357,7 @@ for (const width of [320, 390, 768, 1440]) {
         await page
             .getByRole("button", { name: "Settings", exact: true })
             .click();
-        for (const tab of ["Data collection", "Email reminders"]) {
+        for (const tab of ["Forecast update times", "Forecast email"]) {
             await page.getByRole("button", { name: tab, exact: true }).click();
             await page
                 .getByRole("heading", { name: tab, exact: true })
@@ -368,7 +368,7 @@ for (const width of [320, 390, 768, 1440]) {
             .getByRole("button", { name: "Forecast", exact: true })
             .click();
         await page
-            .getByRole("button", { name: "Generation", exact: true })
+            .getByRole("button", { name: "Generation forecast", exact: true })
             .click();
         await page.getByRole("img", { name: /Power by interval/ }).waitFor();
         await expect(
