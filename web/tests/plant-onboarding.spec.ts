@@ -449,7 +449,7 @@ test("plant submission errors preserve review and every field for retry", async 
         .getByRole("button", { name: "Submit plant for approval" })
         .click();
     await expect(page.locator("main").getByRole("alert")).toContainText(
-        "already in your company's portfolio",
+        "already has a plant at this location",
     );
     await expect(
         page.getByRole("heading", { name: "Check your plant details" }),

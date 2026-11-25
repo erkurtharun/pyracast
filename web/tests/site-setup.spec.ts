@@ -962,7 +962,7 @@ test("a submit refused without a field to go to moves focus to its message", asy
         .getByRole("button", { name: "Submit plant for approval" })
         .click();
     await expect(
-        page.getByRole("alert").filter({ hasText: "The workspace is busy." }),
+        page.getByRole("alert").filter({ hasText: "Another change is being saved." }),
     ).toBeFocused();
 });
 
@@ -1026,7 +1026,7 @@ test("a failed restore in the wizard returns focus to the restore button", async
     const restore = offer.getByRole("button", { name: "Restore Old plant" });
     await restore.click();
     await expect(offer.getByRole("alert")).toContainText(
-        "The workspace is busy.",
+        "Another change is being saved.",
     );
     await expect(restore).toBeFocused();
 });

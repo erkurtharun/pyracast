@@ -67,7 +67,7 @@ test("a failed restore moves the focus to its reason", async ({ page }) => {
         .getByRole("button", { name: `Restore ${plant.name}` })
         .press("Enter");
     await expect(
-        page.getByRole("alert").filter({ hasText: "The workspace is busy." }),
+        page.getByRole("alert").filter({ hasText: "Another change is being saved." }),
     ).toBeFocused();
 });
 
@@ -156,7 +156,7 @@ test("a failed delete keeps the confirmation open with the reason and lets the p
     });
     await move.click();
     await expect(confirmation.getByRole("alert")).toContainText(
-        "The workspace is busy.",
+        "Another change is being saved.",
     );
     await expect(move).toBeEnabled();
     await move.click();
@@ -222,7 +222,7 @@ test("a failed undo shows its alert outside the deletion's status", async ({
     await expect(deletionNotice(page)).toBeVisible();
     await page.getByRole("button", { name: "Undo" }).click();
     await expect(
-        page.getByRole("alert").filter({ hasText: "The workspace is busy." }),
+        page.getByRole("alert").filter({ hasText: "Another change is being saved." }),
     ).toBeVisible();
     await expect(page.getByRole("status").getByRole("alert")).toHaveCount(0);
     await expect(deletionNotice(page)).toBeVisible();
