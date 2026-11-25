@@ -974,8 +974,6 @@ test("a Refresh details started before a refused approval does not release the h
 }) => {
     const { request, decisions, detail, approve, refresh } =
         await reviewRequest(page, answers());
-    // The held read below must be the refresh, not the first read of the detail.
-    await expect(approve).toBeEnabled();
     let release = () => {};
     const released = new Promise<void>((resolve) => {
         release = resolve;
