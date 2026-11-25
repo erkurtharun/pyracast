@@ -1,5 +1,5 @@
 import type { Route } from "@playwright/test";
-import { type Page } from "./test";
+import { expect, type Page } from "./test";
 import { errorBody } from "./errors";
 import {
     answer,
@@ -999,12 +999,15 @@ export async function reviewRequest(
         .getByRole("button", { name: labels.details, exact: true })
         .click();
     const detail = page.locator(".inbox-detail");
+    const approve = detail.getByRole("button", { name: labels.approve });
+    // A case's own route on the detail must not catch the detail's first read.
+    await expect(approve).toBeEnabled();
     return {
         request,
         decisions,
         applied: () => applied,
         detail,
-        approve: detail.getByRole("button", { name: labels.approve }),
+        approve,
         refresh: detail.getByRole("button", { name: labels.refresh }),
     };
 }
