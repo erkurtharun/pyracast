@@ -289,21 +289,14 @@
         "enableDataCollection": "Tahminleri otomatik güncelle",
         "remove": "Kaldır",
         "addTime": "Saat ekle",
-        "collectionDetails": "Güncelleme ayrıntıları",
         "collectionStatus": "Güncelleme durumu",
         "lastSuccess": "Son güncelleme",
         "nextCollection": "Planlanan sonraki güncelleme",
         "notYet": "Henüz yok",
         "notScheduled": "Planlanmadı",
-        "recentCollectionJobs": "Son güncelleme işleri",
-        "partiallyCollected": "Kısmen güncellendi",
         "collectionTimes": "Güncelleme saatleri",
         "collectionTime": "Güncelleme saati {index, number}",
-        "removeTime": "Güncelleme saatini kaldır: {index, number}",
-        "dailyHistory": "Uydu verisinden hesaplanan üretim her gün {time} saatinde güncellenir. Otomatik güncellemeyi kapatmak bunu da durdurur.",
-        "jobSummary": "{endpoint} · {status} · {time} · {attempts, number} deneme",
-        "historyHelp": "Uydu verisinden hesaplanan üretimin yeniden denemeleri, planlanan tahmin güncellemeleri için gereken istekleri korur. Kontroller ve yeniden denemeler ek istek kullanabilir. Tahmin e-postası yeni veri istemez. Uydu verisinden hesaplanan üretim ölçüm değildir; EPİAŞ üretim verisi ayrı tutulur.",
-        "requestsToday": "Bugünkü tahmin verisi istekleri (UTC)"
+        "removeTime": "Güncelleme saatini kaldır: {index, number}"
     },
     "RecycleBin": {
         "deletePlant": "Santrali sil",

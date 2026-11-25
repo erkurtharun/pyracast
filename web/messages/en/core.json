@@ -412,50 +412,6 @@
             "curtailed": "Production curtailed",
             "invalid": "Invalid value"
         },
-        "CollectionEndpoint": {
-            "forecasts": "Forecast",
-            "estimated_actuals": "Production calculated from satellite data",
-            "historical_import": "Imported production calculated from satellite data",
-            "scaled_forecasts": "Forecast",
-            "scaled_estimated_actuals": "Production calculated from satellite data"
-        },
-        "CollectionJobStatus": {
-            "pending": "Queued",
-            "running": "In progress",
-            "retry": "Will retry",
-            "succeeded": "Done",
-            "failed": "Failed",
-            "stale": "No longer needed"
-        },
-        "CollectionJobError": {
-            "history_window_closed": "No satellite data for this day.",
-            "attempts_exhausted": "Forecast update failed.",
-            "forecast_superseded": "Replaced by a later update.",
-            "binding_not_current": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}",
-            "schedule_disabled": "Automatic forecast updates are turned off.",
-            "slot_not_configured": "This time is no longer a forecast update time.",
-            "schedule_changed": "Replaced after the forecast update times changed.",
-            "history_incomplete": "Data is missing for some hours.",
-            "history_already_archived": "Satellite data for this day was already received.",
-            "provider_authentication_failed": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}",
-            "provider_allowance_exhausted": "Forecast update delayed. Pyracast will try again.",
-            "provider_access_denied": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}",
-            "provider_site_not_found": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}",
-            "provider_throttled": "Forecast update delayed. Pyracast will try again.",
-            "provider_server_error": "Forecast update delayed. Pyracast will try again.",
-            "provider_unreachable": "Forecast update delayed. Pyracast will try again.",
-            "provider_invalid_response": "Forecast update failed.",
-            "provider_configuration_invalid": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}",
-            "account_unavailable": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}",
-            "history_budget_reserved": "Satellite data update delayed. Pyracast will try again.",
-            "quota_exhausted": "Forecast update delayed. Pyracast will try again.",
-            "provider_failure": "Forecast update failed.",
-            "provider_unexpected_failure": "Forecast update failed.",
-            "invalid_source_kind": "Forecast update failed.",
-            "calculation_failure": "The forecast could not be calculated.",
-            "lock_contention": "Forecast update delayed. Pyracast will try again.",
-            "publication_failure": "Forecast update delayed. Pyracast will try again."
-        },
         "NotificationDeliveryStatus": {
             "pending": "Preparing",
             "retry": "Will retry",
@@ -547,15 +503,15 @@
             "collecting": "Updating automatically",
             "waiting_for_approval": "Waiting for approval by Pyracast",
             "paused": "Not updating",
-            "provider_attention": "Delayed"
+            "provider_attention": "Not updating"
         },
         "CollectionInactiveReason": {
             "not_approved": "Forecasts start once Pyracast approves the plant.",
             "not_validated": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}",
             "binding_not_current": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}",
             "schedule_disabled": "Automatic forecast updates are turned off for this plant.",
-            "quota_too_low": "This plant has no forecast update times. Write to Pyracast: {contact}",
-            "provider_unavailable": "Forecast update delayed. Pyracast will try again."
+            "quota_too_low": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}",
+            "provider_unavailable": "Forecasts are not being updated right now."
         },
         "SiteAttention": {
             "setup_incomplete": "Adding this plant is not finished.",
