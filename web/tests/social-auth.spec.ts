@@ -1331,7 +1331,10 @@ test("a provider sign-in that ends at email verification leaves a later password
     await page
         .getByLabel("Password", { exact: true })
         .fill("Test-only-cobalt-79!");
-    await page.locator("form").getByRole("button", { name: "Sign in" }).click();
+    await page
+        .locator("form")
+        .getByRole("button", { name: "Sign in", exact: true })
+        .click();
     await expect(portfolio(page)).toBeVisible();
     await expect(page).toHaveURL("/app/w/1/");
 });
