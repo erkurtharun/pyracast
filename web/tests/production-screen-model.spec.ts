@@ -17,6 +17,7 @@ import {
     reduceScreen,
     repeatsAttempt,
     repeatsOrphan,
+    unsentInput,
     type Screen,
     type ScreenEvent,
 } from "../src/features/production/history/screen";
@@ -1434,4 +1435,66 @@ test("an editor counts as unsaved while its values differ from those it opened w
             ).editor,
         ),
     ).toBe(false);
+});
+
+test("input counts as unsent while a staged proposal is not on its way or lost, or editor values differ from what was opened and from every write sent", () => {
+    const eight = row(DAY, 8, { can_edit: true, can_revert: true });
+    const opened = reduceScreen(initialScreen(DAY, "direct"), {
+        type: "open",
+        row: eight,
+    });
+    expect(unsentInput(opened)).toBe(false);
+    const changed = reduceScreen(opened, { type: "change", energy: "0,5" });
+    expect(unsentInput(changed)).toBe(true);
+    const saving = reduceScreen(changed, {
+        type: "save",
+        row: eight,
+        action: "set",
+    });
+    expect(unsentInput(saving)).toBe(false);
+    const lost = reduceScreen(saving, {
+        type: "saveFailed",
+        error: lostAnswer(),
+        implausible: false,
+    });
+    expect(unsentInput(lost)).toBe(false);
+    expect(
+        unsentInput(reduceScreen(lost, { type: "change", energy: "0,6" })),
+    ).toBe(true);
+    const reverting = reduceScreen(opened, {
+        type: "save",
+        row: eight,
+        action: "revert",
+    });
+    expect(
+        unsentInput(
+            reduceScreen(reverting, {
+                type: "saveFailed",
+                error: lostAnswer(),
+                implausible: false,
+            }),
+        ),
+    ).toBe(false);
+    const proposing = reduceScreen(initialScreen(DAY, "propose"), {
+        type: "open",
+        row: row(DAY, 8),
+    });
+    const steps: ScreenEvent[] = [
+        { type: "change", energy: "0,5" },
+        { type: "stage", row: row(DAY, 8), action: "set" },
+        { type: "reason", text: "verified" },
+    ];
+    const staged = steps.reduce(reduceScreen, proposing);
+    expect(unsentInput(staged)).toBe(true);
+    const sending = reduceScreen(staged, { type: "send", rows: [row(DAY, 8)] });
+    expect(unsentInput(sending)).toBe(false);
+    const failed = (error: unknown) =>
+        reduceScreen(sending, {
+            type: "sendFailed",
+            error,
+            refusals: [],
+            fields: { general: [] },
+        });
+    expect(unsentInput(failed(lostAnswer()))).toBe(false);
+    expect(unsentInput(failed(new ApiError("Refused.")))).toBe(true);
 });

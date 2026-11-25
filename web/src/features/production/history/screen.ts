@@ -1,3 +1,4 @@
+import { UnconfirmedError } from "@/lib/api/errors";
 import { outstandingAfter, serverTrim } from "@/lib/idempotency";
 import type { Quality } from "@/lib/production";
 import { qualityOf } from "@/lib/production";
@@ -232,6 +233,23 @@ export function editorUnsaved(editor: Editor) {
             editor.quality !== editor.opened.quality ||
             writing(editor) ||
             !!editor.attempt)
+    );
+}
+
+export function unsentInput({ draft, editor }: Screen) {
+    const send = draft?.send;
+    const sent =
+        send?.status === "sending" ||
+        (send?.status === "failed" && send.error instanceof UnconfirmedError);
+    if (draft && !sent) return true;
+    if (
+        editor.status === "closed" ||
+        (editor.energy === editor.opened.energy &&
+            editor.quality === editor.opened.quality)
+    )
+        return false;
+    return ![runningWrite(editor), editor.attempt].some(
+        (write) => write && contentOf(editor, write.action) === write.payload,
     );
 }
 

@@ -938,45 +938,27 @@ test("a clean switch to the comparison answered by a server failure loads its do
     expect(asked).toEqual([]);
 });
 
-for (const staged of [true, false])
-    test(`a configuration change ${staged ? "with a staged proposal says its unsent entries were discarded" : "with nothing unsent says nothing"}`, async ({
-        page,
-    }) => {
-        await page.clock.install({ time: now });
-        await signIn(page, { role: "viewer" });
-        let configuration = plant.current_configuration;
-        await page.route("**/api/tenants/1/sites/", (route) =>
-            route.request().method() === "GET"
-                ? route.fulfill({
-                      json: paged([
-                          {
-                              ...region,
-                              plant: {
-                                  ...plant,
-                                  current_configuration: configuration,
-                              },
-                              reminder: null,
+// The workspace's plant; the returned step gives it a new configuration and waits for the read that shows it.
+async function serveConfiguration(page: Page) {
+    let configuration = plant.current_configuration;
+    await page.route("**/api/tenants/1/sites/", (route) =>
+        route.request().method() === "GET"
+            ? route.fulfill({
+                  json: paged([
+                      {
+                          ...region,
+                          plant: {
+                              ...plant,
+                              current_configuration: configuration,
                           },
-                      ]),
-                  })
-                : route.fallback(),
-        );
-        await serveProduction(page, [{ can_edit: false, can_propose: true }]);
-        await openPlant(page, "Production");
-        const suggest = page.getByRole("button", {
-            name: "Suggest correction for 08:00",
-        });
-        if (staged) {
-            await suggest.click();
-            const editor = page.locator(".production-row-editor");
-            await editor.getByRole("textbox").first().fill("0,5");
-            await editor
-                .getByRole("button", { name: "Add to request", exact: true })
-                .click();
-        }
+                          reminder: null,
+                      },
+                  ]),
+              })
+            : route.fallback(),
+    );
+    return async () => {
         configuration = { ...configuration, id: 32, revision: 2 };
-        const notice =
-            "The plant's configuration changed; your unsent entries were discarded.";
         const reread = page.waitForResponse(
             (response) =>
                 response.url().endsWith("/api/tenants/1/sites/") &&
@@ -985,13 +967,88 @@ for (const staged of [true, false])
         await page.clock.runFor(5_000);
         await focusWindow(page);
         await reread;
+    };
+}
+
+const discardedNotice =
+    "The plant's configuration changed; your unsent entries were discarded.";
+
+async function stageEight(page: Page) {
+    await page
+        .getByRole("button", { name: "Suggest correction for 08:00" })
+        .click();
+    const editor = page.locator(".production-row-editor");
+    await editor.getByRole("textbox").first().fill("0,5");
+    await editor
+        .getByRole("button", { name: "Add to request", exact: true })
+        .click();
+}
+
+for (const staged of [true, false])
+    test(`a configuration change ${staged ? "with a staged proposal says its unsent entries were discarded" : "with nothing unsent says nothing"}`, async ({
+        page,
+    }) => {
+        await page.clock.install({ time: now });
+        await signIn(page, { role: "viewer" });
+        const changeConfiguration = await serveConfiguration(page);
+        await serveProduction(page, [{ can_edit: false, can_propose: true }]);
+        await openPlant(page, "Production");
+        const suggest = page.getByRole("button", {
+            name: "Suggest correction for 08:00",
+        });
+        if (staged) await stageEight(page);
+        await changeConfiguration();
         await expect(
             page.getByRole("region", { name: "Correction request" }),
         ).toHaveCount(0);
         await expect(suggest).toBeEnabled();
-        await expect(page.getByText(notice)).toHaveCount(staged ? 1 : 0);
+        await expect(page.getByText(discardedNotice)).toHaveCount(
+            staged ? 1 : 0,
+        );
         expect(await asks(page)).toBe(false);
         await page.getByRole("button", { name: "Previous day" }).click();
         await expect(page).toHaveURL(/date=/);
-        await expect(page.getByText(notice)).toHaveCount(0);
+        await expect(page.getByText(discardedNotice)).toHaveCount(0);
     });
+
+test("the notice of entries a configuration change discarded ends when plant midnight shows the next day", async ({
+    page,
+}) => {
+    await page.clock.install({ time: new Date(now.getTime() + 539 * 60_000) });
+    await signIn(page, { role: "viewer" });
+    const changeConfiguration = await serveConfiguration(page);
+    await serveProduction(page, [{ can_edit: false, can_propose: true }]);
+    await openPlant(page, "Production");
+    const day = page.getByLabel("Day", { exact: true });
+    await expect(day).toHaveValue("2026-11-09");
+    await stageEight(page);
+    await changeConfiguration();
+    await expect(page.getByText(discardedNotice)).toHaveCount(1);
+    await page.clock.runFor(2 * 60_000);
+    await focusWindow(page);
+    await expect(day).toHaveValue("2026-11-10");
+    await expect(page.getByText(discardedNotice)).toHaveCount(0);
+});
+
+test("a configuration change after an unchanged Remove correction whose answer was lost says nothing was discarded", async ({
+    page,
+}) => {
+    await page.clock.install({ time: now });
+    await signIn(page);
+    const changeConfiguration = await serveConfiguration(page);
+    const server = await serveDirectProduction(page, answers("abort"));
+    server.changeByOperator(0.9);
+    await openPlant(page, "Production");
+    await page.getByRole("button", { name: /^Edit 08:00/ }).click();
+    const editor = page.locator(".production-row-editor");
+    await editor
+        .getByRole("button", { name: /^Remove correction for 08:00/ })
+        .click();
+    await expect(editor.getByRole("alert")).toContainText(
+        "Change not confirmed",
+    );
+    await changeConfiguration();
+    await expect(editor).toHaveCount(0);
+    await expect(page.getByText(discardedNotice)).toHaveCount(0);
+    expect(server.applied()).toBe(1);
+});

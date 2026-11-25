@@ -43,6 +43,7 @@ import {
     reduceScreen,
     repeatsAttempt,
     repeatsOrphan,
+    unsentInput,
     type Access,
     type ScreenEvent,
 } from "./history/screen";
@@ -50,6 +51,8 @@ import { ProductionSourceDetails } from "./history/source-details";
 import { ProductionImport } from "./production-import";
 
 type Bounds = Pick<Interval, "starts_at" | "ends_at">;
+
+export type ShownDay = { date: string; unsent: boolean };
 
 export function ProductionHistory({
     scope,
@@ -59,7 +62,7 @@ export function ProductionHistory({
     baseDay,
     onDay,
     onKeepDay,
-    onUnsaved,
+    onShown,
     onSaved,
 }: {
     scope: PlantScope;
@@ -69,7 +72,7 @@ export function ProductionHistory({
     baseDay: string | undefined;
     onDay: (day: string) => void;
     onKeepDay: (day: string) => void;
-    onUnsaved: (unsaved: boolean) => void;
+    onShown: (shown: ShownDay | null) => void;
     onSaved: () => Promise<unknown>;
 }) {
     const t = useTranslations("ProductionHistory");
@@ -139,13 +142,12 @@ export function ProductionHistory({
     }
     const history = reading.data;
     const derived = controls(screen, history?.intervals);
-    const unsaved = draft !== null || editorUnsaved(editor);
-    useLeaveGuard(unsaved);
+    useLeaveGuard(draft !== null || editorUnsaved(editor));
+    const unsent = unsentInput(screen);
     useEffect(() => {
-        if (!unsaved) return;
-        onUnsaved(true);
-        return () => onUnsaved(false);
-    }, [onUnsaved, unsaved]);
+        onShown({ date, unsent });
+        return () => onShown(null);
+    }, [onShown, date, unsent]);
     useEffect(() => {
         if (editor.status !== "closed" || !history || !pendingFocus.current)
             return;

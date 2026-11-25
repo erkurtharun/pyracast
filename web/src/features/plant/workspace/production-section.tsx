@@ -5,7 +5,10 @@ import { useState } from "react";
 import type { PlantScope } from "@/lib/api";
 import { sectionUnavailable } from "@/lib/on-demand";
 import type { PlantAddress, PlantView } from "@/lib/routes";
-import { ProductionHistory } from "@/features/production/production-history";
+import {
+    ProductionHistory,
+    type ShownDay,
+} from "@/features/production/production-history";
 import { ViewNav } from "@/ui/action";
 import { Notice } from "@/ui/ui";
 
@@ -40,16 +43,20 @@ export function ProductionSection({
     onSaved: () => Promise<unknown>;
 }) {
     const t = useTranslations("PlantWorkspace");
-    const [unsaved, setUnsaved] = useState(false);
+    const [history, setHistory] = useState<ShownDay | null>(null);
     const [shown, setShown] = useState({ configurationId, view, day });
-    const [discarded, setDiscarded] = useState(false);
+    const [discarded, setDiscarded] = useState<string | null>(null);
     if (
         shown.configurationId !== configurationId ||
         shown.view !== view ||
         shown.day !== day
     ) {
         setShown({ configurationId, view, day });
-        setDiscarded(shown.configurationId !== configurationId && unsaved);
+        setDiscarded(
+            shown.configurationId !== configurationId && history?.unsent
+                ? history.date
+                : null,
+        );
     }
     return (
         <>
@@ -62,7 +69,9 @@ export function ProductionSection({
                 current={view}
                 onSelect={(next) => show({ view: next })}
             />
-            {discarded && <Notice>{t("configurationChanged")}</Notice>}
+            {discarded !== null && discarded === history?.date && (
+                <Notice>{t("configurationChanged")}</Notice>
+            )}
             <fieldset
                 disabled={leaving}
                 inert={leaving}
@@ -84,7 +93,7 @@ export function ProductionSection({
                         baseDay={baseDay}
                         onDay={(next) => show({ date: next })}
                         onKeepDay={(next) => keep({ date: next })}
-                        onUnsaved={setUnsaved}
+                        onShown={setHistory}
                         onSaved={onSaved}
                     />
                 )}
