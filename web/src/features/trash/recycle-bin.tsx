@@ -1,9 +1,9 @@
 ﻿"use client";
 import { useTranslations } from "next-intl";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api } from "@/lib/api/client";
 import { useFormat } from "@/lib/format/use-format";
+import { useNavigate } from "@/lib/leave-guard";
 import type { components } from "@/lib/schema";
 import { useApiList, useRefresh } from "@/lib/api/query";
 import { routes } from "@/lib/routes";
@@ -25,7 +25,7 @@ export function RecycleBin({ tenant }: { tenant: number }) {
     usePageTitle(t("recycleBin"));
     const format = useFormat();
     const errorMessage = useErrorMessage();
-    const router = useRouter();
+    const navigate = useNavigate();
     const refresh = useRefresh();
     const forget = useForgetDeletion();
     const [restore, setRestore] = useState<Restore>({ kind: "idle" });
@@ -75,7 +75,7 @@ export function RecycleBin({ tenant }: { tenant: number }) {
                         className="button secondary"
                         type="button"
                         onClick={() =>
-                            router.push(routes.plant(tenant, restore.row.id))
+                            navigate(routes.plant(tenant, restore.row.id))
                         }
                     >
                         {t("openPlant")}

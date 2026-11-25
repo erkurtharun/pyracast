@@ -85,6 +85,7 @@
         "saveConfiguration": "Save technical details",
         "productionViews": "Production views",
         "comparison": "Comparison",
+        "configurationChanged": "The plant details changed; your unsent entries were discarded.",
         "approvalStatus": "Forecasts for this plant are stopped. Write to Pyracast: {contact}",
         "rejectedNotice": "Pyracast did not approve this plant.",
         "resubmitHelp": "Correct the details and send the plant for approval again.",

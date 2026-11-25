@@ -8,14 +8,21 @@ import {
     type CoordinateAxis,
 } from "./site-location";
 
+// React drops an input event whose value was assigned through `value`, so the text is entered as an edit.
+function enter(field: HTMLInputElement, text: string) {
+    if (field.value === text) return;
+    field.setRangeText(text, 0, field.value.length, "end");
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 // A pair pasted into Latitude fills the form's Longitude too; any other text is pasted as is.
 function fillPair(event: ClipboardEvent<HTMLInputElement>) {
     const pair = coordinatePair(event.clipboardData.getData("text"));
     const longitude = event.currentTarget.form?.elements.namedItem("longitude");
     if (!pair || !(longitude instanceof HTMLInputElement)) return;
     event.preventDefault();
-    event.currentTarget.value = pair[0];
-    longitude.value = pair[1];
+    enter(event.currentTarget, pair[0]);
+    enter(longitude, pair[1]);
 }
 
 // A text field: a number field drops or reinterprets a decimal comma depending on the browser and

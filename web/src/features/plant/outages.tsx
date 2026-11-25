@@ -7,6 +7,7 @@ import { useApiList } from "@/lib/api/query";
 import { outagesExport } from "@/lib/exports";
 import { CsvDownload } from "@/ui/csv-download";
 import { useExportPlant } from "@/ui/export-plant";
+import { UnconfirmedNotice } from "@/ui/form";
 import { Resource } from "@/ui/resource";
 import { Notice } from "@/ui/ui";
 import { useCodeLabel, useLabel, useReceipt } from "@/ui/vocabulary";
@@ -277,6 +278,9 @@ export function Outages({
                     attempt={attempt}
                     onClose={() => apply({ type: "close" })}
                 />
+            )}
+            {carded?.attempt && !resource.data && (
+                <UnconfirmedNotice repeatable={false} />
             )}
             <Resource resource={resource} loading={t("loadingOutages")}>
                 {(list) => {

@@ -1,8 +1,9 @@
 "use client";
 import { useTranslations } from "next-intl";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { cadence, useApiList, useRefresh } from "@/lib/api/query";
+import { useNavigate } from "@/lib/leave-guard";
 import { isPlantSection, plantAddress, routes } from "@/lib/routes";
 import { PlantOnboarding } from "@/features/portfolio/plant-onboarding";
 import { PlantWorkspace } from "./plant-workspace";
@@ -20,7 +21,7 @@ export function PlantSite({
     children: ReactNode;
 }) {
     const t = useTranslations("RegionWorkspace");
-    const router = useRouter();
+    const navigate = useNavigate();
     const refresh = useRefresh();
     const canManage = useCanManageWorkspace();
     const label = useLabel();
@@ -36,7 +37,7 @@ export function PlantSite({
         { poll: cadence.background },
     );
     const site = sites.data?.results.find((row) => row.id === siteId);
-    const back = () => router.push(routes.portfolio(tenant.id));
+    const back = () => navigate(routes.portfolio(tenant.id));
     if (site?.plant)
         return (
             <>
@@ -79,7 +80,7 @@ export function PlantSite({
                     tenant={tenant.id}
                     onCancel={back}
                     onCreated={() => void refresh.workspace(tenant.id)}
-                    onOpen={(id) => router.push(routes.plant(tenant.id, id))}
+                    onOpen={(id) => navigate(routes.plant(tenant.id, id))}
                 />
             ) : site.status === "rejected" ? (
                 <ReviewNotice

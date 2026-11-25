@@ -1,7 +1,7 @@
 "use client";
-import { useRouter } from "next/navigation";
 import { startTransition, useOptimistic } from "react";
 import type { PlantScope } from "@/lib/api";
+import { replaceAddress, useNavigate } from "@/lib/leave-guard";
 import {
     plantView,
     routes,
@@ -16,7 +16,7 @@ export function usePlantNavigation(
     tab: PlantSection,
     address: PlantAddress,
 ) {
-    const router = useRouter();
+    const go = useNavigate();
     const href = (section: PlantSection, next: PlantAddress) =>
         routes.plant(scope.tenant_id, scope.region_id, section, next);
     // Lives as long as the router transition: a committed, superseded, restored or failed
@@ -36,8 +36,8 @@ export function usePlantNavigation(
         mode: "push" | "replace",
     ) =>
         startTransition(() => {
-            setPending({ section, address: next });
-            router[mode](href(section, next));
+            if (go(href(section, next), mode))
+                setPending({ section, address: next });
         });
     return {
         base,
@@ -48,5 +48,8 @@ export function usePlantNavigation(
             navigate(next, next === tab ? base : {}, "push"),
         show: (next: PlantAddress) =>
             navigate(tab, { ...base, ...next }, "replace"),
+        // Unmounts nothing, so it may change the address while anything is registered.
+        keep: (next: PlantAddress) =>
+            replaceAddress(href(tab, { ...address, ...next })),
     };
 }

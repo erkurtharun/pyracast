@@ -85,6 +85,7 @@
         "saveConfiguration": "Teknik bilgileri kaydet",
         "productionViews": "Üretim görünümleri",
         "comparison": "Karşılaştırma",
+        "configurationChanged": "Santral bilgileri değişti; gönderilmemiş girdileriniz silindi.",
         "approvalStatus": "Bu santralin tahminleri durduruldu. Pyracast'e yazın: {contact}",
         "rejectedNotice": "Pyracast bu santrali onaylamadı.",
         "resubmitHelp": "İstenen bilgileri düzeltip santrali yeniden onaya gönderin.",

@@ -10,12 +10,14 @@ import {
 import {
     controls,
     dropped,
+    editorUnsaved,
     initialScreen,
     locked,
     reconcileEditor,
     reduceScreen,
     repeatsAttempt,
     repeatsOrphan,
+    unsentInput,
     type Screen,
     type ScreenEvent,
 } from "../src/features/production/history/screen";
@@ -978,6 +980,7 @@ test("rows of a day reconcile the editor by the viewer's access", () => {
         key,
         energy: "2",
         quality: "valid",
+        opened: { energy: "2", quality: "valid" },
         expectedRevision: null,
     };
     const closed: Editor = { status: "closed" };
@@ -1296,6 +1299,31 @@ test("a failed reload keeps the write whose answer was lost beside the read's fa
     expect(read.editor).not.toHaveProperty("issue");
 });
 
+test("rows read after a failed reload drop the read's failure and keep the write whose answer was lost, also once the interval is gone", () => {
+    const lost = lostSet(3);
+    const attempt = (lost.screen.editor as Draft).attempt;
+    const reloading = apply(lost, { type: "reload" });
+    const failed = apply(reloading, {
+        type: "reloadFailed",
+        key: editorKey(reloading),
+        error: new ApiError("Not found."),
+    });
+    const recovered = reduceScreen(failed.screen, {
+        type: "rowsLoaded",
+        day: DAY,
+        history: history(adminRows(DAY)),
+    });
+    expect(recovered.editor).toMatchObject({ status: "editing", attempt });
+    expect(recovered.editor).not.toHaveProperty("issue");
+    const gone = reduceScreen(failed.screen, {
+        type: "rowsLoaded",
+        day: DAY,
+        history: history([]),
+    });
+    expect(gone.editor).toMatchObject({ status: "orphaned", attempt });
+    expect(gone.editor).not.toHaveProperty("error");
+});
+
 test("an access or day change keeps an editor whose write's outcome is unknown, and only a direct writer can send it again", () => {
     const lost = lostSet(3);
     const attempt = (lost.screen.editor as Draft).attempt;
@@ -1328,4 +1356,145 @@ test("a reason of nothing but the outer whitespace the server strips is missing"
         { type: "send", rows: dayRows(DAY) },
     );
     expect(sent.screen.draft?.send).toEqual({ status: "reason_missing" });
+});
+
+test("an editor counts as unsaved while its values differ from those it opened with or a write of it runs or is unconfirmed", () => {
+    const eight = row(DAY, 8, { can_edit: true, can_revert: true });
+    const open = (rows: Interval[]) =>
+        [
+            { type: "dayShown", day: DAY },
+            { type: "open", row: eight },
+            { type: "rowsLoaded", day: DAY, history: history(rows) },
+        ] satisfies ScreenEvent[];
+    const opened = (open([eight]) as ScreenEvent[]).reduce(
+        reduceScreen,
+        initialScreen(OTHER, "direct"),
+    );
+    expect(editorUnsaved(opened.editor)).toBe(false);
+    const refreshed = reduceScreen(opened, {
+        type: "rowsLoaded",
+        day: DAY,
+        history: history([
+            {
+                ...eight,
+                effective: {
+                    energy_mwh: 0.7,
+                    quality: "valid",
+                    source: "meter",
+                    source_kind: "manual",
+                    provisional: false,
+                    aggregated: false,
+                },
+            },
+        ]),
+    });
+    expect(editorUnsaved(refreshed.editor)).toBe(false);
+    const orphaned = reduceScreen(opened, {
+        type: "rowsLoaded",
+        day: DAY,
+        history: history([{ ...eight, can_edit: false }]),
+    });
+    expect(orphaned.editor.status).toBe("orphaned");
+    expect(editorUnsaved(orphaned.editor)).toBe(false);
+    const changed = reduceScreen(opened, { type: "change", energy: "0,5" });
+    expect(editorUnsaved(changed.editor)).toBe(true);
+    expect(
+        editorUnsaved(
+            reduceScreen(changed, { type: "change", energy: "1" }).editor,
+        ),
+    ).toBe(false);
+    expect(
+        editorUnsaved(
+            reduceScreen(opened, { type: "change", quality: "outage" }).editor,
+        ),
+    ).toBe(true);
+    const reverting = reduceScreen(opened, {
+        type: "save",
+        row: eight,
+        action: "revert",
+    });
+    expect(reverting.editor.status).toBe("saving");
+    expect(editorUnsaved(reverting.editor)).toBe(true);
+    const lost = reduceScreen(reverting, {
+        type: "saveFailed",
+        error: lostAnswer(),
+        implausible: false,
+    });
+    expect(editorUnsaved(lost.editor)).toBe(true);
+    expect(
+        editorUnsaved(
+            reduceScreen(
+                reduceScreen(lost, {
+                    type: "save",
+                    row: eight,
+                    action: "revert",
+                }),
+                {
+                    type: "saved",
+                },
+            ).editor,
+        ),
+    ).toBe(false);
+});
+
+test("input counts as unsent while a staged proposal is not on its way or lost, or editor values differ from what was opened and from every write sent", () => {
+    const eight = row(DAY, 8, { can_edit: true, can_revert: true });
+    const opened = reduceScreen(initialScreen(DAY, "direct"), {
+        type: "open",
+        row: eight,
+    });
+    expect(unsentInput(opened)).toBe(false);
+    const changed = reduceScreen(opened, { type: "change", energy: "0,5" });
+    expect(unsentInput(changed)).toBe(true);
+    const saving = reduceScreen(changed, {
+        type: "save",
+        row: eight,
+        action: "set",
+    });
+    expect(unsentInput(saving)).toBe(false);
+    const lost = reduceScreen(saving, {
+        type: "saveFailed",
+        error: lostAnswer(),
+        implausible: false,
+    });
+    expect(unsentInput(lost)).toBe(false);
+    expect(
+        unsentInput(reduceScreen(lost, { type: "change", energy: "0,6" })),
+    ).toBe(true);
+    const reverting = reduceScreen(opened, {
+        type: "save",
+        row: eight,
+        action: "revert",
+    });
+    expect(
+        unsentInput(
+            reduceScreen(reverting, {
+                type: "saveFailed",
+                error: lostAnswer(),
+                implausible: false,
+            }),
+        ),
+    ).toBe(false);
+    const proposing = reduceScreen(initialScreen(DAY, "propose"), {
+        type: "open",
+        row: row(DAY, 8),
+    });
+    const steps: ScreenEvent[] = [
+        { type: "change", energy: "0,5" },
+        { type: "stage", row: row(DAY, 8), action: "set" },
+        { type: "reason", text: "verified" },
+    ];
+    const staged = steps.reduce(reduceScreen, proposing);
+    expect(unsentInput(staged)).toBe(true);
+    const sending = reduceScreen(staged, { type: "send", rows: [row(DAY, 8)] });
+    expect(unsentInput(sending)).toBe(false);
+    const failed = (error: unknown) =>
+        reduceScreen(sending, {
+            type: "sendFailed",
+            error,
+            refusals: [],
+            fields: { general: [] },
+        });
+    expect(unsentInput(failed(lostAnswer()))).toBe(false);
+    expect(unsentInput(failed(new ApiError("Refused.")))).toBe(true);
 });
