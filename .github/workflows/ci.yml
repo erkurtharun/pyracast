@@ -448,6 +448,10 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npx --no-install playwright install --with-deps chromium
       - run: npm run build
+      - name: Build the same source a second time for the release scenarios
+        run: npm run build
+        env:
+          NEXT_DIST_DIR: .next-second
       - name: Run the worker scenarios against the production web build
         run: npm run test:production
       - name: Upload Playwright failure traces

@@ -23,6 +23,7 @@ sections and a row here.
 | [step-up-reauthentication](step-up-reauthentication.md) | Reauthenticate before a sensitive account change |
 | [account-email-change](account-email-change.md) | Change the account email and verify it by code |
 | [app-entry-routing](app-entry-routing.md) | Open the app: session bootstrap and routing |
+| [installed-app](installed-app.md) | Install and run the app: manifest, worker and releases |
 
 ## Workspace and collaboration
 

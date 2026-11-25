@@ -10,10 +10,17 @@ const SCRIPT_FILES = new Map([
     ["previous", "sw-previous.js"],
 ]);
 const UPSTREAM_STATES = new Set(["answering", "absent"]);
-const UPSTREAM = new URL(required("FRONT_UPSTREAM"));
+const BUILDS = new Map([
+    ["first", new URL(required("FRONT_UPSTREAM"))],
+    ["second", new URL(required("FRONT_SECOND_UPSTREAM"))],
+]);
 
-type State = { script: string; upstream: string };
-const initial: State = { script: "build", upstream: "answering" };
+type State = { script: string; upstream: string; build: string };
+const initial: State = {
+    script: "build",
+    upstream: "answering",
+    build: "first",
+};
 let state = { ...initial };
 
 function required(name: string) {
@@ -48,6 +55,7 @@ function apply(setting: string, value: string) {
     if (setting === "script" && servable(value)) state.script = value;
     else if (setting === "upstream" && UPSTREAM_STATES.has(value))
         state.upstream = value;
+    else if (setting === "build" && BUILDS.has(value)) state.build = value;
     else return false;
     return true;
 }
@@ -102,10 +110,11 @@ function forward(request: http.IncomingMessage, response: http.ServerResponse) {
         delete headers["if-none-match"];
         delete headers["if-modified-since"];
     }
+    const target = BUILDS.get(state.build)!;
     const upstream = http.request(
         {
-            hostname: UPSTREAM.hostname,
-            port: UPSTREAM.port,
+            hostname: target.hostname,
+            port: target.port,
             path: request.url,
             method: request.method,
             headers,

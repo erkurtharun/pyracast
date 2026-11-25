@@ -61,8 +61,7 @@ sequenceDiagram
         end
         W->>DB: status sending, new lease token, attempts plus 1, commit
         W->>M: open connection outside any transaction
-        W->>DB: lock, status and lease token, recheck authority (reading people when the list needs it)
-        W->>W: first clock reading, place To, Cc, Bcc, check the composed message, second clock reading
+        W->>DB: lock, then the transmit checks in the order of the Transmit rule below
         alt row no longer sending under this lease token
             Note over W: no send, row unchanged
         else lease passed at the first reading
@@ -121,7 +120,7 @@ No user acts in this flow; authority is the state of the plant at each step and 
 | Overview: the reminder's answer (`overview.assess`) applies `jobs.list_refusal` to the present schedule, never to a delivery's frozen rows | `state` `invalid_recipient`, `no_recipients` or `over_recipient_limit`, else `sending`, unless an earlier state applies (`paused_by_user`, `waiting_for_approval` or `provider_attention`, `overview.reminder_state`); `operations.invalid_recipient_region_ids` reports the plant only for an enabled schedule of an approved region outside the trash whose provider account is enabled |
 | At the marker, the composed message does not carry exactly the placement (an address that is not plain, also a frozen row's text, or To, Cc or Bcc that read back otherwise) | `skipped`, `invalid_recipient` at once, also when the lease passed during the check; the lease is released, no marker, no row role written, nothing transmitted |
 | A slot already terminal for another reason (`recipient_limit_exceeded`, `no_recipients`) while the answer and the health report name invalid recipients for the same list | Keeps its reason; no mail is sent either way |
-| Binding, region or quota changed before claim or transmit (at transmit while the lease is valid) | `skipped`, `schedule_or_authority_changed` |
+| Before claim or transmit (at transmit while the lease is valid) the binding, region or quota no longer permits this slot: the schedule's region is not the binding's, the slot's time is not among the first daily-quota times of the schedule, or the binding can no longer notify (`jobs._authorize`) | `skipped`, `schedule_or_authority_changed` |
 | Claimed after 2 h without an authorization refusal; at the transmit marker past 2 h while the lease is valid, at the first clock reading without an authorization refusal or at the second | `skipped`, `missed_schedule` (claim) or `delivery_deadline_exceeded` (transmit) |
 | Slot collection pending, or due but not yet created, before the 15 min deadline | Status unchanged; `available_at` moved to `min(now + 30 s, deadline)` |
 | Preparation or rendering raises a non-database error | Plain-text "forecast unavailable" notice frozen and sent, `forecast_kind` `unavailable`, `forecast_complete` null, `prepared_at` kept from an earlier freeze, else now; it names the plant, links to it and gives the reminder time in plant time |
