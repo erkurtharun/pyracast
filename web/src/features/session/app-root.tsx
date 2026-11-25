@@ -18,6 +18,7 @@ import {
     clearInvitationWith,
     confirmIdleSession,
     isCurrent,
+    isHandoffFailure,
     loadSession,
     observedTagKey,
     savedCopyState,
@@ -25,6 +26,7 @@ import {
     sessionState,
     signOut,
     startSavedCopy,
+    useHandoffFailed,
     useSessionClock,
     useSessionState,
     useSessionUnconfirmed,
@@ -35,6 +37,7 @@ import { Brand } from "@/ui/brand";
 import { useErrorMessage } from "@/ui/form";
 import { LiveRegion } from "@/ui/live-region";
 import { clearWorkspaceInvitation } from "@/features/workspace/workspace-invitation";
+import { openProviderLanding } from "@/features/auth/provider-return";
 import { useLanguageHandoff } from "./language-handoff";
 import { SessionLanguage, useSessionLanguage } from "./session-language";
 import { Notice } from "@/ui/ui";
@@ -49,17 +52,23 @@ export function AppRoot({ children }: { children: ReactNode }) {
     const [client] = useState(createQueryClient);
     const { session, failure, fail, clear, retry } = useSessionBootstrap();
     const { retired, signOut: leaving } = useSessionState();
+    const unchecked = useHandoffFailed();
     const handoff = useLanguageHandoff(session);
     const language = useSessionLanguage(session, handoff.status !== "ready");
     const ready =
         session !== undefined &&
         handoff.status === "ready" &&
         language.status === "ready";
-    useFocusSessionRead(ready);
+    useFocusSessionRead(ready && !unchecked);
     const restored = useRestoredDocument();
     const ending = retired !== undefined || restored;
-    useDocumentReload(ending);
-    const current = useCurrentSession(session, ready, fail, clear);
+    useDocumentReload(ending, retired === "otherOwner");
+    const current = useCurrentSession(
+        session,
+        ready && !unchecked,
+        fail,
+        clear,
+    );
     const unconfirmed = useSessionUnconfirmed();
     return (
         <QueryClientProvider client={client}>
@@ -69,6 +78,8 @@ export function AppRoot({ children }: { children: ReactNode }) {
                     <Bootstrap retry={retry} />
                 ) : leaving.status !== "idle" ? (
                     <SigningOut state={leaving} />
+                ) : unchecked ? (
+                    <SavedFiguresUnchecked />
                 ) : ready && current ? (
                     <QueryOwner value={sessionOwner(session)}>
                         <Screens
@@ -121,6 +132,31 @@ function Bootstrap({
               ? language("failed")
               : failure?.message;
     return <LaunchCard failure={error ? { error, retry } : undefined} />;
+}
+
+// Shown until a read is handed over; a retry whose read fails shows that read's error instead.
+function SavedFiguresUnchecked() {
+    const bootstrap = useTranslations("Bootstrap");
+    const [error, setError] = useState<string>();
+    return (
+        <LaunchCard
+            failure={{
+                error: error ?? bootstrap("savedFiguresUnchecked"),
+                retry: () => {
+                    setError(undefined);
+                    loadSession().catch((failure: unknown) => {
+                        if (!isHandoffFailure(failure))
+                            setError(
+                                displayMessage(
+                                    failure,
+                                    browserErrors()("unexpected"),
+                                ),
+                            );
+                    });
+                },
+            }}
+        />
+    );
 }
 
 export function LaunchCard({
@@ -259,10 +295,12 @@ function useCurrentSession(
 }
 
 // The reload runs after the ending document's screens and their leave listeners are gone.
-function useDocumentReload(ending: boolean) {
+function useDocumentReload(ending: boolean, signedIn: boolean) {
     useEffect(() => {
-        if (ending) reloadPage();
-    }, [ending]);
+        if (!ending) return;
+        if (signedIn) openProviderLanding();
+        reloadPage();
+    }, [ending, signedIn]);
 }
 
 // A document restored from the back-forward cache may show a session that ended meanwhile.

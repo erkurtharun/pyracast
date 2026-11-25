@@ -374,7 +374,9 @@ for (const section of ["Forecast", "Settings"] as const) {
             page.getByRole("list", { name: "Next steps" }),
         ).toBeVisible();
         await expect(
-            page.getByRole("heading", { name: "No forecast for this day yet" }),
+            page.getByRole("heading", {
+                name: "No forecast data for this day.",
+            }),
         ).toHaveCount(0);
         if (section === "Settings") {
             await page
@@ -402,7 +404,7 @@ for (const section of ["Forecast", "Settings"] as const) {
                 .click();
         }
         await expect(
-            page.getByRole("heading", { name: "Electrical generation" }),
+            page.getByRole("heading", { name: "Generation forecast" }),
         ).toBeVisible();
         await expect(
             page.getByRole("button", { name: "Production", exact: true }),

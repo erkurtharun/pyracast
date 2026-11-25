@@ -242,6 +242,12 @@ export function liveRegion(page: Page) {
 }
 
 export async function announceResentInvitation(page: Page) {
+    await (await openInvitations(page)).click();
+    await expect(liveRegion(page)).toHaveText(resentNotice);
+}
+
+// Opens the members screen with one pending invitation and returns its resend button.
+export async function openInvitations(page: Page) {
     let rows = [answer("InvitationOutput", invitee)];
     await page.route("**/api/tenants/1/members/", (route) =>
         route.fulfill({
@@ -261,13 +267,10 @@ export async function announceResentInvitation(page: Page) {
         return route.fulfill({ status: 201, json: rows[0] });
     });
     await page.getByRole("button", { name: "Members", exact: true }).click();
-    await page
-        .getByRole("button", {
-            name: `Send again: ${invitee.email}`,
-            exact: true,
-        })
-        .click();
-    await expect(liveRegion(page)).toHaveText(resentNotice);
+    return page.getByRole("button", {
+        name: `Send again: ${invitee.email}`,
+        exact: true,
+    });
 }
 
 export async function tagObserver(page: Page) {
