@@ -144,33 +144,6 @@ jobs:
           done
           uv run --no-project --python 3.15.2 python deploy/ci_images.py prepare "$RUNNER_TEMP/release-images" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
           bash deploy/oci-images.sh load "$RUNNER_TEMP/release-images" "$GITHUB_SHA"
-      - name: Read Debian's fixed libzstd1 from the backend and web images
-        run: |
-          set -o pipefail
-          debian_image=$(sed -n 's/^FROM \([^ ]*-trixie@sha256:[0-9a-f]\{64\}\) AS base$/\1/p' Dockerfile)
-          [[ "$debian_image" == python:* ]]
-          digests=()
-          for image in pyracast-backend:ci pyracast-web:ci; do
-            files=$(mktemp -d)
-            container=$(docker create "$image")
-            docker export "$container" | tar -x -C "$files" --wildcards 'usr/lib/x86_64-linux-gnu/libzstd*' \
-              'var/lib/dpkg/status.d/libzstd1*' 'usr/share/doc/libzstd1/*'
-            docker rm "$container" >/dev/null
-            version=$(sed -n 's/^Version: //p' "$files/var/lib/dpkg/status.d/libzstd1")
-            echo "$image carries libzstd1 $version"
-            dpkg --compare-versions "$version" ge 1.5.7+dfsg-1+deb13u1
-            (cd "$files/usr/lib/x86_64-linux-gnu" && names=(*) && [[ "${names[*]}" == 'libzstd.so.1 libzstd.so.1.5.7' ]])
-            (cd "$files/usr/lib/x86_64-linux-gnu" && [[ -L libzstd.so.1 && $(readlink libzstd.so.1) == libzstd.so.1.5.7 && -f libzstd.so.1.5.7 && ! -L libzstd.so.1.5.7 ]])
-            debian=$(mktemp -d)
-            docker run --rm --platform linux/amd64 --env version="$version" --volume "$debian:/debian" "$debian_image" \
-              sh -c 'apt-get update -qq && cd /tmp && apt-get download "libzstd1=$version" && dpkg-deb --extract libzstd1_*_amd64.deb /debian'
-            digest=$(sha256sum "$files/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.7" | cut -d' ' -f1)
-            debian_digest=$(sha256sum "$debian/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.7" | cut -d' ' -f1)
-            echo "$image libzstd.so.1.5.7 $digest; Debian's libzstd1 $version: $debian_digest"
-            [[ "$digest" =~ ^[0-9a-f]{64}$ && "$digest" == "$debian_digest" ]]
-            digests+=("$digest")
-          done
-          [[ "${digests[0]}" =~ ^[0-9a-f]{64}$ && "${digests[0]}" == "${digests[1]}" ]]
       - name: Scan every image; block every high or critical vulnerability
         run: |
           POSTGRES_IMAGE=$(docker image inspect pyracast-postgres:ci --format '{{.Id}}')

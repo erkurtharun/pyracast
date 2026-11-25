@@ -19,15 +19,9 @@ RUN apt-get update && apt-get upgrade --no-install-recommends -y \
     && cp /usr/local/LICENSE /runtime/usr/local/ \
     && cp -L /usr/lib/x86_64-linux-gnu/libatomic.so.1 /runtime/usr/lib/x86_64-linux-gnu/ \
     && cp -L /usr/share/doc/libatomic1/copyright /runtime/usr/share/doc/libatomic1/ \
-    && dpkg-query --status libatomic1 > /runtime/var/lib/dpkg/status.d/libatomic1 \
-    && zstd_version=$(dpkg-query --show --showformat='${Version}' libzstd1) \
-    && dpkg --compare-versions "$zstd_version" ge 1.5.7+dfsg-1+deb13u1 \
-    && cd /tmp && apt-get download "libzstd1=$zstd_version" \
-    && dpkg-deb --extract libzstd1_*_amd64.deb /runtime \
-    && dpkg-deb --info libzstd1_*_amd64.deb md5sums > /runtime/var/lib/dpkg/status.d/libzstd1.md5sums \
-    && dpkg-query --status libzstd1 > /runtime/var/lib/dpkg/status.d/libzstd1
+    && dpkg-query --status libatomic1 > /runtime/var/lib/dpkg/status.d/libatomic1
 
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:532c7a94f9e96ba9db75eb9388f4227751131c7cb0a411d1a8521af4096135de AS runtime
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:29ee70762214fe8190cea04ef1c0a84a8365879e047ce8f911ae5a5ab2355fa2 AS runtime
 ENV NODE_ENV=production HOSTNAME=0.0.0.0 PORT=3000
 WORKDIR /app
 COPY --from=runtime-node /runtime/ /
