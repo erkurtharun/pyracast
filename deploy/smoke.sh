@@ -373,7 +373,7 @@ import django
 django.setup()
 from django.utils import translation
 with translation.override("tr"):
-    assert translation.gettext("Continue to sign in") == "Oturum a\u00e7maya devam et"
+    assert translation.gettext("Continue to sign in") == "Giri\u015fe devam et"
 '
 "${compose[@]}" exec -T api python - <<'PY'
 import os

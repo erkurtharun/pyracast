@@ -9,9 +9,10 @@ from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.utils import translation
-from django.utils.formats import date_format
+from django.utils.functional import Promise
 from django.utils.translation import gettext_lazy as _
 
+from pyracast.accounts.account_mail import mail_time
 from pyracast.accounts.models import (
     Membership,
     OutboundMail,
@@ -23,28 +24,31 @@ from pyracast.notifications.links import plant_url, workspace_url
 from pyracast.plants.models import Plant
 from pyracast.regions.models import AuditAction, AuditEvent, Region
 
-FOOTER = _("You receive this email because of your role in %(workspace)s on Pyracast.")
+FOOTER = _("You receive this email because of your role in %(workspace)s.")
+
+
+@dataclass(frozen=True)
+class ReviewText:
+    subject: Promise
+    sentence: Promise
+    time_label: Promise
+    next_step: Promise | None = None
+
+
 REVIEW_TEXTS = {
-    AuditAction.REGION_APPROVED: (
-        _("%(plant)s is approved"),
-        _(
-            "Pyracast support approved %(plant)s in %(workspace)s on %(time)s (%(zone)s). "
-            "Forecasts start with the next collection."
-        ),
+    AuditAction.REGION_APPROVED: ReviewText(
+        _("%(plant)s is approved"), _("Pyracast approved the plant."), _("Approved at")
     ),
-    AuditAction.REGION_REJECTED: (
+    AuditAction.REGION_REJECTED: ReviewText(
         _("%(plant)s was not approved"),
-        _(
-            "Pyracast support did not approve %(plant)s in %(workspace)s on %(time)s "
-            "(%(zone)s). Correct the plant's details and resubmit it for review."
-        ),
+        _("Pyracast did not approve the plant."),
+        _("Decided at"),
+        _("Correct the details and send the plant for approval again."),
     ),
-    AuditAction.REGION_SUSPENDED: (
+    AuditAction.REGION_SUSPENDED: ReviewText(
         _("%(plant)s is suspended"),
-        _(
-            "Pyracast support suspended %(plant)s in %(workspace)s on %(time)s (%(zone)s). "
-            "Forecast collection and reminders are paused."
-        ),
+        _("Pyracast suspended the plant. Forecasts and forecast emails for it are stopped."),
+        _("Suspended at"),
     ),
 }
 
@@ -57,7 +61,8 @@ class EventMessage:
     sentence: str
     action_label: str
     action_url: str
-    reason: str = ""
+    details: tuple[tuple[str, str], ...] = ()
+    next_step: str = ""
 
 
 def plant_name(region: Region) -> str:
@@ -66,7 +71,11 @@ def plant_name(region: Region) -> str:
 
 
 def plant_time(moment: datetime, region: Region) -> str:
-    return date_format(moment.astimezone(ZoneInfo(region.timezone)), "j M Y H:i")
+    return mail_time(moment, ZoneInfo(region.timezone))
+
+
+def _plant_details(plant: str, region: Region) -> tuple[tuple[str, str], ...]:
+    return ((str(_("Plant")), plant), (str(_("Workspace")), region.tenant.name))
 
 
 def _subject(mail: OutboundMail) -> int:
@@ -79,21 +88,22 @@ def _review(mail: OutboundMail) -> EventMessage | None:
     region = Region.objects.active().select_related("tenant").filter(auditevent=event_id).first()
     if event is None or region is None:
         return None
-    values = {
-        "plant": plant_name(region),
-        "workspace": region.tenant.name,
-        "time": plant_time(event.created_at, region),
-        "zone": region.timezone,
-    }
-    subject, sentence = REVIEW_TEXTS[AuditAction(event.action)]
+    plant = plant_name(region)
+    text = REVIEW_TEXTS[AuditAction(event.action)]
+    reason = str(event.details.get("reason", ""))
     return EventMessage(
         region.tenant_id,
         region.tenant.name,
-        subject % values,
-        sentence % values,
+        text.subject % {"plant": plant},
+        str(text.sentence),
         str(_("Open plant")),
         plant_url(region),
-        str(event.details.get("reason", "")),
+        (
+            *_plant_details(plant, region),
+            (str(text.time_label), plant_time(event.created_at, region)),
+            *(((str(_("Reason")), reason),) if reason else ()),
+        ),
+        str(text.next_step or ""),
     )
 
 
@@ -106,25 +116,26 @@ def _role(mail: OutboundMail, *, assigned: bool) -> EventMessage | None:
         return EventMessage(
             change.tenant_id,
             change.tenant.name,
-            _("You now administer %(workspace)s") % values,
-            _(
-                "Pyracast support made you the administrator of %(workspace)s. Automatic "
-                "calibration was turned off for its plants and open invitations were cancelled; "
-                "review the members and invite again where needed."
-            )
-            % values,
+            _("You are now the workspace administrator of %(workspace)s") % values,
+            str(
+                _(
+                    "Pyracast made you the workspace administrator and withdrew the pending "
+                    "invitations. Check the members and invite again where needed."
+                )
+            ),
             str(_("Open members")),
             workspace_url(change.tenant_id, "members/"),
         )
     return EventMessage(
         change.tenant_id,
         change.tenant.name,
-        _("Your administrator role in %(workspace)s moved") % values,
-        _(
-            "Pyracast support moved the administrator role of %(workspace)s to another member. "
-            "You keep read-only access."
-        )
-        % values,
+        _("You are no longer the workspace administrator of %(workspace)s") % values,
+        str(
+            _(
+                "Pyracast handed the workspace administrator role over to another member. You "
+                "are now a member of the workspace."
+            )
+        ),
         str(_("Open workspace")),
         workspace_url(change.tenant_id),
     )
@@ -145,26 +156,21 @@ def _purge_warning(mail: OutboundMail) -> EventMessage | None:
     )
     if region is None:
         return None
-    values = {
-        "plant": plant_name(region),
-        "workspace": region.tenant.name,
-        "trashed": plant_time(cast(datetime, region.deleted_at), region),
-        # The warning expires when the purge is due.
-        "time": plant_time(mail.expires_at, region),
-        "zone": region.timezone,
-    }
+    plant = plant_name(region)
     return EventMessage(
         region.tenant_id,
         region.tenant.name,
-        _("%(plant)s will be deleted permanently") % values,
-        _(
-            "%(plant)s has been in the recycle bin of %(workspace)s since %(trashed)s. It will "
-            "be deleted permanently on %(time)s (%(zone)s) with its forecasts and history. "
-            "Restore it before then to keep it."
-        )
-        % values,
+        _("%(plant)s will be deleted permanently") % {"plant": plant},
+        str(_("The plant is in the recycle bin.")),
         str(_("Open recycle bin")),
         workspace_url(region.tenant_id, "trash/"),
+        (
+            *_plant_details(plant, region),
+            (str(_("Deleted at")), plant_time(cast(datetime, region.deleted_at), region)),
+            # The warning expires when the purge is due.
+            (str(_("Deleted permanently at")), plant_time(mail.expires_at, region)),
+        ),
+        str(_("Restore the plant before then to keep it with its forecasts and history.")),
     )
 
 
@@ -196,7 +202,8 @@ def compose_event_mail(mail: OutboundMail) -> EmailMultiAlternatives | OutboundM
         context = {
             "title": message.subject,
             "sentence": message.sentence,
-            "reason": message.reason,
+            "details": message.details,
+            "next_step": message.next_step,
             "action_label": message.action_label,
             "action_url": message.action_url,
             "footer": FOOTER % {"workspace": message.workspace},

@@ -1,3 +1,4 @@
+import re
 from collections.abc import Callable, Iterator, Sequence
 from typing import ClassVar, cast
 
@@ -9,7 +10,8 @@ from django.core.mail.backends.base import BaseEmailBackend
 from django.db import connection, transaction
 from django.test import override_settings
 from django.urls import reverse
-from django.utils import timezone
+from django.utils import dateformat, timezone, translation
+from django.utils.html import escape
 from psycopg import sql
 
 from pyracast.accounts.invitations import invite_workspace_member
@@ -27,6 +29,7 @@ from pyracast.plants.approval import ReviewDecision, approve_region
 from pyracast.plants.models import Plant, PlantSubmission
 from pyracast.regions.models import AuditAction, AuditEvent, Region
 from pyracast.regions.operations import submit_region
+from tests.support.account_mail import TIME_FORMATS, TURKIYE
 from tests.support.api import verified_admin
 from tests.support.domain import FakeAdapter, System, make_system
 from tests.support.outbox import deliver_mail
@@ -428,3 +431,151 @@ def test_a_role_mail_whose_change_record_is_gone_is_not_sent(recorder: type[Reco
     assert set(OutboundMail.objects.values_list("status", "last_error")) == {
         ("skipped", "subject_unavailable")
     }
+
+
+DECISION_TEXT: dict[tuple[str, str], tuple[str, str, tuple[str, ...], str, str, str]] = {
+    ("approved", "en"): (
+        "Kayseri solar park is approved",
+        "Pyracast approved the plant.",
+        ("Plant: Kayseri solar park", "Workspace: Tenant", "Approved at: {time} (UTC+3)"),
+        "",
+        "Open plant",
+        "You receive this email because of your role in Tenant.",
+    ),
+    ("approved", "tr"): (
+        "Kayseri solar park onayland\u0131",
+        "Pyracast santrali onaylad\u0131.",
+        (
+            "Santral: Kayseri solar park",
+            "Çal\u0131şma alan\u0131: Tenant",
+            "Onay zaman\u0131: {time} (UTC+3)",
+        ),
+        "",
+        "Santrali aç",
+        "Bu e-postay\u0131 Tenant çal\u0131şma alan\u0131ndaki rolünüz nedeniyle al\u0131yorsunuz.",
+    ),
+    ("rejected", "en"): (
+        "Kayseri solar park was not approved",
+        "Pyracast did not approve the plant.",
+        (
+            "Plant: Kayseri solar park",
+            "Workspace: Tenant",
+            "Decided at: {time} (UTC+3)",
+            f"Reason: {REASON}",
+        ),
+        "Correct the details and send the plant for approval again.",
+        "Open plant",
+        "You receive this email because of your role in Tenant.",
+    ),
+    ("rejected", "tr"): (
+        "Kayseri solar park onaylanmad\u0131",
+        "Pyracast santrali onaylamad\u0131.",
+        (
+            "Santral: Kayseri solar park",
+            "Çal\u0131şma alan\u0131: Tenant",
+            "Karar zaman\u0131: {time} (UTC+3)",
+            f"Gerekçe: {REASON}",
+        ),
+        "\u0130stenen bilgileri düzeltip santrali yeniden onaya gönderin.",
+        "Santrali aç",
+        "Bu e-postay\u0131 Tenant çal\u0131şma alan\u0131ndaki rolünüz nedeniyle al\u0131yorsunuz.",
+    ),
+    ("suspended", "en"): (
+        "Kayseri solar park is suspended",
+        "Pyracast suspended the plant. Forecasts and forecast emails for it are stopped.",
+        (
+            "Plant: Kayseri solar park",
+            "Workspace: Tenant",
+            "Suspended at: {time} (UTC+3)",
+            f"Reason: {REASON}",
+        ),
+        "",
+        "Open plant",
+        "You receive this email because of your role in Tenant.",
+    ),
+    ("suspended", "tr"): (
+        "Kayseri solar park ask\u0131ya al\u0131nd\u0131",
+        "Pyracast santrali ask\u0131ya ald\u0131. "
+        "Santralin tahminleri ve tahmin e-postalar\u0131 durduruldu.",
+        (
+            "Santral: Kayseri solar park",
+            "Çal\u0131şma alan\u0131: Tenant",
+            "Ask\u0131ya alma zaman\u0131: {time} (UTC+3)",
+            f"Gerekçe: {REASON}",
+        ),
+        "",
+        "Santrali aç",
+        "Bu e-postay\u0131 Tenant çal\u0131şma alan\u0131ndaki rolünüz nedeniyle al\u0131yorsunuz.",
+    ),
+}
+
+
+def assert_in_order(html: str, parts: Sequence[str]) -> None:
+    position = 0
+    for part in parts:
+        found = html.find(part, position)
+        assert found >= 0, part
+        position = found + len(part)
+
+
+@pytest.mark.parametrize(("decision", "language"), sorted(DECISION_TEXT))
+def test_a_decision_mail_lists_the_plant_its_workspace_and_the_plant_time_in_both_parts(
+    recorder: type[Recorder], decision: str, language: str
+) -> None:
+    approved, trigger, action = TRIGGERS[decision]
+    system = plant_system(language=language, approved=approved)
+    trigger(system)
+    assert deliver_mail() == 1
+
+    (message,) = recorder.sent
+    event = AuditEvent.objects.filter(action=action).latest("pk")
+    with translation.override(language):
+        time = dateformat.format(event.created_at.astimezone(TURKIYE), TIME_FORMATS[language])
+    heading, sentence, details, next_step, label, footer = DECISION_TEXT[(decision, language)]
+    lines = [line.format(time=time) for line in details]
+    link = f"{ORIGIN}/app/w/{system.tenant.pk}/plants/{system.region.pk}/forecast/"
+    parts = [heading, sentence, "\n".join(lines), *([next_step] if next_step else [])]
+    assert message.body == "\n\n".join(["Pyracast", *parts, f"{label}: {link}", footer])
+    html = str(cast(EmailMultiAlternatives, message).alternatives[0][0])
+    assert re.findall(r"<h1[^>]*>(.*?)</h1>", html) == [escape(heading)]
+    shown = [escape(line).replace(": ", ":</strong> ", 1) for line in lines]
+    assert_in_order(
+        html,
+        [
+            f">{escape(heading)}</h1>",
+            escape(sentence),
+            *shown,
+            *([escape(next_step)] if next_step else []),
+            escape(label),
+            escape(footer),
+        ],
+    )
+
+
+def test_the_role_mails_say_which_role_each_person_now_has(recorder: type[Recorder]) -> None:
+    tenant, platform, former, chosen = role_system()
+    reassign_workspace_admin(platform, tenant.pk, chosen.pk, expected_admin_id=former.pk)
+    assert deliver_mail() == 2
+
+    messages = {message.to[0]: message for message in recorder.sent}
+    assert messages["chosen@example.com"].body == "\n\n".join(
+        [
+            "Pyracast",
+            "You are now the workspace administrator of Role workspace",
+            "Pyracast made you the workspace administrator and withdrew the pending invitations. "
+            "Check the members and invite again where needed.",
+            f"Open members: {ORIGIN}/app/w/{tenant.pk}/members/",
+            "You receive this email because of your role in Role workspace.",
+        ]
+    )
+    assert messages["former@example.com"].body == "\n\n".join(
+        [
+            "Pyracast",
+            "Art\u0131k Role workspace çal\u0131şma alan\u0131n\u0131n yöneticisi değilsiniz",
+            "Pyracast çal\u0131şma alan\u0131 yöneticisi rolünü başka bir üyeye devretti. "
+            "Art\u0131k çal\u0131şma alan\u0131nda üyesiniz.",
+            f"Çal\u0131şma alan\u0131n\u0131 aç: {ORIGIN}/app/w/{tenant.pk}/",
+            "Bu e-postay\u0131 Role workspace "
+            "çal\u0131şma alan\u0131ndaki rolünüz nedeniyle al\u0131yorsunuz.",
+        ]
+    )

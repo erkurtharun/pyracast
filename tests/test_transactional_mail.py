@@ -1,14 +1,25 @@
+import re
+from datetime import timedelta
+
 import pytest
 from django.contrib.auth.models import User
 from django.core import mail
 from django.core.mail import EmailMultiAlternatives
 from django.template import TemplateDoesNotExist
 from django.test import override_settings
-from django.utils import translation
+from django.utils import dateformat, timezone, translation
+from django.utils.html import escape
 
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.invitations import invite_workspace_member
-from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference, WorkspaceRole
+from pyracast.accounts.models import (
+    Membership,
+    Tenant,
+    UserLanguagePreference,
+    WorkspaceInvitation,
+    WorkspaceRole,
+)
+from tests.support.account_mail import TIME_FORMATS, TURKIYE
 from tests.support.outbox import deliver_mail
 
 
@@ -95,3 +106,61 @@ def test_invitation_mail_has_private_action_and_escaped_workspace(language: str)
     assert "/app/invitation/#token=" in html
     assert "?token=" not in html
     assert ("Daveti incele" if language == "tr" else "Review invitation") in html
+
+
+INVITATION_TEXT = {
+    "en": (
+        "Workspace invitation",
+        "You are invited to Solar.",
+        "Invited role: Member\nInvitation expires: {deadline} (UTC+3)",
+        "Sign in or create an account with guest@example.com, then verify your email to "
+        "accept the invitation.",
+        "Review invitation: ",
+    ),
+    "tr": (
+        "Çal\u0131şma alan\u0131 daveti",
+        "Solar çal\u0131şma alan\u0131na davet edildiniz.",
+        "Davet edildiğiniz rol: Üye\nDavetin son geçerlilik zaman\u0131: {deadline} (UTC+3)",
+        "guest@example.com adresiyle giriş yap\u0131n veya hesap oluşturun, "
+        "ard\u0131ndan daveti kabul "
+        "etmek için e-posta adresinizi doğrulay\u0131n.",
+        "Daveti incele: ",
+    ),
+}
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("language", ["en", "tr"])
+@override_settings(
+    MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
+)
+def test_invitation_mail_names_the_role_and_the_stored_deadline_in_both_parts(
+    language: str,
+) -> None:
+    tenant = Tenant.objects.create(name="Solar")
+    actor = User.objects.create_user(username="administrator", email="admin@example.com")
+    Membership.objects.create(tenant=tenant, user=actor, role=WorkspaceRole.ADMIN)
+    invitation = invite_workspace_member(actor, tenant.pk, "guest@example.com", language=language)
+    deadline = (timezone.now() + timedelta(days=3)).replace(second=0, microsecond=0)
+    WorkspaceInvitation.objects.filter(pk=invitation.pk).update(expires_at=deadline)
+
+    deliver_mail()
+
+    message = mail.outbox[-1]
+    with translation.override(language):
+        shown = dateformat.format(deadline.astimezone(TURKIYE), TIME_FORMATS[language])
+    heading, invited, lines, step, action = INVITATION_TEXT[language]
+    lines = lines.format(deadline=shown)
+    assert str(message.body).startswith(
+        "\n\n".join(["Pyracast", heading, invited, lines, step, action])
+    )
+    assert isinstance(message, EmailMultiAlternatives)
+    html = message.alternatives[0][0]
+    assert isinstance(html, str)
+    assert re.findall(r"<h1[^>]*>(.*?)</h1>", html) == [escape(heading)]
+    shown_lines = [escape(line).replace(": ", ":</strong> ", 1) for line in lines.split("\n")]
+    position = html.index("</h1>")
+    for part in [escape(invited), *shown_lines, escape(step), escape(action.removesuffix(": "))]:
+        found = html.find(part, position)
+        assert found >= 0, part
+        position = found + len(part)
