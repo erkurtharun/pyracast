@@ -1,10 +1,14 @@
 import re
+from collections.abc import Iterator
+from dataclasses import dataclass
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import Any
 
 import pytest
 from django.template.loader import render_to_string
 
+ROOT = Path(__file__).resolve().parents[1]
 URL = "https://testserver/app/w/1/"
 MAILS: dict[str, dict[str, Any]] = {
     "account/email/email_confirmation_message.html": {"code": "012345", "code_timeout_minutes": 10},
@@ -53,39 +57,146 @@ MAILS: dict[str, dict[str, Any]] = {
     },
 }
 TEXT = {"h1", "p", "span"}
+VOID = {"br", "hr", "img", "input", "link", "meta"}
+PAINTED = ("color", "background-color")
 
 
-class Elements(HTMLParser):
-    def __init__(self) -> None:
+def declarations(body: str) -> dict[str, str]:
+    return {
+        name.strip(): value.strip()
+        for name, value in (part.split(":", 1) for part in body.split(";") if part.strip())
+    }
+
+
+@dataclass(eq=False)
+class Node:
+    tag: str
+    attributes: dict[str, str]
+    parent: Node | None
+    text: bool = False
+
+    @property
+    def classes(self) -> set[str]:
+        return set(self.attributes.get("class", "").split())
+
+    @property
+    def style(self) -> dict[str, str]:
+        return declarations(self.attributes.get("style", ""))
+
+    def lineage(self) -> Iterator[Node]:
+        node: Node | None = self
+        while node is not None:
+            yield node
+            node = node.parent
+
+
+class Tree(HTMLParser):
+    def __init__(self, html: str) -> None:
         super().__init__()
-        self.elements: list[tuple[str, dict[str, str], bool]] = []
-        self.inside = False
+        self.nodes: list[Node] = []
+        self.open: list[Node] = []
+        self.feed(html)
+        self.close()
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        values = {name: value or "" for name, value in attrs}
-        self.elements.append((tag, values, self.inside))
-        self.inside = self.inside or "mail-content" in values.get("class", "").split()
-
-
-def dark_rules(html: str) -> list[tuple[list[str], dict[str, str]]]:
-    block = html[html.index("@media (prefers-color-scheme: dark) {") :].split("\n    }\n")[0]
-    return [
-        (
-            [selector.strip() for selector in selectors.split(",")],
-            dict(
-                (name.strip(), value.replace("!important", "").strip())
-                for name, value in (part.split(":") for part in body.split(";") if part.strip())
-            ),
+        node = Node(
+            tag, {name: value or "" for name, value in attrs}, self.open[-1] if self.open else None
         )
-        for selectors, body in re.findall(r"\n\s*([^{}@]+?)\s*\{([^{}]*)\}", block)
-    ]
+        self.nodes.append(node)
+        if tag not in VOID:
+            self.open.append(node)
+
+    def handle_endtag(self, tag: str) -> None:
+        names = [node.tag for node in self.open]
+        if tag in names:
+            del self.open[len(names) - 1 - names[::-1].index(tag) :]
+
+    def handle_data(self, data: str) -> None:
+        if data.strip() and self.open:
+            self.open[-1].text = True
 
 
-def dark(rules: list[tuple[list[str], dict[str, str]]], name: str, prop: str) -> str | None:
-    for selectors, body in rules:
-        if prop in body and any(f".{name}" in selector.split() for selector in selectors):
-            return body[prop]
-    return None
+@dataclass(frozen=True)
+class Rule:
+    selector: tuple[tuple[str, ...], ...]
+    prop: str
+    value: str
+    important: bool
+    order: int
+
+    @property
+    def rank(self) -> tuple[int, int, int]:
+        parts = [part for compound in self.selector for part in compound]
+        classes = sum(part.startswith(".") for part in parts)
+        return classes, sum(part[0].isalpha() for part in parts), self.order
+
+    def matches(self, node: Node) -> bool:
+        *outer, last = self.selector
+        if not fits(last, node):
+            return False
+        # One shared iterator: each outer compound must match above the previous one's match.
+        ancestors = node.lineage()
+        next(ancestors)
+        return all(
+            any(fits(compound, ancestor) for ancestor in ancestors) for compound in outer[::-1]
+        )
+
+
+def fits(compound: tuple[str, ...], node: Node) -> bool:
+    return all(
+        part == "*" or part == node.tag or (part.startswith(".") and part[1:] in node.classes)
+        for part in compound
+    )
+
+
+def dark_rules(html: str) -> list[Rule]:
+    block = html[html.index("@media (prefers-color-scheme: dark) {") :].split("\n    }\n")[0]
+    rules: list[Rule] = []
+    for selectors, body in re.findall(r"\n\s*([^{}@]+?)\s*\{([^{}]*)\}", block):
+        for selector in selectors.split(","):
+            compounds = tuple(
+                tuple(re.findall(r"\*|\.[\w-]+|[a-z][\w-]*", compound))
+                for compound in selector.split()
+            )
+            for prop, value in declarations(body).items():
+                rules.append(
+                    Rule(
+                        compounds,
+                        prop,
+                        value.removesuffix("!important").strip(),
+                        value.endswith("!important"),
+                        len(rules),
+                    )
+                )
+    return rules
+
+
+def declared(node: Node, prop: str, rules: list[Rule]) -> tuple[str, str]:
+    """The value the node itself shows for the property and where it comes from, by the
+    cascade: important rules, then the inline style, then other rules, then `bgcolor`."""
+    matched = sorted(
+        (rule for rule in rules if rule.prop == prop and rule.matches(node)),
+        key=lambda rule: rule.rank,
+    )
+    important = [rule for rule in matched if rule.important]
+    if important:
+        return important[-1].value, "rule"
+    if prop in node.style:
+        return node.style[prop], "inline"
+    if matched:
+        return matched[-1].value, "rule"
+    if prop == "background-color" and "bgcolor" in node.attributes:
+        return node.attributes["bgcolor"], "attribute"
+    return "", ""
+
+
+def shown(node: Node, prop: str, rules: list[Rule]) -> str:
+    """Colour is inherited; the background is that of the nearest painted ancestor."""
+    return next(value for each in node.lineage() if (value := declared(each, prop, rules)[0]))
+
+
+def hidden(node: Node) -> bool:
+    return any(each.tag == "head" or each.style.get("display") == "none" for each in node.lineage())
 
 
 def luminance(colour: str) -> float:
@@ -102,80 +213,97 @@ def contrast(first: str, second: str) -> float:
     return (high + 0.05) / (low + 0.05)
 
 
+def frame_templates() -> set[str]:
+    return {
+        path.relative_to(
+            next(folder for folder in path.parents if folder.name == "templates")
+        ).as_posix()
+        for path in (ROOT / "src").glob("**/templates/**/*.html")
+        if '{% extends "mail/base.html" %}' in path.read_text(encoding="utf-8")
+    }
+
+
+def test_every_mail_in_the_frame_is_checked() -> None:
+    assert set(MAILS) == frame_templates()
+
+
 @pytest.mark.parametrize("template", list(MAILS))
-def test_in_dark_mode_every_element_with_a_background_has_its_own_readable_pair(
-    template: str,
-) -> None:
+def test_in_dark_mode_every_dark_rule_wins_over_the_inline_colours(template: str) -> None:
     html = render_to_string(template, MAILS[template])
     rules = dark_rules(html)
-    parser = Elements()
-    parser.feed(html)
-    backed = [
-        (attributes, inside)
-        for _, attributes, inside in parser.elements
-        if "background-color" in attributes.get("style", "") or "bgcolor" in attributes
-    ]
-    assert backed
-    for attributes, inside in backed:
-        classes = attributes.get("class", "").split()
-        backgrounds = [dark(rules, name, "background-color") for name in classes]
-        background = next((value for value in backgrounds if value), None)
-        assert background, attributes
-        if inside:
-            colour = next(
-                (value for name in classes if (value := dark(rules, name, "color"))), None
+    nodes = Tree(html).nodes
+    assert any("background-color" in node.style for node in nodes)
+    for node in nodes:
+        for prop in PAINTED:
+            ruled = prop in node.style and any(
+                rule.prop == prop and rule.matches(node) for rule in rules
             )
-            assert colour, attributes
-            assert contrast(background, colour) >= 4.5, attributes
+            backed = prop == "background-color" and (
+                prop in node.style or "bgcolor" in node.attributes
+            )
+            if ruled or backed:
+                assert declared(node, prop, rules)[1] == "rule", (prop, node.attributes)
 
 
-def test_the_dark_rules_give_the_code_and_the_notice_their_own_pairs() -> None:
+@pytest.mark.parametrize("dark", [False, True], ids=["light", "dark"])
+@pytest.mark.parametrize("template", list(MAILS))
+def test_every_visible_text_is_readable_on_its_background(template: str, dark: bool) -> None:
+    html = render_to_string(template, MAILS[template])
+    rules = dark_rules(html) if dark else []
+    texts = [node for node in Tree(html).nodes if node.text and not hidden(node)]
+    assert texts
+    for node in texts:
+        pair = shown(node, "background-color", rules), shown(node, "color", rules)
+        assert contrast(*pair) >= 4.5, (pair, node.tag, node.attributes)
+
+
+def test_the_dark_rules_reach_the_code_the_notice_text_and_the_button_link() -> None:
     code = render_to_string(
-        "account/email/login_code_message.html", {"code": "012345", "code_timeout_minutes": 10}
+        "account/email/login_code_message.html", MAILS["account/email/login_code_message.html"]
     )
-    rules = dark_rules(code)
-    assert '<p class="mail-code"' in code
-    assert (dark(rules, "mail-code", "background-color"), dark(rules, "mail-code", "color")) == (
-        "#0f1a1f",
-        "#e6edf0",
-    )
-    assert dark(rules, "mail-code", "border-color") == "#2b3f49"
     forecast = render_to_string("notifications/forecast.html", MAILS["notifications/forecast.html"])
-    assert '<td class="mail-notice"' in forecast
-    assert (
-        dark(rules, "mail-notice", "background-color"),
-        dark(rules, "mail-notice", "color"),
-    ) == ("#fdf6e7", "#172b36")
+    expected = {
+        (code, "p", "mail-code"): ("#0f1a1f", "#e6edf0"),
+        (forecast, "td", "mail-notice"): ("#fdf6e7", "#172b36"),
+        (forecast, "strong", "mail-notice"): ("#fdf6e7", "#172b36"),
+        (forecast, "a", "mail-button"): ("#d7ebe6", "#09383a"),
+    }
+    for (html, tag, name), pair in expected.items():
+        rules = dark_rules(html)
+        (node,) = [
+            node
+            for node in Tree(html).nodes
+            if node.tag == tag
+            and node.text
+            and any(name in each.classes for each in node.lineage())
+        ]
+        assert (shown(node, "background-color", rules), shown(node, "color", rules)) == pair, tag
 
 
 @pytest.mark.parametrize("template", list(MAILS))
 def test_every_heading_paragraph_and_span_names_its_font(template: str) -> None:
-    parser = Elements()
-    parser.feed(render_to_string(template, MAILS[template]))
-    texts = [attributes for tag, attributes, _ in parser.elements if tag in TEXT]
+    texts = [
+        node for node in Tree(render_to_string(template, MAILS[template])).nodes if node.tag in TEXT
+    ]
     assert texts
-    for attributes in texts:
-        assert "font-family:" in attributes.get("style", ""), attributes
+    for node in texts:
+        assert "font-family" in node.style, node.attributes
 
 
 def test_the_whole_button_is_the_link_and_at_least_44_pixels_high() -> None:
-    parser = Elements()
-    parser.feed(
+    nodes = Tree(
         render_to_string("mail/workspace_invitation.html", MAILS["mail/workspace_invitation.html"])
-    )
+    ).nodes
     index, cell = next(
-        (index, attributes)
-        for index, (tag, attributes, _) in enumerate(parser.elements)
-        if "mail-button" in attributes.get("class", "")
+        (index, node) for index, node in enumerate(nodes) if "mail-button" in node.classes
     )
-    tag, link, _ = parser.elements[index + 1]
-    assert tag == "a"
-    cell_style = dict(part.split(":", 1) for part in cell["style"].split(";") if part.strip())
-    link_style = dict(part.split(":", 1) for part in link["style"].split(";") if part.strip())
-    assert "padding" not in cell_style
-    assert cell_style["mso-padding-alt"] == "12px 22px"
-    assert cell["bgcolor"] == cell_style["background-color"] == "#09383a"
-    assert link_style["display"] == "block"
-    assert link_style["padding"] == "12px 22px"
-    vertical = int(link_style["padding"].split()[0].removesuffix("px"))
-    assert 2 * vertical + int(link_style["line-height"].removesuffix("px")) >= 44
+    link = nodes[index + 1]
+    assert link.tag == "a"
+    assert link.parent is cell
+    assert "padding" not in cell.style
+    assert cell.style["mso-padding-alt"] == "12px 22px"
+    assert cell.attributes["bgcolor"] == cell.style["background-color"] == "#09383a"
+    assert link.style["display"] == "block"
+    assert link.style["padding"] == "12px 22px"
+    vertical = int(link.style["padding"].split()[0].removesuffix("px"))
+    assert 2 * vertical + int(link.style["line-height"].removesuffix("px")) >= 44

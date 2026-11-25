@@ -414,66 +414,84 @@ export async function serveHalfHourCorrection(
     };
 }
 
-// A half hour at 08:00 beside another operator's half-hour correction at 08:30; once that correction is removed the
-// day reads as one hourly interval. A repeat of an applied change is a replay.
+// A half hour at 08:00 with a provider reading beside another operator's half-hour correction at 08:30; once that
+// correction is removed and 08:00 holds no person's change, the day reads as one hourly interval without a value. A
+// person's change appends a revision to 08:00; a repeat of an applied change is a replay that appends nothing.
 export async function serveSplitSlot(page: Page, next: () => Answering) {
-    let split = true;
+    let corrected = true;
     const requests: unknown[] = [];
-    const applied = new Set<string>();
+    const revisions: Revision[] = [];
+    const head = () => revisions.at(-1);
     await page.route("**/api/**/production/?*", (route) => {
         const date = new URL(route.request().url()).searchParams.get(
             "start_date",
         )!;
         const at = (time: string) => `${date}T${time}:00+03:00`;
+        const current = head();
         return route.fulfill({
             json: nativeProductionHistory(
                 date,
                 "Europe/Istanbul",
-                split
+                corrected || current
                     ? [
                           {
                               starts_at: at("08:00"),
                               ends_at: at("08:30"),
-                              effective: reading,
+                              effective: current
+                                  ? { ...reading, energy_mwh: current.energy }
+                                  : reading,
+                              revision_id: current?.id ?? null,
+                              can_revert: !!current,
                           },
                           {
                               starts_at: at("08:30"),
                               ends_at: at("09:00"),
-                              effective: { ...reading, energy_mwh: 0.4 },
-                              revision_id: 1,
-                              can_revert: true,
+                              effective: corrected
+                                  ? { ...reading, energy_mwh: 0.4 }
+                                  : null,
+                              revision_id: corrected ? 1 : null,
+                              can_revert: corrected,
                           },
                       ]
-                    : [
-                          {
-                              starts_at: at("08:00"),
-                              ends_at: at("09:00"),
-                              effective: reading,
-                              revision_id: 2,
-                          },
-                      ],
+                    : [{ starts_at: at("08:00"), ends_at: at("09:00") }],
             ),
         });
     });
     await page.route("**/production/changes/", (route) => {
-        const body = route.request().postDataJSON() as unknown;
+        const body = route.request().postDataJSON() as { changes: ChangeRow[] };
         requests.push(body);
         const answering = next();
         const early = refusedEarly(route, answering);
         if (early) return early;
-        applied.add(JSON.stringify(body));
+        const [change] = body.changes;
+        if (!change?.starts_at.endsWith("T08:00:00+03:00"))
+            throw new Error("Only the half hour at 08:00 takes a change.");
+        const current = head();
+        const energy = change.energy ?? 0;
+        if ((current?.id ?? null) === change.expected_revision_id)
+            revisions.push({
+                id: revisions.length + 2,
+                supersedes: current?.id ?? null,
+                energy,
+                quality: change.quality ?? "valid",
+                source: change.source ?? "operator",
+                reverted: change.action === "revert",
+                by: "person",
+            });
+        else if (!replays(change, current, energy))
+            return route.fulfill({ status: 409, json: conflict() });
         return fulfil(route, answering, {
             created: 1,
             existing: 0,
             count: 1,
-            ids: [3],
+            ids: [head()!.id],
         });
     });
     return {
         requests,
-        applied: () => applied.size,
+        applied: () => revisions.length,
         merge() {
-            split = false;
+            corrected = false;
         },
     };
 }
@@ -607,13 +625,13 @@ type Stored = {
     id: number;
     payload: Payload;
     status: Status;
-    configuration: number;
+    configuration: number | null;
 };
 
 // A repeat under a key answers with its first request as it now is; other content under the key is refused.
 function proposalStore(
     kind: Schemas["ChangeRequestKindEnum"],
-    configuration: () => number,
+    configuration: (payload: Payload) => number | null,
 ) {
     const requests: Payload[] = [];
     const stored = new Map<string, Stored>();
@@ -658,7 +676,7 @@ function proposalStore(
                 id: stored.size + 1,
                 payload,
                 status: "pending",
-                configuration: configuration(),
+                configuration: configuration(payload),
             };
             stored.set(key, request);
             return fulfil(route, answering, {
@@ -673,7 +691,10 @@ function proposalStore(
 
 // The 08:00 interval of a member; it shows the member's pending request once one exists.
 export async function serveProposals(page: Page, next: () => Answering) {
-    const proposals = proposalStore("production", () => 31);
+    const proposals = proposalStore(
+        "production",
+        (payload) => payload.configuration_id as number,
+    );
     await page.route("**/api/**/production/?*", (route) => {
         const date = new URL(route.request().url()).searchParams.get(
             "start_date",
@@ -822,7 +843,15 @@ export async function serveOutageProposals(
     direct: () => boolean = () => false,
     configuration: () => number = () => 31,
 ) {
-    const proposals = proposalStore("incident", configuration);
+    // The server's rule: a new or ongoing outage follows the plant, an ended edit its outage, the rest neither.
+    const proposals = proposalStore("incident", (payload) => {
+        if (payload.action === "create") return configuration();
+        if (payload.action !== "update") return null;
+        return (payload.values as { ends_at?: string | null }).ends_at == null
+            ? configuration()
+            : [activeOutage].find((row) => row.id === payload.incident_id)!
+                  .declared_configuration_id;
+    });
     const writes: { url: string; body: unknown }[] = [];
     await page.route("**/plants/21/outages/**", (route) => {
         const request = route.request();

@@ -17,11 +17,14 @@ export type Draft = {
     key: string;
     energy: string;
     quality: Quality;
+    // The values the editor opened with, never a refreshed row.
+    opened: { energy: string; quality: Quality };
     expectedRevision: number | null;
     attempt?: Write;
 };
 
-type WriteIssue = { error: unknown; implausible: boolean };
+// A failed read of the editor's current values is told until a later read answers.
+type WriteIssue = { error: unknown; implausible: boolean; read?: true };
 type EditorIssue = "invalid_energy" | WriteIssue;
 
 // Why an editor can no longer act: its interval went away, holds the member's own request, or its day is not shown.

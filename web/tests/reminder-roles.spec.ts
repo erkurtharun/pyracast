@@ -615,7 +615,7 @@ test("returning to the reminders while the read after a save is held shows the l
     await expect(line(page, HIDDEN_TODAY)).toHaveCount(0);
 });
 
-test("leaving the reminders while a hidden save is held and returning after its answer shows no answer from before the save", async ({
+test("leaving the reminders while a hidden save is held asks first, and after Stay its answer shows the saved placement", async ({
     page,
 }) => {
     const SUMMARY =
@@ -633,23 +633,24 @@ test("leaving the reminders while a hidden save is held and returning after its 
     try {
         await saveButton(page).click();
         await write.committed;
+        const asked = new Promise<string>((resolve) =>
+            page.once("dialog", (dialog) => {
+                resolve(dialog.type());
+                void dialog.dismiss();
+            }),
+        );
         await page
             .getByRole("button", { name: "Location", exact: true })
             .click();
-        await expect(hideBox(page)).toHaveCount(0);
-        const seen = await watchFor(page, [SUMMARY]);
+        expect(await asked).toBe("beforeunload");
+        await expect(hideBox(page)).toBeChecked();
         const held = await write.request;
         const answered = answerTo(page, held);
-        const tenants = nextRequest(page, isTenants);
         write.release();
         await answered;
-        await (await tenants).response();
-        await page
-            .getByRole("button", { name: "Email reminders", exact: true })
-            .click();
         await expect(line(page, HIDDEN_TODAY)).toBeVisible();
+        await expect(line(page, SUMMARY)).toHaveCount(0);
         await expect(hideBox(page)).toBeChecked();
-        expect(await seen()).toEqual([]);
     } finally {
         write.release();
     }
