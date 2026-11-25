@@ -30,6 +30,7 @@ import { LanguageSelect } from "@/ui/language-select";
 import { Empty, Notice, RefreshFailed } from "@/ui/ui";
 import { WorkspaceAccess } from "@/ui/workspace-access";
 import { KeepFigures, KeepFiguresOffer } from "@/features/saved/keep-figures";
+import { useSavedFiguresRefresh } from "@/features/saved/saved-figures";
 import { RecentDeletionProvider } from "@/features/trash/recent-deletion";
 import { InstallApp } from "./install-app";
 import { chooseWorkspace, rememberWorkspace } from "./workspace-choice";
@@ -88,6 +89,7 @@ export function WorkspaceShell({
     );
     const owner = useContext(QueryOwner);
     const client = useQueryClient();
+    useSavedFiguresRefresh(client, session);
     useEffect(() => {
         if (owner === undefined) return;
         const list = keys.path(owner, "/api/tenants/");

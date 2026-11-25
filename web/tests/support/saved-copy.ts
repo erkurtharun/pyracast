@@ -111,7 +111,6 @@ export function writeMarks(page: Page, marks: RemovalMark[]) {
     );
 }
 
-// Every outstanding removal, in the order of its token.
 export function removalMarks(page: Page): Promise<unknown[]> {
     return page.evaluate((prefix) => {
         const keys = Array.from(
@@ -468,11 +467,9 @@ export async function watchStoreChunk(page: Page, held = false) {
     return { requested: () => requested, reached, release: () => release() };
 }
 
-const constant = "const SAVED_FIGURES = true;";
-
-function transpiled(name: string, source = (text: string) => text) {
+function transpiled(name: string) {
     const file = path.resolve(__dirname, `../../src/lib/saved/${name}.ts`);
-    return ts.transpileModule(source(readFileSync(file, "utf8")), {
+    return ts.transpileModule(readFileSync(file, "utf8"), {
         compilerOptions: {
             target: ts.ScriptTarget.ES2022,
             module: ts.ModuleKind.CommonJS,
@@ -482,20 +479,13 @@ function transpiled(name: string, source = (text: string) => text) {
 
 // The store module and its deadline as source in a blank page of the origin, with the withdrawal constant set.
 export async function loadStore(page: Page, savedFigures: boolean) {
-    const store = transpiled("store", (source) => {
-        if (!source.includes(constant))
-            throw new Error(`store.ts no longer declares ${constant}`);
-        return source.replace(
-            constant,
-            `const SAVED_FIGURES = ${savedFigures};`,
-        );
-    });
     await onBlankPage(page);
     await page.evaluate(
         `(() => {
-            const load = (text) => { const exports = {}; new Function("exports", text)(exports); return exports; };
+            const modules = { "./feature": { SAVED_FIGURES: ${savedFigures} } };
+            const load = (text) => { const exports = {}; new Function("exports", "require", text)(exports, (name) => modules[name]); return exports; };
             window.savedDeadline = load(${JSON.stringify(transpiled("deadline"))});
-            window.savedStore = load(${JSON.stringify(store)});
+            window.savedStore = load(${JSON.stringify(transpiled("store"))});
         })()`,
     );
 }
@@ -505,7 +495,6 @@ type LoadedStore = Record<
     (...operands: unknown[]) => Promise<unknown>
 >;
 
-// Calls a loaded store operation under a two-second deadline; the returned function reads its answer and the deletions it reported.
 export async function callStore(page: Page, operation: keyof LoadedStore) {
     await page.evaluate((name) => {
         const store = Reflect.get(window, "savedStore") as LoadedStore;
@@ -538,7 +527,6 @@ export async function callStore(page: Page, operation: keyof LoadedStore) {
         }));
 }
 
-// Calls a write of the loaded store as the given owner, with the deadline as its last operand.
 export function writeStore(
     page: Page,
     operation: string,
@@ -576,7 +564,6 @@ export type HeldDay = {
     total_mwh: number | null;
 };
 
-// The held plants and days as stored, in key order.
 export function readHeld(
     page: Page,
 ): Promise<{ plants: Record<string, unknown>[]; days: HeldDay[] }> {
@@ -658,7 +645,15 @@ export function daysAnswer(total = 1.5, date = "2026-11-11") {
     };
 }
 
-// The page answers as if the worker of the application were registered for `/app/`.
+// The worker judges the copy's times by its own clock, which the page clock does not move.
+export async function workerClock(page: Page) {
+    const context = page.context();
+    const worker =
+        context.serviceWorkers()[0] ??
+        (await context.waitForEvent("serviceworker"));
+    return worker.evaluate(() => Date.now());
+}
+
 export async function supplyRegistration(page: Page) {
     await page.addInitScript(() => {
         ServiceWorkerContainer.prototype.getRegistration = function (
@@ -676,7 +671,6 @@ export async function supplyRegistration(page: Page) {
     });
 }
 
-// The page reports itself hidden while `hide` is in force, and announces each change.
 export async function controlVisibility(page: Page) {
     await page.addInitScript(() => {
         Object.defineProperty(document, "visibilityState", {

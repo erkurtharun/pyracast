@@ -43,7 +43,6 @@ function statusOf(error: unknown) {
     return error instanceof ApiError ? error.status : 0;
 }
 
-// The production read of the plant on screen, whatever day or view it shows.
 function productionOf(key: readonly unknown[], plant: PlantKey | undefined) {
     const parameters = key[5] as
         { region_id?: unknown; plant_id?: unknown } | undefined;
@@ -68,10 +67,13 @@ export function mountRefresh(context: RefreshContext): () => void {
     const seen = new Map<string, unknown>();
     let stopped = false;
     let running = false;
+    let again = false;
 
     const call = <T>(
         work: (saved: SavedStore, limit: Deadline) => Promise<T>,
     ) => boundedStore(work);
+
+    const eligible = () => !stopped && visible() && context.current();
 
     const due = (plants: HeldPlant[], now: number) => {
         const screen = shownPlant();
@@ -99,6 +101,7 @@ export function mountRefresh(context: RefreshContext): () => void {
     };
 
     const settle = async (): Promise<Step> => {
+        if (!eligible()) return "stop";
         const tenants = await readListOnce(
             context.client,
             context.owner,
@@ -110,16 +113,16 @@ export function mountRefresh(context: RefreshContext): () => void {
             tenant: id,
             name,
         }));
+        await call((saved, limit) =>
+            saved.settle(owner, { workspaces }, limit),
+        );
         const tenant = shownWorkspace();
         if (
             tenant === undefined ||
             !workspaces.some((workspace) => workspace.tenant === tenant)
-        ) {
-            await call((saved, limit) =>
-                saved.settle(owner, { workspaces }, limit),
-            );
+        )
             return "go on";
-        }
+        if (!eligible()) return "stop";
         const sites = await readListOnce(
             context.client,
             context.owner,
@@ -131,9 +134,6 @@ export function mountRefresh(context: RefreshContext): () => void {
                 return "stop";
             await call((saved, limit) =>
                 saved.removeWorkspace(owner, tenant, limit),
-            );
-            await call((saved, limit) =>
-                saved.settle(owner, { workspaces }, limit),
             );
             return "go on";
         }
@@ -153,11 +153,12 @@ export function mountRefresh(context: RefreshContext): () => void {
     };
 
     const readDays = async (plant: HeldPlant): Promise<Step> => {
+        if (!eligible()) return "stop";
         const attemptedAt = Date.now();
         const marked = await call((saved, limit) =>
             saved.markAttempt(owner, plant, attemptedAt, limit),
         );
-        if (!marked) return "stop";
+        if (!marked || !eligible()) return "stop";
         changed.delete(idOf(plant));
         let answer: DaysAnswer;
         try {
@@ -196,34 +197,45 @@ export function mountRefresh(context: RefreshContext): () => void {
         return "go on";
     };
 
+    const held = () => call((saved, limit) => saved.held(owner, limit));
+
     const steps = async () => {
-        if (stopped || !visible()) return;
+        if (!eligible() || !(await held())) return;
         if ((await settle()) === "stop") return;
         for (;;) {
-            if (stopped || !visible()) return;
-            const held = await call((saved, limit) => saved.held(owner, limit));
+            if (!eligible()) return;
+            const copy = await held();
             const now = Date.now();
-            if (!held || (held.retryAt !== null && now < held.retryAt)) return;
-            const next = due(held.plants, now);
+            if (!copy || (copy.retryAt !== null && now < copy.retryAt)) return;
+            const next = due(copy.plants, now);
             if (!next || (await readDays(next)) === "stop") return;
         }
     };
 
+    const ended = new AbortController();
+
+    // Another window's run judges by its own screen, so a start that meets it waits instead of being dropped.
     const run = async () => {
         const locks = navigator.locks;
         if (!locks) return steps();
-        await locks.request(runLock, { ifAvailable: true }, async (lock) => {
-            if (lock) await steps();
-        });
+        await locks.request(runLock, { signal: ended.signal }, steps);
     };
 
+    // A start while a run goes on runs once more after it: that run may have judged the plants before the start's cause.
     const start = () => {
-        if (stopped || running) return;
+        if (stopped) return;
+        if (running) {
+            again = true;
+            return;
+        }
         running = true;
         void run()
             .catch(() => {})
             .finally(() => {
                 running = false;
+                if (!again) return;
+                again = false;
+                start();
             });
     };
 
@@ -263,6 +275,7 @@ export function mountRefresh(context: RefreshContext): () => void {
     void open();
     return () => {
         stopped = true;
+        ended.abort();
         unsubscribeCache();
         unsubscribeOpened();
         window.removeEventListener("online", start);

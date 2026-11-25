@@ -1,23 +1,18 @@
 "use client";
-import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import {
+    readStored,
     removeSavedFiguresHere,
     savedCopyState,
     savedFiguresAvailable,
     subscribeSavedFigures,
     turnOnSavedFigures,
     useSessionState,
+    writeStored,
     type Session,
 } from "@/lib/session-client";
-import {
-    contextOf,
-    registered,
-    startRefresh,
-    stopRefresh,
-    useShownWorkspace,
-} from "./saved-figures";
+import { registered, useShownWorkspace } from "./saved-figures";
 
 type Shown =
     | { kind: "absent" }
@@ -66,7 +61,6 @@ async function readSwitch(session: Session | undefined) {
 }
 
 function useSwitchActions() {
-    const client = useQueryClient();
     const { session } = useSessionState();
     const [busy, setBusy] = useState(false);
     const act = (work: () => Promise<unknown>) => {
@@ -78,17 +72,8 @@ function useSwitchActions() {
     return {
         busy,
         session,
-        turnOn: () =>
-            act(async () => {
-                const context = contextOf(client, session);
-                if ((await turnOnSavedFigures()) && context)
-                    startRefresh(context);
-            }),
-        remove: () =>
-            act(async () => {
-                stopRefresh();
-                await removeSavedFiguresHere();
-            }),
+        turnOn: () => act(turnOnSavedFigures),
+        remove: () => act(removeSavedFiguresHere),
     };
 }
 
@@ -98,25 +83,17 @@ export function KeepFigures({ tenant }: { tenant?: number }) {
     const value = useShown();
     const actions = useSwitchActions();
     const { session } = actions;
-    const read = useCallback(() => void readSwitch(session), [session]);
     useEffect(() => {
+        const read = () => void readSwitch(session);
         read();
-        const onVisible = () => {
-            if (document.visibilityState === "visible") read();
-        };
-        document.addEventListener("visibilitychange", onVisible);
-        const unsubscribe = subscribeSavedFigures(read);
-        return () => {
-            document.removeEventListener("visibilitychange", onVisible);
-            unsubscribe();
-        };
-    }, [read]);
+        return subscribeSavedFigures(read);
+    }, [session]);
     if (value.kind === "absent") return null;
     return (
         <details
             className="install-app keep-figures"
             onToggle={(event) => {
-                if (event.currentTarget.open) read();
+                if (event.currentTarget.open) void readSwitch(session);
             }}
         >
             <summary>{t("title")}</summary>
@@ -149,14 +126,6 @@ export function KeepFigures({ tenant }: { tenant?: number }) {
     );
 }
 
-function readOffer() {
-    try {
-        return window.localStorage.getItem(offerKey) !== null;
-    } catch {
-        return true;
-    }
-}
-
 function standalone() {
     return (
         window.matchMedia("(display-mode: standalone)").matches ||
@@ -168,20 +137,22 @@ export function KeepFiguresOffer() {
     const t = useTranslations("KeepFigures");
     const value = useShown();
     const actions = useSwitchActions();
-    const [answered, setAnswered] = useState(readOffer);
+    const [answeredHere, setAnsweredHere] = useState(false);
+    const answered = useSyncExternalStore(
+        subscribeSavedFigures,
+        () => readStored(offerKey) !== null,
+        () => true,
+    );
     const installed = useSyncExternalStore(
         () => () => {},
         standalone,
         () => false,
     );
-    if (!installed || answered || value.kind !== "off") return null;
-    const answer = () => {
-        setAnswered(true);
-        try {
-            window.localStorage.setItem(offerKey, "1");
-        } catch {
-            return;
-        }
+    if (!installed || answered || answeredHere || value.kind !== "off")
+        return null;
+    const answerOffer = () => {
+        setAnsweredHere(true);
+        writeStored(offerKey, "1");
     };
     return (
         <section className="notice keep-figures-offer" aria-label={t("title")}>
@@ -193,7 +164,7 @@ export function KeepFiguresOffer() {
                     className="button"
                     disabled={actions.busy}
                     onClick={() => {
-                        answer();
+                        answerOffer();
                         actions.turnOn();
                     }}
                 >
@@ -202,7 +173,7 @@ export function KeepFiguresOffer() {
                 <button
                     type="button"
                     className="button secondary"
-                    onClick={answer}
+                    onClick={answerOffer}
                 >
                     {t("notNow")}
                 </button>

@@ -1,12 +1,20 @@
 import { expect, test, type Page } from "../tests/support/test";
+import type { Response } from "@playwright/test";
 import {
     firstAccount,
     mockApi,
     type AccountState,
 } from "../tests/support/workspace";
 import { serveSession } from "../tests/support/session";
-import { daysAnswer, readHeld } from "../tests/support/saved-copy";
-import { workerWithdrawn } from "../tests/support/worker-state";
+import {
+    daysAnswer,
+    readCopy,
+    readHeld,
+    refuseClears,
+    seedCopy,
+    workerClock,
+} from "../tests/support/saved-copy";
+import { workerState } from "../tests/support/worker-state";
 
 const NOTICE_POLICY =
     "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'";
@@ -29,14 +37,31 @@ function totals(page: Page) {
     );
 }
 
-async function expectSaved(page: Page, address: string, heading: string) {
-    const answer = await page.goto(address);
+async function expectFromWorker(page: Page, answer: Response | null) {
     expect(answer?.status()).toBe(503);
     expect(answer?.fromServiceWorker()).toBe(true);
     expect(answer?.headers()["content-security-policy"]).toBe(NOTICE_POLICY);
-    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
     expect(await page.evaluate(() => document.scripts.length)).toBe(0);
+}
+
+async function expectSaved(
+    page: Page,
+    answer: Response | null,
+    heading: string,
+) {
+    await expectFromWorker(page, answer);
+    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
     await expect(page.getByText(/^Read from the server on /)).toBeVisible();
+}
+
+async function follow(page: Page, link: string) {
+    const [answer] = await Promise.all([
+        page.waitForResponse((response) =>
+            response.request().isNavigationRequest(),
+        ),
+        page.getByRole("link", { name: link }).click(),
+    ]);
+    return answer;
 }
 
 async function expectNothingSaved(page: Page) {
@@ -48,21 +73,30 @@ async function expectNothingSaved(page: Page) {
     await expect(page.getByText("East array")).toHaveCount(0);
 }
 
-if (!workerWithdrawn)
+async function signedInWithWorker(
+    page: Page,
+    account: AccountState,
+    served: Served,
+) {
+    await application(page, account, served);
+    await page.goto("/app/");
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    await page.clock.setSystemTime(await workerClock(page));
+    account.current = firstAccount;
+    await page.goto("/app/w/1/");
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
+}
+
+if (workerState === "figures")
     test("figures kept on the device are read without a connection, renewed once it returns, and gone after a removal and after a sign-out made without a connection", async ({
         page,
         context,
     }) => {
         const account: AccountState = { current: null };
         const served: Served = { answer: daysAnswer(1.5) };
-        await application(page, account, served);
-        await page.goto("/app/");
-        await page.evaluate(() => navigator.serviceWorker.ready);
-        account.current = firstAccount;
-        await page.goto("/app/w/1/");
-        await expect(
-            page.getByRole("heading", { name: "Plants", exact: true }),
-        ).toBeVisible();
+        await signedInWithWorker(page, account, served);
         await page.getByText(TITLE, { exact: true }).click();
         await page.getByRole("button", { name: "Turn on" }).click();
         await expect
@@ -72,20 +106,20 @@ if (!workerWithdrawn)
         await context.setOffline(true);
         const offline = await context.newPage();
         await application(offline, account, served);
+        const forecast = "East array, Sunfield Energy: Forecast";
         await expectSaved(
             offline,
-            `${FORECAST}?date=2026-11-11`,
-            "East array, Sunfield Energy: Forecast",
+            await offline.goto(`${FORECAST}?date=2026-11-11`),
+            forecast,
         );
         await expect(offline.getByText("Day total: 1.5 MWh")).toBeVisible();
-        await offline.reload();
+        await expectSaved(offline, await offline.reload(), forecast);
         await expect(offline.getByText("Day total: 1.5 MWh")).toBeVisible();
-        await offline.getByRole("link", { name: "Production" }).click();
-        await expect(
-            offline.getByRole("heading", {
-                name: "East array, Sunfield Energy: Production",
-            }),
-        ).toBeVisible();
+        await expectSaved(
+            offline,
+            await follow(offline, "Production"),
+            "East array, Sunfield Energy: Production",
+        );
 
         const renewed = daysAnswer(2.5);
         served.answer = {
@@ -100,6 +134,9 @@ if (!workerWithdrawn)
         await expect(
             offline.getByRole("heading", { name: "East array", level: 1 }),
         ).toBeVisible();
+        const openedAt = async () =>
+            (await readHeld(offline)).plants[0]?.openedAt ?? null;
+        await expect.poll(openedAt).not.toBeNull();
         await offline.clock.fastForward(16 * MINUTE);
         await expect
             .poll(() => totals(offline))
@@ -112,8 +149,13 @@ if (!workerWithdrawn)
         await context.setOffline(true);
         await expectSaved(
             offline,
-            `${FORECAST}?date=2026-11-12`,
-            "East array, Sunfield Energy: Forecast",
+            await offline.goto(`${FORECAST}?date=2026-11-11`),
+            forecast,
+        );
+        await expectSaved(
+            offline,
+            await follow(offline, "Next saved day"),
+            forecast,
         );
         await expect(offline.getByText("Day total: 3 MWh")).toBeVisible();
         await offline
@@ -157,4 +199,23 @@ if (!workerWithdrawn)
             page.getByText("It is not known whether it was saved"),
         ).toBeVisible();
         await expectNothingSaved(offline);
+    });
+
+if (workerState === "figuresWithdrawn")
+    test("a build whose saved figures are withdrawn offers no switch and reads no figures, also over a copy it could not remove", async ({
+        page,
+    }) => {
+        const account: AccountState = { current: null };
+        const reads: string[] = [];
+        await seedCopy(page);
+        await refuseClears(page);
+        page.on("request", (request) => {
+            if (DAYS.test(request.url())) reads.push(request.url());
+        });
+        await signedInWithWorker(page, account, { answer: daysAnswer() });
+        expect(await readCopy(page)).toMatchObject({ plants: 1 });
+        for (let step = 0; step < 12; step += 1)
+            await page.clock.fastForward(5 * MINUTE);
+        await expect(page.getByText(TITLE, { exact: true })).toHaveCount(0);
+        expect(reads).toEqual([]);
     });

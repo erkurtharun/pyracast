@@ -1,6 +1,5 @@
 import type { Deadline } from "./deadline";
-
-export const SAVED_FIGURES = true;
+import { SAVED_FIGURES } from "./feature";
 
 const databaseName = "pyracast-saved";
 const format = 1;
@@ -278,8 +277,19 @@ function deleteDatabase(
 }
 
 // The figures are unreadable once the clear commits; a deletion still waiting at the deadline goes on and `deleted` runs whenever it succeeds.
-export async function removeCopy(limit: Deadline, deleted: () => void) {
-    const outcome = await transact("readwrite", clearAll, limit);
+export async function removeCopy(
+    limit: Deadline,
+    deleted: () => void,
+    cleared = () => {},
+) {
+    const outcome = await transact(
+        "readwrite",
+        (transaction) => {
+            transaction.addEventListener("complete", cleared);
+            clearAll(transaction);
+        },
+        limit,
+    );
     if (outcome === "absent") deleted();
     else if (outcome === "done") await deleteDatabase(limit, deleted);
 }
@@ -432,20 +442,19 @@ export async function available(limit: Deadline) {
     return outcome === "absent" || outcome === "done";
 }
 
-function newToken() {
-    return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
-        byte.toString(16).padStart(2, "0"),
-    ).join("");
-}
-
 export async function turnOn(
-    owner: Owner & { language: Holder["language"] },
+    owner: Pick<Holder, "user" | "language" | "session" | "removal">,
+    present: () => boolean,
+    committed: () => void,
     limit: Deadline,
 ) {
+    const read = { done: false };
     const outcome = await transact(
         "readwrite",
         (transaction) =>
             withHolder(transaction, (holder, store) => {
+                if (!present()) return;
+                transaction.addEventListener("complete", committed);
                 if (
                     !isHolder(holder) ||
                     holder.user !== owner.user ||
@@ -454,21 +463,19 @@ export async function turnOn(
                     clearFigures(transaction);
                 store.put(
                     {
-                        user: owner.user,
-                        language: owner.language,
-                        session: owner.session,
+                        ...owner,
                         active: true,
                         confirmedAt: Date.now(),
-                        removal: newToken(),
                         retryAt: null,
                     } satisfies Holder,
                     holderKey,
                 );
+                read.done = true;
             }),
         limit,
         { creating: true },
     );
-    return outcome === "done";
+    return written(outcome, read);
 }
 
 function isKeyPart(value: unknown): value is number {
@@ -522,7 +529,6 @@ function dropPlant(transaction: IDBTransaction, key: PlantKey) {
     store.delete(range);
 }
 
-// Work on the plants runs only while the holder is this document's active session.
 function withPlants(
     transaction: IDBTransaction,
     owner: Owner,
@@ -563,7 +569,6 @@ export async function held(owner: Owner, limit: Deadline) {
     return read.held;
 }
 
-// One never opened leaves before the least recently opened.
 function evicted(plants: HeldPlant[]) {
     const unopened = plants.find((plant) => plant.openedAt === null);
     if (unopened) return unopened;
@@ -722,7 +727,6 @@ function boundedDays(kind: keyof typeof dayBounds, days: unknown[]) {
         .slice(0, dayBounds[kind]) as Record<string, unknown>[];
 }
 
-// An answer overtaken by a later attempt, or one for a plant no longer held, is dropped.
 export async function writeDays(
     owner: Owner,
     key: PlantKey,

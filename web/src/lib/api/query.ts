@@ -249,7 +249,6 @@ export function useApiList<P extends ListPath>(
     );
 }
 
-// The answer a screen's list read stored less than a live poll ago is used as it is.
 export function readListOnce<P extends ListPath>(
     client: QueryClient,
     owner: string,

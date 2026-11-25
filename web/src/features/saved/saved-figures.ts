@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import {
     savedCopyState,
     sessionOwner,
+    sessionStill,
     subscribeSavedFigures,
     type Session,
 } from "@/lib/session-client";
@@ -20,6 +21,7 @@ export type RefreshContext = {
     owner: string;
     user: number;
     session: string;
+    current: () => boolean;
 };
 
 let plant: ShownPlant | undefined;
@@ -72,17 +74,7 @@ export async function registered() {
     }
 }
 
-export function contextOf(
-    client: QueryClient,
-    session: Session | undefined,
-): RefreshContext | undefined {
-    const owner = sessionOwner(session);
-    const tag = session?.session_tag;
-    if (!owner || !session?.user || !tag) return undefined;
-    return { client, owner, user: session.user.id, session: tag };
-}
-
-export function startRefresh(context: RefreshContext) {
+function startRefresh(context: RefreshContext) {
     if (mounted?.owner === context.owner) return;
     stopRefresh();
     const entry: { owner: string; stop?: () => void } = {
@@ -99,24 +91,27 @@ export function startRefresh(context: RefreshContext) {
     );
 }
 
-export function stopRefresh() {
+function stopRefresh() {
     mounted?.stop?.();
     mounted = undefined;
 }
 
-// The refresh runs while the copy is on for this document's session, also once another window turns it on.
 export function useSavedFiguresRefresh(
     client: QueryClient,
     session: Session | undefined,
-    enabled: boolean,
 ) {
-    const context = enabled ? contextOf(client, session) : undefined;
-    const owner = context?.owner;
-    const [user, tag] = [context?.user, context?.session];
+    const owner = sessionOwner(session);
+    const user = session?.user?.id;
+    const tag = session?.session_tag;
     useEffect(() => {
-        if (owner === undefined || user === undefined || tag === undefined)
-            return;
-        const shown = { client, owner, user, session: tag };
+        if (owner === undefined || user === undefined || !tag) return;
+        const shown: RefreshContext = {
+            client,
+            owner,
+            user,
+            session: tag,
+            current: () => sessionStill(owner),
+        };
         let active = true;
         const check = async () => {
             const on =
