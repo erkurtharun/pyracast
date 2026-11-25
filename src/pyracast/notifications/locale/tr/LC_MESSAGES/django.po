@@ -126,8 +126,13 @@ msgstr "%(date)s için üretim tahmini hazırlanamadı. Bu e-postada rakam yoktu
 msgid "Open plant in Pyracast"
 msgstr "Santrali Pyracast'te aç"
 
-msgid "Summary"
-msgstr "Özet"
+msgctxt "workbook sheet"
+msgid "Forecast"
+msgstr "Tahmin"
+
+msgctxt "workbook sheet"
+msgid "Irradiance"
+msgstr "Işınım"
 
 msgid "Generation forecast · Pyracast"
 msgstr "Üretim tahmini · Pyracast"
@@ -143,6 +148,9 @@ msgstr "Saat dilimi"
 
 msgid "Unit"
 msgstr "Birim"
+
+msgid "Daily totals"
+msgstr "Günlük toplamlar"
 
 msgid "Date"
 msgstr "Tarih"
@@ -171,12 +179,11 @@ msgstr "%(date)s: bazı saatlerin verisi eksik; günlük toplam verilmedi."
 msgid "%(date)s: no forecast data."
 msgstr "%(date)s: tahmin verisi yok."
 
-msgid "Hourly"
-msgstr "Saatlik"
+msgid "Hourly values"
+msgstr "Saatlik değerler"
 
-msgctxt "workbook sheet"
-msgid "Intervals"
-msgstr "Aralıklar"
+msgid "Interval values"
+msgstr "Aralık değerleri"
 
 msgid "From"
 msgstr "Başlangıç"
