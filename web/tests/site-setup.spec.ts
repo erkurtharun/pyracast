@@ -962,7 +962,9 @@ test("a submit refused without a field to go to moves focus to its message", asy
         .getByRole("button", { name: "Submit plant for approval" })
         .click();
     await expect(
-        page.getByRole("alert").filter({ hasText: "Another change is being saved." }),
+        page
+            .getByRole("alert")
+            .filter({ hasText: "Another change is being saved." }),
     ).toBeFocused();
 });
 
