@@ -378,7 +378,7 @@ def test_new_configuration_accepts_old_meter_history_and_future_batch_rolls_back
     saved_actuals(system, start.astimezone(ZoneInfo(system.binding.timezone)).date())
     past = ObservationInput(start, start + timedelta(hours=1), 26)
     future = ObservationInput(NOW, NOW + timedelta(hours=1), 26)
-    with pytest.raises(ValidationError, match="Completed"):
+    with pytest.raises(ValidationError, match="already ended"):
         import_observations(
             system.member,
             system.tenant.pk,
@@ -565,7 +565,7 @@ def test_configless_plant_cannot_activate_and_historical_imports_keep_revision(
     assert saved.configuration_id == old_id
     assert saved.created_at == NOW
     assert revised.current_configuration_id is not None
-    with pytest.raises(ValidationError, match="Conflicting"):
+    with pytest.raises(ValidationError, match="overlap in time"):
         import_observations(
             system.member,
             system.tenant.pk,

@@ -11,20 +11,17 @@ msgstr ""
 msgid "%(provider)s · %(identity)s · key revision %(revision)s"
 msgstr "%(provider)s · %(identity)s · anahtar revizyonu %(revision)s"
 
-msgid "A calibration is already pending."
-msgstr "Bekleyen bir kalibrasyon zaten var."
+msgid "A calibration is already queued or being calculated."
+msgstr "Sırada bekleyen veya hesaplanan bir kalibrasyon zaten var."
 
-msgid "A plant name cannot contain a null character."
-msgstr "Santral adı boş (NUL) karakter içeremez."
+msgid "The plant name contains an invisible character. Type the name again."
+msgstr "Santral adında görünmeyen bir karakter var. Adı yeniden yazın."
 
-msgid "A plant name of at most 200 characters is required."
+msgid "Enter a plant name of at most 200 characters."
 msgstr "En fazla 200 karakterlik bir santral adı girin."
 
-msgid "A reason of at most 1000 characters is required."
-msgstr "Gerekçe en fazla 1000 karakter olmalıdır."
-
-msgid "A timezone-aware ISO 8601 timestamp is required."
-msgstr "Saat dilimi içeren bir ISO 8601 zamanı girin."
+msgid "Enter a reason of at most 1,000 characters."
+msgstr "En fazla 1.000 karakterlik bir gerekçe girin."
 
 msgid "AC generation"
 msgstr "AC üretimi"
@@ -63,21 +60,15 @@ msgstr "Onay bekleyenlerin tümü"
 msgid "All operations"
 msgstr "Tüm işlemler"
 
-msgid "An IANA timezone is required."
-msgstr "Geçerli bir IANA saat dilimi girin."
+msgid "Choose a time zone."
+msgstr "Bir saat dilimi seçin."
 
-msgid "At least one time is required."
-msgstr "En az bir saat gereklidir."
-
-msgid "An issuance cutoff requires archived_forecast comparison."
-msgstr "Yayın kesim saati için arşiv tahmini karşılaştırmasını seçin."
-
-msgid "An observation source of at most 200 characters is required."
-msgstr "En fazla 200 karakterlik bir üretim kaynağı girin."
-
-msgid "Another location request is pending. Reopen the editor to see it."
+msgid "Add at least one update time to update forecasts automatically."
 msgstr ""
-"Bekleyen başka bir konum talebi var. Görmek için düzenleyiciyi yeniden açın."
+"Tahminleri otomatik güncellemek için en az bir güncelleme saati ekleyin."
+
+msgid "A location change request is already in review by Pyracast."
+msgstr "Pyracast'in incelediği bir konum değişikliği talebi zaten var."
 
 msgid "Any status"
 msgstr "Tüm durumlar"
@@ -118,7 +109,7 @@ msgstr "Santrallere dön"
 msgid "Based on revision"
 msgstr "Esas alınan revizyon"
 
-msgid "Both start_date and end_date are required."
+msgid "Enter both the start and the end date."
 msgstr "Başlangıç ve bitiş tarihlerini birlikte girin."
 
 msgid "Calculation failure"
@@ -127,14 +118,11 @@ msgstr "Hesaplama başarısız"
 msgid "Calibration"
 msgstr "Kalibrasyon"
 
-msgid "Calibration requires the current configuration."
-msgstr "Kalibrasyon için güncel yapılandırma gereklidir."
-
 msgid "Cancelled"
 msgstr "İptal edildi"
 
-msgid "Capacities must be finite and positive."
-msgstr "Kapasiteler sonlu ve sıfırdan büyük olmalıdır."
+msgid "Enter a number greater than zero."
+msgstr "Sıfırdan büyük bir sayı girin."
 
 msgid "Change EPİAŞ connection"
 msgstr "EPİAŞ bağlantısını değiştir"
@@ -161,11 +149,12 @@ msgstr "Üretim dağıtıcısını ve işçisini denetleyin."
 msgid "Check the value and messages below."
 msgstr "Değeri ve aşağıdaki mesajları denetleyin."
 
-msgid "Choose a completed local day for historical estimates."
-msgstr "Geçmiş tahminleri için tamamlanmış bir yerel gün seçin."
+msgid "Choose today or an earlier day."
+msgstr "Bugünü veya daha önceki bir günü seçin."
 
-msgid "Choose a date within the available forecast range."
-msgstr "Kullanılabilir tahmin aralığında bir tarih seçin."
+msgid ""
+"The selected data is not available for this date. Choose another date."
+msgstr "Seçilen veri bu tarih için yok. Başka bir tarih seçin."
 
 msgid "Choose a review action and reload the current plant before continuing."
 msgstr ""
@@ -190,24 +179,24 @@ msgstr "Veri toplama programı güncellendi"
 msgid "Email reminders updated"
 msgstr "E-posta hatırlatıcıları güncellendi"
 
-msgid "Collection times must use HH:MM."
-msgstr "Veri toplama saatleri SS:DD biçiminde olmalıdır."
-
 msgid "Company"
 msgstr "Şirket"
 
-msgid "Complete the plant's technical details before requesting approval."
-msgstr "Onay istemeden önce santralin teknik bilgilerini tamamlayın."
+msgid "Complete the plant's technical details before sending it for approval."
+msgstr "Santrali onaya göndermeden önce teknik bilgilerini tamamlayın."
 
-msgid "Completed 30 or 60 minute observations are required."
-msgstr "Tamamlanmış 30 veya 60 dakikalık üretim kayıtları gereklidir."
+msgid "Enter values only for half hours or hours that have already ended."
+msgstr "Yalnızca bitmiş yarım saatler veya saatler için değer girin."
 
 msgid "Configuration revision"
 msgstr "Yapılandırma revizyonu"
 
-msgid "Conflicting or overlapping observation."
+msgid ""
+"Some values overlap in time with each other or with saved values. Enter one "
+"value per interval."
 msgstr ""
-"Üretim kaydı mevcut bir kayıtla çelişiyor veya zaman aralığı çakışıyor."
+"Bazı değerler birbiriyle veya kayıtlı değerlerle aynı zamana denk geliyor. "
+"Her aralık için tek değer girin."
 
 msgid "Connected"
 msgstr "Bağlı"
@@ -323,9 +312,8 @@ msgstr "EPİAŞ sağlayıcı hatası"
 msgid "Error"
 msgstr "Hata"
 
-msgid "Estimated actuals require a completed local day within the past year."
-msgstr ""
-"Geçmiş tahminleri için son bir yıl içinde tamamlanmış bir yerel gün seçin."
+msgid "Choose a day before today and within the past year."
+msgstr "Bugünden önce ve son bir yıl içinde kalan bir gün seçin."
 
 msgid "Existing Solcast account"
 msgstr "Mevcut Solcast hesabı"
@@ -429,8 +417,8 @@ msgstr "Son başarı"
 msgid "Last validation"
 msgstr "Son doğrulama"
 
-msgid "Latitude must be between -90 and 90 degrees."
-msgstr "Enlem -90 ile 90 derece arasında olmalıdır."
+msgid "Enter a latitude between -90 and 90 degrees."
+msgstr "-90 ile 90 derece arasında bir enlem girin."
 
 msgid "Local timezone"
 msgstr "Yerel saat dilimi"
@@ -462,8 +450,8 @@ msgstr "Konum değişiklikleri"
 msgid "Location revision"
 msgstr "Konum revizyonu"
 
-msgid "Longitude must be between -180 and 180 degrees."
-msgstr "Boylam -180 ile 180 derece arasında olmalıdır."
+msgid "Enter a longitude between -180 and 180 degrees."
+msgstr "-180 ile 180 derece arasında bir boylam girin."
 
 msgid "Losses (%)"
 msgstr "Kayıplar (%)"
@@ -486,10 +474,8 @@ msgstr "E-posta hazırlanamadı"
 msgid "Mail rejected"
 msgstr "E-posta reddedildi"
 
-msgid ""
-"Matching historical estimates are unavailable. Choose a day with collected "
-"data."
-msgstr "Eşleşen geçmiş tahminleri yok. Veri toplanmış bir gün seçin."
+msgid "No satellite data for the selected time range."
+msgstr "Seçilen zaman aralığı için uydu verisi yok."
 
 msgid "Measurement point"
 msgstr "Ölçüm noktası"
@@ -593,29 +579,24 @@ msgstr "İnceleme bekleyen kayıt yok."
 msgid "Notifications"
 msgstr "Bildirimler"
 
-msgid "Observation timestamps must be timezone-aware."
-msgstr "Üretim kayıtlarının zamanları saat dilimi bilgisi içermelidir."
-
-msgid "Observations must align to local half-hour boundaries."
+msgid "Start and end each value on the hour or half hour in plant time."
 msgstr ""
-"Üretim kayıtları yerel saatle tam veya yarım saatte başlamalı ve bitmelidir."
+"Her değeri santral saatine göre tam saatte veya buçukta başlatıp bitirin."
 
-msgid "Observations must not cross local midnight."
-msgstr "Üretim kayıtları yerel gece yarısını aşmamalıdır."
-
-msgid "Observed energy must be finite and nonnegative."
-msgstr "Ölçülen enerji sonlu, sıfır veya pozitif olmalıdır."
+msgid "A value cannot run past midnight in plant time."
+msgstr "Bir değer santral saatine göre gece yarısını aşamaz."
 
 msgid "Onboarding"
 msgstr "Kurulum"
 
-msgid "Only a completed, held-out evaluated calibration can be activated."
+msgid ""
+"Only a calculated calibration that was checked on test days can be used."
 msgstr ""
-"Yalnızca tamamlanmış ve ayrı doğrulama verileriyle değerlendirilmiş bir "
-"kalibrasyon etkinleştirilebilir."
+"Yalnızca hesaplanmış ve test günlerinde denenmiş bir kalibrasyon "
+"kullanılabilir."
 
-msgid "Only fixed mounting permits surface angles."
-msgstr "Yüzey açıları yalnızca sabit montajda kullanılabilir."
+msgid "Enter panel angles only for fixed mounting."
+msgstr "Panel açılarını yalnızca sabit montaj için girin."
 
 msgid "Open"
 msgstr "Aç"
@@ -656,12 +637,8 @@ msgstr "Santral onaylandı"
 msgid "Plant approved. The first saved forecast is being prepared."
 msgstr "Santral onaylandı. İlk kayıtlı tahmin hazırlanıyor."
 
-msgid ""
-"Plant configuration is unavailable. Complete setup and wait for "
-"administrator approval."
-msgstr ""
-"Santral yapılandırması kullanılamıyor. Kurulumu tamamlayıp yönetici onayını "
-"bekleyin."
+msgid "This plant has no current technical details."
+msgstr "Bu santralin geçerli teknik bilgileri yok."
 
 msgid "Plant location"
 msgstr "Santral konumu"
@@ -718,12 +695,19 @@ msgid "Private provider setup saved. Validate the connection before approval."
 msgstr ""
 "Özel sağlayıcı kurulumu kaydedildi. Onaydan önce bağlantıyı doğrulayın."
 
-msgid "Production entry requires the current approved configuration."
-msgstr "Üretim girişi için güncel ve onaylı yapılandırma gereklidir."
-
-msgid "Production changed. Reload the latest values before saving."
+msgid ""
+"The plant's technical details changed after these values were entered, so "
+"they cannot be saved."
 msgstr ""
-"Üretim verileri değişti. Kaydetmeden önce güncel değerleri yeniden yükleyin."
+"Bu değerler girildikten sonra santralin teknik bilgileri değişti; değerler "
+"kaydedilemez."
+
+msgid ""
+"These production values changed in the meantime. Check the current values "
+"and save again."
+msgstr ""
+"Bu üretim değerleri bu arada değişti. Güncel değerleri kontrol edip yeniden "
+"kaydedin."
 
 msgid "Pyracast is being updated. Try again in a minute; your data is safe."
 msgstr ""
@@ -732,35 +716,32 @@ msgstr ""
 msgid "Some values exceed what the plant can produce. Check the unit, then confirm to save."
 msgstr "Bazı değerler santralin üretebileceğini aşıyor. Birimi kontrol edin, ardından kaydetmek için onaylayın."
 
-msgid "The request is too large to be accepted."
-msgstr "İstek kabul edilemeyecek kadar büyük."
-
-msgid "A production batch must stay within 31 local days."
-msgstr "Bir üretim grubu en fazla 31 yerel günü kapsayabilir."
+msgid "Save values for at most 31 days at a time."
+msgstr "Tek seferde en fazla 31 günlük değer kaydedin."
 
 msgid "Saving creates a pending revision that must be validated and approved."
 msgstr ""
 "Kaydetme işlemi, doğrulanması ve onaylanması gereken bekleyen bir revizyon "
 "oluşturur."
 
-msgid "Unknown production action."
-msgstr "Bilinmeyen üretim işlemi."
+msgid ""
+"This value was saved with earlier technical details and cannot be changed."
+msgstr "Bu değer önceki teknik bilgilerle kaydedildi ve değiştirilemez."
 
-msgid "Production belongs to a previous configuration."
-msgstr "Üretim önceki bir yapılandırmaya aittir."
-
-msgid "There is no manual production to revert."
-msgstr "Geri alınabilecek elle girilmiş bir üretim kaydı yok."
+msgid "There is no entered value to remove."
+msgstr "Kaldırılacak girilen değer yok."
 
 msgid "This field is required."
 msgstr "Bu alan zorunludur."
 
-msgid ""
-"Provide at most %(limit)s distinct local times; history uses one daily "
-"request."
-msgstr ""
-"En fazla %(limit)s farklı yerel saat girin; geçmiş verileri günde bir istek "
-"kullanır."
+msgid "Enter a value."
+msgstr "Bir değer girin."
+
+msgid "Choose at most %(limit)s update times."
+msgstr "En fazla %(limit)s güncelleme saati seçin."
+
+msgid "Use each update time once."
+msgstr "Her güncelleme saatini bir kez kullanın."
 
 msgid "Provider authentication failed"
 msgstr "Sağlayıcı kimlik doğrulaması başarısız"
@@ -816,10 +797,8 @@ msgstr "Alıcı"
 msgid "Recipient addresses cannot exceed %(limit)s characters."
 msgstr "Alıcı adresleri %(limit)s karakteri aşamaz."
 
-msgid "Recipient addresses must be distinct (case-insensitive)."
-msgstr ""
-"Alıcı adresleri büyük/küçük harf ayrımı olmadan birbirinden farklı "
-"olmalıdır."
+msgid "Use each address once."
+msgstr "Her adresi bir kez kullanın."
 
 msgid "Choose each member's role once."
 msgstr "Her üyenin rolünü bir kez seçin."
@@ -902,9 +881,6 @@ msgstr "Talep edilen saat dilimi"
 
 msgid "Requests wait until"
 msgstr "İstekler şu zamana kadar bekler:"
-
-msgid "Resolution must be 30 or 60 minutes."
-msgstr "Çözünürlük 30 veya 60 dakika olmalıdır."
 
 msgid "Resource ID"
 msgstr "Kaynak kimliği"
@@ -1056,8 +1032,11 @@ msgstr "Başvuran"
 msgid "Succeeded"
 msgstr "Başarılı"
 
-msgid "Surface angles must be finite and inside the allowed bounds."
-msgstr "Yüzey açıları sonlu ve izin verilen sınırlar içinde olmalıdır."
+msgid "Enter a panel tilt from 0 to 90°."
+msgstr "0 ile 90° arasında bir panel eğimi girin."
+
+msgid "Enter a panel azimuth of at least 0° and less than 360°."
+msgstr "0° veya daha büyük, 360°'den küçük bir panel azimutu girin."
 
 msgid "Suspend plant"
 msgstr "Santrali askıya al"
@@ -1074,9 +1053,6 @@ msgstr "Askıya alındı."
 msgid "Suspending withdraws approval. The saved connection is not changed."
 msgstr "Askıya almak onayı kaldırır. Kayıtlı bağlantı değişmez."
 
-msgid "The server could not complete this request."
-msgstr "Sunucu bu isteği tamamlayamadı."
-
 msgid "The 30-day restore period has ended."
 msgstr "30 günlük geri yükleme süresi doldu."
 
@@ -1086,16 +1062,23 @@ msgstr "EPİAŞ santral kimliği ile EIC eşleşmedi. Her iki kimliği denetleyi
 msgid "The account changed. Reload this page before saving."
 msgstr "Hesap değişti. Kaydetmeden önce bu sayfayı yeniden yükleyin."
 
-msgid "The active calibration changed; request a new comparison."
-msgstr "Etkin kalibrasyon değişti; yeni bir karşılaştırma isteyin."
+msgid ""
+"The calibration in use changed after this one was calculated. Calculate a "
+"new calibration."
+msgstr ""
+"Bu kalibrasyon hesaplandıktan sonra kullanımdaki kalibrasyon değişti. Yeni "
+"kalibrasyon hesaplayın."
 
 msgid ""
 "The current provider connection is validated. The plant can now be approved."
 msgstr "Güncel sağlayıcı bağlantısı doğrulandı. Santral artık onaylanabilir."
 
-msgid "The local issuance cutoff is ambiguous or does not exist."
+msgid ""
+"This time does not exist on that day or occurs twice because of a clock "
+"change. Choose another time."
 msgstr ""
-"Yerel yayın kesim saati belirsiz veya mevcut değil. Başka bir saat seçin."
+"Bu saat, saat değişikliği nedeniyle o gün hiç yok veya iki kez var. Başka "
+"bir saat seçin."
 
 msgid ""
 "The mail server's acceptance is unknown. Confirm with the mail provider "
@@ -1104,14 +1087,18 @@ msgstr ""
 "Posta sunucusunun kabul durumu bilinmiyor. Elle yeniden göndermeden önce "
 "e-posta sağlayıcısıyla doğrulayın."
 
-msgid "The outage history changed; request a new calibration."
-msgstr "Kesinti geçmişi değişti; yeni bir kalibrasyon isteyin."
+msgid ""
+"Outages in its period changed after this calibration was calculated. "
+"Calculate a new calibration."
+msgstr ""
+"Bu kalibrasyon hesaplandıktan sonra dönemindeki kesinti kayıtları değişti. "
+"Yeni kalibrasyon hesaplayın."
 
 msgid "The plant changed. Reload this page before saving."
 msgstr "Santral değişti. Kaydetmeden önce bu sayfayı yeniden yükleyin."
 
-msgid "The plant configuration is no longer current."
-msgstr "Santral yapılandırması artık güncel değil. Santrali yeniden açın."
+msgid "The plant's technical details changed. Reload the page and try again."
+msgstr "Santralin teknik bilgileri değişti. Sayfayı yenileyip tekrar deneyin."
 
 msgid ""
 "The plant configuration is unavailable or changed. Approve its current setup"
@@ -1120,11 +1107,19 @@ msgstr ""
 "Santral yapılandırması kullanılamıyor veya değişti. Bağlamadan önce güncel "
 "kurulumu onaylayın ve yeniden yükleyin."
 
-msgid "The plant location changed. Reopen the plant and try again."
-msgstr "Santral konumu değişti. Santrali yeniden açıp tekrar deneyin."
+msgid ""
+"The plant's location changed in the meantime. Check the current location and"
+" try again."
+msgstr ""
+"Santralin konumu bu arada değişti. Güncel konumu kontrol edip tekrar "
+"deneyin."
 
-msgid "The production source changed; request a new calibration."
-msgstr "Üretim kaynağı değişti; yeni bir kalibrasyon isteyin."
+msgid ""
+"The source of the actual production changed after this calibration was "
+"calculated. Calculate a new calibration."
+msgstr ""
+"Bu kalibrasyon hesaplandıktan sonra gerçekleşen üretimin kaynağı değişti. "
+"Yeni kalibrasyon hesaplayın."
 
 msgid "The provider answered with an error. Try validating again later."
 msgstr ""
@@ -1211,12 +1206,8 @@ msgstr ""
 msgid "This account cannot be validated here. Select a Solcast account."
 msgstr "Bu hesap burada doğrulanamaz. Bir Solcast hesabı seçin."
 
-msgid ""
-"This forecast could not be calculated. Choose another day or contact your "
-"administrator."
-msgstr ""
-"Bu tahmin hesaplanamadı. Başka bir gün seçin veya yöneticinizle iletişime "
-"geçin."
+msgid "The forecast for this day could not be calculated."
+msgstr "Bu günün tahmini hesaplanamadı."
 
 msgid "This is required for a new account."
 msgstr "Yeni hesap için bu alan zorunludur."
@@ -1225,12 +1216,17 @@ msgid "This location already has an active plant. Open the existing plant."
 msgstr "Bu konumda zaten etkin bir santral var. Mevcut santrali açın."
 
 msgid ""
-"This location is already in your company's portfolio. Open the existing "
+"This workspace already has a plant at this location. Open the existing "
 "plant."
-msgstr "Bu konum şirketinizin portföyünde zaten var. Mevcut santrali açın."
+msgstr ""
+"Bu konumdaki santral çalışma alanınızda zaten var. Mevcut santrali açın."
 
-msgid "This location request has already been reviewed. Refresh the page."
-msgstr "Bu konum talebi zaten değerlendirilmiş. Sayfayı yenileyin."
+msgid ""
+"This location change request was already approved, rejected or withdrawn. "
+"Reload the page to see it."
+msgstr ""
+"Bu konum değişikliği talebi zaten onaylandı, reddedildi veya geri çekildi. "
+"Görmek için sayfayı yenileyin."
 
 msgid ""
 "This plant allows at most %(limit)s distinct recipient addresses in total."
@@ -1263,47 +1259,33 @@ msgstr "Belirsiz"
 msgid "Unknown"
 msgstr "Bilinmiyor"
 
-msgid "Unknown comparison mode."
-msgstr "Geçerli bir karşılaştırma türü seçin."
-
-msgid "Unknown fields are not accepted."
-msgstr "Bilinmeyen alanlar kabul edilmez."
-
 msgid "Unpublished data"
 msgstr "Yayımlanmamış veri"
 
-msgid "Unsupported data source."
-msgstr "Geçerli bir veri kaynağı seçin."
+msgid "Choose a meter point."
+msgstr "Bir ölçüm noktası seçin."
 
-msgid "Unsupported meter basis."
-msgstr "Geçerli bir ölçüm noktası seçin."
-
-msgid "Unsupported mounting type."
-msgstr "Geçerli bir montaj türü seçin."
-
-msgid "Unsupported observation quality."
-msgstr "Geçerli bir üretim kaydı kalitesi seçin."
+msgid "Choose a mounting."
+msgstr "Bir montaj seçin."
 
 msgid "Update the private API key before validating this connection again."
 msgstr ""
 "Bu bağlantıyı yeniden doğrulamadan önce özel API anahtarını güncelleyin."
 
-msgid "Use 1 to 90 completed local days within the past year."
-msgstr "Son bir yıl içinde tamamlanmış 1 ile 90 arasında yerel gün seçin."
-
-msgid "Use 7 to 90 completed local days."
-msgstr "Tamamlanmış 7 ile 90 arasında yerel gün seçin."
-
-msgid "Use MWh or kWh and a batch of 1 to 2000 observations."
+msgid ""
+"Choose a date range of 1 to 90 days, before today and within the past year."
 msgstr ""
-"MWh veya kWh birimini ve her aktarımda 1 ile 2000 arasında üretim kaydını "
-"kullanın."
+"Bugünden önce ve son bir yıl içinde kalan, 1 ile 90 gün arasında bir tarih "
+"aralığı seçin."
 
-msgid "Use a local issuance cutoff without a UTC offset."
-msgstr "UTC farkı içermeyen yerel bir yayın kesim saati kullanın."
+msgid "Choose a period of 7 to 90 days that ends before today."
+msgstr "Bugünden önce biten, 7 ile 90 gün arasında bir dönem seçin."
 
-msgid "Use a range of 1 to 31 days and 30 or 60 minute resolution."
-msgstr "1 ile 31 günlük bir aralık ve 30 veya 60 dakikalık çözünürlük seçin."
+msgid "Save 1 to 2,000 values at a time."
+msgstr "Tek seferde 1 ile 2.000 arasında değer kaydedin."
+
+msgid "Choose a date range of 1 to 31 days."
+msgstr "1 ile 31 gün arasında bir tarih aralığı seçin."
 
 msgid "Use an existing account (shared key and quota)"
 msgstr "Mevcut hesap kullan (paylaşılan anahtar ve kota)"
@@ -1328,9 +1310,6 @@ msgstr "Doğrulama"
 
 msgid "Workspace"
 msgstr "Çalışma alanı"
-
-msgid "as_of must be aware and no later than now."
-msgstr "Veri kesim zamanı saat dilimi içermeli ve şu anı aşmamalıdır."
 
 msgid "location change"
 msgstr "konum değişikliği"
@@ -1820,20 +1799,22 @@ msgstr ""
 "Bir santralin alıcı listesi sınırı aşıyor, boş veya geçersiz bir adres içeriyor. "
 "Çalışma alanı yöneticisinden düzeltmesini isteyin."
 
-msgid "A title of at most 200 characters is required."
-msgstr "En fazla 200 karakterlik bir başlık gereklidir."
+msgid "Enter a title of at most 200 characters."
+msgstr "En fazla 200 karakterlik bir başlık girin."
 
-msgid "An outage end time is required."
-msgstr "Kesinti bitiş zamanı gereklidir."
+msgid "Enter when the outage ended."
+msgstr "Kesintinin bittiği zamanı girin."
 
-msgid "Another request from this session is still running. Try again."
-msgstr "Bu oturumdan gönderilen başka bir istek hâlâ sürüyor. Tekrar deneyin."
+msgid "This could not be done right now. Try again in a moment."
+msgstr "Şu anda yapılamadı. Biraz sonra tekrar deneyin."
 
-msgid "Available capacity must be a finite, nonnegative number."
-msgstr "Kullanılabilir kapasite sonlu ve negatif olmayan bir sayı olmalıdır."
+msgid "Enter zero or a positive number."
+msgstr "Sıfır veya pozitif bir sayı girin."
 
-msgid "Available capacity must not exceed the configured capacity."
-msgstr "Kullanılabilir kapasite yapılandırılmış kapasiteyi aşmamalıdır."
+msgid ""
+"Enter a value no greater than the one in the plant's technical details."
+msgstr ""
+"Santralin teknik bilgilerindeki değerden büyük olmayan bir değer girin."
 
 msgid "Check the highlighted values and try again."
 msgstr "İşaretli değerleri kontrol edip tekrar deneyin."
@@ -1841,108 +1822,72 @@ msgstr "İşaretli değerleri kontrol edip tekrar deneyin."
 msgid "Enter a positive EPİAŞ plant ID and the plant's EIC."
 msgstr "Pozitif bir EPİAŞ santral kimliği ve santralin EIC kodunu girin."
 
-msgid "Notes must stay within 2000 characters."
-msgstr "Notlar 2000 karakteri aşmamalıdır."
-
-msgid "Outage fields are incomplete or unsupported."
-msgstr "Kesinti alanları eksik veya desteklenmiyor."
-
-msgid "Outage periods must not overlap."
-msgstr "Kesinti dönemleri birbiriyle çakışmamalıdır."
-
-msgid "Outage times must include a time zone."
-msgstr "Kesinti zamanları saat dilimi içermelidir."
-
-msgid "Platform administrator required."
-msgstr "Platform yöneticisi yetkisi gereklidir."
-
-msgid "Send the request as JSON."
-msgstr "İsteği JSON olarak gönderin."
-
-msgid "Sign in to continue."
-msgstr "Devam etmek için oturum açın."
-
-msgid "The change collided with another change. Try again."
-msgstr "Değişiklik başka bir değişiklikle çakıştı. Tekrar deneyin."
-
-msgid "The forecast provider is limiting requests. Try again later."
-msgstr "Tahmin sağlayıcısı istekleri sınırlıyor. Daha sonra tekrar deneyin."
-
-msgid "The forecast provider is unavailable. Try again later."
-msgstr "Tahmin sağlayıcısına ulaşılamıyor. Daha sonra tekrar deneyin."
+msgid "Enter notes of at most 2,000 characters."
+msgstr "En fazla 2.000 karakterlik bir not girin."
 
 msgid ""
-"The forecast provider rejected the stored credentials. Contact your "
-"administrator."
+"Another outage already covers part of this time. Change the start or the "
+"end."
 msgstr ""
-"Tahmin sağlayıcısı kayıtlı kimlik bilgilerini reddetti. Yöneticinize "
-"başvurun."
+"Bu zamanın bir kısmında başka bir kesinti kayıtlı. Başlangıcı veya bitişi "
+"değiştirin."
 
-msgid "The forecast provider's daily quota is used up. Try again tomorrow."
-msgstr "Tahmin sağlayıcısının günlük kotası doldu. Yarın tekrar deneyin."
+msgid "Only Pyracast can do this."
+msgstr "Bunu yalnızca Pyracast yapabilir."
 
-msgid "The forecast sources changed while loading. Try again."
-msgstr "Tahmin kaynakları yüklenirken değişti. Tekrar deneyin."
+msgid "Sign in to continue."
+msgstr "Devam etmek için giriş yapın."
 
-msgid "The outage changed. Review its current values and save again."
-msgstr "Kesinti kaydı değişti. Güncel değerleri inceleyip yeniden kaydedin."
+msgid "Forecast update delayed. Pyracast will try again."
+msgstr "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek."
+
+msgid "No new forecast data is arriving for this plant."
+msgstr "Bu santral için yeni tahmin verisi gelmiyor."
+
+msgid "The forecast data changed while loading. Try again."
+msgstr "Tahmin verisi yüklenirken değişti. Tekrar deneyin."
+
+msgid ""
+"The outage changed in the meantime. Check its current values and save again."
+msgstr ""
+"Kesinti kaydı bu arada değişti. Güncel değerleri kontrol edip yeniden "
+"kaydedin."
 
 msgid "The outage end must be after its start."
 msgstr "Kesinti bitişi başlangıcından sonra olmalıdır."
 
-msgid "The outage end must not be in the future."
-msgstr "Kesinti bitişi gelecekte olamaz."
+msgid "Choose now or an earlier time."
+msgstr "Şimdiki saati veya daha önceki bir saati seçin."
 
-msgid "The outage start must not be in the future."
-msgstr "Kesinti başlangıcı gelecekte olamaz."
+msgid ""
+"Something changed in the meantime. Check the current values and try again."
+msgstr ""
+"Bu arada bir değişiklik oldu. Güncel değerleri kontrol edip tekrar deneyin."
 
-msgid "The page expired. Reload it and try again."
-msgstr "Sayfanın süresi doldu. Sayfayı yenileyip tekrar deneyin."
+msgid "Something went wrong. Try again."
+msgstr "Bir sorun oluştu. Tekrar deneyin."
 
-msgid "The request conflicts with the current state. Reload and try again."
-msgstr "İstek mevcut durumla çakışıyor. Sayfayı yenileyip tekrar deneyin."
-
-msgid "Send the request body as a JSON object."
-msgstr "İstek gövdesini bir JSON nesnesi olarak gönderin."
-
-msgid "Choose a supported language."
-msgstr "Desteklenen bir dil seçin."
-
-msgid "The request could not be processed."
-msgstr "İstek işlenemedi."
-
-msgid "The request could not be verified."
-msgstr "İstek doğrulanamadı."
-
-msgid "The request took too long. Try again later."
-msgstr "İstek çok uzun sürdü. Daha sonra tekrar deneyin."
+msgid "This took too long. Try again later."
+msgstr "İşlem çok uzun sürdü. Daha sonra tekrar deneyin."
 
 msgid "The requested item was not found."
 msgstr "İstenen öğe bulunamadı."
 
-msgid "The requested response format is not available."
-msgstr "İstenen yanıt biçimi kullanılamıyor."
+msgid "This could not be saved right now. Try again in a moment."
+msgstr "Şu anda kaydedilemedi. Biraz sonra tekrar deneyin."
 
-msgid "The workspace is busy. Try again in a moment."
-msgstr "Çalışma alanı meşgul. Biraz sonra tekrar deneyin."
+msgid "This outage is no longer ongoing."
+msgstr "Bu kesinti artık devam etmiyor."
 
-msgid "This action is not available here."
-msgstr "Bu işlem burada kullanılamaz."
-
-msgid "This outage is already closed."
-msgstr "Bu kesinti zaten kapatılmış."
-
-msgid "This request no longer matches the plant. Review it again."
-msgstr "Bu talep artık santralle uyuşmuyor. Yeniden inceleyin."
+msgid ""
+"This change request no longer matches the plant and cannot be approved."
+msgstr "Bu değişiklik talebi artık santralle uyuşmuyor ve onaylanamaz."
 
 msgid "Too many invitations were sent. Try again later."
 msgstr "Çok fazla davet gönderildi. Daha sonra tekrar deneyin."
 
-msgid "Too many requests. Wait a moment and try again."
-msgstr "Çok fazla istek gönderildi. Biraz bekleyip tekrar deneyin."
-
-msgid "Unsupported outage kind."
-msgstr "Desteklenmeyen kesinti türü."
+msgid "Too many attempts in a short time. Wait a moment and try again."
+msgstr "Kısa sürede çok fazla deneme yapıldı. Biraz bekleyip tekrar deneyin."
 
 msgid "You are not a member of this workspace."
 msgstr "Bu çalışma alanının üyesi değilsiniz."
@@ -1950,8 +1895,8 @@ msgstr "Bu çalışma alanının üyesi değilsiniz."
 msgid "You do not have permission for this action."
 msgstr "Bu işlem için yetkiniz yok."
 
-msgid "Your session ended. Sign in again."
-msgstr "Oturumunuz sona erdi. Yeniden oturum açın."
+msgid "Sign in again."
+msgstr "Yeniden giriş yapın."
 
 msgid "Enter a number greater than %(limit)s."
 msgstr "%(limit)s değerinden büyük bir sayı girin."
@@ -2852,9 +2797,6 @@ msgstr "Devre dışı"
 
 msgid "Key rejected"
 msgstr "Anahtar reddedildi"
-msgid "The session changed in another tab. The page now shows the current session."
-msgstr "Oturum başka bir sekmede değişti. Sayfa artık geçerli oturumu gösteriyor."
-
 msgid "Enter the reason the customer will read."
 msgstr "Müşterinin okuyacağı gerekçeyi yazın."
 
@@ -2864,8 +2806,10 @@ msgstr "Santral yeniden incelemeye gönderildi"
 msgid "Use at most 500 characters for the reason."
 msgstr "Gerekçe en fazla 500 karakter olabilir."
 
-msgid "Only a rejected plant can be resubmitted for review."
-msgstr "Yalnızca reddedilen bir santral yeniden incelemeye gönderilebilir."
+msgid ""
+"Only a plant that Pyracast did not approve can be sent for approval again."
+msgstr ""
+"Yalnızca Pyracast'in onaylamadığı bir santral yeniden onaya gönderilebilir."
 
 msgid "Last review decision"
 msgstr "Son inceleme kararı"
@@ -3253,22 +3197,21 @@ msgstr "E-posta gönderim sınırına ulaşıldı"
 msgid "Mail sender forbidden"
 msgstr "E-posta göndericisine izin verilmedi"
 
-msgid "The plant's technical details cannot change in its current state."
-msgstr "Santralin teknik bilgileri mevcut durumunda değiştirilemez."
+msgid "The plant's technical details cannot be changed now."
+msgstr "Santralin teknik bilgileri şu anda değiştirilemez."
 
 msgid ""
-"The plant is suspended, so its technical details cannot change. Contact "
-"Pyracast support to resume it."
+"Pyracast suspended this plant, so its technical details cannot be changed."
 msgstr ""
-"Santral askıya alındığı için teknik bilgileri değiştirilemez. Yeniden "
-"başlatmak için Pyracast destek ekibine yazın."
+"Pyracast bu santrali askıya aldı; bu nedenle teknik bilgileri "
+"değiştirilemez."
 
 msgid ""
-"The plant's data connection needs attention from Pyracast support, so its "
-"technical details cannot change yet."
+"No new forecast data is arriving for this plant. The plant's technical "
+"details cannot be changed yet."
 msgstr ""
-"Santralin veri bağlantısıyla Pyracast destek ekibinin ilgilenmesi gerekiyor; "
-"bu nedenle teknik bilgileri henüz değiştirilemez."
+"Bu santral için yeni tahmin verisi gelmiyor. Santralin teknik bilgileri "
+"henüz değiştirilemez."
 
 msgid "Distance of the move"
 msgstr "Taşıma mesafesi"
@@ -3319,3 +3262,19 @@ msgstr "Tahmin kontrolü"
 
 msgid "Provider wait cleared. Queued collection can resume within the remaining quota."
 msgstr "Sağlayıcı beklemesi kaldırıldı. Sıradaki veri toplama kalan kota içinde devam edebilir."
+
+msgid ""
+"This form is out of date. Copy what you typed, reload the page and try again."
+msgstr ""
+"Bu form güncel değil. Yazdıklarınızı kopyalayın, sayfayı yenileyin ve "
+"tekrar deneyin."
+
+msgid "Row %(row)s: the date or time is not valid."
+msgstr "Satır %(row)s: tarih veya saat geçerli değil."
+
+msgid ""
+"This calibration was calculated for earlier technical details. Calculate a "
+"new calibration."
+msgstr ""
+"Bu kalibrasyon önceki teknik bilgilerle hesaplandı. Yeni kalibrasyon "
+"hesaplayın."

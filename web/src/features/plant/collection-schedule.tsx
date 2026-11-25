@@ -80,7 +80,6 @@ function ScheduleEditor({
         <>
             <section className="panel">
                 <h2>{t("dataCollection")}</h2>
-                <p>{t("chooseTimes")}</p>
                 <ActionForm
                     submit={t("saveCollectionSchedule")}
                     unsaved={!sameTimes(times, saved.times)}
@@ -206,7 +205,7 @@ function ScheduleEditor({
                                     attempts: job.attempts,
                                 })}
                                 {job.last_error && job.status !== "succeeded"
-                                    ? ` - ${label("CollectionJobError", job.last_error)}`
+                                    ? ` · ${label("CollectionJobError", job.last_error)}`
                                     : ""}
                             </li>
                         ))}

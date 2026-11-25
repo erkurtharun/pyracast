@@ -64,7 +64,7 @@ def _reason(reason: str, *, required: bool = False) -> str:
     ):
         raise DomainError(
             ErrorCode.INVALID_REQUEST,
-            _("A reason of 1 to 500 characters is required."),
+            _("Enter a reason of at most 500 characters."),
             field="reason",
         )
     return reason.strip()
@@ -130,7 +130,7 @@ def submit_production(
     if not 1 <= len(changes) <= 100:
         raise DomainError(
             ErrorCode.INVALID_REQUEST,
-            _("Submit 1 to 100 production intervals."),
+            _("Send 1 to 100 values in one change request."),
             field="changes",
         )
     payload_hash = digest(

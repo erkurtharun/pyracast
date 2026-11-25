@@ -15,7 +15,7 @@ test("verified email and a recovery code protect a real browser session", async 
     await page.getByLabel("Company name").fill("Browser security company");
     await page.getByLabel("Email", { exact: true }).fill(email);
     await page.getByLabel("Password", { exact: true }).fill(password);
-    await page.getByRole("button", { name: "Create company account" }).click();
+    await page.getByRole("button", { name: "Create workspace" }).click();
     await expect(
         page.getByRole("heading", { name: "Verify your email" }),
     ).toBeVisible();
@@ -55,12 +55,12 @@ test("verified email and a recovery code protect a real browser session", async 
     expect((await (await linkedAccountsRead).response())?.status()).toBe(200);
     const twoFactor = page.locator("section").filter({
         has: page.getByRole("heading", {
-            name: "Two-factor authentication",
+            name: "Two-step verification",
             exact: true,
         }),
     });
     await expect(
-        twoFactor.getByRole("button", { name: "Set up authenticator" }),
+        twoFactor.getByRole("button", { name: "Set up authenticator app" }),
     ).toBeVisible();
     await expect(
         page
@@ -82,15 +82,19 @@ test("verified email and a recovery code protect a real browser session", async 
         status: 200,
         meta: { is_authenticated: true },
     });
-    await page.getByRole("button", { name: "Set up authenticator" }).click();
-    await page.getByText("Can't scan? Use setup key", { exact: true }).click();
+    await page
+        .getByRole("button", { name: "Set up authenticator app" })
+        .click();
+    await page.getByText("Show setup key", { exact: true }).click();
     const setupKey = page.locator(".mfa-secret-code");
     await expect(setupKey).toBeVisible();
     const setupSecret = await setupKey.innerText();
     // The server's authenticator clock is pinned to this instant, so the code cannot cross a step.
     const code = totp(setupSecret, Number(process.env.BROWSER_TOTP_NOW) * 1000);
     await page.getByLabel("Authenticator code", { exact: true }).fill(code);
-    await page.getByRole("button", { name: "Activate authenticator" }).click();
+    await page
+        .getByRole("button", { name: "Activate authenticator app" })
+        .click();
     await expect(setupKey).not.toBeVisible();
     const firstCode = page.locator("main li code").first();
     await expect(firstCode).toBeVisible();
@@ -119,9 +123,11 @@ test("verified email and a recovery code protect a real browser session", async 
         .getByRole("button", { name: "Sign in", exact: true })
         .click();
     await expect(
-        page.getByRole("heading", { name: "Two-factor authentication" }),
+        page.getByRole("heading", { name: "Two-step verification" }),
     ).toBeVisible();
-    await page.getByLabel("Authenticator or recovery code").fill(recoveryCode);
+    await page
+        .getByLabel("Authenticator code or recovery code")
+        .fill(recoveryCode);
     await page.getByRole("button", { name: "Verify code" }).click();
     await expect(
         page.getByRole("heading", { name: "Account", exact: true }),
@@ -140,10 +146,10 @@ test("verified email and a recovery code protect a real browser session", async 
     await page.getByLabel("New password", { exact: true }).fill(newPassword);
     await page.getByRole("button", { name: "Change password" }).click();
     await passwordSettings
-        .getByLabel("Authenticator or recovery code")
+        .getByLabel("Authenticator code or recovery code")
         .fill(fourthRecoveryCode);
     await passwordSettings
-        .getByRole("button", { name: "Confirm authenticator" })
+        .getByRole("button", { name: "Confirm code" })
         .click();
     await expect(
         page.getByRole("heading", { name: "Welcome back" }),
@@ -161,19 +167,19 @@ test("verified email and a recovery code protect a real browser session", async 
         .getByRole("button", { name: "Sign in", exact: true })
         .click();
     await expect(
-        page.getByRole("heading", { name: "Two-factor authentication" }),
+        page.getByRole("heading", { name: "Two-step verification" }),
     ).toBeVisible();
     await page
-        .getByLabel("Authenticator or recovery code")
+        .getByLabel("Authenticator code or recovery code")
         .fill(secondRecoveryCode);
     await page.getByRole("button", { name: "Verify code" }).click();
     await expect(
         page.getByRole("heading", { name: "Account", exact: true }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Sign out" }).click();
-    await page.getByRole("button", { name: "Forgot password?" }).click();
+    await page.getByRole("button", { name: "Forgot password" }).click();
     await page.getByLabel("Email", { exact: true }).fill(email);
-    await page.getByRole("button", { name: "Send reset code" }).click();
+    await page.getByRole("button", { name: "Send email code" }).click();
     await expect(
         page.getByRole("heading", { name: "Choose a new password" }),
     ).toBeVisible();
@@ -212,10 +218,10 @@ test("verified email and a recovery code protect a real browser session", async 
         .getByRole("button", { name: "Sign in", exact: true })
         .click();
     await expect(
-        page.getByRole("heading", { name: "Two-factor authentication" }),
+        page.getByRole("heading", { name: "Two-step verification" }),
     ).toBeVisible();
     await page
-        .getByLabel("Authenticator or recovery code")
+        .getByLabel("Authenticator code or recovery code")
         .fill(thirdRecoveryCode);
     await page.getByRole("button", { name: "Verify code" }).click();
     await expect(
@@ -227,15 +233,11 @@ test("verified email and a recovery code protect a real browser session", async 
     });
     await emailChange.getByText("Change email", { exact: true }).click();
     await emailChange.getByLabel("New email address").fill(changedEmail);
+    await emailChange.getByRole("button", { name: "Send email code" }).click();
     await emailChange
-        .getByRole("button", { name: "Send email code" })
-        .click();
-    await emailChange
-        .getByLabel("Authenticator or recovery code")
+        .getByLabel("Authenticator code or recovery code")
         .fill(fifthRecoveryCode);
-    await emailChange
-        .getByRole("button", { name: "Confirm authenticator" })
-        .click();
+    await emailChange.getByRole("button", { name: "Confirm code" }).click();
     await expect(emailChange.getByText(changedEmail)).toBeVisible();
     let changeCode = "";
     await expect

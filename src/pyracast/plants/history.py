@@ -9,7 +9,7 @@ from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.db import read_snapshot
-from pyracast.errors import DomainError, ErrorCode
+from pyracast.errors import UNEXPECTED, DomainError, ErrorCode
 from pyracast.forecasts.actuals import (
     ArchivedActualSource,
     apply_archived_actual_source,
@@ -228,9 +228,7 @@ def _past_actuals(
 
 def _outside(policy: Policy) -> ValidationError:
     if policy in (Policy.ARCHIVED_ACTUALS, Policy.ACTUALS_THEN_SAVED_FORECAST):
-        return ValidationError(
-            gettext("Estimated actuals require a completed local day within the past year.")
-        )
+        return ValidationError(gettext("Choose a day before today and within the past year."))
     return DomainError(ErrorCode.DATE_OUT_OF_RANGE)
 
 
@@ -244,7 +242,7 @@ def _plant_outlook(
     now: datetime | None = None,
 ) -> dict[str, object]:
     if not is_source(source):
-        raise ValidationError(gettext("Unsupported data source."))
+        raise ValidationError(UNEXPECTED)
     require_resolution(resolution_minutes)
     now = now or timezone.now()
     today = now.astimezone(ZoneInfo(plant.region.timezone)).date()

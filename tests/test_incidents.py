@@ -110,7 +110,7 @@ def test_validation_and_overlap() -> None:
         available_export_mw=None,
     )
     save_incident(*scope, **data)
-    with pytest.raises(ValidationError, match="overlap"):
+    with pytest.raises(ValidationError, match="covers part of this time"):
         save_incident(
             *scope, **(data | {"starts_at": start + timedelta(minutes=30), "ends_at": None})
         )
@@ -370,6 +370,6 @@ def test_active_incident_update_requires_current_configuration() -> None:
     )
     incident = save_incident(*parent, **values)
     Plant.objects.filter(pk=plant.pk).update(current_configuration=None)
-    with pytest.raises(ValidationError, match="configuration"):
+    with pytest.raises(ValidationError, match="no current technical details"):
         save_incident(*parent, incident_id=incident.pk, expected_revision=1, **values)
     assert IncidentRevision.objects.filter(incident=incident).count() == 1

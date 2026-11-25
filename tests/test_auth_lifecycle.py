@@ -35,13 +35,13 @@ def signup_unverified() -> Any:
     [
         (
             "en",
-            "Too many sign-in attempts, or a verification code was sent recently. "
+            "Too many sign-in attempts, or an email code was sent a moment ago. "
             "Try again in a few minutes.",
         ),
         (
             "tr",
-            "Çok fazla giriş denemesi yap\u0131ld\u0131 veya k\u0131sa süre önce bir doğrulama "
-            "kodu gönderildi. Birkaç dakika sonra tekrar deneyin.",
+            "Çok fazla giriş denemesi yap\u0131ld\u0131 veya az önce bir e-posta kodu gönderildi. "
+            "Birkaç dakika sonra tekrar deneyin.",
         ),
     ],
 )

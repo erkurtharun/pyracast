@@ -62,9 +62,11 @@ export async function signInToConsole(
         .getByRole("button", { name: "Sign in", exact: true })
         .click();
     await expect(
-        page.getByRole("heading", { name: "Two-factor authentication" }),
+        page.getByRole("heading", { name: "Two-step verification" }),
     ).toBeVisible();
-    await page.getByLabel("Authenticator or recovery code").fill(signInCode!);
+    await page
+        .getByLabel("Authenticator code or recovery code")
+        .fill(signInCode!);
     await page.getByRole("button", { name: "Verify code" }).click();
     await expect(page).toHaveURL("/admin/");
     // Console writes need a confirmation after sign-in.

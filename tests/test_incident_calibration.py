@@ -163,7 +163,7 @@ def test_live_outlook_rejects_contaminated_factor_without_rewriting_saved_foreca
     assert saved.payloads == frozen_payloads
     historical = plant_outlook(*scope, target_date=target, resolution_minutes=60, as_of=NOW)
     assert cast(dict[str, Any], historical["result"])["factor"] == 0.5
-    with pytest.raises(ValidationError, match="outage history changed"):
+    with pytest.raises(ValidationError, match="Outages in its period changed"):
         activate_calibration(*scope, ready.pk)
     new_run = request_run(system, plant)
     assert build_calibration_dataset(new_run, new_run.configuration).incumbent_factor == 1

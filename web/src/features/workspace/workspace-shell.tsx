@@ -325,7 +325,9 @@ function SessionEndingSoon({ expiresAt }: { expiresAt: string }) {
         <Notice>
             {t("sessionEndingSoon", {
                 time: format.time(expiresAt, deviceZone(), {
-                    timeStyle: "short",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    timeZoneName: "shortOffset",
                 }),
             })}
         </Notice>

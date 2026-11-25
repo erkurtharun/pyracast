@@ -6,6 +6,7 @@ import {
     formatSignificant,
 } from "../src/lib/format/number";
 import {
+    daysZoneLabel,
     formatTime,
     fromPlantInput,
     intervalTimeFormatter,
@@ -65,13 +66,23 @@ test("times render in the zone they are given and name it only when asked", () =
     expect(formatTime("en", null, "UTC")).toBe(MISSING);
 });
 
-test("a zone label names the zone and its offset at the given instant", () => {
+test("a zone label names the plant's offset from UTC at the given instant", () => {
+    expect(zoneLabel("Europe/Istanbul", new Date("2026-01-07T09:00:00Z"))).toBe(
+        "UTC+3",
+    );
+    expect(zoneLabel("Europe/Berlin", new Date("2026-07-07T09:00:00Z"))).toBe(
+        "UTC+2",
+    );
+    expect(zoneLabel("Europe/Berlin", new Date("2026-01-07T09:00:00Z"))).toBe(
+        "UTC+1",
+    );
+    expect(zoneLabel("Asia/Kolkata", new Date("2026-01-07T09:00:00Z"))).toBe(
+        "UTC+5:30",
+    );
     expect(
-        zoneLabel("en", "Europe/Istanbul", new Date("2026-01-07T09:00:00Z")),
-    ).toBe("Europe/Istanbul (GMT+3)");
-    expect(
-        zoneLabel("en", "Europe/Berlin", new Date("2026-07-07T09:00:00Z")),
-    ).toBe("Europe/Berlin (GMT+2)");
+        zoneLabel("America/St_Johns", new Date("2026-01-07T09:00:00Z")),
+    ).toBe("UTC-3:30");
+    expect(zoneLabel("UTC", new Date("2026-01-07T09:00:00Z"))).toBe("UTC");
 });
 
 test("a plant day is the calendar date in the plant zone, shifted by whole days", () => {
@@ -127,4 +138,22 @@ test("an entered plant time is read in the plant zone and a missing hour is refu
     );
     expect(fromPlantInput("", "Europe/Berlin")).toBeNull();
     expect(fromPlantInput("2026-02-30T10:00", "Europe/Berlin")).toBeNull();
+});
+
+test("the offset of plant days names each offset of a day with a clock change", () => {
+    expect(daysZoneLabel("Europe/Berlin", ["2026-07-15", "2026-07-15"])).toBe(
+        "UTC+2",
+    );
+    expect(daysZoneLabel("Europe/Berlin", ["2026-03-29", "2026-03-29"])).toBe(
+        "UTC+1 / UTC+2",
+    );
+    expect(daysZoneLabel("Europe/Berlin", ["2026-10-25", "2026-10-25"])).toBe(
+        "UTC+2 / UTC+1",
+    );
+    expect(daysZoneLabel("Europe/Berlin", ["2026-10-11", "2026-11-09"])).toBe(
+        "UTC+2 / UTC+1",
+    );
+    expect(daysZoneLabel("Europe/Istanbul", ["2026-03-29", "2026-10-25"])).toBe(
+        "UTC+3",
+    );
 });

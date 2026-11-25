@@ -443,10 +443,7 @@ def test_finite_capacity_overflow_returns_validation_without_saving_forecast(
     assert response.status_code == 400
     assert response.json() == {
         "code": "calculation_out_of_range",
-        "message": (
-            "This forecast could not be calculated. "
-            "Choose another day or contact your administrator."
-        ),
+        "message": "The forecast for this day could not be calculated.",
     }
 
 

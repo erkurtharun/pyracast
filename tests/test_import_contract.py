@@ -50,6 +50,10 @@ PROJECT_MODULES = {"settings", "urls", "wsgi", "cli", "production"}
 # Each entry is an import against the layer order that is not resolved yet, with its reason.
 BACK_EDGES: dict[tuple[str, str], str] = {
     (
+        "accounts.account_mail",
+        "notifications.formats",
+    ): "account mail shows moments and offsets with the forecast mail formats",
+    (
         "accounts.operations",
         "notifications.recipients",
     ): "member removal and administrator change call notifications and plants explicitly",

@@ -59,17 +59,13 @@ test("retry hints and request references are kept", () => {
     expect(busy.fields).toEqual({});
     const failure = errorFromResponse(
         500,
-        errorBody(
-            "server_error",
-            "The server could not complete this request.",
-            {
-                request_id: "0123456789abcdef0123456789abcdef",
-            },
-        ),
+        errorBody("server_error", "Something went wrong. Try again.", {
+            request_id: "0123456789abcdef0123456789abcdef",
+        }),
     );
     expect(failure.requestId).toBe("0123456789abcdef0123456789abcdef");
     expect(failure.message).toBe(
-        "The server could not complete this request. Reference: 0123456789abcdef0123456789abcdef",
+        "Something went wrong. Try again. Reference: 0123456789abcdef0123456789abcdef",
     );
 });
 

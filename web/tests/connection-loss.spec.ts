@@ -20,7 +20,7 @@ const refreshFailed = (page: Page) =>
 
 function outageSection(page: Page) {
     return page.locator("section", {
-        has: page.getByRole("heading", { name: "Plant outages", exact: true }),
+        has: page.getByRole("heading", { name: "Outages", exact: true }),
     });
 }
 
@@ -120,7 +120,7 @@ test("without a poll the outage list reports a dropped connection at focus and o
     await page
         .getByRole("button", { name: "Report outage", exact: true })
         .click();
-    await page.getByLabel("Incident title").fill("Grid fault");
+    await page.getByLabel("Title").fill("Grid fault");
     const reconnect = await loseConnection(page);
     const notice = outageSection(page)
         .getByRole("alert")
@@ -139,10 +139,10 @@ test("without a poll the outage list reports a dropped connection at focus and o
     await failed;
     expect(outageReads).toBe(reads + 1);
     await expect(notice).toBeVisible();
-    await expect(page.getByLabel("Incident title")).toHaveValue("Grid fault");
+    await expect(page.getByLabel("Title")).toHaveValue("Grid fault");
     await reconnect();
     await expect(notice).toHaveCount(0);
-    await expect(page.getByLabel("Incident title")).toHaveValue("Grid fault");
+    await expect(page.getByLabel("Title")).toHaveValue("Grid fault");
 });
 
 test("plants hidden by a refusal stay hidden through a later lost read until a read succeeds", async ({
@@ -340,7 +340,7 @@ test("a language change while reads fail keeps the earlier outages with the time
     await page
         .getByRole("button", { name: "Report outage", exact: true })
         .click();
-    await page.getByLabel("Incident title").fill("Grid fault");
+    await page.getByLabel("Title").fill("Grid fault");
     await page.route("**/plants/21/outages/", (route) =>
         route.request().method() === "GET"
             ? route.abort("internetdisconnected")
@@ -349,7 +349,7 @@ test("a language change while reads fail keeps the earlier outages with the time
     await page.clock.setFixedTime(new Date(now.getTime() + 7 * 60_000));
     await page.getByLabel("Language", { exact: true }).selectOption("tr");
     await expect(
-        page.getByRole("heading", { name: "Santral kesintileri", exact: true }),
+        page.getByRole("heading", { name: "Kesintiler", exact: true }),
     ).toBeVisible();
     await expect(
         page

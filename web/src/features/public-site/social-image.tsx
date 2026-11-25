@@ -35,8 +35,8 @@ export function createSocialImage(language: Language) {
                 </div>
                 <div style={{ color: colours.muted, fontSize: 28 }}>
                     {language === "tr"
-                        ? "Tahminler · Gerçekleşen üretim · Tek çalışma alanı"
-                        : "Forecasts · Reported production · One workspace"}
+                        ? "Üretim tahmini · Gerçekleşen üretim · Tek çalışma alanı"
+                        : "Generation forecast · Actual production · One workspace"}
                 </div>
             </div>
             <div style={{ color: colours.accent, fontSize: 24 }}>

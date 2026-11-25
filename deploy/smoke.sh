@@ -212,9 +212,9 @@ too_large() {
     --write-out '%{http_code}' "https://localhost:18443$2"
 }
 [[ $(too_large 2621441 /api/session/) == 413 ]]
-[[ $(<"$temporary/too-large") == '{"code": "request_too_large", "message": "The request is too large to be accepted."}' ]]
+[[ $(<"$temporary/too-large") == '{"code": "request_too_large", "message": "Something went wrong. Try again."}' ]]
 [[ $(too_large 2621441 /api/auth/browser/v1/config) == 413 ]]
-[[ $(<"$temporary/too-large") == '{"code": "request_too_large", "message": "The request is too large to be accepted."}' ]]
+[[ $(<"$temporary/too-large") == '{"code": "request_too_large", "message": "Something went wrong. Try again."}' ]]
 [[ $(too_large 8388609 /admin/login/) == 413 ]]
 [[ $(too_large 1048577 /health/ready/) == 413 ]]
 [[ $(too_large 1048577 /) == 413 ]]
@@ -373,7 +373,7 @@ import django
 django.setup()
 from django.utils import translation
 with translation.override("tr"):
-    assert translation.gettext("Continue to sign in") == "Oturum a\u00e7maya devam et"
+    assert translation.gettext("Continue to sign in") == "Giri\u015fe devam et"
 '
 "${compose[@]}" exec -T api python - <<'PY'
 import os

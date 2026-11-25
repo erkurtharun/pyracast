@@ -38,21 +38,23 @@ test("refresh and Back keep the workspace, the view and the forecast date", asyn
     await expect(page).toHaveURL(
         "/app/w/1/plants/11/forecast/?date=2026-11-25",
     );
-    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Irradiance forecast", exact: true })
+        .click();
     await expect(page).toHaveURL(
         "/app/w/1/plants/11/forecast/?date=2026-11-25&view=irradiance",
     );
     await page.reload();
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-25");
     await expect(
-        page.getByRole("button", { name: "Irradiance", exact: true }),
+        page.getByRole("button", { name: "Irradiance forecast", exact: true }),
     ).toHaveAttribute("aria-current", "page");
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await expect(page).toHaveURL("/app/w/1/plants/11/production/");
     await page.goBack();
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-25");
     await expect(
-        page.getByRole("button", { name: "Irradiance", exact: true }),
+        page.getByRole("button", { name: "Irradiance forecast", exact: true }),
     ).toHaveAttribute("aria-current", "page");
     await page.getByRole("button", { name: /All plants/ }).click();
     await expect(page).toHaveURL("/app/w/1/");
@@ -90,7 +92,9 @@ test("refresh and Back keep the production day and the plant sub-views", async (
     );
     await page.reload();
     await current("Comparison");
-    await page.getByRole("button", { name: "Actuals", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Actual production", exact: true })
+        .click();
     await expect(page).toHaveURL(
         "/app/w/1/plants/11/production/?date=2026-11-10",
     );
@@ -101,11 +105,11 @@ test("refresh and Back keep the production day and the plant sub-views", async (
     await expect(day).toHaveValue("2026-11-10");
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page
-        .getByRole("button", { name: "Email reminders", exact: true })
+        .getByRole("button", { name: "Forecast email", exact: true })
         .click();
     await expect(page).toHaveURL("/app/w/1/plants/11/settings/?view=reminders");
     await page.reload();
-    await current("Email reminders");
+    await current("Forecast email");
 });
 
 test("the workspace lives in the address and survives a reload", async ({

@@ -1,0 +1,43 @@
+{
+    "nav": "Product",
+    "startNav": "Getting started",
+    "login": "Sign in",
+    "signup": "Create workspace",
+    "skip": "Skip to content",
+    "privacy": "Privacy",
+    "terms": "Terms",
+    "contact": "Contact",
+    "footer": "A clearer view of solar production.",
+    "eyebrow": "Solar generation forecasts",
+    "title": "Plan tomorrow’s solar production.",
+    "intro": "Bring generation forecasts, actual production and outages of your plants together. Give your team the information to plan the day ahead.",
+    "secondary": "Explore the product",
+    "chartTitle": "Daily production",
+    "chartAxis": "Power",
+    "chartDescription": "A schematic daily power profile, with a forecast curve and actual production through the morning.",
+    "forecast": "Forecast",
+    "actual": "Actual production",
+    "chartNote": "Illustrative daily profile of forecast and actual production.",
+    "productEyebrow": "The plant workspace",
+    "productTitle": "Forecasts, production and operations in one place.",
+    "features": [
+        {
+            "title": "Generation forecast for tomorrow",
+            "text": "See the generation forecast through the day and its daily total, in plant time."
+        },
+        {
+            "title": "Compare with actual production",
+            "text": "See actual production beside the forecast, with missing hours kept visible."
+        },
+        {
+            "title": "Keep your team informed",
+            "text": "Share plant information, record outages and send forecast emails with an Excel file."
+        }
+    ],
+    "startEyebrow": "Getting started",
+    "startTitle": "Start with your plant.",
+    "startText": "Create a workspace and add your plant. Pyracast needs to approve the plant before forecasts can start.",
+    "updated": "Last updated",
+    "contents": "On this page",
+    "back": "Back to home"
+}

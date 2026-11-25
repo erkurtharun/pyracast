@@ -319,7 +319,7 @@ test("leaving a pending sign-in stage keeps the pending invitation", async ({
     await page.goto("/app/invitation/#token=invite-secret");
     await expect(
         page.getByRole("heading", {
-            name: "Two-factor authentication",
+            name: "Two-step verification",
             exact: true,
         }),
     ).toBeVisible();

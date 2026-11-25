@@ -77,6 +77,7 @@ let signingOut = false;
 let clearTabInvitation = () => {};
 let savedStore: Promise<SavedStore> | undefined;
 let savedWork: Promise<unknown> = Promise.resolve();
+const pendingAnswers = new Set<Promise<unknown>>();
 let handoffFailed = false;
 const listeners = new Set<() => void>();
 const handoffListeners = new Set<() => void>();
@@ -328,14 +329,21 @@ async function boundedStore<T>(
     work: (store: SavedStore, limit: Deadline) => Promise<T>,
     limit = deadline(savedLimitMs),
 ): Promise<T | undefined> {
+    const answer = Promise.race([
+        withSavedStore((store) => work(store, limit)),
+        limit.reached.then(() => undefined),
+    ]);
+    pendingAnswers.add(answer);
     try {
-        return await Promise.race([
-            withSavedStore((store) => work(store, limit)),
-            limit.reached.then(() => undefined),
-        ]);
+        return await answer;
     } finally {
+        pendingAnswers.delete(answer);
         limit.clear();
     }
+}
+
+export async function savedCopyAnswered() {
+    await Promise.all(pendingAnswers);
 }
 
 export function startSavedCopy() {

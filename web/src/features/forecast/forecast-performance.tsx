@@ -15,6 +15,7 @@ import { useCodeLabel } from "@/ui/vocabulary";
 import { Notice, Stat } from "@/ui/ui";
 import { CsvDownload } from "@/ui/csv-download";
 import { DailyAccuracyChart } from "./daily-accuracy-chart";
+import { useShownDays } from "@/features/plant/shown-days";
 import { useExportPlant } from "@/ui/export-plant";
 import { performanceExport } from "@/lib/exports";
 
@@ -156,6 +157,7 @@ function PerformanceResults({
             query,
         },
     );
+    useShownDays(resource.data?.start_date, resource.data?.end_date);
     const matched =
         resource.data?.days.filter((day) => day.status === "matched") ?? [];
     const historical = resource.data?.comparison === "historical_model";

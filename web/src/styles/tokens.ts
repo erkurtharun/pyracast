@@ -13,7 +13,6 @@ export const brandProperties = {
     "--amber-65": "#fef2df",
     "--amber-69": "#f9f0e2",
     "--amber-220": "#eecfa0",
-    "--amber-300": "#dabb8b",
     "--amber-329-a0": "#f7bb5f00",
     "--amber-329-a20": "#f7bb5f33",
     "--amber-608": "#a17027",

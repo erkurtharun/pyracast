@@ -93,7 +93,7 @@ test("administrator recovery codes request a fresh authenticator confirmation", 
                         {
                             code: "mfa_reauthentication_required",
                             message:
-                                "Confirm with your authenticator to continue.",
+                                "Enter your authenticator code or a recovery code.",
                         },
                     ],
                 },
@@ -104,10 +104,16 @@ test("administrator recovery codes request a fresh authenticator confirmation", 
     await page.getByRole("button", { name: "Generate recovery codes" }).click();
     await page.getByRole("button", { name: "Replace codes" }).click();
     await expect(
-        page.getByRole("heading", { name: "Confirm with your authenticator" }),
+        page.getByRole("heading", {
+            name: "Confirm with your authenticator app",
+            exact: true,
+        }),
     ).toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Confirm authenticator" }),
+        page.getByLabel("Authenticator code or recovery code", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "Confirm code", exact: true }),
     ).toBeVisible();
 });
 
@@ -271,12 +277,12 @@ test("the account lists where it is signed in and signs out another session", as
     });
     await page.goto("/app/account/");
     const devices = page.getByRole("region", {
-        name: "Where you are signed in",
+        name: "Active sessions",
     });
     await expect(devices.getByText("This device")).toBeVisible();
     await expect(devices.getByText("Chrome · Windows")).toBeVisible();
     await devices
-        .getByRole("button", { name: "Sign out Safari · iOS" })
+        .getByRole("button", { name: "Sign out of Safari · iOS" })
         .click();
     await expect(devices.getByText("Safari · iOS")).toHaveCount(0);
     expect(ended).toEqual([{ sessions: [2] }]);
@@ -322,10 +328,10 @@ test("one sign-out runs at a time, says it is working and names each session by 
     });
     await page.goto("/app/account/");
     const devices = page.getByRole("region", {
-        name: "Where you are signed in",
+        name: "Active sessions",
     });
     const rows = devices.getByRole("button", {
-        name: /^Sign out Chrome · Windows/,
+        name: /^Sign out of Chrome · Windows/,
     });
     await expect(rows).toHaveCount(2);
     const names = await rows.evaluateAll((buttons) =>
@@ -341,7 +347,7 @@ test("one sign-out runs at a time, says it is working and names each session by 
     await expect(rows).toHaveCount(1);
     await expect(rows).toBeDisabled();
     await expect(
-        devices.getByRole("button", { name: "Sign out all other sessions" }),
+        devices.getByRole("button", { name: "Sign out of other sessions" }),
     ).toBeDisabled();
     await arrived;
     expect(ended).toEqual([{ sessions: [2] }]);

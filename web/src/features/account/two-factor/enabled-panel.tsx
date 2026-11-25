@@ -45,7 +45,9 @@ export function EnabledPanel({
             )}
             {recovery && recovery.unused <= 2 && (
                 <div className="notice" role="status">
-                    {t("recoveryLowWarning")}
+                    {recovery.unused === 0
+                        ? t("recoveryEmpty")
+                        : t("recoveryLowWarning")}
                 </div>
             )}
             {mfaRequired && <p className="fine">{t("policyRequiredNote")}</p>}

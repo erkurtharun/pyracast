@@ -14,7 +14,8 @@ import {
     type RefObject,
 } from "react";
 import { ApiError, displayMessage, UnconfirmedError } from "@/lib/api/errors";
-import { useLeaveGuard } from "@/lib/leave-guard";
+import { writesStarted } from "@/lib/api/writes";
+import { useLeaveGuard, useSubmissionGuard } from "@/lib/leave-guard";
 import { useAnnounce } from "./live-region";
 import { Notice } from "./ui";
 import { useCanManageWorkspace } from "./workspace-access";
@@ -414,7 +415,8 @@ function FormAlert({
 }
 
 type FormState =
-    | { status: "idle" | "pending" | "success" }
+    | { status: "idle" | "success" }
+    | { status: "pending"; since: number }
     | {
           status: "error";
           error: unknown;
@@ -463,12 +465,13 @@ export function ActionForm({
     const [sendsRepeat, setSendsRepeat] = useState(false);
     const [edited, setEdited] = useState(false);
     const busy = pending ?? state.status === "pending";
+    const submitting = state.status === "pending";
+    useSubmissionGuard(guard && submitting ? state.since : null);
     useLeaveGuard(
         guard &&
-            (edited ||
-                unsaved ||
-                busy ||
+            (unsaved ||
                 !!attempt ||
+                (!submitting && (edited || !!pending)) ||
                 (state.status === "error" &&
                     state.error instanceof UnconfirmedError)),
     );
@@ -521,7 +524,7 @@ export function ActionForm({
                     running.current = true;
                     const data = new FormData(event.currentTarget);
                     measure();
-                    setState({ status: "pending" });
+                    setState({ status: "pending", since: writesStarted() });
                     try {
                         await onSubmit(data);
                         setState({ status: "success" });

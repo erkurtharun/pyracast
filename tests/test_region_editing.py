@@ -206,7 +206,7 @@ def test_approved_location_requires_validated_replacement_before_collection_resu
 
 def test_request_operation_validation_permissions_and_rejection_keep_active_region() -> None:
     system = make_system(approved=True)
-    with pytest.raises(ValidationError, match="1000"):
+    with pytest.raises(ValidationError, match="1,000"):
         request_location_change(
             system.member,
             system.region.pk,

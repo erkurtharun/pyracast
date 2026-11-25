@@ -1,5 +1,5 @@
 import type { Route } from "@playwright/test";
-import { type Page } from "./test";
+import { expect, type Page } from "./test";
 import { errorBody } from "./errors";
 import {
     answer,
@@ -669,7 +669,7 @@ function proposalStore(
                     status: 409,
                     json: errorBody(
                         "idempotency_key_reused",
-                        "Use a new request key for changed input.",
+                        "Something went wrong. Try again.",
                     ),
                 });
             const request = earlier ?? {
@@ -779,7 +779,7 @@ export async function serveOutageWrites(
                         status: 409,
                         json: errorBody(
                             "idempotency_key_reused",
-                            "Use a new request key for changed input.",
+                            "Something went wrong. Try again.",
                         ),
                     });
                 const now = outages.find((row) => row.id === earlier.id)!;
@@ -803,7 +803,7 @@ export async function serveOutageWrites(
                 json: answer("IncidentConflict", {
                     ...errorBody(
                         "incident_revision_changed",
-                        "The outage changed. Review its current values and save again.",
+                        "The outage changed in the meantime. Check its current values and save again.",
                     ),
                     current: target,
                 }),
@@ -999,15 +999,18 @@ export async function reviewRequest(
         .getByRole("button", { name: labels.details, exact: true })
         .click();
     const detail = page.locator(".inbox-detail");
+    const approve = detail.getByRole("button", {
+        name: labels.approve,
+        exact: true,
+    });
+    // A case's own route on the detail must not catch the detail's first read.
+    await expect(approve).toBeEnabled();
     return {
         request,
         decisions,
         applied: () => applied,
         detail,
-        approve: detail.getByRole("button", {
-            name: labels.approve,
-            exact: true,
-        }),
+        approve,
         refresh: detail.getByRole("button", { name: labels.refresh }),
     };
 }

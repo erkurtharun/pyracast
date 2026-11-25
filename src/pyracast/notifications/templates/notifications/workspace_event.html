@@ -5,7 +5,8 @@
 {% block content %}
 <h1 style="font-family:Arial,Helvetica,sans-serif;margin:0 0 16px;font-size:22px;line-height:1.3;">{{ title }}</h1>
 <p style="font-family:Arial,Helvetica,sans-serif;margin:0;">{{ sentence }}</p>
-{% if reason %}<p style="font-family:Arial,Helvetica,sans-serif;margin:16px 0 0;"><strong>{% translate "Reason" %}:</strong> {{ reason }}</p>{% endif %}
+{% if details %}<p style="font-family:Arial,Helvetica,sans-serif;margin:16px 0 0;">{% for label, value in details %}<strong>{{ label }}:</strong> {{ value }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</p>{% endif %}
+{% if next_step %}<p style="font-family:Arial,Helvetica,sans-serif;margin:16px 0 0;">{{ next_step }}</p>{% endif %}
 {% include "mail/action_link.html" %}
 <p style="font-family:Arial,Helvetica,sans-serif;margin:20px 0 0;color:#526370;font-size:13px;">{{ footer }}</p>
 {% endblock %}

@@ -70,15 +70,15 @@ const labels = {
         confirm: "Confirm import (5)",
         imported: "Import complete: 4 created, 1 already present, 5 total.",
         report: "Report outage",
-        title: "Incident title",
-        saveOutage: "Save outage",
-        editReport: "Edit report",
-        saveChanges: "Save outage changes",
-        resolve: "Resolve outage",
-        saveResolution: "Save resolution",
-        cancelEntry: "Cancel an incorrect entry",
-        confirmCancel: "I confirm this incident was recorded incorrectly.",
-        cancelOutage: "Cancel outage",
+        title: "Title",
+        saveOutage: "Save",
+        editReport: "Edit outage",
+        saveChanges: "Save",
+        resolve: "End outage",
+        saveResolution: "End outage",
+        cancelEntry: "Mark as entered in error",
+        confirmCancel: "I confirm this outage was entered in error.",
+        cancelOutage: "Mark as entered in error",
         proposeResolution: "End outage",
         optionalReason: "Reason (optional)",
         sent: "Sent for approval.",
@@ -107,15 +107,15 @@ const labels = {
         imported:
             "İçe aktarma tamamlandı: 4 yeni kayıt, 1 mevcut kayıt, toplam 5 kayıt.",
         report: "Kesinti bildir",
-        title: "Olay başlığı",
-        saveOutage: "Kesintiyi kaydet",
-        editReport: "Bildirimi düzenle",
-        saveChanges: "Kesinti değişikliklerini kaydet",
+        title: "Başlık",
+        saveOutage: "Kaydet",
+        editReport: "Kesintiyi düzenle",
+        saveChanges: "Kaydet",
         resolve: "Kesintiyi sonlandır",
-        saveResolution: "Sonlandırmayı kaydet",
-        cancelEntry: "Hatalı kaydı iptal et",
-        confirmCancel: "Bu olayın hatalı kaydedildiğini onaylıyorum.",
-        cancelOutage: "Kesintiyi iptal et",
+        saveResolution: "Kesintiyi sonlandır",
+        cancelEntry: "Hatalı kayıt olarak işaretle",
+        confirmCancel: "Bu kesintinin hatalı kaydedildiğini onaylıyorum.",
+        cancelOutage: "Hatalı kayıt olarak işaretle",
         proposeResolution: "Kesintiyi sonlandır",
         optionalReason: "Gerekçe (isteğe bağlı)",
         sent: "Onaya gönderildi.",
@@ -187,7 +187,7 @@ async function readAgainOnFocus(page: Page) {
 // A focus joins a read on its way; the export is enabled again once the reads a lost outage change started answered.
 async function outageReadsAnswered(page: Page) {
     await expect(
-        page.getByRole("button", { name: "Download outages CSV", exact: true }),
+        page.getByRole("button", { name: "Download CSV", exact: true }),
     ).toBeEnabled();
 }
 
@@ -802,7 +802,7 @@ test("a member's lost resolution is told without the advice after a promotion, a
     direct = true;
     await readAgainOnFocus(page);
     const save = card.getByRole("button", {
-        name: "Save resolution",
+        name: "End outage",
         exact: true,
     });
     await expect(save).toBeEnabled();
@@ -902,12 +902,12 @@ test("a repeat keeps the outage form disabled while it runs, and its refusal end
     await expectUnconfirmed(form, true);
     writes.hold();
     await save.click();
-    await expect(page.getByLabel("Incident title")).toBeDisabled();
+    await expect(page.getByLabel("Title")).toBeDisabled();
     writes.release();
     await expect(form.getByRole("alert")).toContainText(
         "The request is invalid.",
     );
-    await expect(page.getByLabel("Incident title")).toBeEnabled();
+    await expect(page.getByLabel("Title")).toBeEnabled();
     await expect(save).toBeEnabled();
 });
 
@@ -941,7 +941,7 @@ test("a member's lost outage proposal that arrived is held by the read that show
         .getByRole("button", { name: "Send for approval", exact: true })
         .click();
     await expect(card).toContainText(
-        "A request of yours for this outage now waits for approval.",
+        "Your change request for this outage is waiting for approval.",
     );
     await expectUnconfirmed(card, false);
     expect(server.requests).toHaveLength(1);
@@ -1055,7 +1055,7 @@ async function proposeOutage(page: Page) {
         .getByRole("button", { name: "Report outage", exact: true })
         .click();
     const form = page.getByRole("region", { name: "Report outage" });
-    await form.getByLabel("Incident title").fill("Grid fault");
+    await form.getByLabel("Title").fill("Grid fault");
     const reason = form.getByLabel("Reason (optional)");
     await reason.fill("Meter checked");
     return {
@@ -1088,7 +1088,7 @@ test("a member's lost outage proposal is told without the advice once a promotio
     direct = true;
     await readAgainOnFocus(page);
     await expect(
-        form.getByRole("button", { name: "Save outage", exact: true }),
+        form.getByRole("button", { name: "Save", exact: true }),
     ).toBeVisible();
     session.changeRole("viewer");
     direct = false;
@@ -1230,7 +1230,7 @@ test("an outage edit lost after it was applied, another edit refused as stale an
     const { form, save } = await editOutage(page);
     await save.click();
     await expectUnconfirmed(form, true);
-    const title = page.getByLabel("Incident title");
+    const title = page.getByLabel("Title");
     await title.fill("Inverter replaced");
     await save.click();
     await expect(
@@ -1584,13 +1584,11 @@ for (const language of ["en", "tr"] as const)
         await page
             .getByRole("button", { name: "Continue", exact: true })
             .click();
-        await page.getByLabel("DC nameplate capacity (MW)").fill("5");
+        await page.getByLabel("Panel capacity (MWp)").fill("5");
         await page
             .getByRole("button", { name: "Continue", exact: true })
             .click();
-        await page
-            .getByRole("button", { name: "Submit plant for approval" })
-            .click();
+        await page.getByRole("button", { name: "Send for approval" }).click();
         const main = page.locator("main");
         await expectUnconfirmed(main, false);
         if (language === "tr") {
@@ -1615,7 +1613,7 @@ test("a reminder preview whose answer was lost says the request failed, not that
     await page
         .getByLabel("Hide recipients from each other", { exact: true })
         .uncheck();
-    await page.getByRole("button", { name: "Save reminders" }).click();
+    await page.getByRole("button", { name: "Save" }).click();
     const main = page.locator("main");
     await expect(main.getByText(unreachable)).toBeVisible();
     await expect(main).not.toContainText(texts.en.title);
@@ -1679,7 +1677,7 @@ test("an edit of a resolved outage lost after it was applied is advised and save
             .locator("article", {
                 has: page.getByRole("heading", { name: "Grid fault" }),
             })
-            .getByText(/^Configuration changed./),
+            .getByText(/^Technical details changed./),
     ).toBeVisible();
     await expectUnconfirmed(form, true);
     await save.click();
@@ -2072,7 +2070,7 @@ test("a lost resolution whose outage list is then refused is told beside the ref
     await page.route(outageReads, refusing);
     await readAgainOnFocus(page);
     const section = page.locator("section", {
-        has: page.getByRole("heading", { name: "Plant outages" }),
+        has: page.getByRole("heading", { name: "Outages" }),
     });
     await expect(section.getByText("Not found.")).toBeVisible();
     await expect(card).toHaveCount(0);

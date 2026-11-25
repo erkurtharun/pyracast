@@ -16,11 +16,15 @@ type Language = "en" | "tr";
 
 const navigation = {
     en: {
-        irradiance: "Irradiance",
+        irradiance: "Irradiance forecast",
         settings: "Settings",
-        data: "Data collection",
+        data: "Forecast update times",
     },
-    tr: { irradiance: "Işınım", settings: "Ayarlar", data: "Veri toplama" },
+    tr: {
+        irradiance: "Işınım tahmini",
+        settings: "Ayarlar",
+        data: "Tahmin güncelleme saatleri",
+    },
 };
 
 function schedule(overrides: Partial<Schedule>): Schedule {
@@ -88,7 +92,7 @@ async function openCollection(
         .click();
     await page.getByRole("button", { name: labels.data }).click();
     return page.getByRole("region", {
-        name: language === "tr" ? "Toplama durumu" : "Collection status",
+        name: language === "tr" ? "Güncelleme durumu" : "Update status",
     });
 }
 
@@ -101,13 +105,69 @@ test("a collecting plant shows its state, next collection and requests of the da
         status.getByText("Updating automatically", { exact: true }),
     ).toBeVisible();
     await expect(
-        status.getByText("Next collection").locator(".."),
+        status.getByText("Next planned update").locator(".."),
     ).toContainText("Jan 2, 2026, 12:00 AM");
     await expect(
-        status.getByText("Provider requests today (UTC)").locator(".."),
+        status.getByText("Forecast data requests today (UTC)").locator(".."),
     ).toContainText("2");
     await expect(status.getByRole("status")).toHaveCount(0);
 });
+
+const lastUpdate = {
+    en: {
+        label: "Last update",
+        time: "Jan 1, 2026, 12:05 PM",
+        forecastData: "Forecast data",
+    },
+    tr: {
+        label: "Son güncelleme",
+        time: "1 Oca 2026 12:05",
+        forecastData: "Tahmin verisi",
+    },
+};
+
+for (const language of ["en", "tr"] as const)
+    test(`a satellite update after a forecast update is shown as the last update (${language})`, async ({
+        page,
+    }) => {
+        const job = {
+            status: "succeeded",
+            retry_until: null,
+            attempts: 1,
+            last_error: "",
+        } as const;
+        const status = await openCollection(
+            page,
+            language,
+            schedule({
+                last_success_at: "2026-01-01T09:05:00Z",
+                recent_jobs: [
+                    {
+                        ...job,
+                        id: 2,
+                        endpoint: "estimated_actuals",
+                        scheduled_for: "2026-01-01T09:00:00Z",
+                        available_at: "2026-01-01T09:00:00Z",
+                    },
+                    {
+                        ...job,
+                        id: 1,
+                        endpoint: "forecasts",
+                        scheduled_for: "2026-01-01T06:00:00Z",
+                        available_at: "2026-01-01T06:00:00Z",
+                    },
+                ],
+            }),
+        );
+        const names = lastUpdate[language];
+
+        await expect(
+            status.getByText(names.label, { exact: true }).locator(".."),
+        ).toContainText(names.time);
+        await expect(
+            status.getByText(names.forecastData, { exact: true }),
+        ).toHaveCount(0);
+    });
 
 const inactive = [
     {
@@ -116,7 +176,7 @@ const inactive = [
         reason: "schedule_disabled",
         label: "Not updating",
         sentence: "Automatic forecast updates are turned off for this plant.",
-        next: "Not scheduled",
+        next: "Not planned",
     },
     {
         language: "tr",
@@ -141,7 +201,7 @@ const inactive = [
         label: "Not updating",
         sentence:
             "No new forecast data is arriving for this plant. Write to Pyracast: info@pyracast.app",
-        next: "Not scheduled",
+        next: "Not planned",
     },
     {
         language: "tr",
@@ -168,7 +228,7 @@ for (const item of inactive)
         page,
     }) => {
         const quiet =
-            item.next === "Not scheduled" || item.next === "Planlanmadı";
+            item.next === "Not planned" || item.next === "Planlanmadı";
         const status = await openCollection(
             page,
             item.language,
@@ -188,8 +248,8 @@ for (const item of inactive)
             status
                 .getByText(
                     item.language === "tr"
-                        ? "Sonraki toplama"
-                        : "Next collection",
+                        ? "Planlanan sonraki güncelleme"
+                        : "Next planned update",
                 )
                 .locator(".."),
         ).toContainText(item.next);
@@ -201,8 +261,7 @@ const plantStates = [
         state: "waiting_for_approval",
         reason: "not_approved",
         label: "Waiting for approval by Pyracast",
-        sentence:
-            "Awaiting administrator approval. Your plant details are saved.",
+        sentence: "Waiting for approval by Pyracast.",
         resubmit: false,
     },
     {
@@ -211,7 +270,7 @@ const plantStates = [
         reason: "not_approved",
         label: "Not updating",
         sentence:
-            "Plant status: Suspended. Contact Pyracast support at info@pyracast.app to resume collection.",
+            "Forecasts for this plant are stopped. Write to Pyracast: info@pyracast.app",
         resubmit: false,
     },
     {
@@ -219,7 +278,7 @@ const plantStates = [
         state: "paused",
         reason: "not_approved",
         label: "Not updating",
-        sentence: "Pyracast support did not approve this plant.",
+        sentence: "Pyracast did not approve this plant.",
         resubmit: true,
     },
     {
@@ -265,6 +324,6 @@ for (const item of plantStates)
             notices.getByText(item.sentence, { exact: true }),
         ).toBeVisible();
         await expect(
-            notices.getByRole("button", { name: "Resubmit for review" }),
+            notices.getByRole("button", { name: "Send for approval again" }),
         ).toHaveCount(item.resubmit ? 1 : 0);
     });

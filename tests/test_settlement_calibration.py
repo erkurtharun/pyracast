@@ -190,7 +190,7 @@ def test_changed_settlement_identity_cannot_publish_or_activate(
     assert ready.status == "ready"
     connection.eic = "OTHER"
     connection.save()
-    with pytest.raises(ValidationError, match="production source changed"):
+    with pytest.raises(ValidationError, match="source of the actual production changed"):
         activate_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk, ready.pk)
 
 
