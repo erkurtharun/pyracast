@@ -53,15 +53,19 @@ def source_settings(**updates: Any) -> SourceSettings:
     )
 
 
-def system_for_import(monkeypatch: pytest.MonkeyPatch) -> System:
-    monkeypatch.setattr(timezone, "now", lambda: NOW)
-    system = make_system(approved=True)
+def allow_import(system: System) -> None:
     ProviderAccount.objects.filter(pk=system.account.pk).update(
         provider="solcast", encrypted_api_key=encrypt_secret("test-only-solcast-key")
     )
     SiteBinding.objects.filter(pk=system.binding.pk).update(
         dc_capacity_kw=1, settings_verification_reference="Verified test model settings"
     )
+
+
+def system_for_import(monkeypatch: pytest.MonkeyPatch) -> System:
+    monkeypatch.setattr(timezone, "now", lambda: NOW)
+    system = make_system(approved=True)
+    allow_import(system)
     return system
 
 

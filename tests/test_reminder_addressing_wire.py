@@ -391,15 +391,47 @@ def prepare_shape(system: System, monkeypatch: pytest.MonkeyPatch, shape: str) -
         monkeypatch.setattr(jobs, "build_message", broken)
 
 
-def assert_shape(message: WireMessage, shape: str) -> None:
+HEADING = "Site: solar irradiance forecast (GHI), not electricity generation"
+INCOMPLETE = "Data is missing for some hours, so no daily total is given."
+NO_FIGURES = (
+    "The forecast for Wednesday 11 November 2026 could not be prepared. "
+    "This email contains no figures."
+)
+FOOTER = (
+    "You receive this email because an administrator of Tenant added your address to the "
+    "forecast emails of Site. To stop receiving it, ask a workspace administrator to remove "
+    "your address."
+)
+
+
+def expected_text(system: System, shape: str) -> str:
+    plant = f"https://testserver/app/w/{system.tenant.pk}/plants/{system.region.pk}/forecast/"
+    if shape == "file":
+        lines = [
+            HEADING,
+            "",
+            f"Tomorrow (Wed 11 Nov 2026): {INCOMPLETE}",
+            f"Today (Tue 10 Nov 2026): {INCOMPLETE}",
+            "",
+            "Forecast data: 9 Nov 2026, 16:00 (UTC+3)",
+            "Interval values are in the attached Excel file.",
+            "",
+            "Open forecast in Pyracast:",
+            f"{plant}?date=2026-11-11&view=irradiance",
+        ]
+    else:
+        heading = [HEADING, ""] if shape == "no figures" else []
+        lines = [*heading, NO_FIGURES, "", "Open plant in Pyracast:", plant]
+    return "\n".join([*lines, "", "--", FOOTER, ""])
+
+
+def assert_shape(message: WireMessage, shape: str, system: System) -> None:
     assert [part.get_content_type() for part in message.walk()] == SHAPES[shape]
     files = [part.get_filename() for part in message.walk() if part.get_filename()]
     assert files == (["pyracast-site-2026-11-11.xlsx"] if shape == "file" else [])
     body = message.get_body(("plain",))
     assert body is not None
-    text = body.get_content()
-    assert ("This email contains no figures." in text) is (shape != "file")
-    assert ("Open plant in Pyracast:" in text) is (shape != "file")
+    assert body.get_content().replace("\r\n", "\n") == expected_text(system, shape)
 
 
 @pytestdb
@@ -418,7 +450,7 @@ def test_smtp_carries_the_automatic_mail_headers_and_parts_of_each_mail_shape(
     (transaction,) = script.transactions
     message = parsed(transaction.data)
     assert_automatic(message)
-    assert_shape(message, shape)
+    assert_shape(message, shape, system)
 
 
 @pytest.fixture
@@ -482,7 +514,7 @@ def test_gmail_carries_the_automatic_mail_headers_and_parts_of_each_mail_shape(
     (raw,) = gmail_requests
     message = parsed(raw)
     assert_automatic(message)
-    assert_shape(message, shape)
+    assert_shape(message, shape, system)
 
 
 @pytestdb
