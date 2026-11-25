@@ -130,7 +130,6 @@ export function PlantWorkspace({
                             configurationId={configuration?.id}
                             view={forecastView}
                             date={address.date ?? plantDay(timezone, 1)}
-                            baseDate={navigation.base.date}
                             leaving={navigation.leaving("forecast")}
                             options={forecastOptions}
                             onOptions={setForecastOptions}

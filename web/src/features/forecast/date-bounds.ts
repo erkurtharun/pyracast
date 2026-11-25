@@ -1,5 +1,5 @@
-export type DataSource =
-    "auto" | "forecast" | "estimated_actuals" | "archived_forecast";
+export type DataSource = "auto" | "estimated_actuals" | "archived_forecast";
+export type DataChoice = "forecast" | "estimated_actuals" | "archived_forecast";
 
 export type DateBounds = { min: string; max: string };
 
@@ -15,15 +15,27 @@ export function shiftDay(day: string, offset: number): string {
 
 export function dateBounds(source: DataSource, today: string): DateBounds {
     return {
-        min: source === "forecast" ? today : shiftDay(today, -HISTORY_DAYS),
-        max:
-            source === "forecast" || source === "auto"
-                ? shiftDay(today, OUTLOOK_DAYS)
-                : today,
+        min: shiftDay(today, -HISTORY_DAYS),
+        max: source === "auto" ? shiftDay(today, OUTLOOK_DAYS) : today,
     };
 }
 
 export function clampDate(day: string, bounds: DateBounds): string {
     if (!day || day < bounds.min) return bounds.min;
     return day > bounds.max ? bounds.max : day;
+}
+
+// "auto" shows the forecast, or satellite data for a past day once it has arrived.
+export function sourceOf(choice: DataChoice): DataSource {
+    return choice === "forecast" ? "auto" : choice;
+}
+
+export function shownChoice(
+    source: DataSource,
+    shown: { source_kind?: string | null; result?: unknown } | undefined,
+): DataChoice {
+    if (source !== "auto") return source;
+    return shown?.result && shown.source_kind === "estimated_actuals"
+        ? "estimated_actuals"
+        : "forecast";
 }

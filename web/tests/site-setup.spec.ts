@@ -416,7 +416,9 @@ test("a pending plant lists its next steps instead of an empty forecast", async 
     await page.goto("/app/w/1/plants/11/forecast/");
     const steps = page.getByRole("list", { name: "Next steps" });
     await expect(steps.getByRole("listitem")).toHaveCount(3);
-    await expect(page.getByText("No forecast for this day yet")).toHaveCount(0);
+    await expect(page.getByText("No forecast data for this day.")).toHaveCount(
+        0,
+    );
 });
 
 test("a location request offers the available zones with the current one chosen", async ({
