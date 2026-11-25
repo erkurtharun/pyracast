@@ -6,6 +6,7 @@ import { csvTexts } from "./support/production-csv";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
 import {
+    answer,
     region,
     plant,
     user,
@@ -2235,6 +2236,19 @@ test("the plant header names the offset of the day on screen and the present off
     await expect(header).toHaveText("Plant time: UTC+1 / UTC+2");
     await page.goto("/app/w/1/plants/11/production/?date=2026-08-03");
     await expect(header).toHaveText("Plant time: UTC+2");
+    await page.route("**/plants/21/performance/**", (route) =>
+        route.fulfill({
+            json: answer("PerformanceOutput", {
+                start_date: "2026-10-11",
+                end_date: "2026-11-09",
+                matched_days: 0,
+                requested_days: 30,
+                metrics: null,
+                baseline_metrics: null,
+                days: [],
+            }),
+        }),
+    );
     await page.goto("/app/w/1/plants/11/production/?view=comparison");
     await expect(header).toHaveText("Plant time: UTC+2 / UTC+1");
     await page.goto("/app/w/1/plants/11/settings/");
