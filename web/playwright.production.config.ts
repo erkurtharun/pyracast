@@ -1,7 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
+import { API_PORTS, BUILD_DIRECTORIES } from "./testing/builds";
 
 const serverPort = 3110;
 const frontPort = 3111;
+const secondServerPort = 3112;
 
 export default defineConfig({
     testDir: "./production-tests",
@@ -21,7 +23,15 @@ export default defineConfig({
     webServer: [
         {
             command: `npm start -- --port ${serverPort}`,
+            env: { NEXT_DIST_DIR: BUILD_DIRECTORIES.first },
             url: `http://127.0.0.1:${serverPort}/app/sw.js`,
+            reuseExistingServer: false,
+            timeout: 120_000,
+        },
+        {
+            command: `npm start -- --port ${secondServerPort}`,
+            env: { NEXT_DIST_DIR: BUILD_DIRECTORIES.second },
+            url: `http://127.0.0.1:${secondServerPort}/app/sw.js`,
             reuseExistingServer: false,
             timeout: 120_000,
         },
@@ -30,6 +40,9 @@ export default defineConfig({
             env: {
                 FRONT_PORT: String(frontPort),
                 FRONT_UPSTREAM: `http://127.0.0.1:${serverPort}`,
+                FRONT_SECOND_UPSTREAM: `http://127.0.0.1:${secondServerPort}`,
+                FRONT_API_UPSTREAM: `http://127.0.0.1:${API_PORTS.first}`,
+                FRONT_SECOND_API_UPSTREAM: `http://127.0.0.1:${API_PORTS.second}`,
             },
             url: `http://127.0.0.1:${frontPort}/__front/state`,
             reuseExistingServer: false,

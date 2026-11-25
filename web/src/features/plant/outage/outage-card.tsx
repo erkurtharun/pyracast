@@ -5,7 +5,13 @@ import { PendingApproval } from "@/features/inbox/pending-approval";
 import { DisplayError } from "@/lib/api/errors";
 import { toPlantInput } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
-import { ActionForm, CheckboxField, Field, formText } from "@/ui/form";
+import {
+    ActionForm,
+    CheckboxField,
+    Field,
+    formText,
+    type Submitted,
+} from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
 import type { Outage, OutageChange, OutageControls, Workflow } from "./model";
@@ -18,7 +24,7 @@ import {
 } from "./outage-editor";
 import { StaleChanges } from "./stale-changes";
 
-type Submit = (change: OutageChange) => Promise<void>;
+type Submit = (change: OutageChange) => Promise<Submitted>;
 
 function Capacity({ label, value }: { label: string; value: number | null }) {
     const t = useTranslations("Outages");
@@ -251,7 +257,7 @@ function ResolveOutageForm({
             {hold && <Notice>{hold}</Notice>}
             <ActionForm
                 permitted={controls.editable}
-                pending={!controls.acts}
+                pending={controls.pending}
                 success={null}
                 submit={direct ? t("saveResolution") : proposals("send")}
                 attempt={attempt && { repeats: repeatsWith(attempt, changeOf) }}
@@ -312,7 +318,7 @@ function CancelOutageForm({
             {hold && <Notice>{hold}</Notice>}
             <ActionForm
                 permitted={controls.editable}
-                pending={!controls.acts}
+                pending={controls.pending}
                 success={null}
                 submit={direct ? t("cancelOutage") : proposals("send")}
                 attempt={attempt && { repeats: repeatsWith(attempt, changeOf) }}

@@ -14,8 +14,12 @@ import {
     type RefObject,
 } from "react";
 import { ApiError, displayMessage, UnconfirmedError } from "@/lib/api/errors";
-import { writesStarted } from "@/lib/api/writes";
-import { useLeaveGuard, useSubmissionGuard } from "@/lib/leave-guard";
+import {
+    submission,
+    useLeaveGuard,
+    useSubmissionGuard,
+    type Submission,
+} from "@/lib/leave-guard";
 import { useAnnounce } from "./live-region";
 import { Notice } from "./ui";
 import { useCanManageWorkspace } from "./workspace-access";
@@ -415,14 +419,19 @@ function FormAlert({
 }
 
 type FormState =
-    | { status: "idle" | "success" }
-    | { status: "pending"; since: number }
+    | { status: "idle" | "confirmed" | "success" }
+    | { status: "pending"; submission: Submission }
     | {
           status: "error";
           error: unknown;
           fields: Record<string, string>;
           entries: FieldEntry[];
       };
+
+// A submission resolves once its own changes are known applied, with the reads that follow them.
+export type Submitted = void | (() => Promise<unknown>);
+
+type OwnerWrite = "unanswered" | "confirmed" | null;
 
 export function ActionForm({
     children,
@@ -440,12 +449,11 @@ export function ActionForm({
 }: {
     children: ReactNode;
     submit: string;
-    onSubmit: (data: FormData) => Promise<void>;
+    onSubmit: (data: FormData) => Promise<Submitted>;
     onEdit?: (data: FormData) => void;
     permitted?: boolean;
-    // An owner that tracks its own request says here whether it is still unanswered, so a form mounted again
-    // while it runs shows it and cannot send it twice.
-    pending?: boolean;
+    // The owner's own write: a form mounted again meanwhile shows it, cannot send it twice and asks only while unanswered.
+    pending?: OwnerWrite;
     errorTitle?: string;
     success?: string | null;
     variant?: Variant;
@@ -464,14 +472,14 @@ export function ActionForm({
     // Whether the form as it now stands, valid and submittable, would send the owner's attempt.
     const [sendsRepeat, setSendsRepeat] = useState(false);
     const [edited, setEdited] = useState(false);
-    const busy = pending ?? state.status === "pending";
     const submitting = state.status === "pending";
-    useSubmissionGuard(guard && submitting ? state.since : null);
+    const busy = !!pending || submitting || state.status === "confirmed";
+    useSubmissionGuard(guard && submitting ? state.submission : null);
     useLeaveGuard(
         guard &&
             (unsaved ||
                 !!attempt ||
-                (!submitting && (edited || !!pending)) ||
+                (!submitting && (edited || pending === "unanswered")) ||
                 (state.status === "error" &&
                     state.error instanceof UnconfirmedError)),
     );
@@ -524,11 +532,15 @@ export function ActionForm({
                     running.current = true;
                     const data = new FormData(event.currentTarget);
                     measure();
-                    setState({ status: "pending", since: writesStarted() });
+                    const own = submission();
+                    setState({ status: "pending", submission: own });
                     try {
-                        await onSubmit(data);
-                        setState({ status: "success" });
+                        const follow = await onSubmit(data);
+                        own.confirm();
+                        setState({ status: "confirmed" });
                         setEdited(false);
+                        await follow?.();
+                        setState({ status: "success" });
                     } catch (error) {
                         const fields =
                             error instanceof ApiError ? error.fields : {};

@@ -4,12 +4,16 @@ import { useEffect, useRef, useState } from "react";
 import type { Site } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { ApiError, displayMessage } from "@/lib/api/errors";
-import { writesStarted } from "@/lib/api/writes";
 import { useApiList, useRefresh } from "@/lib/api/query";
 import { MISSING } from "@/lib/format/number";
 import { deviceZone } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
-import { useLeaveGuard, useSubmissionGuard } from "@/lib/leave-guard";
+import {
+    submission,
+    useLeaveGuard,
+    useSubmissionGuard,
+    type Submission,
+} from "@/lib/leave-guard";
 import type { components } from "@/lib/schema";
 import {
     Field,
@@ -39,9 +43,9 @@ import { TimezoneField } from "./timezone-field";
 
 type Trashed = components["schemas"]["TrashedRegionOutput"];
 type LocationRefusal = components["schemas"]["LocationRefusal"];
-type Submission =
+type Status =
     | { kind: "idle" }
-    | { kind: "saving"; since: number }
+    | { kind: "saving"; submission: Submission }
     | { kind: "saved" }
     | {
           kind: "error";
@@ -53,7 +57,7 @@ type Found = { row: Trashed; others: number };
 type Offer =
     | { kind: "none" }
     | ({ kind: "offered" } & Found)
-    | ({ kind: "restoring"; since: number } & Found)
+    | ({ kind: "restoring"; submission: Submission } & Found)
     | ({ kind: "failed"; message: string } & Found);
 
 const stepLabels = {
@@ -143,7 +147,7 @@ function Wizard({
             typed ? coordinateValue(axis, typed) : existing?.[axis],
         );
     };
-    const [status, setStatus] = useState<Submission>({ kind: "idle" });
+    const [status, setStatus] = useState<Status>({ kind: "idle" });
     const [offer, setOffer] = useState<Offer>({ kind: "none" });
     // React disables the form only once it commits; these refs act before that and after an unmount.
     const running = useRef(false);
@@ -177,9 +181,9 @@ function Wizard({
     const [entered, setEntered] = useState(false);
     useSubmissionGuard(
         status.kind === "saving"
-            ? status.since
+            ? status.submission
             : offer.kind === "restoring"
-              ? offer.since
+              ? offer.submission
               : null,
     );
     useLeaveGuard(!busy && entered);
@@ -233,12 +237,14 @@ function Wizard({
     async function restore(found: Found) {
         if (running.current) return;
         running.current = true;
-        setOffer({ ...found, kind: "restoring", since: writesStarted() });
+        const restoring = submission();
+        setOffer({ ...found, kind: "restoring", submission: restoring });
         try {
             await api.post(
                 "/api/tenants/{tenant_id}/regions/{region_id}/restore/",
                 { path: { tenant_id: tenant, region_id: found.row.id } },
             );
+            restoring.confirm();
         } catch (error) {
             running.current = false;
             setOffer({
@@ -257,7 +263,8 @@ function Wizard({
     async function submit(data: FormData) {
         if (running.current) return;
         running.current = true;
-        setStatus({ kind: "saving", since: writesStarted() });
+        const own = submission();
+        setStatus({ kind: "saving", submission: own });
         try {
             const body = configurationInput(data);
             const site = existing
@@ -290,6 +297,7 @@ function Wizard({
                           timezone: formText(data, "timezone"),
                       },
                   });
+            own.confirm();
             running.current = false;
             setStatus({ kind: "saved" });
             if (open.current) onCreated(site);

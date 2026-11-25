@@ -6,7 +6,14 @@ import { fromPlantInput, toPlantInput } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
 import { serverTrim } from "@/lib/idempotency";
 import type { components } from "@/lib/schema";
-import { ActionForm, Field, Select, TextAreaField, formText } from "@/ui/form";
+import {
+    ActionForm,
+    Field,
+    Select,
+    TextAreaField,
+    formText,
+    type Submitted,
+} from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import { useLabel } from "@/ui/vocabulary";
 import {
@@ -113,7 +120,7 @@ export function OutageEditor({
     controls: OutageControls;
     // Why this editor cannot send any more; it can still be closed.
     hold: string | null;
-    onSubmit: (change: OutageChange) => Promise<void>;
+    onSubmit: (change: OutageChange) => Promise<Submitted>;
     attempt: Repeats | null | undefined;
     onClose: () => void;
 }) {
@@ -183,7 +190,7 @@ export function OutageEditor({
             {hold && <Notice>{hold}</Notice>}
             <ActionForm
                 permitted={controls.editable}
-                pending={!controls.acts}
+                pending={controls.pending}
                 success={null}
                 submit={
                     direct
