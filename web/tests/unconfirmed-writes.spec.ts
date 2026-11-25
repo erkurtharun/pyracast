@@ -1796,6 +1796,45 @@ test("a failed Reload current values after a lost direct change is told beside i
     expect(server.applied()).toBe(1);
 });
 
+test("a failed Reload current values after a lost direct change is no longer told once a focus read answers the same rows, and the repeat applies once", async ({
+    page,
+}) => {
+    await page.clock.install({ time: now });
+    await signIn(page);
+    const server = await serveDirectProduction(page, answers("drop"));
+    await openPlant(page, "Production");
+    const { editor, save } = await editEight(page);
+    const reread = page.waitForResponse((response) =>
+        productionReads.test(response.url()),
+    );
+    await save.click();
+    await reread;
+    await expectUnconfirmed(editor, true);
+    const failing = (route: Route) =>
+        route.fulfill({
+            status: 500,
+            json: errorBody("server_error", "The server failed."),
+        });
+    await page.route(productionReads, failing);
+    await editor
+        .getByRole("button", { name: "Reload current values", exact: true })
+        .click();
+    await expect(editor).toContainText("The server failed.");
+    await page.unroute(productionReads, failing);
+    const recovered = page.waitForResponse(
+        (response) => productionReads.test(response.url()) && response.ok(),
+    );
+    await readAgainOnFocus(page);
+    await recovered;
+    await expect(editor).not.toContainText("The server failed.");
+    await expectUnconfirmed(editor, true);
+    await save.click();
+    await expect(editor).toHaveCount(0);
+    expect(server.requests).toHaveLength(2);
+    expect(server.requests[1]).toEqual(server.requests[0]);
+    expect(server.applied()).toBe(1);
+});
+
 test("an orphaned direct change whose outcome is unknown keeps its notice once the person can only propose, without sending it", async ({
     page,
 }) => {

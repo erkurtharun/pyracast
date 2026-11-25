@@ -80,9 +80,12 @@ export function ProductionHistory({
     const canManage = useCanManageWorkspace();
     const proposals = useTranslations("ChangeRequests");
     const plant = useExportPlant();
-    const [reconciled, setReconciled] = useState<History>();
+    const [reconciled, setReconciled] = useState<{
+        history: History;
+        at: number;
+    }>();
     // The server builds days in the zone it answers with; the last answer bounds the day picker.
-    const yesterday = plantDay(reconciled?.timezone ?? timezone, -1);
+    const yesterday = plantDay(reconciled?.history.timezone ?? timezone, -1);
     const shown = (day?: string) => (day && day <= yesterday ? day : yesterday);
     const date = shown(requestedDay);
     // A step taken while a day change loads continues from the day being navigated to.
@@ -124,9 +127,14 @@ export function ProductionHistory({
                 dropped(shownDay, next) ? t("access_dropped", { access }) : "",
             );
     }
-    if (reading.data && reading.data !== reconciled) {
+    // A read answering the same rows keeps their object, so each answered read is told by its time.
+    if (
+        reading.data &&
+        (reading.data !== reconciled?.history ||
+            reading.updatedAt !== reconciled.at)
+    ) {
         const fresh = reading.data;
-        setReconciled(fresh);
+        setReconciled({ history: fresh, at: reading.updatedAt });
         apply({ type: "rowsLoaded", day: date, history: fresh });
     }
     const history = reading.data;
