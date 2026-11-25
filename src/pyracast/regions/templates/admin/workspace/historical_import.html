@@ -17,7 +17,7 @@
       <details><summary>{% translate "Selected reference configuration" %}</summary>
         <dl class="facts">
           <div><dt>{% translate "Resource ID" %}</dt><dd>{{ binding.site_id }}</dd></div>
-          <div><dt>{% translate "Local timezone" %}</dt><dd>{{ region.timezone }}</dd></div>
+          <div><dt>{% translate "Time zone" %}</dt><dd>{{ region.timezone }}</dd></div>
           <div><dt>{% translate "Location" %}</dt><dd>{{ region.latitude }}, {{ region.longitude }}</dd></div>
           <div><dt>{% translate "Reference capacity" %}</dt><dd>{{ binding.capacity_kw }} kW AC / {% if binding.dc_capacity_kw != None %}{{ binding.dc_capacity_kw }} kW DC{% else %}{% translate "DC capacity not declared" %}{% endif %}</dd></div>
           <div><dt>{% translate "Azimuth / losses" %}</dt><dd>{{ binding.azimuth_degrees }}° / {{ binding.losses_percent }}%</dd></div>
@@ -29,7 +29,7 @@
       <div class="upload-drop" data-upload-drop>
         <label for="{{ form.file.id_for_label }}"><strong>{% translate "Drop a Solcast file here or choose a file" %}</strong></label>
         {{ form.file }}
-        <p class="hint">{% translate "JSON or CSV, up to 7 MiB. Selecting a file does not upload it." %}</p>
+        <p class="hint">{% translate "JSON or CSV, up to 7 MiB." %}</p>
       </div>
       <details class="upload-options"><summary>{% translate "File interpretation options" %}</summary>
         <p class="hint">{% translate "Use these only if the file does not declare its timezone or interval. An existing timestamp offset is preserved." %}</p>

@@ -14,8 +14,8 @@ from pyracast.regions.models import NAME_MAX_LENGTH, active_region
 
 
 class MeasurementBasis(models.TextChoices):
-    NET_EXPORT = "net_export", gettext_lazy("Net export")
-    AC_GENERATION = "ac_generation", gettext_lazy("AC generation")
+    NET_EXPORT = "net_export", gettext_lazy("Energy delivered to the grid")
+    AC_GENERATION = "ac_generation", gettext_lazy("Inverter output")
 
 
 class MountingType(models.TextChoices):

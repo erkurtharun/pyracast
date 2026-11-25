@@ -44,7 +44,7 @@ class Presentation:
 PLANTS = gettext_lazy("Review affected plants")
 CONNECTIONS = gettext_lazy("Review provider connections")
 COLLECTIONS = gettext_lazy("Review collections")
-EMAILS = gettext_lazy("Review emails")
+EMAILS = gettext_lazy("Review forecast emails")
 OUTBOUND = gettext_lazy("Review outbound emails")
 METERING = gettext_lazy("Review production collection")
 CALIBRATIONS = gettext_lazy("Review calibrations")
@@ -53,7 +53,7 @@ RECOVERS = gettext_lazy("Check the dispatcher and worker; the dispatcher recover
 # The console order; every check that can make the report unhealthy has an entry.
 PRESENTATION: Mapping[str, Presentation] = {
     "invalid_reminder_recipients": Presentation(
-        gettext_lazy("Invalid email recipients"),
+        gettext_lazy("Invalid forecast email recipients"),
         gettext_lazy("Ask the workspace administrator to correct the saved recipient addresses."),
         PLANTS,
         "action",
@@ -72,7 +72,7 @@ PRESENTATION: Mapping[str, Presentation] = {
     ),
     "regions_without_recent_forecasts": Presentation(
         gettext_lazy("Plants without recent forecasts"),
-        gettext_lazy("Review saved acquisition times and collection settings."),
+        gettext_lazy("Review the forecast update times and collection settings."),
         PLANTS,
         "action",
     ),
@@ -102,13 +102,13 @@ PRESENTATION: Mapping[str, Presentation] = {
         "review",
     ),
     "overdue_notifications": Presentation(
-        gettext_lazy("Delayed emails"),
+        gettext_lazy("Delayed forecast emails"),
         gettext_lazy("Check the dedicated notification worker."),
         EMAILS,
         "action",
     ),
     "interrupted_notifications": Presentation(
-        gettext_lazy("Interrupted emails"),
+        gettext_lazy("Interrupted forecast emails"),
         gettext_lazy(
             "Review the outcome; uncertain transmission must not be resent automatically."
         ),
@@ -116,7 +116,7 @@ PRESENTATION: Mapping[str, Presentation] = {
         "action",
     ),
     "failed_notifications": Presentation(
-        gettext_lazy("Email outcomes needing review"),
+        gettext_lazy("Forecast email outcomes needing review"),
         gettext_lazy(
             "Review failed, unavailable or unknown outcomes. "
             "Reconcile unknown acceptance before resending."
@@ -125,7 +125,7 @@ PRESENTATION: Mapping[str, Presentation] = {
         "review",
     ),
     "missed_notifications": Presentation(
-        gettext_lazy("Missed email times"),
+        gettext_lazy("Missed forecast email send times"),
         gettext_lazy("Check notification worker availability and the delivery deadline."),
         EMAILS,
         "review",
@@ -139,7 +139,7 @@ PRESENTATION: Mapping[str, Presentation] = {
         "review",
     ),
     "paused_notifications": Presentation(
-        gettext_lazy("Paused email times"),
+        gettext_lazy("Paused forecast email send times"),
         gettext_lazy(
             "A plant's recipient list is over the limit, empty or holds an invalid address. "
             "Ask the workspace administrator to correct it."
@@ -155,26 +155,29 @@ PRESENTATION: Mapping[str, Presentation] = {
     ),
     "failed_outbound_mail": Presentation(
         gettext_lazy("Failed account and invitation emails"),
-        gettext_lazy("Review the recorded error; the person or administrator can ask again."),
+        gettext_lazy(
+            "Review the recorded error; the person or the workspace administrator can ask again."
+        ),
         OUTBOUND,
         "review",
     ),
     "uncertain_outbound_mail": Presentation(
         gettext_lazy("Account and invitation emails with an unknown outcome"),
         gettext_lazy(
-            "They may have arrived and are never resent; the person or administrator can ask again."
+            "They may have arrived and are never resent; the person or the workspace "
+            "administrator can ask again."
         ),
         OUTBOUND,
         "review",
     ),
     "unavailable_forecasts": Presentation(
-        gettext_lazy("Notifications prepared without saved forecasts"),
+        gettext_lazy("Forecast emails prepared without saved forecasts"),
         gettext_lazy("Review the plant collection history and approved connection."),
         EMAILS,
         "review",
     ),
     "partial_forecasts": Presentation(
-        gettext_lazy("Notifications prepared with partial forecasts"),
+        gettext_lazy("Forecast emails prepared with partial forecasts"),
         gettext_lazy("Review saved forecast coverage; missing intervals are not zero."),
         EMAILS,
         "review",

@@ -60,7 +60,7 @@ TURKISH = {
     "No plants currently match this check.": "Bu kontrole şu anda uyan santral yok.",
     "Showing 1\u20132 of 2": "2 kay\u0131ttan 1\u20132 gösteriliyor",
     "Showing 1\u20135 of 5": "5 kay\u0131ttan 1\u20135 gösteriliyor",
-    "Work of the last 24 hours and all open work.": "Son 24 saatin işleri ve tüm aç\u0131k işler.",
+    "Show all work": "Tüm işleri göster",
     "All work.": "Tüm işler.",
 }
 
@@ -388,7 +388,7 @@ def test_operations_lists_show_the_last_24_hours_until_all_work_is_asked_for(
     assert recent.context["collections_page"].paginator.count == 2
     content = recent.content.decode()
     assert text(language, "Showing 1\u20132 of 2") in content
-    assert text(language, "Work of the last 24 hours and all open work.") in content
+    assert text(language, "Show all work") in content
     assert 'href="/admin/operations/?window=all"' in content
 
     everything = client.get("/admin/operations/?window=all&collections_page=1")
@@ -420,7 +420,7 @@ def test_a_selected_check_lists_its_rows_whatever_their_age(
     page = client.get("/admin/operations/?issue=overdue_collections")
 
     assert [row["id"] for row in page.context["collections"]] == [job.pk]
-    assert "Work of the last 24 hours and all open work." not in page.content.decode()
+    assert "Show all work" not in page.content.decode()
 
 
 def old_collections(system: System, _plant: Plant, old: datetime) -> list[int]:
@@ -552,7 +552,6 @@ def test_the_dispatch_check_lists_no_work_and_so_offers_no_window(
     content = page.content.decode()
     assert page.context["show_dispatch"] is True
     assert page.context["work_window"] == ""
-    assert "Work of the last 24 hours and all open work." not in content
     assert "Show all work" not in content
 
 

@@ -2,7 +2,7 @@
 {% load i18n %}
 {% block title %}{% translate "Provider accounts" %}{% endblock %}
 {% block heading %}{% translate "Provider accounts" %}{% endblock %}
-{% block lead %}<p class="lead">{% translate "Each account's key and daily request budget are shared by every plant that uses it. Budgets count requests per UTC day." %}</p>{% endblock %}
+{% block lead %}<p class="lead">{% translate "Each account's key and daily request budget are shared by every plant that uses it." %}</p>{% endblock %}
 {% block content %}
   <section class="panel" aria-labelledby="accounts-title">
     <div class="panel-head"><h2 id="accounts-title">{% translate "Provider accounts" %} <span class="muted">{{ accounts|length }}</span></h2></div>

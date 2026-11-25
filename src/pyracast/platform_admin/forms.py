@@ -38,7 +38,7 @@ CONSOLE_MESSAGES = {
         "This workspace already has a plant at this location."
     ),
     ErrorCode.LOCATION_CHANGE_ALREADY_PENDING: gettext_lazy(
-        "A location request is waiting for review. "
+        "A location change request is waiting for review. "
         "Approve or reject it before correcting the location."
     ),
     ErrorCode.PLANT_EDIT_BLOCKED: gettext_lazy(
@@ -340,7 +340,7 @@ class WorkspaceSettingsForm(forms.Form):
     )
     expected_max_recipients = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
     confirm_pause = forms.BooleanField(
-        required=False, label=gettext_lazy("Pause reminders for the plants listed above")
+        required=False, label=gettext_lazy("Pause the forecast email of the plants listed above")
     )
 
 

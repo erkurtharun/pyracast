@@ -19,9 +19,9 @@
   <section class="panel panel--narrow" aria-labelledby="removal-title">
     <div class="panel-head"><h2 id="removal-title">{% translate "What happens" %}</h2></div>
     {% if is_administrator %}
-      <p class="callout callout--warn">{% translate "The administrator cannot be removed. Make another member the administrator first." %}</p>
+      <p class="callout callout--warn">{% translate "The workspace administrator cannot be removed. Make another member the workspace administrator first." %}</p>
       <div class="form-actions">
-        <a class="btn btn--primary" href="{% url 'admin:workspace_tenant_administrator' tenant.pk %}">{% translate "Change administrator" %}</a>
+        <a class="btn btn--primary" href="{% url 'admin:workspace_tenant_administrator' tenant.pk %}">{% translate "Change workspace administrator" %}</a>
         <a class="text-link" href="{% url 'admin:workspace_tenant' tenant.pk %}">{% translate "Cancel" context "console" %}</a>
       </div>
     {% elif is_self %}
@@ -32,13 +32,13 @@
     {% else %}
       <ul class="plain-list">
         <li>{% translate "Their access to this workspace ends at once." %}</li>
-        <li>{% translate "They no longer receive email reminders for this workspace." %}</li>
+        <li>{% translate "They no longer receive the forecast emails of this workspace." %}</li>
         <li>{% translate "Pending invitations to their addresses expire." %}</li>
         <li>{% translate "Their account, the plants and the saved data stay." %}</li>
       </ul>
       <form method="post" class="form-actions">
         {% csrf_token %}
-        <button type="submit" class="btn btn--danger">{% translate "Remove member" %}</button>
+        <button type="submit" class="btn btn--danger">{% translate "Remove from workspace" %}</button>
         <a class="text-link" href="{% url 'admin:workspace_tenant' tenant.pk %}">{% translate "Cancel" context "console" %}</a>
       </form>
     {% endif %}

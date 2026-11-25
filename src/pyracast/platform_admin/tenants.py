@@ -47,7 +47,7 @@ DELIVERY_LABELS: dict[str, StrPromise] = {
     InvitationDeliveryStatus.PENDING: gettext_lazy("Sending"),
     InvitationDeliveryStatus.SENT: gettext_lazy("Sent"),
     InvitationDeliveryStatus.FAILED: gettext_lazy("Not sent"),
-    InvitationDeliveryStatus.UNCERTAIN: gettext_lazy("Delivery unknown"),
+    InvitationDeliveryStatus.UNCERTAIN: gettext_lazy("Not known whether sent"),
 }
 
 
@@ -67,7 +67,7 @@ class WorkspaceMemberChoice(MemberChoice):
 class WorkspaceAdministratorForm(forms.Form):
     administrator = WorkspaceMemberChoice(
         queryset=User.objects.none(),
-        label=gettext_lazy("Administrator"),
+        label=gettext_lazy("Workspace administrator"),
         help_text=gettext_lazy("Only active members can be chosen."),
     )
     expected_admin_id = forms.IntegerField(required=False, widget=forms.HiddenInput)
@@ -121,10 +121,10 @@ class WorkspaceForm(WorkspaceNameForm):
     administrator_email = forms.EmailField(
         max_length=254,
         required=False,
-        label=gettext_lazy("Administrator email (optional)"),
+        label=gettext_lazy("Workspace administrator email (optional)"),
         help_text=gettext_lazy(
-            "We email this address an invitation to administer the workspace. Without one, "
-            "the workspace has no administrator until you invite one."
+            "Pyracast sends this address an invitation as workspace administrator. Without an "
+            "address, the workspace has none until you invite one."
         ),
     )
     language = forms.ChoiceField(
@@ -182,14 +182,17 @@ class InvitationForm(forms.Form):
         required=False,
         widget=forms.RadioSelect,
         choices=(
-            (WorkspaceRole.VIEWER, gettext_lazy("Viewer: sees plants, forecasts and production")),
+            (
+                WorkspaceRole.VIEWER,
+                gettext_lazy("Member: sees the plants and sends change requests"),
+            ),
             (
                 WorkspaceRole.ADMIN,
-                gettext_lazy("Administrator: manages plants, members and settings"),
+                gettext_lazy("Workspace administrator: manages plants, members and settings"),
             ),
         ),
         label=gettext_lazy("Role"),
-        help_text=gettext_lazy("Offered while the workspace has no administrator."),
+        help_text=gettext_lazy("Offered while the workspace has no workspace administrator."),
     )
     language = forms.ChoiceField(
         choices=Language.choices, label=gettext_lazy("Invitation language")

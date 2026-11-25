@@ -39,8 +39,8 @@ DECISION_UNAVAILABLE = "This review decision is unavailable for the current revi
 LAST_VALIDATION_FAILED = (
     "The last validation failed. Validate the connection again before approval."
 )
-REJECTED = "Plant rejected."
-ALREADY_REJECTED = "This plant is already rejected."
+REJECTED = "Plant not approved."
+ALREADY_REJECTED = "This plant is already marked not approved."
 REVIEW_NOT_APPLIED = "The review could not be applied. Reload and review the current plant."
 LOCATION_APPROVED = "Location change approved."
 LOCATION_ALREADY_APPROVED = "This location change is already approved."
@@ -297,8 +297,8 @@ def test_the_review_page_shows_and_approval_activates_the_values_edited_while_ap
 
     page = client.get(plant_url(system.region)).content.decode()
 
-    assert "<dd>150.0 MW</dd>" in page
-    assert "<dd>100.0 MW</dd>" not in page
+    assert "<dt>Panel capacity (MWp)</dt><dd>150.0</dd>" in page
+    assert "<dt>Panel capacity (MWp)</dt><dd>100.0</dd>" not in page
     approval = {**page_actions(client, system.region), "action": "approve"}
     assert notices(client, plant_url(system.region), approval) == (302, [APPROVED])
     assert activated(plant) == (replacement.pk, 3, 150)
@@ -324,7 +324,9 @@ def test_an_edit_after_the_review_page_opened_refuses_the_approval(edit: dict[st
 
 
 def shown_capacity(response: Any) -> float:
-    shown = re.findall(r"<dd>([0-9.]+) MW</dd>", response.content.decode())
+    shown = re.findall(
+        r"<dt>Panel capacity \(MWp\)</dt><dd>([0-9.]+)</dd>", response.content.decode()
+    )
     assert len(shown) == 1, shown
     return float(shown[0])
 

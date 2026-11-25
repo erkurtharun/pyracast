@@ -2,7 +2,6 @@
 {% load i18n %}
 {% block title %}{% translate "Operations" %}{% endblock %}
 {% block heading %}{% translate "Operations" %}{% endblock %}
-{% block lead %}<p class="lead">{% translate "Collection and email status." %}</p>{% endblock %}
 {% block content %}
   <section class="panel" aria-labelledby="checks-title">
     <div class="panel-head">
@@ -12,7 +11,7 @@
   </section>
 
   {% if health_filter %}<div class="panel-head"><p>{{ health_filter.label }}</p><a class="text-link" href="{% url 'admin:workspace_operations' %}">{% translate "Show all operations" %}</a></div>{% endif %}
-  {% if work_window == "recent" %}<div class="panel-head"><p>{% translate "Work of the last 24 hours and all open work." %}</p><a class="text-link" href="{% url 'admin:workspace_operations' %}{{ window_links.all }}">{% translate "Show all work" %}</a></div>
+  {% if work_window == "recent" %}<div class="panel-head"><a class="text-link" href="{% url 'admin:workspace_operations' %}{{ window_links.all }}">{% translate "Show all work" %}</a></div>
   {% elif work_window == "all" %}<div class="panel-head"><p>{% translate "All work." %}</p><a class="text-link" href="{% url 'admin:workspace_operations' %}{{ window_links.recent }}">{% translate "Show the last 24 hours" %}</a></div>{% endif %}
   {% if show_dispatch %}
   <section class="panel" aria-labelledby="dispatch-title">
@@ -167,7 +166,7 @@
 
   {% if show_deliveries %}
   <section class="panel" aria-labelledby="deliveries-title">
-    <div class="panel-head"><h2 id="deliveries-title">{% translate "Email delivery" %}</h2><p class="row-meta">{% if deliveries %}{% blocktranslate with first=deliveries_page.start_index last=deliveries_page.end_index total=deliveries_page.paginator.count %}Showing {{ first }}–{{ last }} of {{ total }}{% endblocktranslate %}{% endif %}</p></div>
+    <div class="panel-head"><h2 id="deliveries-title">{% translate "Forecast emails" %}</h2><p class="row-meta">{% if deliveries %}{% blocktranslate with first=deliveries_page.start_index last=deliveries_page.end_index total=deliveries_page.paginator.count %}Showing {{ first }}–{{ last }} of {{ total }}{% endblocktranslate %}{% endif %}</p></div>
     {% if deliveries %}
       <div class="table-wrap" role="region" aria-labelledby="deliveries-title" tabindex="0">
         <table class="table table--stack">
@@ -201,9 +200,9 @@
         </table>
       </div>
     {% else %}
-      <p class="empty">{% translate "No email deliveries yet." %}</p>
+      <p class="empty">{% translate "No forecast emails yet." %}</p>
     {% endif %}
-    {% include "admin/workspace/work_pager.html" with page=deliveries_page links=deliveries_links label=_("Email delivery pages") %}
+    {% include "admin/workspace/work_pager.html" with page=deliveries_page links=deliveries_links label=_("Forecast email pages") %}
   </section>
   {% endif %}
 {% endblock %}

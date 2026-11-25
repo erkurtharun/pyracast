@@ -837,8 +837,8 @@ export interface components {
             review_fingerprint: string;
         };
         /**
-         * @description * `region_created` - Plant submitted
-         *     * `region_renamed` - Plant location renamed
+         * @description * `region_created` - Plant sent for approval
+         *     * `region_renamed` - Plant renamed
          *     * `location_change_requested` - Location change requested
          *     * `location_change_approved` - Location change approved
          *     * `location_change_rejected` - Location change rejected
@@ -848,13 +848,13 @@ export interface components {
          *     * `connection_validated` - Provider connection validated
          *     * `connection_validation_failed` - Provider connection validation failed
          *     * `region_approved` - Plant approved
-         *     * `region_rejected` - Plant rejected
+         *     * `region_rejected` - Plant not approved
          *     * `region_suspended` - Plant suspended
-         *     * `region_resubmitted` - Plant resubmitted for review
-         *     * `region_trashed` - Plant location moved to trash
-         *     * `region_restored` - Plant location restored
-         *     * `collection_schedule_updated` - Collection schedule updated
-         *     * `reminder_schedule_updated` - Email reminders updated
+         *     * `region_resubmitted` - Plant sent for approval again
+         *     * `region_trashed` - Plant moved to recycle bin
+         *     * `region_restored` - Plant restored
+         *     * `collection_schedule_updated` - Forecast update times changed
+         *     * `reminder_schedule_updated` - Forecast email updated
          *     * `historical_reference_imported` - Historical reference imported
          *     * `reference_capacity_normalized` - Reference capacity normalized
          *     * `provider_account_created` - Provider account created
@@ -2188,8 +2188,8 @@ export interface components {
             region_id?: number;
         };
         /**
-         * @description * `net_export` - Net export
-         *     * `ac_generation` - AC generation
+         * @description * `net_export` - Energy delivered to the grid
+         *     * `ac_generation` - Inverter output
          * @enum {string}
          */
         MeasurementBasisEnum: "net_export" | "ac_generation";
@@ -2238,7 +2238,7 @@ export interface components {
          *     * `no_recipients` - No recipients
          *     * `invalid_recipient` - Invalid recipient
          *     * `recipient_limit_exceeded` - Recipient limit exceeded
-         *     * `definition_trashed` - Definition trashed
+         *     * `definition_trashed` - Plant in recycle bin
          *     * `interrupted_send` - Interrupted during sending
          *     * `interrupted_connection` - Interrupted before sending
          *     * `mail_not_sent` - Mail not sent
@@ -2273,12 +2273,12 @@ export interface components {
             | "mail_preparation_failed"
             | "mail_outcome_uncertain";
         /**
-         * @description * `pending` - Pending
-         *     * `retry` - Retry
+         * @description * `pending` - Preparing
+         *     * `retry` - Will retry
          *     * `sending` - Sending
          *     * `sent` - Sent
-         *     * `failed` - Failed
-         *     * `uncertain` - Uncertain
+         *     * `failed` - Not sent
+         *     * `uncertain` - Not known whether sent
          *     * `skipped` - Skipped
          *     * `cancelled` - Cancelled
          * @enum {string}
@@ -3074,10 +3074,10 @@ export interface components {
             readonly review_reason: string | null;
         };
         /**
-         * @description * `pending` - Awaiting approval
+         * @description * `pending` - In review
          *     * `approved` - Approved
          *     * `suspended` - Suspended
-         *     * `rejected` - Rejected
+         *     * `rejected` - Not approved
          * @enum {string}
          */
         RegionStatusEnum: "pending" | "approved" | "suspended" | "rejected";

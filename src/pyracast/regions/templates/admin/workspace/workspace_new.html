@@ -1,14 +1,13 @@
 {% extends "admin/workspace/form.html" %}
 {% load i18n %}
 {% block backlink %}<a class="back-link" href="{% url 'admin:workspace_tenants' %}">{% translate "Workspaces" %}</a>{% endblock %}
-{% block lead %}<p class="lead">{% translate "A workspace holds one customer's plants and the people who can see them." %}</p>{% endblock %}
 {% block fields %}
   <fieldset class="group">
     <legend>{% translate "Workspace" %}</legend>
     {% include "admin/workspace/field.html" with field=form.name %}
   </fieldset>
   <fieldset class="group">
-    <legend>{% translate "Administrator" %}</legend>
+    <legend>{% translate "Workspace administrator" %}</legend>
     {% include "admin/workspace/field.html" with field=form.administrator_email %}
     {% include "admin/workspace/field.html" with field=form.language %}
   </fieldset>

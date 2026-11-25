@@ -125,7 +125,7 @@ def workspace_administrator(
         site,
         request,
         "workspace_administrator",
-        _("Change administrator"),
+        _("Change workspace administrator"),
         {"tenant": tenant, "form": form, "impact": reassignment_impact(tenant)},
     )
 
@@ -195,7 +195,7 @@ def invitation_revocation(request: HttpRequest, tenant_id: int, invitation_id: i
         messages.error(request, " ".join(refusal.messages))
     else:
         if revoked:
-            messages.success(request, _("Invitation to %(email)s revoked.") % email)
+            messages.success(request, _("Invitation to %(email)s withdrawn.") % email)
         else:
             messages.info(request, _("The invitation to %(email)s is already closed.") % email)
     return _workspace_section(tenant_id, "invitations-title")
@@ -247,7 +247,7 @@ def member_removal(
     return site.workspace_response(
         request,
         "tenant",
-        _("Remove member"),
+        _("Remove from workspace"),
         {
             "tenant": membership.tenant,
             "member": label,

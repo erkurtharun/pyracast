@@ -15,10 +15,10 @@ NAME_INVISIBLE_CHARACTER = gettext_lazy(
 
 
 class RegionStatus(models.TextChoices):
-    PENDING = "pending", gettext_lazy("Awaiting approval")
+    PENDING = "pending", gettext_lazy("In review")
     APPROVED = "approved", gettext_lazy("Approved")
     SUSPENDED = "suspended", gettext_lazy("Suspended")
-    REJECTED = "rejected", gettext_lazy("Rejected")
+    REJECTED = "rejected", gettext_lazy("Not approved")
 
 
 class LocationChangeStatus(models.TextChoices):
@@ -29,8 +29,8 @@ class LocationChangeStatus(models.TextChoices):
 
 
 class AuditAction(models.TextChoices):
-    REGION_CREATED = "region_created", gettext_lazy("Plant submitted")
-    REGION_RENAMED = "region_renamed", gettext_lazy("Plant location renamed")
+    REGION_CREATED = "region_created", gettext_lazy("Plant sent for approval")
+    REGION_RENAMED = "region_renamed", gettext_lazy("Plant renamed")
     LOCATION_CHANGE_REQUESTED = (
         "location_change_requested",
         gettext_lazy("Location change requested"),
@@ -52,18 +52,18 @@ class AuditAction(models.TextChoices):
         gettext_lazy("Provider connection validation failed"),
     )
     REGION_APPROVED = "region_approved", gettext_lazy("Plant approved")
-    REGION_REJECTED = "region_rejected", gettext_lazy("Plant rejected")
+    REGION_REJECTED = "region_rejected", gettext_lazy("Plant not approved")
     REGION_SUSPENDED = "region_suspended", gettext_lazy("Plant suspended")
-    REGION_RESUBMITTED = "region_resubmitted", gettext_lazy("Plant resubmitted for review")
-    REGION_TRASHED = "region_trashed", gettext_lazy("Plant location moved to trash")
-    REGION_RESTORED = "region_restored", gettext_lazy("Plant location restored")
+    REGION_RESUBMITTED = "region_resubmitted", gettext_lazy("Plant sent for approval again")
+    REGION_TRASHED = "region_trashed", gettext_lazy("Plant moved to recycle bin")
+    REGION_RESTORED = "region_restored", gettext_lazy("Plant restored")
     COLLECTION_SCHEDULE_UPDATED = (
         "collection_schedule_updated",
-        gettext_lazy("Collection schedule updated"),
+        gettext_lazy("Forecast update times changed"),
     )
     REMINDER_SCHEDULE_UPDATED = (
         "reminder_schedule_updated",
-        gettext_lazy("Email reminders updated"),
+        gettext_lazy("Forecast email updated"),
     )
     HISTORICAL_REFERENCE_IMPORTED = (
         "historical_reference_imported",

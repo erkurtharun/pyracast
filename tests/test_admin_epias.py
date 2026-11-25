@@ -231,8 +231,8 @@ def test_connection_errors_are_safe_and_preserve_input(
         "credentials": "EPİAŞ service credentials are unavailable",
         "rejected": "EPİAŞ service credentials are unavailable",
         "mismatch": "plant ID and EIC did not match",
-        "configuration": "plant configuration is unavailable or changed",
-        "missing": "plant configuration is unavailable or changed",
+        "configuration": "technical details are unavailable or changed",
+        "missing": "technical details are unavailable or changed",
     }
     assert expected[error].encode() in response.content
     assert provider_detail.encode() not in response.content

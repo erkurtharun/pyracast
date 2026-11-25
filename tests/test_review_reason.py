@@ -238,7 +238,7 @@ def test_the_console_refuses_a_rejection_without_a_reason() -> None:
     )
 
     assert refused == ["Enter the reason the customer will read."]
-    assert done == ["Plant rejected."]
+    assert done == ["Plant not approved."]
     assert AuditEvent.objects.get(action=AuditAction.REGION_REJECTED).details == {"reason": REASON}
 
 
@@ -255,7 +255,7 @@ def test_the_console_asks_for_the_reason_and_shows_the_earlier_one_on_a_resubmis
 
     assert 'name="decision_reason" required' in asked
     assert REASON in shown
-    assert "Resubmitted" in shown
+    assert "Sent for approval again by the customer" in shown
 
 
 def test_a_rejected_plant_accepts_edits_of_its_declaration() -> None:
@@ -455,7 +455,7 @@ def test_reject_read_edit_resubmit_and_approve_through_the_real_api() -> None:
     )
     final = site_row(customer, system)
 
-    assert rejected == ["Plant rejected."]
+    assert rejected == ["Plant not approved."]
     assert (read["status"], read["review_reason"]) == (RegionStatus.REJECTED, REASON)
     assert edited.status_code == 200, edited.content
     assert (resubmitted.status_code, resubmitted.json()["status"]) == (200, RegionStatus.PENDING)

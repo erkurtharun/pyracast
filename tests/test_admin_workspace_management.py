@@ -174,7 +174,7 @@ def test_workspace_list_offers_creation_and_shows_each_administrator_state() -> 
     html = client.get("/admin/workspaces/").content.decode()
     assert owner.email in html
     assert html.count("Invitation pending") == 1
-    assert html.count("No administrator") == 1
+    assert html.count("No workspace administrator") == 1
     assert '<td data-label="Plants">1</td>' in html
     assert '<td data-label="Members">2</td>' in html
     assert (
@@ -348,7 +348,7 @@ def test_invitation_form_defaults_to_the_administrator_role_until_one_is_invited
     url = f"/admin/workspaces/{tenant.pk}/invitations/new/"
     page = client.get(url).content.decode()
     assert 'value="admin" id="id_role_1" checked' in page
-    assert "This workspace has no administrator. Invite the administrator first." in page
+    assert "Invite the workspace administrator first." in page
 
     invite_workspace_member(
         operator, tenant.pk, "boss@example.com", role=WorkspaceRole.ADMIN, platform=True
@@ -404,7 +404,7 @@ def test_an_invitation_address_longer_than_an_account_address_is_a_form_error(
     ("failure", "status", "label"),
     [
         (PermanentlyNotSentError("relay refused"), "failed", "Not sent"),
-        (TimeoutError("relay silent"), "uncertain", "Delivery unknown"),
+        (TimeoutError("relay silent"), "uncertain", "Not known whether sent"),
     ],
 )
 def test_an_undelivered_invitation_is_reported_with_its_delivery_state(
@@ -460,7 +460,7 @@ def test_pending_invitations_are_reissued_and_revoked_from_the_workspace_page() 
     replacement.refresh_from_db()
     assert replacement.state_at(timezone.now()) == "revoked"
     html = client.get(base).content.decode()
-    assert "Invitation to guest@example.com revoked." in html
+    assert "Invitation to guest@example.com withdrawn." in html
     assert "No pending invitations." in html
     client.post(f"{base}invitations/{replacement.pk}/reissue/")
     assert (
@@ -509,11 +509,11 @@ def test_member_removal_states_its_consequences_and_keeps_the_administrator() ->
     assert "A.Ş.." not in page
     for consequence in (
         "Their access to this workspace ends at once.",
-        "They no longer receive email reminders for this workspace.",
+        "They no longer receive the forecast emails of this workspace.",
         "Pending invitations to their addresses expire.",
     ):
         assert consequence in page
-    assert ">Remove member</button>" in page
+    assert ">Remove from workspace</button>" in page
     removed = client.post(url)
     assert removed["Location"] == f"/admin/workspaces/{tenant.pk}/#members-title"
     assert not Membership.objects.filter(user=viewer).exists()
@@ -525,8 +525,11 @@ def test_member_removal_states_its_consequences_and_keeps_the_administrator() ->
     administrator = f"/admin/workspaces/{tenant.pk}/members/{owner.pk}/removal/"
     page = client.get(administrator).content.decode()
     assert "<dt>Member</dt><dd>owner@example.com</dd>" in page
-    assert "The administrator cannot be removed." in page
-    assert ">Remove member</button>" not in page
+    assert (
+        "The workspace administrator cannot be removed. Make another member the workspace "
+        "administrator first." in page
+    )
+    assert ">Remove from workspace</button>" not in page
     refused = client.post(administrator)
     assert refused.status_code == 400
     assert "The workspace administrator cannot be removed." in refused.content.decode()
@@ -558,7 +561,7 @@ def test_a_double_submitted_cancellation_reports_it_once(
     caplog.set_level(logging.INFO, logger="pyracast.security")
     caplog.clear()
 
-    assert notices(client, url) == ["Invitation to guest@example.com revoked."]
+    assert notices(client, url) == ["Invitation to guest@example.com withdrawn."]
     assert notices(client, url) == ["The invitation to guest@example.com is already closed."]
     assert security_events(caplog) == ["invitation_revoked"]
 
@@ -657,7 +660,7 @@ def test_workspace_page_orders_its_sections_and_points_to_the_next_step() -> Non
         assert f'aria-labelledby="{section}-title"' in html
     for empty in (
         "No plants yet.",
-        "No members yet. Invite the customer's administrator first.",
+        "No members yet. Invite the workspace administrator first.",
         "No pending invitations. Invite people under Members.",
     ):
         assert empty in html
@@ -665,7 +668,9 @@ def test_workspace_page_orders_its_sections_and_points_to_the_next_step() -> Non
     assert f'href="{base}plants/new/"' in html
     settings = settings_section(html)
     assert f'href="{base}name/">Rename</a>' in settings
-    assert f'href="{base}invitations/new/?role=admin">Invite an administrator</a>' in settings
+    assert (
+        f'href="{base}invitations/new/?role=admin">Invite workspace administrator</a>' in settings
+    )
 
     invite_workspace_member(
         operator, fresh.pk, "boss@example.com", role=WorkspaceRole.ADMIN, platform=True
@@ -675,7 +680,8 @@ def test_workspace_page_orders_its_sections_and_points_to_the_next_step() -> Non
     assert "Invitation pending" in settings_section(invited)
     assert "?role=admin" not in invited
     assert (
-        "No members yet. The administrator appears here after accepting the invitation." in invited
+        "No members yet. The workspace administrator appears here after accepting the invitation."
+        in invited
     )
 
     tenant, owner, viewer = workspace()
@@ -683,8 +689,9 @@ def test_workspace_page_orders_its_sections_and_points_to_the_next_step() -> Non
     base = f"/admin/workspaces/{tenant.pk}/"
     html = client.get(base).content.decode()
     assert "Console site" in html
-    assert "1.5 MW" in html
-    assert "Awaiting approval" in html
+    assert "Panel capacity (MWp)</th>" in html
+    assert '<td data-label="Panel capacity (MWp)">1.5</td>' in html
+    assert "In review" in html
     assert "Not configured" in html
     assert html.count(f'href="/admin/plants/{region.pk}/"') == 1
     assert owner.email in html
@@ -696,7 +703,7 @@ def test_workspace_page_orders_its_sections_and_points_to_the_next_step() -> Non
     assert PRIMARY_ACTION.findall(html) == ["Add plant", "Invite member"]
     settings = settings_section(html)
     assert f'href="{base}name/">Rename</a>' in settings
-    assert f'href="{base}administrator/">Change administrator</a>' in settings
+    assert f'href="{base}administrator/">Change workspace administrator</a>' in settings
 
 
 def test_workspace_console_pages_render_in_turkish_without_mail_or_provider_calls(
@@ -718,9 +725,9 @@ def test_workspace_console_pages_render_in_turkish_without_mail_or_provider_call
         "/admin/workspaces/new/": "Çal\u0131şma alan\u0131 oluştur",
         base: "Santral ekle",
         f"{base}name/": "Çal\u0131şma alan\u0131n\u0131 yeniden adland\u0131r",
-        f"{base}administrator/": "Yöneticiyi değiştir",
+        f"{base}administrator/": "Çal\u0131şma alan\u0131 yöneticisini değiştir",
         f"{base}invitations/new/": "Davet gönder",
-        f"{base}members/{viewer.pk}/removal/": "Üyeyi ç\u0131kar",
+        f"{base}members/{viewer.pk}/removal/": "Çal\u0131şma alan\u0131ndan ç\u0131kar",
         f"{base}plants/new/": "Santral ekle",
         f"/admin/plants/{region.pk}/details/": "Santral bilgilerini düzenle",
     }
@@ -768,7 +775,7 @@ def test_the_console_keeps_the_signed_in_membership_and_explains_self_removal(
         html = response.content.decode()
         assert notice in html
         assert 'class="btn btn--danger"' not in html
-        assert ">Remove member</button>" not in html
+        assert ">Remove from workspace</button>" not in html
         assert "The workspace administrator cannot be removed." not in html
         assert f'href="/admin/workspaces/{tenant.pk}/"' in html
     assert Membership.objects.get(tenant=tenant, user=operator).role == WorkspaceRole.VIEWER
@@ -799,4 +806,4 @@ def test_workspace_tables_leave_keyboard_focus_to_their_interactive_controls() -
         assert f'<div class="table-wrap" role="region" aria-labelledby="{section}-title">' in html
     assert f'href="/admin/plants/{region.pk}/"' in html
     assert ">Resend<" in html
-    assert ">Revoke<" in html
+    assert ">Withdraw<" in html

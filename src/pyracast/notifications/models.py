@@ -22,14 +22,14 @@ class NotificationSettings(models.Model):
         default=5,
         validators=[MinValueValidator(1), MaxValueValidator(MAX_RECIPIENT_LIMIT)],
         help_text=(
-            "Global recipient limit per plant reminder schedule. Lowering it pauses reminders "
-            "at plants exceeding the limit until their recipient lists are revised."
+            "Recipient limit of each plant's forecast email. Lowering it pauses the forecast "
+            "email of plants over the limit until their recipient lists are shortened."
         ),
     )
 
     class Meta:
-        verbose_name = "email reminder settings"
-        verbose_name_plural = "email reminder settings"
+        verbose_name = "forecast email settings"
+        verbose_name_plural = "forecast email settings"
         constraints = (
             models.CheckConstraint(condition=models.Q(pk=1), name="%(class)s_id_chk"),
             models.CheckConstraint(
@@ -176,7 +176,7 @@ class NotificationDeliveryError(models.TextChoices):
     NO_RECIPIENTS = "no_recipients", gettext_lazy("No recipients")
     INVALID_RECIPIENT = "invalid_recipient", gettext_lazy("Invalid recipient")
     RECIPIENT_LIMIT_EXCEEDED = "recipient_limit_exceeded", gettext_lazy("Recipient limit exceeded")
-    DEFINITION_TRASHED = "definition_trashed", gettext_lazy("Definition trashed")
+    DEFINITION_TRASHED = "definition_trashed", gettext_lazy("Plant in recycle bin")
     INTERRUPTED_SEND = "interrupted_send", gettext_lazy("Interrupted during sending")
     INTERRUPTED_CONNECTION = "interrupted_connection", gettext_lazy("Interrupted before sending")
     # Every MailFailure code is a member: send failures store error.code here.
@@ -220,12 +220,12 @@ class PreparedMessageKind(models.TextChoices):
 
 
 class NotificationDeliveryStatus(models.TextChoices):
-    PENDING = "pending", gettext_lazy("Pending")
-    RETRY = "retry", gettext_lazy("Retry")
+    PENDING = "pending", gettext_lazy("Preparing")
+    RETRY = "retry", gettext_lazy("Will retry")
     SENDING = "sending", gettext_lazy("Sending")
     SENT = "sent", gettext_lazy("Sent")
-    FAILED = "failed", gettext_lazy("Failed")
-    UNCERTAIN = "uncertain", gettext_lazy("Uncertain")
+    FAILED = "failed", gettext_lazy("Not sent")
+    UNCERTAIN = "uncertain", gettext_lazy("Not known whether sent")
     SKIPPED = "skipped", gettext_lazy("Skipped")
     CANCELLED = "cancelled", gettext_lazy("Cancelled")
 

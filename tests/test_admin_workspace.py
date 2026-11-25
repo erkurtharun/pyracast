@@ -542,7 +542,7 @@ def test_approved_plant_with_an_unvalidated_key_has_no_unavailable_approval_inst
     response = client.get(reverse("admin:workspace_plant", args=(system.region.pk,)))
     assert response.status_code == 200
     assert response.context["can_approve"] is False
-    assert b"This plant is approved" in response.content
+    assert b'<span class="badge badge--approved">Approved</span>' in response.content
     assert b"to enable approval" not in response.content
     assert b">Approve plant</button>" not in response.content
 
@@ -603,9 +603,9 @@ def test_setup_page_shows_the_values_approval_activates_and_marks_a_waiting_subm
     client, _ = verified_admin()
     url = reverse("admin:workspace_plant", args=(system.region.pk,))
     page = client.get(url).content
-    assert b"130.0 MW" in page
-    assert b"99.0 MW" not in page
-    assert b"Awaiting approval" not in page
+    assert b"<dt>Panel capacity (MWp)</dt><dd>130.0</dd>" in page
+    assert b"99.0" not in page
+    assert b'<span class="badge">In review</span>' not in page
     set_review_status(Region.objects.get(pk=system.region.pk), RegionStatus.PENDING)
     revise_plant(
         system.member,
@@ -615,9 +615,9 @@ def test_setup_page_shows_the_values_approval_activates_and_marks_a_waiting_subm
         PlantParameters(name=plant.name, dc_capacity_mw=77, export_limit_mw=100),
     )
     page = client.get(url).content
-    assert b"77.0 MW" in page
-    assert b"130.0 MW" not in page
-    assert b"Awaiting approval" in page
+    assert b"<dt>Panel capacity (MWp)</dt><dd>77.0</dd>" in page
+    assert b"130.0" not in page
+    assert b'<span class="badge">In review</span>' in page
 
 
 def test_setup_page_says_when_a_plant_declares_no_values_yet() -> None:
@@ -626,8 +626,8 @@ def test_setup_page_says_when_a_plant_declares_no_values_yet() -> None:
     client, _ = verified_admin()
     page = client.get(reverse("admin:workspace_plant", args=(system.region.pk,))).content
     assert b"<h3>Bare plant</h3>" in page
-    assert b"No saved technical configuration or customer submission." in page
-    assert b"Awaiting approval" not in page
+    assert b"No saved technical details or customer submission." in page
+    assert b'<span class="badge">In review</span>' not in page
 
 
 @pytest.mark.parametrize(

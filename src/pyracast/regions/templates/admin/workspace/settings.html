@@ -2,14 +2,13 @@
 {% load i18n %}
 {% block title %}{% translate "Settings" %}{% endblock %}
 {% block heading %}{% translate "Settings" %}{% endblock %}
-{% block lead %}<p class="lead">{% translate "Platform-wide limits." %}</p>{% endblock %}
 {% block content %}
   {% if settings_form.errors %}<section class="notice notice--error" role="alert" tabindex="-1" data-error-summary aria-labelledby="errors-title">
     <h2 id="errors-title">{% translate "Review the recipient limit" %}</h2>
     <p><a href="#reminders-title">{% translate "Check the value and messages below." %}</a></p>
   </section>{% endif %}
   <section class="panel panel--narrow" aria-labelledby="reminders-title">
-    <div class="panel-head"><h2 id="reminders-title">{% translate "Email reminders" %}</h2></div>
+    <div class="panel-head"><h2 id="reminders-title">{% translate "Forecast email" %}</h2></div>
     <dl class="facts facts--compact">
       <div><dt>{% translate "Current limit" %}</dt><dd>{% blocktranslate count counter=recipient_limit %}{{ counter }} recipient per plant{% plural %}{{ counter }} recipients per plant{% endblocktranslate %}</dd></div>
     </dl>
@@ -20,10 +19,10 @@
       <div class="field{% if settings_form.max_recipients.errors %} field--error{% endif %}">
         {{ settings_form.max_recipients.as_field_group }}
       </div>
-      <p class="callout">{% translate "Lowering the limit pauses reminders for plants whose saved recipient list is over it. Their lists are kept, and future reminders resume once the list is shortened or the limit is raised." %}</p>
+      <p class="callout">{% translate "Lowering the limit pauses the forecast email of plants whose saved recipient list is over it. The lists are kept, and the forecast email resumes once a list is shortened or the limit is raised." %}</p>
       {% if newly_paused %}
         <div class="callout callout--warn">
-          <p>{% translate "This limit pauses reminders for these plants:" %}</p>
+          <p>{% translate "This limit pauses the forecast email of these plants:" %}</p>
           <ul class="plain-list">{% for plant in newly_paused %}<li><a href="{{ plant.review_url }}">{{ plant.name }}</a> · {{ plant.workspace }} · {% blocktranslate count counter=plant.recipients %}{{ counter }} recipient{% plural %}{{ counter }} recipients{% endblocktranslate %}</li>{% endfor %}</ul>
           <div class="field field--check{% if settings_form.confirm_pause.errors %} field--error{% endif %}">{{ settings_form.confirm_pause.as_field_group }}</div>
         </div>

@@ -398,7 +398,7 @@ def test_a_waiting_location_request_blocks_a_correction_and_is_linked() -> None:
     url = f"/admin/plants/{system.region.pk}/details/"
     link = f'href="/admin/plants/{system.region.pk}/#location-title"'
     page = client.get(url).content.decode()
-    assert "A location request is waiting for review." in page
+    assert "A location change request is waiting for review." in page
     assert link in page
     refused = client.post(url, details(client, system.region, latitude="40.5"))
     assert refused.status_code == 400

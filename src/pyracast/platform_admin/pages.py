@@ -57,7 +57,10 @@ def settings(request: HttpRequest, *, site: PlatformAdminSite) -> HttpResponse:
         if paused and not form.cleaned_data["confirm_pause"]:
             form.add_error(
                 "confirm_pause",
-                _("This limit pauses reminders for the plants listed above. Confirm to save it."),
+                _(
+                    "This limit pauses the forecast email of the plants listed above. "
+                    "Confirm to save it."
+                ),
             )
             return site.workspace_response(request, "settings", _("Settings"), context, status=400)
         try:

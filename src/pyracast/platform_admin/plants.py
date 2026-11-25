@@ -99,28 +99,28 @@ class SiteForm(forms.Form):
         widget=forms.TextInput(attrs={"autocomplete": "off", "placeholder": "28.9784"}),
     )
     timezone = forms.CharField(
-        label=gettext_lazy("Timezone"),
+        label=gettext_lazy("Time zone"),
         help_text=gettext_lazy("IANA name, for example Europe/Istanbul."),
         widget=forms.TextInput(
             attrs={"list": "timezone-options", "autocomplete": "off", "spellcheck": "false"}
         ),
     )
-    dc_capacity_mw = _number(gettext_lazy("DC capacity (MW)"))
+    dc_capacity_mw = _number(gettext_lazy("Panel capacity (MWp)"))
     inverter_capacity_mw = _number(
-        gettext_lazy("Inverter AC capacity (MW, optional)"), required=False
+        gettext_lazy("Inverter capacity (MW AC, optional)"), required=False
     )
     export_limit_mw = _number(gettext_lazy("Grid export limit (MW, optional)"), required=False)
     measurement_basis = forms.ChoiceField(
-        label=gettext_lazy("Measurement point"), choices=MeasurementBasis.choices
+        label=gettext_lazy("Meter point"), choices=MeasurementBasis.choices
     )
     mounting_type = forms.ChoiceField(
-        label=gettext_lazy("Mounting type"),
+        label=gettext_lazy("Mounting"),
         choices=MountingType.choices,
         widget=forms.Select(attrs={"data-mounting": ""}),
     )
-    surface_tilt_degrees = _number(gettext_lazy("Tilt (°, optional)"), required=False)
+    surface_tilt_degrees = _number(gettext_lazy("Panel tilt (°, optional)"), required=False)
     surface_azimuth_degrees = _number(
-        gettext_lazy("Azimuth (°, optional)"),
+        gettext_lazy("Panel azimuth (°, optional)"),
         required=False,
         help_text=gettext_lazy("Clockwise from north; south is 180."),
     )

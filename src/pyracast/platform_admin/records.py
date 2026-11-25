@@ -86,7 +86,7 @@ def region_filter(path: str) -> type[admin.SimpleListFilter]:
     location the link names, and a value naming no live location filters nothing."""
 
     class RegionFilter(admin.SimpleListFilter):
-        title = gettext_lazy("plant location")
+        title = gettext_lazy("plant")
         parameter_name = "region"
 
         def _region(self) -> tuple[int, str] | None:
@@ -114,7 +114,7 @@ def region_records(region_id: int) -> list[tuple[StrOrPromise, str]]:
             (gettext_lazy("Plant events"), "plants_plantevent"),
             (gettext_lazy("Collection jobs"), "forecasts_collectionjob"),
             (gettext_lazy("Request attempts"), "forecasts_requestattempt"),
-            (gettext_lazy("Email deliveries"), "notifications_notificationdelivery"),
+            (gettext_lazy("Forecast emails"), "notifications_notificationdelivery"),
             (gettext_lazy("Provider bindings"), "connections_sitebinding"),
         )
     ]
