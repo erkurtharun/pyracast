@@ -83,8 +83,8 @@ sequenceDiagram
 | Id of the plant address not in the list (unknown, foreign, trashed) | Notice `siteUnavailable` and an "All plants" button |
 | Site without plant, viewer | Notice `plantUnavailable`; with `edit_blocked_reason`, that reason as for an administrator |
 | Region not approved | Tag and review notice in the shell (`ReviewNotice`); tabs stay usable. An approved plant whose connection is not current repeats the card's attention sentence there |
-| Code of an on-demand section cannot load | Plant route error (`web/src/app/app/w/[tenantId]/plants/error.tsx`, `RouteError`): "Try again" reloads the page, since a failed chunk stays failed for the document (`recovery`), beside "Reload page" |
-| Any other render failure under `/app/` | `web/src/app/app/error.tsx` (`RouteError` with "Try again", "Reload page" and a link "Go to the start screen" to `/app/`); an unknown `/app/` address shows `web/src/app/app/not-found.tsx` with a link to `/app/` |
+| Code of an on-demand section cannot load, or another render failure under the plant routes | Plant route error (`web/src/app/app/w/[tenantId]/plants/error.tsx`, `RouteError`) beside "Reload page": "Try again" reloads the page for a section that could not load, since a failed chunk stays failed for the document (`recovery`), and renders again otherwise |
+| Any other render failure under `/app/`, outside the plant routes | `web/src/app/app/error.tsx` (`RouteError` with "Try again", "Reload page" and a link "Go to the start screen" to `/app/`); an unknown `/app/` address shows `web/src/app/app/not-found.tsx` with a link to `/app/` |
 
 ## Rules and invariants
 

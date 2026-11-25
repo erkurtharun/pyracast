@@ -46,7 +46,7 @@ sequenceDiagram
         W-->>U: "admin gets Members and badge pending + unread, viewer gets read-only label and badge unread"
     end
     U->>W: "choose another workspace"
-    W->>W: "useNavigate: same screen where allowed, else the plant overview; a document load while input is unsaved"
+    W->>W: "useNavigate: same screen where allowed, else the plant overview; a document load while input is unsaved or once the document asked before unloading"
 ```
 
 ## Data
@@ -85,7 +85,7 @@ sequenceDiagram
 - Any authenticated request, including this poll, refreshes `last_activity_at` at most once a minute (`SessionLifetime`), so an open tab never idles out; the 12-hour absolute limit still applies. `docs/ARCHITECTURE.md` states this.
 - At `/app/w/` the workspace is the remembered one (written to `localStorage` whenever a workspace address resolves) or the lowest id across all pages. The selector keeps the Inbox, and Members or Recycle bin when the target role is administrator, and otherwise opens the plant overview. Components keyed by tenant id (`WorkspaceMembers` in `MembersPage`, `RecycleBin`, and `OperationalInbox` by tenant id and role) remount and drop the previous tenant's data.
 - The shell shows the list it finds cached from the entry at `/app/` without reading it again inside the 2 s `staleTime`; past it the shell reads again and shows the cached rows meanwhile.
-- Every navigation the person starts goes through `useNavigate` (flow `frontend-data-layer`): a router change, or a document load while unsaved input is registered. An automatic redirect yields to it: the shell runs its sidebar and selector navigations in a transition (`useNavigating`), and `Replace` in `features/workspace/redirect.tsx` (the `WorkspaceIndex` redirect and `AdminOnly`) replaces the address only while none is pending, since a later replace would drop the pending push. Without such a navigation the redirect happens as soon as the workspace rows allow it.
+- The shell's navigations go through `useNavigate` (flow `frontend-data-layer`): a router change, or a document load while unsaved input is registered or once the document asked before unloading. An automatic redirect yields to it: the shell runs its sidebar and selector navigations in a transition (`useNavigating`), and `Replace` in `features/workspace/redirect.tsx` (the `WorkspaceIndex` redirect and `AdminOnly`) replaces the address only while none is pending, since a later replace would drop the pending push. Without such a navigation the redirect happens as soon as the workspace rows allow it.
 
 ## Tests
 

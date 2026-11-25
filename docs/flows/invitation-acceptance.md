@@ -80,7 +80,7 @@ sequenceDiagram
 | Preview of an unusable or malformed token | 400 `invitation_unavailable`; a failed preview still lets the invitee accept |
 | Preview whose answer was lost | Shown as a failed read with Try again (`ReadFailed`), which reads it again |
 | `sessionStorage` unavailable | Token lives only in the current page load; lost on reload |
-| The signed-in session ends (sign-out here or elsewhere, expiry) while a token is stored | The fresh document clears the token, except after "Use another account"; leaving a pending sign-in stage keeps it |
+| The signed-in session ends (sign-out here or elsewhere, expiry) while a token is stored | The fresh document clears the token when its first answer shows another owner than the signed-in one this tab recorded (`sessionStorage` `pyracast.shownOwner`), except after "Use another account"; without that record, and after leaving a pending sign-in stage, it stays |
 
 ## Rules and invariants
 

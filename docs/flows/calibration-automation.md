@@ -103,7 +103,7 @@ sequenceDiagram
 | Unknown field, missing or unparseable `enabled` | 400 `invalid_request` (checked after the 403 and 404 cases) |
 | Enable with no configuration; region not approved, binding or account not current | 400 `configuration_unavailable`; 400 `configuration_changed` (disabling needs neither) |
 | Lock wait over 5 s (`lock_timeout`) | 503 `busy`, `Retry-After: 1` |
-| PATCH fails in the UI; the first status GET fails; a later poll fails | Error `Notice`, the checkbox keeps the last server state; the error with Retry (`ReadFailed`) without checkbox and status; a refresh-failed alert with Retry (`RefreshFailed`) above the unchanged checkbox and status |
+| PATCH fails in the UI; the first status GET fails; a later poll fails | Error `Notice`, the checkbox keeps the last server state; the error with Retry (`ReadFailed`) without checkbox and status; a refresh-failed alert with Retry (`RefreshFailed`) above the unchanged checkbox and status, except a 403 or 404, which replaces them with the refusal and Retry (`ReadFailed`) |
 | Enabler inactive, demoted or removed | `calibration_automatic_skipped` `authorization_revoked`: the scan records it once per pause, a promotion once per run; panel notice "Authorization unavailable. Calibration is paused."; slot still advances |
 | Run superseded or failed at claim, rejected or insufficient fit, fit failed on the last attempt | Skip `configuration_changed` or `candidate_<status>` |
 | Configuration, production source, outage history or incumbent changed, or the run is not an activatable held-out fit | Skip whose reason is the `activation_blocker` code (`configuration_changed`, `production_source_changed`, `outage_history_changed`, `incumbent_changed`, `calibration_not_activatable`) |

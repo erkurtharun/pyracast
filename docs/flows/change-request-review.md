@@ -60,7 +60,7 @@ sequenceDiagram
     Op->>DB: "link applied ids, status approved, reviewed_by, closed_at"
     V->>DB: "summary built in the same transaction, then COMMIT"
     V-->>UI: "200 summary, the UI then refetches detail, list and tenant counters"
-    opt "an answered approve refusal other than 429"
+    opt "an approve failure other than a lost answer or 429"
         UI-->>A: "error plus contextChanged notice; Approve held for the fingerprint it was sent with until Refresh details loads a new detail"
     end
     opt "answer lost"
@@ -120,7 +120,7 @@ Rejection takes the Tenant, Region, Plant and ChangeRequest locks and the same s
 - `reviewed_context` (version 1) freezes the decision-time view; approved and rejected production details are rendered from it, not from live data (pending and withdrawn ones are computed live).
 - Approval runs as the administrator: new observations and incident revisions record the admin, while the request keeps the proposer. Production is applied with origin `change_request` and the approval counts as the plausibility confirmation. Unchanged production values reuse the existing head as `applied_observation`. When the deciding admin is also the proposer, `outcome_seen_at` is set at close, so no unread badge appears.
 - Visibility, pending, unread, authorship and former-member rules live in `change_requests.policy`, shared with the workspace counters. Decision answers are the request summary, built in the decision's transaction.
-- Approval hold: an answered, non-429 refusal holds Approve for the review fingerprint it was sent with; Refresh details releases only the hold it saw when it started. An unconfirmed decision sets no hold and reads the detail again by a read started after it; its notice stays through Refresh details and shows the repeatable text while the same decision with the same fingerprint (or reason) can be sent. A rejection's notice and failure are told once, by its form while it is shown and by the detail otherwise, and the form shown again keeps the reason as typed.
+- Approval hold: every approval failure other than a lost answer (`UnconfirmedError`) and a 429 holds Approve for the review fingerprint it was sent with, an answered refusal and a request not sent during a sign-out (`NotSentError`) alike; Refresh details releases only the hold it saw when it started. An unconfirmed decision sets no hold and reads the detail again by a read started after it; its notice stays through Refresh details and shows the repeatable text while the same decision with the same fingerprint (or reason) can be sent. A rejection's notice and failure are told once, by its form while it is shown and by the detail otherwise, and the form shown again keeps the reason as typed.
 - The detail never takes row locks; its conflict check can be stale by the time Approve is pressed, which the locked revalidation and fingerprint check catch. Submission times show as device times with their offset; request kinds, statuses, qualities and outage kinds come from the vocabulary; a failed decision shows a localized message.
 
 ## Tests
