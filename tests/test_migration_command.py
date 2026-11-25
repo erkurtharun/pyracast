@@ -108,6 +108,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0010_delivery_preparation_metadata",
             "0011_recipient_roles",
             "0012_recipient_limit_ceiling",
+            "0013_forecast_email_names",
         ),
         "plants": (
             "0002_plant_event_action_and_calibration_error_checks",
@@ -117,6 +118,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0006_submission_updated_at",
             "0007_plant_parameters_revision",
             "0008_calibration_run_available_at",
+            "0009_meter_point_names",
         ),
         "regions": (
             "0002_audit_event_details",
@@ -128,6 +130,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0008_region_purge_warning_sent_at",
             "0009_audit_connection_validation_failed",
             "0010_region_created_audit_and_purge_findings",
+            "0011_plant_review_names",
         ),
     }
     expected = {app: names | set(forward.get(app, ())) for app, names in baseline.items()}

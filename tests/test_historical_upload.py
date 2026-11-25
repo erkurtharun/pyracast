@@ -426,7 +426,7 @@ def test_authorization_confirmation_current_configuration_and_binding_are_rechec
     with pytest.raises(PermissionDenied):
         import_historical_upload(system.member, *args[1:], settings_confirmed=True)
     plant = Plant.objects.create(region=system.region, name="Configured later")
-    with pytest.raises(ValidationError, match="configuration changed"):
+    with pytest.raises(ValidationError, match="technical details changed"):
         upload(system, expected_configuration_ids=())
     assert upload(system, expected_configuration_ids=((plant.pk, None),))
     SiteBinding.objects.filter(pk=system.binding.pk).update(

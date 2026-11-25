@@ -39,7 +39,7 @@ test("an MFA administrator reviews plants and operations on desktop and mobile u
 
     await page
         .getByRole("link", {
-            name: "Review emails · Email outcomes needing review",
+            name: "Review forecast emails · Forecast email outcomes needing review",
             exact: true,
         })
         .click();
