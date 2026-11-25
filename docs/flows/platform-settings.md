@@ -50,7 +50,7 @@ sequenceDiagram
             end
         end
     end
-    R->>D: "later: tenant lock, row FOR SHARE, region, delivery, then over-limit plants get no slot or end skipped"
+    R->>D: "later: tenant lock, row FOR SHARE, region, delivery: a due slot over the limit is recorded as skipped, and a queued delivery is skipped when its recheck before claim or transmit finds its list over the limit"
 ```
 
 ## Data
