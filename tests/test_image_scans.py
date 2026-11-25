@@ -10,10 +10,8 @@ import pytest
 from deploy import check_image_scans
 from deploy.check_image_scans import SERVICES, ScanException, load_exceptions, review_findings
 from deploy.check_image_scans import check_image_scans as check
-from tests.support.workflows import ci_jobs, step, step_index
 
 ROOT = Path(__file__).resolve().parents[1]
-FIXED_LIBZSTD1 = "1.5.7+dfsg-1+deb13u1"
 TODAY = date(2026, 11, 21)
 FINDING = {
     "VulnerabilityID": "CVE-2026-116587",
@@ -112,86 +110,26 @@ def test_trivy_hides_no_finding_and_the_checker_reads_exceptions_from_the_mounte
 
 
 @pytest.mark.parametrize(
-    ("dockerfile", "stage"), [("Dockerfile", "runtime-python"), ("web/Dockerfile", "runtime-node")]
+    ("dockerfile", "stage", "libraries"),
+    [
+        (
+            "Dockerfile",
+            "runtime-python",
+            {"libbz2.so.1.0", "liblzma.so.5", "libffi.so.8", "libmpdec.so.4"},
+        ),
+        ("web/Dockerfile", "runtime-node", {"libatomic.so.1"}),
+    ],
 )
-def test_the_runtime_image_lays_debians_fixed_libzstd1_over_the_base(
-    dockerfile: str, stage: str
+def test_the_runtime_image_adds_only_the_libraries_the_base_lacks(
+    dockerfile: str, stage: str, libraries: set[str]
 ) -> None:
     text = (ROOT / dockerfile).read_text(encoding="utf-8")
     (body,) = re.findall(rf"^FROM \S+ AS {stage}\n(.*?)(?=^FROM |\Z)", text, re.M | re.S)
-    commands = [
-        "apt-get upgrade",
-        "zstd_version=$(dpkg-query --show --showformat='${Version}' libzstd1)",
-        f'    && dpkg --compare-versions "$zstd_version" ge {FIXED_LIBZSTD1} \\\n    && cd /tmp',
-        'apt-get download "libzstd1=$zstd_version"',
-        "dpkg-deb --extract libzstd1_*_amd64.deb /runtime",
-        "dpkg-deb --info libzstd1_*_amd64.deb md5sums"
-        " > /runtime/var/lib/dpkg/status.d/libzstd1.md5sums",
-        "dpkg-query --status libzstd1 > /runtime/var/lib/dpkg/status.d/libzstd1",
-    ]
-    positions = [body.index(command) for command in commands]
 
-    assert body.count("RUN ") == 1
-    assert body.count("dpkg --compare-versions") == 1
-    assert positions == sorted(positions)
+    assert set(re.findall(r"/usr/lib/x86_64-linux-gnu/(lib[^ /]+)", body)) == libraries
+    assert "apt-get download" not in body
+    assert "dpkg-deb" not in body
     assert f"COPY --from={stage} /runtime/ /" in text
-
-
-def test_ci_reads_the_fixed_libzstd1_from_the_built_backend_and_web_images_before_the_scan() -> (
-    None
-):
-    deployment = ci_jobs()["deployment"]
-    read = step(deployment, "Read Debian's fixed libzstd1 from the backend and web images")
-    position = deployment["steps"].index(read)
-
-    assert "for image in pyracast-backend:ci pyracast-web:ci; do" in read["run"]
-    assert f'dpkg --compare-versions "$version" ge {FIXED_LIBZSTD1}' in read["run"]
-    assert 'sha256sum "$files/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.7"' in read["run"]
-    assert '"${digests[0]}" == "${digests[1]}"' in read["run"]
-    assert "'libzstd.so.1 libzstd.so.1.5.7'" in read["run"]
-    assert step_index(deployment, "deploy/oci-images.sh load") < position
-    assert position < step_index(deployment, "deploy/scan-images.sh")
-
-
-def test_ci_requires_the_loaded_name_to_link_to_the_versioned_library_file() -> None:
-    read = step(
-        ci_jobs()["deployment"], "Read Debian's fixed libzstd1 from the backend and web images"
-    )
-
-    assert (
-        "[[ -L libzstd.so.1 && $(readlink libzstd.so.1) == libzstd.so.1.5.7"
-        " && -f libzstd.so.1.5.7 && ! -L libzstd.so.1.5.7 ]]"
-    ) in read["run"]
-
-
-def test_ci_compares_each_image_library_with_debians_package_of_the_reported_version() -> None:
-    read = step(
-        ci_jobs()["deployment"], "Read Debian's fixed libzstd1 from the backend and web images"
-    )
-    base = re.search(
-        r"^FROM ([^ ]*-trixie@sha256:[0-9a-f]{64}) AS base$",
-        (ROOT / "Dockerfile").read_text(encoding="utf-8"),
-        re.M,
-    )
-    commands = [
-        "debian_image=$(sed -n 's/^FROM \\([^ ]*-trixie@sha256:[0-9a-f]\\{64\\}\\) AS base$/\\1/p'"
-        " Dockerfile)",
-        '[[ "$debian_image" == python:* ]]',
-        'docker run --rm --platform linux/amd64 --env version="$version"'
-        ' --volume "$debian:/debian" "$debian_image"',
-        'apt-get update -qq && cd /tmp && apt-get download "libzstd1=$version"'
-        " && dpkg-deb --extract libzstd1_*_amd64.deb /debian",
-        'digest=$(sha256sum "$files/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.7"',
-        'debian_digest=$(sha256sum "$debian/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.7"',
-        '[[ "$digest" =~ ^[0-9a-f]{64}$ && "$digest" == "$debian_digest" ]]',
-        'digests+=("$digest")',
-    ]
-    positions = [read["run"].index(command) for command in commands]
-
-    assert base is not None
-    assert base[1].startswith("python:")
-    assert positions == sorted(positions)
-    assert read["run"].index("for image in") < positions[2]
 
 
 def test_complete_clean_reports_have_no_findings(reports: Path) -> None:
