@@ -3,7 +3,7 @@
         "title": "Pyracast açılamadı",
         "retry": "Tekrar dene",
         "loading": "Yükleniyor…",
-        "savedFiguresUnchecked": "Bu cihazda kayıtlı rakamlar kontrol edilemedi. Tekrar deneyin."
+        "savedFiguresUnchecked": "Bu cihazda saklanan değerler kontrol edilemedi. Tekrar deneyin."
     },
     "AppError": {
         "title": "Bu sayfa görüntülenemedi",

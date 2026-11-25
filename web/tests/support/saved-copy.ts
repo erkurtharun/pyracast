@@ -85,14 +85,51 @@ export const heldDays = [
     },
 ];
 
+export type RemovalMark = { removal: string; user: number; session: string };
+
 export type Copy = {
     holder?: Holder;
     plants?: unknown[];
     days?: unknown[];
     version?: number;
     flagged?: boolean;
-    mark?: string;
+    marks?: RemovalMark[];
 };
+
+const markPrefix = "pyracast.savedRemoval.";
+
+export function writeMarks(page: Page, marks: RemovalMark[]) {
+    return page.evaluate(
+        ({ marks, prefix }) => {
+            for (const mark of marks)
+                window.localStorage.setItem(
+                    prefix + mark.removal,
+                    JSON.stringify(mark),
+                );
+        },
+        { marks, prefix: markPrefix },
+    );
+}
+
+// Every outstanding removal, in the order of its token.
+export function removalMarks(page: Page): Promise<unknown[]> {
+    return page.evaluate((prefix) => {
+        const keys = Array.from(
+            { length: window.localStorage.length },
+            (_, index) => window.localStorage.key(index) ?? "",
+        )
+            .filter((key) => key.startsWith(prefix))
+            .sort();
+        return keys.map((key) => {
+            const value = window.localStorage.getItem(key) ?? "";
+            try {
+                return JSON.parse(value) as unknown;
+            } catch {
+                return value;
+            }
+        });
+    }, markPrefix);
+}
 
 export async function onBlankPage(page: Page) {
     await page.route(`**${blank}`, (route) =>
@@ -109,16 +146,15 @@ export async function seedCopy(
         days = heldDays,
         version = 1,
         flagged = true,
-        mark,
+        marks = [],
     }: Copy = {},
 ) {
     await onBlankPage(page);
+    await writeMarks(page, marks);
     await page.evaluate(
-        ({ holder, plants, days, version, flagged, mark }) =>
+        ({ holder, plants, days, version, flagged }) =>
             new Promise<void>((resolve, reject) => {
                 if (flagged) window.localStorage.setItem("pyracast.saved", "1");
-                if (mark)
-                    window.localStorage.setItem("pyracast.savedRemoval", mark);
                 const request = indexedDB.open("pyracast-saved", version);
                 request.onupgradeneeded = () => {
                     const database = request.result;
@@ -153,7 +189,7 @@ export async function seedCopy(
                         );
                 };
             }),
-        { holder, plants, days, version, flagged, mark },
+        { holder, plants, days, version, flagged },
     );
 }
 
@@ -163,19 +199,19 @@ export type ReadCopy = {
     plants: number;
     days: number;
     flag: string | null;
-    mark: string | null;
+    marks: unknown[];
 };
 
 // Reads without creating: a database that is gone stays gone, and one that exists must open.
-export function readCopy(page: Page): Promise<ReadCopy> {
-    return page.evaluate(async () => {
+export async function readCopy(page: Page): Promise<ReadCopy> {
+    const marks = await removalMarks(page);
+    return page.evaluate(async (marks) => {
         const flag = window.localStorage.getItem("pyracast.saved");
-        const mark = window.localStorage.getItem("pyracast.savedRemoval");
         const listed = async () =>
             (await indexedDB.databases()).some(
                 (database) => database.name === "pyracast-saved",
             );
-        const absent = { plants: 0, days: 0, flag, mark };
+        const absent = { plants: 0, days: 0, flag, marks };
         if (!(await listed())) return absent;
         return new Promise<ReadCopy>((resolve, reject) => {
             const request = indexedDB.open("pyracast-saved");
@@ -210,14 +246,14 @@ export function readCopy(page: Page): Promise<ReadCopy> {
                         plants: plants.result,
                         days: days.result,
                         flag,
-                        mark,
+                        marks,
                     });
                 };
                 transaction.onabort = () =>
                     reject(new Error("The copy could not be read or written."));
             };
         });
-    });
+    }, marks);
 }
 
 // Another page holds a write transaction until `release` commits it, with the holder given; later transactions queue behind it.
@@ -337,8 +373,8 @@ export async function countWrites(page: Page) {
 export function markOf(
     session: string,
     removal = "fedcba9876543210fedcba9876543210",
-) {
-    return JSON.stringify({ removal, user: 1, session });
+): RemovalMark {
+    return { removal, user: 1, session };
 }
 
 // Once armed, the next write of a holder keeps its transaction open until `release` or an abort.
@@ -466,27 +502,193 @@ export async function loadStore(page: Page, savedFigures: boolean) {
 
 type LoadedStore = Record<
     "start" | "copyState",
-    (...operands: unknown[]) => Promise<string>
+    (...operands: unknown[]) => Promise<unknown>
 >;
 
-// Calls a loaded store operation under a two-second deadline; the returned function reads its answer.
+// Calls a loaded store operation under a two-second deadline; the returned function reads its answer and the deletions it reported.
 export async function callStore(page: Page, operation: keyof LoadedStore) {
     await page.evaluate((name) => {
         const store = Reflect.get(window, "savedStore") as LoadedStore;
         const { deadline } = Reflect.get(window, "savedDeadline") as {
             deadline: (limitMs: number) => unknown;
         };
-        const none = { outstanding: () => null, acknowledge: () => {} };
+        const none = { outstanding: () => [], acknowledge: () => {} };
         const limit = deadline(2_000);
+        const deleted = () => {
+            const count = Reflect.get(window, "storeDeletions") as
+                number | undefined;
+            Object.assign(window, { storeDeletions: (count ?? 0) + 1 });
+        };
         Object.assign(window, {
             storeAnswer:
                 name === "start"
-                    ? store.start(none, limit)
+                    ? store.start(none, limit, deleted)
                     : store[name](limit),
         });
     }, operation);
     return () =>
-        page.evaluate(
-            () => Reflect.get(window, "storeAnswer") as Promise<string>,
-        );
+        page.evaluate(async () => ({
+            answer: await (Reflect.get(
+                window,
+                "storeAnswer",
+            ) as Promise<unknown>),
+            deleted:
+                (Reflect.get(window, "storeDeletions") as number | undefined) ??
+                0,
+        }));
+}
+
+// Calls a write of the loaded store as the given owner, with the deadline as its last operand.
+export function writeStore(
+    page: Page,
+    operation: string,
+    ...operands: unknown[]
+): Promise<unknown> {
+    return page.evaluate(
+        ({ operation, operands }) => {
+            const store = Reflect.get(window, "savedStore") as Record<
+                string,
+                (...values: unknown[]) => Promise<unknown>
+            >;
+            const { deadline } = Reflect.get(window, "savedDeadline") as {
+                deadline: (limitMs: number) => unknown;
+            };
+            const call = store[operation];
+            if (!call) throw new Error(`The store has no ${operation}.`);
+            return call(...operands, deadline(2_000));
+        },
+        { operation, operands },
+    );
+}
+
+export const plantKey = { tenant: 1, site: 11, plant: 21 };
+
+export function heldPlantOf(fields: Record<string, unknown> = {}) {
+    return { ...heldPlant, ...plantKey, ...fields };
+}
+
+export type HeldDay = {
+    tenant: number;
+    site: number;
+    plant: number;
+    kind: string;
+    date: string;
+    total_mwh: number | null;
+};
+
+// The held plants and days as stored, in key order.
+export function readHeld(
+    page: Page,
+): Promise<{ plants: Record<string, unknown>[]; days: HeldDay[] }> {
+    return page.evaluate(
+        () =>
+            new Promise((resolve, reject) => {
+                const request = indexedDB.open("pyracast-saved");
+                request.onupgradeneeded = () => request.transaction?.abort();
+                request.onerror = () => resolve({ plants: [], days: [] });
+                request.onsuccess = () => {
+                    const database = request.result;
+                    database.onversionchange = () => database.close();
+                    const transaction = database.transaction(
+                        ["plants", "days"],
+                        "readonly",
+                    );
+                    const plants = transaction.objectStore("plants").getAll();
+                    const days = transaction.objectStore("days").getAll();
+                    transaction.oncomplete = () => {
+                        database.close();
+                        resolve({
+                            plants: plants.result as Record<string, unknown>[],
+                            days: days.result as HeldDay[],
+                        });
+                    };
+                    transaction.onabort = () =>
+                        reject(new Error("The copy could not be read."));
+                };
+            }),
+    );
+}
+
+export function daysAnswer(total = 1.5, date = "2026-11-11") {
+    return {
+        plant_id: plantKey.plant,
+        name: "East array",
+        today: "2026-11-10",
+        forecast: [
+            {
+                date,
+                timezone: "Europe/Istanbul",
+                source_kind: "forecast",
+                freshness: "fresh",
+                stale_reason: null,
+                unavailable_reason: null,
+                collected_at: "2026-11-10T06:00:00+03:00",
+                total_mwh: total,
+                partial: false,
+                affected: null,
+                rows: [
+                    {
+                        start: `${date}T12:00:00+03:00`,
+                        end: `${date}T13:00:00+03:00`,
+                        mwh: total,
+                        affected_mwh: null,
+                        sources: null,
+                    },
+                ],
+            },
+        ],
+        production: [
+            {
+                date: "2026-11-09",
+                timezone: "Europe/Istanbul",
+                total_mwh: 1.2,
+                complete: false,
+                rows: [
+                    {
+                        start: "2026-11-09T12:00:00+03:00",
+                        end: "2026-11-09T13:00:00+03:00",
+                        mwh: 1.2,
+                        quality: "valid",
+                        source: "meter",
+                        provisional: false,
+                    },
+                ],
+            },
+        ],
+    };
+}
+
+// The page answers as if the worker of the application were registered for `/app/`.
+export async function supplyRegistration(page: Page) {
+    await page.addInitScript(() => {
+        ServiceWorkerContainer.prototype.getRegistration = function (
+            this: ServiceWorkerContainer,
+            scope?: string,
+        ) {
+            return Promise.resolve(
+                scope === "/app/"
+                    ? ({
+                          scope: `${location.origin}/app/`,
+                      } as ServiceWorkerRegistration)
+                    : undefined,
+            );
+        };
+    });
+}
+
+// The page reports itself hidden while `hide` is in force, and announces each change.
+export async function controlVisibility(page: Page) {
+    await page.addInitScript(() => {
+        Object.defineProperty(document, "visibilityState", {
+            configurable: true,
+            get: () =>
+                Reflect.get(window, "pageHidden") ? "hidden" : "visible",
+        });
+    });
+    const set = (hidden: boolean) =>
+        page.evaluate((value) => {
+            Object.assign(window, { pageHidden: value });
+            document.dispatchEvent(new Event("visibilitychange"));
+        }, hidden);
+    return { hide: () => set(true), show: () => set(false) };
 }

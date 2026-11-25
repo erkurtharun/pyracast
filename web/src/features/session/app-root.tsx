@@ -27,6 +27,7 @@ import {
     sessionState,
     signOut,
     startSavedCopy,
+    subscribeSavedFigures,
     useHandoffFailed,
     useSessionClock,
     useSessionState,
@@ -39,6 +40,7 @@ import { useErrorMessage } from "@/ui/form";
 import { LiveRegion } from "@/ui/live-region";
 import { clearWorkspaceInvitation } from "@/features/workspace/workspace-invitation";
 import { openProviderLanding } from "@/features/auth/provider-return";
+import { useSavedFiguresRefresh } from "@/features/saved/saved-figures";
 import { useLanguageHandoff } from "./language-handoff";
 import { SessionLanguage, useSessionLanguage } from "./session-language";
 import { Notice } from "@/ui/ui";
@@ -71,6 +73,11 @@ export function AppRoot({ children }: { children: ReactNode }) {
         clear,
     );
     const unconfirmed = useSessionUnconfirmed();
+    useSavedFiguresRefresh(
+        client,
+        session,
+        ready && current && !unchecked && !ending && leaving.status === "idle",
+    );
     return (
         <QueryClientProvider client={client}>
             <SessionLanguage value={language}>
@@ -342,15 +349,20 @@ function Screens({
     );
 }
 
+// Follows a copy turned on or removed in another window.
 function useSavedFiguresShown() {
     const [shown, setShown] = useState(false);
     useEffect(() => {
         let active = true;
-        void savedCopyState().then((state) => {
-            if (active) setShown(state === "on");
-        });
+        const read = () =>
+            void savedCopyState().then(({ state }) => {
+                if (active) setShown(state === "on");
+            });
+        read();
+        const unsubscribe = subscribeSavedFigures(read);
         return () => {
             active = false;
+            unsubscribe();
         };
     }, []);
     return shown;

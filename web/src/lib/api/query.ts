@@ -52,7 +52,7 @@ export const QueryOwner = createContext<string | undefined>(undefined);
 type Page<T> = { results: T[]; next: string | null };
 type Fetched<T> = { value: T; requests: number; sentAt?: number };
 type Refusal = { status: number; code: ErrorCode | null; message: string };
-type Stored<T> = Fetched<T> | { refusal: Refusal };
+export type Stored<T> = Fetched<T> | { refusal: Refusal };
 
 export async function fetchList<T>(url: string): Promise<Fetched<Page<T>>> {
     const first = await send<Page<T>>({ method: "GET", url });
@@ -247,6 +247,25 @@ export function useApiList<P extends ListPath>(
         polling,
         (url) => fetchList(url) as Promise<Fetched<Answer<P, "get">>>,
     );
+}
+
+// The answer a screen's list read stored less than a live poll ago is used as it is.
+export function readListOnce<P extends ListPath>(
+    client: QueryClient,
+    owner: string,
+    path: P,
+    options: RequestOptions<P, "get">,
+) {
+    return client.fetchQuery<Stored<Answer<P, "get">>>({
+        queryKey: keys.request(owner, path, options),
+        queryFn: answered(() =>
+            withSentAt(
+                (url) => fetchList(url) as Promise<Fetched<Answer<P, "get">>>,
+                buildUrl(path, options),
+            ),
+        ),
+        staleTime: cadence.live,
+    });
 }
 
 export async function readAgain(

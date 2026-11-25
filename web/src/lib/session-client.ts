@@ -13,7 +13,7 @@ import { ApiError, NotSentError } from "./api/errors";
 import { authRequest, authUrl, type AuthResult } from "./auth-api";
 import { browserErrors } from "@/i18n/browser";
 import { deadline, type Deadline } from "./saved/deadline";
-import type { CopyState, Removal } from "./saved/store";
+import type { CopyState, Departure, Removal } from "./saved/store";
 
 export type Session = components["schemas"]["SessionOutput"];
 export type SessionUser = components["schemas"]["SessionUserOutput"];
@@ -41,6 +41,8 @@ const clockTickMs = 30_000;
 // The last session tag any tab of this browser observed. A write is an observation of a session
 // read, never a new value, so tabs that read crossing answers converge.
 export const observedTagKey = "pyracast.sessionTag";
+// Changes at every change of the observed tag, also one that returns to an earlier tag.
+const observedRevisionKey = "pyracast.sessionRevision";
 // The signed-in owner this tab's document last showed, and how a sign-out begun here treats the
 // pending invitation. The next document compares its first answer with it.
 const shownOwnerKey = "pyracast.shownOwner";
@@ -51,10 +53,12 @@ type ShownOwner = {
 type PreviousEnd = { notice?: "ended" | "changed"; clearInvitation: boolean };
 // The store of saved figures loads only where this flag is set or cannot be read, or a removal is outstanding.
 const savedFlagKey = "pyracast.saved";
-// An outstanding removal names its token and the departing user and session; only that removal acknowledges it.
-const savedRemovalKey = "pyracast.savedRemoval";
+// One key per outstanding removal, named by its token and holding the departing user and session.
+const savedRemovalPrefix = "pyracast.savedRemoval.";
+// Every operation on the copy holds this lock, so windows of the browser never interleave them.
+const savedLock = "pyracast.saved-copy";
 const savedLimitMs = 2_000;
-type SavedStore = typeof import("./saved/store");
+export type SavedStore = typeof import("./saved/store");
 type Handoff = "handed" | "superseded" | "unhanded";
 
 let state: SessionState = {
@@ -66,7 +70,7 @@ let confirmation: Confirmation = { sentAt: 0, covered: false };
 let documentOwner: string | null | undefined;
 // What a session read's answer may have missed: this tab's session changes, another tab's
 // observation and every read started or session adopted here.
-type Mark = { epoch: number; observed: string | null; generation: number };
+type Mark = { epoch: number; observed: string; generation: number };
 type Flight = Mark & { promise: Promise<Session> };
 
 let flight: Flight | undefined;
@@ -248,10 +252,15 @@ function observedTag(): string | null {
     }
 }
 
+function observedRevision() {
+    return readStored(observedRevisionKey) ?? null;
+}
+
 function observe(tag: string) {
     try {
-        if (window.localStorage.getItem(observedTagKey) !== tag)
-            window.localStorage.setItem(observedTagKey, tag);
+        if (window.localStorage.getItem(observedTagKey) === tag) return;
+        window.localStorage.setItem(observedRevisionKey, randomHex());
+        window.localStorage.setItem(observedTagKey, tag);
     } catch {
         // Without storage a tab learns another tab's change at its next answer or focus read.
     }
@@ -283,29 +292,57 @@ function savedCopyFlagged() {
     return readStored(savedFlagKey) !== null;
 }
 
+function removalKeys() {
+    try {
+        const stored = window.localStorage;
+        return Array.from({ length: stored.length }, (_, index) =>
+            stored.key(index),
+        ).filter((key): key is string =>
+            Boolean(key?.startsWith(savedRemovalPrefix)),
+        );
+    } catch {
+        return [];
+    }
+}
+
 // A flag written anew since the deletion was asked for names another copy.
 function forgetSavedCopy(flag: string | null | undefined) {
     if (readStored(savedFlagKey) !== flag) return;
     writeStored(savedFlagKey, null);
-    writeStored(savedRemovalKey, null);
+    for (const key of removalKeys()) writeStored(key, null);
 }
 
-function outstandingRemoval() {
-    const removal = readStored(savedRemovalKey);
-    return typeof removal === "string" ? removal : null;
+function departureOf(key: string): Departure {
+    const id = key.slice(savedRemovalPrefix.length);
+    try {
+        const { user, session } = JSON.parse(readStored(key) ?? "") as Record<
+            string,
+            unknown
+        >;
+        return {
+            id,
+            ...(typeof user === "number" && { user }),
+            ...(typeof session === "string" && { session }),
+        };
+    } catch {
+        return { id };
+    }
 }
 
-function newRemoval() {
+function outstandingRemovals() {
+    return removalKeys().map(departureOf);
+}
+
+function randomHex() {
     return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
         byte.toString(16).padStart(2, "0"),
     ).join("");
 }
 
 const savedRemoval: Removal = {
-    outstanding: outstandingRemoval,
-    acknowledge: (removal) => {
-        if (outstandingRemoval() === removal)
-            writeStored(savedRemovalKey, null);
+    outstanding: outstandingRemovals,
+    acknowledge: (ids) => {
+        for (const id of ids) writeStored(savedRemovalPrefix + id, null);
     },
 };
 
@@ -324,13 +361,30 @@ function withSavedStore<T>(
     });
 }
 
-// One deadline from admission bounds the wait in the queue, the store's load and its work.
-async function boundedStore<T>(
+// A browser without Web Locks has one window's order only.
+async function underLock<T>(
+    limit: Deadline,
+    work: () => Promise<T>,
+): Promise<T> {
+    const locks =
+        typeof navigator === "undefined" ? undefined : navigator.locks;
+    if (!locks) return work();
+    const waiting = new AbortController();
+    void limit.reached.then(() => waiting.abort());
+    let result!: T;
+    await locks.request(savedLock, { signal: waiting.signal }, async () => {
+        result = await work();
+    });
+    return result;
+}
+
+// One deadline from admission bounds the wait in the queue, the store's load, the lock and its work.
+export async function boundedStore<T>(
     work: (store: SavedStore, limit: Deadline) => Promise<T>,
     limit = deadline(savedLimitMs),
 ): Promise<T | undefined> {
     const answer = Promise.race([
-        withSavedStore((store) => work(store, limit)),
+        withSavedStore((store) => underLock(limit, () => work(store, limit))),
         limit.reached.then(() => undefined),
     ]);
     pendingAnswers.add(answer);
@@ -348,21 +402,19 @@ export async function savedCopyAnswered() {
 
 export function startSavedCopy() {
     if (!savedCopyFlagged()) {
-        if (outstandingRemoval() !== null) writeStored(savedRemovalKey, null);
+        savedRemoval.acknowledge(outstandingRemovals().map(({ id }) => id));
         return;
     }
     const flag = readStored(savedFlagKey);
-    void boundedStore((store, limit) => store.start(savedRemoval, limit)).then(
-        (outcome) => {
-            if (outcome === "deleted") forgetSavedCopy(flag);
-        },
+    void boundedStore((store, limit) =>
+        store.start(savedRemoval, limit, () => forgetSavedCopy(flag)),
     );
 }
 
 function handOffNeeded(session: Session) {
     return (
         Boolean(session.user) &&
-        (savedCopyFlagged() || outstandingRemoval() !== null)
+        (savedCopyFlagged() || removalKeys().length > 0)
     );
 }
 
@@ -410,23 +462,80 @@ async function removeSavedFigures(session: Session | undefined) {
         user: session.user.id,
         session: session.session_tag ?? "",
     };
-    const removal = JSON.stringify({ removal: newRemoval(), ...signedOut });
+    const removal = randomHex();
     const removed = await boundedStore((store, limit) =>
         store.removeFigures(
             signedOut,
-            () => savedRemoval.acknowledge(removal),
+            () => savedRemoval.acknowledge([removal]),
             limit,
         ),
     );
-    if (!removed) writeStored(savedRemovalKey, removal);
+    if (!removed)
+        writeStored(
+            savedRemovalPrefix + removal,
+            JSON.stringify({ removal, ...signedOut }),
+        );
 }
 
-export async function savedCopyState(): Promise<CopyState> {
-    if (!savedCopyFlagged()) return "off";
-    const copy =
-        (await boundedStore((store, limit) => store.copyState(limit))) ??
-        "unavailable";
-    return copy === "on" && outstandingRemoval() !== null ? "paused" : copy;
+export type SavedFigures = { state: CopyState; plants: number };
+
+// On only while the copy is active for this session and no removal waits.
+export async function savedCopyState(
+    session = state.session,
+): Promise<SavedFigures> {
+    if (!savedCopyFlagged()) return { state: "off", plants: 0 };
+    const copy = await boundedStore((store, limit) => store.copyState(limit));
+    if (!copy) return { state: "unavailable", plants: 0 };
+    const mine =
+        copy.holder?.user === session?.user?.id &&
+        copy.holder?.session === session?.session_tag;
+    return copy.state === "on" && (!mine || removalKeys().length > 0)
+        ? { state: "paused", plants: 0 }
+        : { state: copy.state, plants: copy.plants };
+}
+
+export async function savedFiguresAvailable() {
+    return (
+        (await boundedStore((store, limit) => store.available(limit))) ?? false
+    );
+}
+
+// The flag is written before the database exists, so a sign-out always finds a copy it must remove.
+export async function turnOnSavedFigures() {
+    const { session } = state;
+    const tag = session?.session_tag;
+    if (!session?.user || !tag) return false;
+    const owner = {
+        user: session.user.id,
+        session: tag,
+        language: session.language,
+    };
+    writeStored(savedFlagKey, randomHex());
+    if (!savedCopyFlagged()) return false;
+    const on = await boundedStore((store, limit) => store.turnOn(owner, limit));
+    if (on) void navigator.storage?.persist?.().catch(() => false);
+    return on === true;
+}
+
+export async function removeSavedFiguresHere() {
+    const flag = readStored(savedFlagKey);
+    await boundedStore((store, limit) =>
+        store.removeCopy(limit, () => forgetSavedCopy(flag)),
+    );
+}
+
+// Other windows turn the copy on or off, or leave a removal, through these keys.
+export function subscribeSavedFigures(listener: () => void) {
+    const changed = (event: StorageEvent) => {
+        if (
+            event.key === null ||
+            event.key === savedFlagKey ||
+            event.key.startsWith(savedRemovalPrefix)
+        )
+            listener();
+    };
+    window.addEventListener("storage", changed);
+    return () => window.removeEventListener("storage", changed);
 }
 
 class HandoffFailure extends Error {}
@@ -438,7 +547,7 @@ export function isHandoffFailure(error: unknown) {
 function failHandoff() {
     setHandoffFailed(true);
     return new HandoffFailure(
-        "The figures saved on this device could not be checked.",
+        "The figures kept on this device could not be checked.",
     );
 }
 
@@ -504,8 +613,12 @@ function applySession(session: Session, sentAt?: number) {
     notify();
 }
 
+function observation() {
+    return JSON.stringify([observedRevision(), observedTag()]);
+}
+
 function mark(): Mark {
-    return { epoch: mutationEpoch(), observed: observedTag(), generation };
+    return { epoch: mutationEpoch(), observed: observation(), generation };
 }
 
 function unchangedSince(since: Mark) {
@@ -577,7 +690,7 @@ export function loadSession(): Promise<Session> {
     if (
         flight &&
         flight.epoch === mutationEpoch() &&
-        flight.observed === observedTag()
+        flight.observed === observation()
     )
         return flight.promise;
     return startRead().promise;
@@ -663,6 +776,8 @@ confirmSessionWith({
     shows,
     refusal,
     confirm: () => {
+        if (handoffFailed)
+            return Promise.reject(new HandoffFailure("Try again reads first."));
         confirming ??= startRead()
             .promise.then(tagOf)
             .finally(() => {

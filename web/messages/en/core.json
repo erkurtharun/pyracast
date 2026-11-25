@@ -221,6 +221,15 @@
         "homeScreen": "Tap Share, then Add to Home Screen. If Share is not shown, it is in the page menu.",
         "dock": "In Safari, choose File > Add to Dock."
     },
+    "KeepFigures": {
+        "title": "Keep figures on this device",
+        "statement": "Anyone who can open this browser on this device can read these figures without signing in, until they are removed or you sign out. Do not turn this on for a shared device.",
+        "kept": "{count, plural, one {Figures of # plant are kept on this device.} other {Figures of # plants are kept on this device.}}",
+        "paused": "Figures are kept again after your next sign-in.",
+        "turnOn": "Turn on",
+        "remove": "Remove from this device",
+        "notNow": "Not now"
+    },
     "Common": {
         "unexpected": "Something went wrong. Try again.",
         "saveFailed": "Could not be saved.",
