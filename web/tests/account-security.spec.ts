@@ -605,3 +605,53 @@ test("a refused removal keeps its failure when the session ends before the addre
     ).toHaveCount(0);
     await expect(change.getByText(/Something went wrong/)).toHaveCount(0);
 });
+
+const unreachable =
+    "Pyracast could not be reached. Check your connection and try again.";
+
+test("active sessions that cannot be read say so and are read again on request", async ({
+    page,
+}) => {
+    await mockApi(page);
+    let reads = 0;
+    await page.route("**/api/auth/browser/v1/auth/sessions", (route) =>
+        ++reads === 1
+            ? route.abort()
+            : route.fulfill({ json: { status: 200, data: [signedInSession] } }),
+    );
+    await page.goto("/app/account/");
+    const devices = page.getByRole("region", { name: "Active sessions" });
+    await expect(devices.getByRole("alert")).toContainText(unreachable);
+    await devices.getByRole("button", { name: "Try again" }).click();
+    await expect(devices.getByText("This device")).toBeVisible();
+    await expect(devices.getByRole("alert")).toHaveCount(0);
+});
+
+test("connected accounts that cannot be read say so and are read again on request", async ({
+    page,
+}) => {
+    await mockApi(page);
+    let reads = 0;
+    await page.route("**/api/auth/browser/v1/account/providers", (route) =>
+        ++reads === 1 ? route.abort() : route.fallback(),
+    );
+    await page.goto("/app/account/");
+    const linked = page.getByRole("region", { name: "Connected accounts" });
+    await expect(linked.getByRole("alert")).toContainText(unreachable);
+    await linked.getByRole("button", { name: "Try again" }).click();
+    await expect(linked).toHaveCount(0);
+    expect(reads).toBe(2);
+});
+
+test("an address change whose pending state cannot be read offers a new address", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/api/auth/browser/v1/account/email", (route) =>
+        route.request().method() === "GET" ? route.abort() : route.fallback(),
+    );
+    await page.goto("/app/account/");
+    const change = emailChange(page);
+    await change.getByText("Change email", { exact: true }).click();
+    await expect(change.getByLabel("New email address")).toBeEditable();
+});
