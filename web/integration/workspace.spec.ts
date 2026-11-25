@@ -74,7 +74,9 @@ test("a customer manages one plant site through the real API", async ({
     await expect(page.getByLabel("Forecast date")).toHaveValue(
         process.env.BROWSER_DATE!,
     );
-    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Irradiance forecast", exact: true })
+        .click();
 
     await page.getByLabel("Forecast date").fill(process.env.BROWSER_DATE!);
     await expect(
@@ -101,7 +103,9 @@ test("a customer manages one plant site through the real API", async ({
     await expect(
         page.getByText("Satellite/model estimates, not meter readings."),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Generation", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Generation forecast", exact: true })
+        .click();
     await page.getByLabel("Forecast date").fill(process.env.BROWSER_DATE!);
     await page.getByLabel("Interval", { exact: true }).selectOption("60");
     await expect(
