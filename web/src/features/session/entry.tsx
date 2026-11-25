@@ -12,10 +12,6 @@ import { keys } from "@/lib/api/keys";
 import { QueryOwner, useApiList } from "@/lib/api/query";
 import { appQuery, localPath, routes } from "@/lib/routes";
 import { useSessionState } from "@/lib/session-client";
-import {
-    forgetProviderLanding,
-    providerLanding,
-} from "@/features/auth/provider-return";
 import { storedInvitation } from "@/features/workspace/workspace-invitation";
 import { chooseWorkspace } from "@/features/workspace/workspace-choice";
 import { LaunchCard } from "./app-root";
@@ -25,17 +21,13 @@ const consoleRoot = "/admin/";
 
 type Target = { href: string; document?: boolean };
 
-function destination(
-    canAdmin: boolean,
-    landing: string | undefined,
-): Target | undefined {
+function destination(canAdmin: boolean): Target | undefined {
     const { search } = window.location;
     const params = new URLSearchParams(search);
     // A signed-in browser completes every provider return on the account page.
     if (appQuery(params).socialCallback !== "none")
         return { href: `${routes.account()}${search}`, document: true };
     if (storedInvitation()) return { href: routes.invitation() };
-    if (landing) return { href: landing };
     if (canAdmin)
         return {
             href:
@@ -59,9 +51,7 @@ export function Entry() {
 
 function EntryResolver() {
     const canAdmin = Boolean(useSessionState().session?.user?.can_admin);
-    const [landing] = useState(providerLanding);
-    useEffect(forgetProviderLanding, []);
-    const target = destination(canAdmin, landing);
+    const target = destination(canAdmin);
     return target ? <Navigate {...target} /> : <WorkspaceEntry />;
 }
 

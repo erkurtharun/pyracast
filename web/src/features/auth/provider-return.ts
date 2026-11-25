@@ -1,5 +1,6 @@
 "use client";
 import { localPath, routes } from "@/lib/routes";
+import { storedInvitation } from "@/features/workspace/workspace-invitation";
 
 const storageKey = "pyracast.providerReturn";
 const longestAddress = 2_000;
@@ -37,10 +38,13 @@ export function receiveProviderReturn(succeeded: boolean) {
     landing = succeeded ? address : undefined;
 }
 
-export function providerLanding() {
-    return landing;
+export function forgetProviderLanding() {
+    landing = undefined;
 }
 
-export function forgetProviderLanding() {
+// A sign-in reloads the document at its address, so the landing replaces that address before it.
+export function openProviderLanding() {
+    if (landing && !storedInvitation())
+        window.history.replaceState(window.history.state, "", landing);
     landing = undefined;
 }

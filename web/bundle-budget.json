@@ -1,9 +1,9 @@
 {
     "tolerancePercent": 1,
     "firstLoad": {
-        "/app": 661174,
+        "/app": 662079,
         "/app/w/[tenantId]": 688242,
-        "/app/w/[tenantId]/plants/[siteId]/[section]": 768627
+        "/app/w/[tenantId]/plants/[siteId]/[section]": 776789
     },
     "onDemand": {
         "Calibrations": 15147,

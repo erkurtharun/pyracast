@@ -18,6 +18,7 @@ import { ActionForm } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import {
     forgetProviderLanding,
+    openProviderLanding,
     receiveProviderReturn,
 } from "./provider-return";
 import { SocialProviderButtons } from "./social-provider-buttons";
@@ -46,6 +47,7 @@ async function completeProviderLogin(): Promise<ProviderCompletion> {
     try {
         const result = await authRequest("auth/provider/complete", "POST");
         if (result.meta?.is_authenticated) {
+            openProviderLanding();
             await loadSession();
             return "signedIn";
         }
@@ -114,6 +116,7 @@ export function Auth({
 
     async function finish(result: AuthResult) {
         if (result.meta?.is_authenticated) {
+            openProviderLanding();
             await loadSession();
             return;
         }

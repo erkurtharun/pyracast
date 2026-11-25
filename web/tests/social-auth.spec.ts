@@ -933,8 +933,9 @@ const storedReturn = (page: Page) =>
 function sentNavigations(page: Page) {
     const paths: string[] = [];
     page.on("request", (request) => {
-        if (request.headers().rsc === "1")
-            paths.push(new URL(request.url()).pathname);
+        const { pathname } = new URL(request.url());
+        if (request.isNavigationRequest()) paths.push(`document ${pathname}`);
+        else if (request.headers().rsc === "1") paths.push(`RSC ${pathname}`);
     });
     return paths;
 }
@@ -951,8 +952,30 @@ test("a provider sign-in started at a dated forecast opens that forecast through
     await continueWithGoogle(page);
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-25");
     await expect(page).toHaveURL(datedForecast);
-    expect(navigations).toEqual(["/app/w/1/plants/11/forecast/"]);
+    expect(navigations).toEqual([
+        "document /api/auth/browser/v1/auth/provider/redirect",
+        "document /app/",
+        "document /app/w/1/plants/11/forecast/",
+    ]);
     expect(await storedReturn(page)).toBeNull();
+});
+
+test("a provider sign-in with an invitation kept in the tab opens the invitation", async ({
+    page,
+}) => {
+    await page.addInitScript(() =>
+        window.sessionStorage.setItem(
+            "pyracast.workspaceInvitation",
+            "invite-secret",
+        ),
+    );
+    await offerGoogleSignIn(page);
+    await page.goto(datedForecast);
+    await continueWithGoogle(page);
+    await expect(
+        page.getByRole("heading", { name: "Join workspace" }),
+    ).toBeVisible();
+    await expect(page).toHaveURL("/app/invitation/");
 });
 
 test("a provider sign-in started at a workspace the reader does not belong to opens that address", async ({
@@ -981,11 +1004,16 @@ test("a provider sign-in that needs the second factor opens the forecast it star
             meta: { is_authenticated: false },
         },
     };
-    await page.route("**/api/auth/browser/v1/auth/provider/complete", (route) =>
-        route.fulfill(pending),
+    let returned = false;
+    await page.route(
+        "**/api/auth/browser/v1/auth/provider/complete",
+        (route) => {
+            returned = true;
+            return route.fulfill(pending);
+        },
     );
     await page.route("**/api/auth/browser/v1/auth/session", (route) =>
-        route.request().method() === "GET" && !account.current
+        route.request().method() === "GET" && returned && !account.current
             ? route.fulfill(pending)
             : route.fallback(),
     );
@@ -1023,7 +1051,7 @@ test("a second provider return in the same tab opens the workspace", async ({
     const account = await offerGoogleSignIn(page);
     await page.goto(datedForecast);
     await continueWithGoogle(page);
-    await expect(page).toHaveURL(datedForecast);
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-25");
     account.current = null;
     await page.goto("/app/?social_callback=1");
     await expect(portfolio(page)).toBeVisible();
