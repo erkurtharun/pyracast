@@ -249,7 +249,9 @@ export function unsentInput({ draft, editor }: Screen) {
     )
         return false;
     return ![runningWrite(editor), editor.attempt].some(
-        (write) => write && contentOf(editor, write.action) === write.payload,
+        (write) =>
+            write?.action === "set" &&
+            contentOf(editor, "set") === write.payload,
     );
 }
 

@@ -1130,25 +1130,29 @@ test("the notice of entries a configuration change discarded ends when plant mid
     await expect(page.getByText(discardedNotice)).toHaveCount(0);
 });
 
-test("a configuration change after an unchanged Remove correction whose answer was lost says nothing was discarded", async ({
-    page,
-}) => {
-    await page.clock.install({ time: now });
-    await signIn(page);
-    const changeConfiguration = await serveConfiguration(page);
-    const server = await serveDirectProduction(page, answers("abort"));
-    server.changeByOperator(0.9);
-    await openPlant(page, "Production");
-    await page.getByRole("button", { name: /^Edit 08:00/ }).click();
-    const editor = page.locator(".production-row-editor");
-    await editor
-        .getByRole("button", { name: /^Remove correction for 08:00/ })
-        .click();
-    await expect(editor.getByRole("alert")).toContainText(
-        "Change not confirmed",
-    );
-    await changeConfiguration();
-    await expect(editor).toHaveCount(0);
-    await expect(page.getByText(discardedNotice)).toHaveCount(0);
-    expect(server.applied()).toBe(1);
-});
+for (const typed of [false, true])
+    test(`a configuration change after a Remove correction whose answer was lost ${typed ? "says a value typed after it was discarded" : "and nothing typed after it says nothing was discarded"}`, async ({
+        page,
+    }) => {
+        await page.clock.install({ time: now });
+        await signIn(page);
+        const changeConfiguration = await serveConfiguration(page);
+        const server = await serveDirectProduction(page, answers("abort"));
+        server.changeByOperator(0.9);
+        await openPlant(page, "Production");
+        await page.getByRole("button", { name: /^Edit 08:00/ }).click();
+        const editor = page.locator(".production-row-editor");
+        await editor
+            .getByRole("button", { name: /^Remove correction for 08:00/ })
+            .click();
+        await expect(editor.getByRole("alert")).toContainText(
+            "Change not confirmed",
+        );
+        if (typed) await editorValue(page).fill("0,6");
+        await changeConfiguration();
+        await expect(editor).toHaveCount(0);
+        await expect(page.getByText(discardedNotice)).toHaveCount(
+            typed ? 1 : 0,
+        );
+        expect(server.applied()).toBe(1);
+    });
