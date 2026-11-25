@@ -322,7 +322,10 @@ test("a sign-in completed on a sign-in screen of the old build at a deep address
     await page
         .getByLabel("Password", { exact: true })
         .fill("Test-only-cobalt-79!");
-    await page.locator("form").getByRole("button", { name: "Sign in" }).click();
+    await page
+        .locator("form")
+        .getByRole("button", { name: "Sign in", exact: true })
+        .click();
     await expect(
         page.getByRole("button", { name: "Production", exact: true }),
     ).toHaveAttribute("aria-current", "page");
