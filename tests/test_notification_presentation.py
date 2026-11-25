@@ -1,7 +1,10 @@
+import re
 from base64 import b64decode
 from datetime import UTC, date, datetime, timedelta, timezone
 from io import BytesIO
+from math import nextafter
 from typing import Any, cast
+from zipfile import ZipFile
 
 import pytest
 from django.utils import translation
@@ -615,12 +618,24 @@ def test_the_file_name_is_a_lower_case_ascii_slug_of_the_plant(
 
 @pytest.mark.parametrize(
     ("value", "en", "tr"),
-    [(3.2994, "3.30", "3,30"), (2500.0, "2,500.00", "2.500,00"), (-0.001, "0.00", "0,00")],
+    [
+        (3.2994, "3.30", "3,30"),
+        (2500.0, "2,500.00", "2.500,00"),
+        (-0.001, "0.00", "0,00"),
+        (1e26, f"100{',000' * 8}.00", f"100{'.000' * 8},00"),
+    ],
 )
 def test_energy_is_rounded_to_two_grouped_decimals(value: float, en: str, tr: str) -> None:
     for language, text in (("en", en), ("tr", tr)):
         with translation.override(language):
             assert energy_number(value) == text
+
+
+def stored_cells(message: dict[str, str], references: tuple[str, ...]) -> list[str]:
+    archive = ZipFile(BytesIO(b64decode(message["attachment_base64"])))
+    sheet = archive.read("xl/worksheets/sheet1.xml").decode()
+    cells = dict(re.findall(r'<c r="([A-Z]+[0-9]+)"[^>]*><v>([^<]*)</v>', sheet))
+    return [cells[reference] for reference in references]
 
 
 @pytest.mark.parametrize(
@@ -630,11 +645,14 @@ def test_energy_is_rounded_to_two_grouped_decimals(value: float, en: str, tr: st
         ("tr", "24,13", "30,13", "Yar\u0131n 24,13\u00a0MWh · Bugün 1,25\u00a0MWh"),
     ],
 )
+@pytest.mark.parametrize("below", [False, True], ids=["half cent", "just below half cent"])
 def test_a_half_cent_rounds_up_in_the_mail_as_the_file_displays_it(
-    language: str, figure: str, without: str, preheader: str
+    language: str, figure: str, without: str, preheader: str, below: bool
 ) -> None:
-    source = context(payload(total=30.125), payload(total=24.125), status="estimated")
+    tomorrow, outage = (nextafter(value, 0) if below else value for value in (24.125, 30.125))
+    source = context(payload(total=outage), payload(total=tomorrow), status="estimated")
     message = rendered(source, language)
+    assert stored_cells(message, ("B10", "C10")) == ["24.125", "30.125"]
     assert f">{figure}&nbsp;<span" in message["html"]
     assert f"{figure} MWh" in message["body"]
     assert f"{without}\u00a0MWh." in message["html"]
