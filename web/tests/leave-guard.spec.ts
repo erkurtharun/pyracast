@@ -83,6 +83,13 @@ async function answer(
     else await started;
 }
 
+// A traversal the browser asks about never finishes loading when Stay is chosen, so Playwright's own Back and Forward would wait for a load that does not come.
+const traverse = (page: Page, direction: "back" | "forward") =>
+    page.evaluate(
+        (to) => history[to === "back" ? "back" : "forward"](),
+        direction,
+    );
+
 const stay = (page: Page, start: () => Promise<unknown>) =>
     answer(page, false, start);
 
@@ -854,9 +861,9 @@ test("with a changed value Forward and Back each load a document after the brows
     await editValue(page, "0,5");
     await markDocument(page);
     const sent = routerRequests(page);
-    await stay(page, () => page.goForward());
+    await stay(page, () => traverse(page, "forward"));
     await expect(editorValue(page)).toHaveValue("0,5");
-    await stay(page, () => page.goBack());
+    await stay(page, () => traverse(page, "back"));
     await expect(editorValue(page)).toHaveValue("0,5");
     await expect(actualsOf(page)).not.toHaveAttribute("inert");
     await saveValue(page);
