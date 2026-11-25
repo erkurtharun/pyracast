@@ -93,5 +93,7 @@ def test_ledger_rows_name_their_workspace_change() -> None:
         tenant=system.tenant, actor=system.admin, user=other
     )
 
-    assert str(change) == f"Administrator of workspace {system.tenant.pk} set to {system.member.pk}"
+    assert str(change) == (
+        f"Workspace administrator of workspace {system.tenant.pk} set to {system.member.pk}"
+    )
     assert str(removal) == f"Member {other.pk} removed from workspace {system.tenant.pk}"

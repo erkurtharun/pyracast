@@ -45,8 +45,8 @@ SOURCE_LABELS = {
     "mounting_type": gettext_lazy("Mounting"),
     "unit": gettext_lazy("Unit"),
     "timestamp_convention": gettext_lazy("Timestamp convention"),
-    "timezone": gettext_lazy("Source timezone"),
-    "site_timezone": gettext_lazy("Plant timezone"),
+    "timezone": gettext_lazy("File time zone"),
+    "site_timezone": gettext_lazy("Plant time zone"),
     "site_id": gettext_lazy("Resource ID"),
     "power_basis": gettext_lazy("Power basis"),
     "period": gettext_lazy("Interval"),
@@ -71,7 +71,7 @@ class HistoricalUploadForm(forms.Form):
     source_timezone = forms.CharField(
         required=False,
         max_length=100,
-        label=gettext_lazy("Source timezone, only for timestamps without an offset"),
+        label=gettext_lazy("File time zone, only for timestamps without an offset"),
         widget=forms.TextInput(attrs={"placeholder": "Europe/Istanbul"}),
     )
     period = forms.ChoiceField(

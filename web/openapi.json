@@ -6010,7 +6010,7 @@
                     "provider_cooldown_cleared"
                 ],
                 "type": "string",
-                "description": "* `region_created` - Plant submitted\n* `region_renamed` - Plant location renamed\n* `location_change_requested` - Location change requested\n* `location_change_approved` - Location change approved\n* `location_change_rejected` - Location change rejected\n* `location_change_withdrawn` - Location change withdrawn\n* `location_change_rebased` - Location change request moved to the new revision\n* `binding_configured` - Provider connection configured\n* `connection_validated` - Provider connection validated\n* `connection_validation_failed` - Provider connection validation failed\n* `region_approved` - Plant approved\n* `region_rejected` - Plant rejected\n* `region_suspended` - Plant suspended\n* `region_resubmitted` - Plant resubmitted for review\n* `region_trashed` - Plant location moved to trash\n* `region_restored` - Plant location restored\n* `collection_schedule_updated` - Collection schedule updated\n* `reminder_schedule_updated` - Email reminders updated\n* `historical_reference_imported` - Historical reference imported\n* `reference_capacity_normalized` - Reference capacity normalized\n* `provider_account_created` - Provider account created\n* `provider_secret_rotated` - Provider key rotated\n* `provider_cooldown_cleared` - Provider request pause cleared"
+                "description": "* `region_created` - Plant sent for approval\n* `region_renamed` - Plant renamed\n* `location_change_requested` - Location change requested\n* `location_change_approved` - Location change approved\n* `location_change_rejected` - Location change rejected\n* `location_change_withdrawn` - Location change withdrawn\n* `location_change_rebased` - Location change request moved to the new revision\n* `binding_configured` - Provider connection configured\n* `connection_validated` - Provider connection validated\n* `connection_validation_failed` - Provider connection validation failed\n* `region_approved` - Plant approved\n* `region_rejected` - Plant not approved\n* `region_suspended` - Plant suspended\n* `region_resubmitted` - Plant sent for approval again\n* `region_trashed` - Plant moved to recycle bin\n* `region_restored` - Plant restored\n* `collection_schedule_updated` - Forecast update times changed\n* `reminder_schedule_updated` - Forecast email updated\n* `historical_reference_imported` - Historical reference imported\n* `reference_capacity_normalized` - Reference capacity normalized\n* `provider_account_created` - Provider account created\n* `provider_secret_rotated` - Provider key rotated\n* `provider_cooldown_cleared` - Provider request pause cleared"
             },
             "AutomaticCalibrationAttemptOutput": {
                 "type": "object",
@@ -6940,24 +6940,28 @@
                     },
                     "revision": {
                         "type": "integer",
-                        "readOnly": true
+                        "readOnly": true,
+                        "title": "Technical details revision"
                     },
                     "dc_capacity_mw": {
                         "type": "number",
                         "format": "double",
-                        "readOnly": true
+                        "readOnly": true,
+                        "title": "Panel capacity (MWp)"
                     },
                     "inverter_capacity_mw": {
                         "type": "number",
                         "format": "double",
                         "readOnly": true,
-                        "nullable": true
+                        "nullable": true,
+                        "title": "Inverter capacity (MW AC)"
                     },
                     "export_limit_mw": {
                         "type": "number",
                         "format": "double",
                         "readOnly": true,
-                        "nullable": true
+                        "nullable": true,
+                        "title": "Grid export limit (MW)"
                     },
                     "measurement_basis": {
                         "allOf": [
@@ -6965,7 +6969,8 @@
                                 "$ref": "#/components/schemas/MeasurementBasisEnum"
                             }
                         ],
-                        "readOnly": true
+                        "readOnly": true,
+                        "title": "Meter point"
                     },
                     "mounting_type": {
                         "allOf": [
@@ -6973,19 +6978,22 @@
                                 "$ref": "#/components/schemas/MountingTypeEnum"
                             }
                         ],
-                        "readOnly": true
+                        "readOnly": true,
+                        "title": "Mounting"
                     },
                     "surface_tilt_degrees": {
                         "type": "number",
                         "format": "double",
                         "readOnly": true,
-                        "nullable": true
+                        "nullable": true,
+                        "title": "Panel tilt (°)"
                     },
                     "surface_azimuth_degrees": {
                         "type": "number",
                         "format": "double",
                         "readOnly": true,
-                        "nullable": true
+                        "nullable": true,
+                        "title": "Panel azimuth (°)"
                     },
                     "created_at": {
                         "type": "string",
@@ -8812,7 +8820,7 @@
             "LocationChangeStatusEnum": {
                 "enum": ["pending", "approved", "rejected", "withdrawn"],
                 "type": "string",
-                "description": "* `pending` - Awaiting review\n* `approved` - Approved\n* `rejected` - Rejected\n* `withdrawn` - Withdrawn"
+                "description": "* `pending` - In review\n* `approved` - Approved\n* `rejected` - Rejected\n* `withdrawn` - Withdrawn"
             },
             "LocationRefusal": {
                 "description": "A refusal that can name the plant already at the requested location.",
@@ -8834,7 +8842,7 @@
             "MeasurementBasisEnum": {
                 "enum": ["net_export", "ac_generation"],
                 "type": "string",
-                "description": "* `net_export` - Net export\n* `ac_generation` - AC generation"
+                "description": "* `net_export` - Energy delivered to the grid\n* `ac_generation` - Inverter output"
             },
             "MemberAddressOutput": {
                 "type": "object",
@@ -8938,7 +8946,7 @@
                     "mail_outcome_uncertain"
                 ],
                 "type": "string",
-                "description": "* `missed_schedule` - Missed schedule\n* `delivery_deadline_exceeded` - Delivery deadline exceeded\n* `cancelled_by_settings_change` - Cancelled by settings change\n* `schedule_or_authority_changed` - Schedule or authority changed\n* `no_recipients` - No recipients\n* `invalid_recipient` - Invalid recipient\n* `recipient_limit_exceeded` - Recipient limit exceeded\n* `definition_trashed` - Definition trashed\n* `interrupted_send` - Interrupted during sending\n* `interrupted_connection` - Interrupted before sending\n* `mail_not_sent` - Mail not sent\n* `mail_configuration_invalid` - Mail configuration invalid\n* `mail_credentials_rejected` - Mail credentials rejected\n* `mail_authorization_revoked` - Mail authorization revoked\n* `mail_rate_limited` - Mail rate limited\n* `mail_rejected` - Mail rejected\n* `mail_sender_forbidden` - Mail sender forbidden\n* `mail_preparation_failed` - Mail preparation failed\n* `mail_outcome_uncertain` - Mail outcome uncertain"
+                "description": "* `missed_schedule` - Missed schedule\n* `delivery_deadline_exceeded` - Delivery deadline exceeded\n* `cancelled_by_settings_change` - Cancelled by settings change\n* `schedule_or_authority_changed` - Schedule or authority changed\n* `no_recipients` - No recipients\n* `invalid_recipient` - Invalid recipient\n* `recipient_limit_exceeded` - Recipient limit exceeded\n* `definition_trashed` - Plant in recycle bin\n* `interrupted_send` - Interrupted during sending\n* `interrupted_connection` - Interrupted before sending\n* `mail_not_sent` - Mail not sent\n* `mail_configuration_invalid` - Mail configuration invalid\n* `mail_credentials_rejected` - Mail credentials rejected\n* `mail_authorization_revoked` - Mail authorization revoked\n* `mail_rate_limited` - Mail rate limited\n* `mail_rejected` - Mail rejected\n* `mail_sender_forbidden` - Mail sender forbidden\n* `mail_preparation_failed` - Mail preparation failed\n* `mail_outcome_uncertain` - Mail outcome uncertain"
             },
             "NotificationDeliveryStatusEnum": {
                 "enum": [
@@ -8952,7 +8960,7 @@
                     "cancelled"
                 ],
                 "type": "string",
-                "description": "* `pending` - Pending\n* `retry` - Retry\n* `sending` - Sending\n* `sent` - Sent\n* `failed` - Failed\n* `uncertain` - Uncertain\n* `skipped` - Skipped\n* `cancelled` - Cancelled"
+                "description": "* `pending` - Preparing\n* `retry` - Will retry\n* `sending` - Sending\n* `sent` - Sent\n* `failed` - Not sent\n* `uncertain` - Not known whether sent\n* `skipped` - Skipped\n* `cancelled` - Cancelled"
             },
             "NullEnum": {
                 "enum": [null]
@@ -9781,7 +9789,7 @@
                     "calibration_automatic_skipped"
                 ],
                 "type": "string",
-                "description": "* `submission_saved` - Submission saved\n* `configuration_created` - Configuration created\n* `plant_renamed` - Plant renamed\n* `observations_imported` - Observations imported\n* `production_changed` - Production changed\n* `epias_connected` - EPIAS connected\n* `epias_disconnected` - EPIAS disconnected\n* `calibration_requested` - Calibration requested\n* `calibration_scheduled` - Calibration scheduled\n* `calibration_completed` - Calibration completed\n* `calibration_activated` - Calibration activated\n* `calibration_automatically_activated` - Calibration automatically activated\n* `calibration_reset` - Calibration reset\n* `calibration_automation_enabled` - Automatic calibration enabled\n* `calibration_automation_disabled` - Automatic calibration disabled\n* `calibration_automatic_skipped` - Automatic calibration skipped"
+                "description": "* `submission_saved` - Submission saved\n* `configuration_created` - Technical details revision created\n* `plant_renamed` - Plant renamed\n* `observations_imported` - Observations imported\n* `production_changed` - Production changed\n* `epias_connected` - EPIAS connected\n* `epias_disconnected` - EPIAS disconnected\n* `calibration_requested` - Calibration requested\n* `calibration_scheduled` - Calibration scheduled\n* `calibration_completed` - Calibration completed\n* `calibration_activated` - Calibration activated\n* `calibration_automatically_activated` - Calibration automatically activated\n* `calibration_reset` - Calibration reset\n* `calibration_automation_enabled` - Automatic calibration enabled\n* `calibration_automation_disabled` - Automatic calibration disabled\n* `calibration_automatic_skipped` - Automatic calibration skipped"
             },
             "PlantForecastOutput": {
                 "type": "object",
@@ -11106,7 +11114,7 @@
             "RegionStatusEnum": {
                 "enum": ["pending", "approved", "suspended", "rejected"],
                 "type": "string",
-                "description": "* `pending` - Awaiting approval\n* `approved` - Approved\n* `suspended` - Suspended\n* `rejected` - Rejected"
+                "description": "* `pending` - In review\n* `approved` - Approved\n* `suspended` - Suspended\n* `rejected` - Not approved"
             },
             "RejectionInput": {
                 "type": "object",

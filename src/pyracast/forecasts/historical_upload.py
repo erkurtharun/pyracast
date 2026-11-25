@@ -177,7 +177,7 @@ def _instant(value: object, zone: ZoneInfo | None) -> tuple[datetime, bool]:
     naive = instant.utcoffset() is None
     if naive:
         if zone is None:
-            raise ValueError(_("Naive timestamps require an explicit source timezone."))
+            raise ValueError(_("Naive timestamps require an explicit file time zone."))
         candidates = {
             aware.astimezone(UTC)
             for fold in (0, 1)
@@ -272,7 +272,7 @@ def parse_historical_upload(
                         raise ValueError(_("Source settings change within the uploaded file."))
                     metadata[name] = row[name]
         if used_naive and source_timezone and file_timezone and source_timezone != file_timezone:
-            raise ValueError(_("Selected timezone conflicts with the file's source timezone."))
+            raise ValueError(_("Selected time zone conflicts with the file's time zone."))
         if len(periods) != 1 or len(products) != 1:
             raise ValueError(_("Use one power product and one interval period per upload."))
         warnings = []
@@ -285,7 +285,7 @@ def parse_historical_upload(
         if used_naive:
             warnings.append(
                 gettext_noop(
-                    "Naive source timestamps were interpreted using the selected timezone."
+                    "Naive source timestamps were interpreted using the selected time zone."
                 )
             )
         return HistoricalUpload(

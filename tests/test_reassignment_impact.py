@@ -70,7 +70,7 @@ def test_the_administrator_page_lists_what_a_change_would_do() -> None:
     impact = page[page.index('id="impact-title"') :]
     assert "current@example.com" in impact
     assert "Inactive account" in impact
-    assert "becomes a viewer" in impact
+    assert "New role of current@example.com: Member" in impact
     assert "Automated park" in impact
     assert "Manual park" not in impact
     assert "open@example.com" in impact
@@ -100,6 +100,6 @@ def test_a_workspace_without_an_administrator_shows_no_one_to_demote() -> None:
     ).content.decode()
 
     impact = page[page.index('id="impact-title"') :]
-    assert "becomes a viewer" not in impact
+    assert "New role of" not in impact
     assert "No plant uses automatic calibration." in impact
     assert "No invitation is open." in impact

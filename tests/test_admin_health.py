@@ -138,4 +138,4 @@ def test_summary_prioritizes_current_action_without_hiding_other_reasons(
 def test_prepared_notification_reason_does_not_claim_the_message_was_sent() -> None:
     with override("en"):
         check = summarize_health(healthy_report(partial_forecasts=1)).checks[0]
-    assert check.label == "Notifications prepared with partial forecasts"
+    assert check.label == "Forecast emails prepared with partial forecasts"

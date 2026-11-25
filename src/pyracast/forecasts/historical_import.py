@@ -60,7 +60,7 @@ def _confirm_under_lock(
         .order_by("pk")
         .values_list("pk", "current_configuration_id")
     ):
-        raise ValidationError(_("The plant configuration changed. Preview the file again."))
+        raise ValidationError(_("The plant's technical details changed. Preview the file again."))
     return region
 
 

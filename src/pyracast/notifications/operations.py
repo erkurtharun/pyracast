@@ -163,7 +163,7 @@ def set_recipient_limit(actor: User, value: int, *, expected: int) -> RecipientL
             user=actor,
             content_type=ContentType.objects.get_for_model(NotificationSettings),
             object_id=str(settings.pk),
-            object_repr="Email reminder settings",
+            object_repr="Forecast email settings",
             action_flag=CHANGE,
             change_message=f"Recipient limit changed from {previous} to {value}.",
         )

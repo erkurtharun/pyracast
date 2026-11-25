@@ -8,7 +8,7 @@
   <form method="get" class="panel filters" role="search" aria-label="{% translate "Filter plants" %}">
     {% if health_filter %}<input type="hidden" name="issue" value="{{ health_filter.key }}">{% endif %}
     <div class="field">
-      <label for="plants-q">{% translate "Plant, location or company" %}</label>
+      <label for="plants-q">{% translate "Plant, location or workspace" %}</label>
       <input type="search" id="plants-q" name="q" value="{{ q }}" maxlength="200" autocomplete="off">
     </div>
     <div class="field">
