@@ -95,7 +95,9 @@ def _notes(shown: Figure, unit: str, space: str) -> list[str]:
     if shown.outage in ("excluded", "unknown"):
         notes = [_("The recorded outage is not included in this figure.")]
         if shown.outage == "unknown":
-            notes.append(_("Enter the capacity still in service in the outage record to include it."))
+            notes.append(
+                _("Enter the capacity still in service in the outage record to include it.")
+            )
         return [" ".join(notes)]
     return []
 
