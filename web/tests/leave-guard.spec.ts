@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "./support/test";
+import { errorBody } from "./support/errors";
 import {
     mockApi,
     paged,
@@ -13,6 +14,7 @@ import {
     focusWindow,
     now,
     openPlant,
+    reviewRequest,
     serveDirectProduction,
     serveImport,
     serveOutageWrites,
@@ -183,6 +185,34 @@ test("a changed location form asks until it is submitted", async ({ page }) => {
     await page.getByRole("button", { name: "Submit location request" }).click();
     await expect(page.getByText("37°, 31° · Europe/Istanbul")).toBeVisible();
     expect(await asks(page)).toBe(false);
+});
+
+test("a typed rejection reason that a failed and a recovered read of the request bring back asks before a shell destination, and Stay keeps it", async ({
+    page,
+}) => {
+    const { detail, refresh } = await reviewRequest(page, answers());
+    const reason = detail.getByLabel("Reason for rejection");
+    await reason.fill("The meter reading is wrong");
+    let gone = true;
+    await page.route(/change-requests\/1\/$/, (route) =>
+        gone
+            ? route.fulfill({
+                  status: 404,
+                  json: errorBody("not_found", "Not found."),
+              })
+            : route.fallback(),
+    );
+    await refresh.click();
+    await expect(detail).toContainText("Not found.");
+    await expect(reason).toHaveCount(0);
+    gone = false;
+    await refresh.click();
+    await expect(reason).toHaveValue("The meter reading is wrong");
+    expect(await asks(page)).toBe(true);
+    await stay(page, () =>
+        page.getByRole("button", { name: "Plants", exact: true }).click(),
+    );
+    await expect(reason).toHaveValue("The meter reading is wrong");
 });
 
 test("two registrations ask independently: saving the changed value keeps the chosen file asking", async ({
