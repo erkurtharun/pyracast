@@ -2,7 +2,7 @@
     "tolerancePercent": 1,
     "firstLoad": {
         "/app": 663944,
-        "/app/w/[tenantId]": 689939,
+        "/app/w/[tenantId]": 696895,
         "/app/w/[tenantId]/plants/[siteId]/[section]": 778958
     },
     "onDemand": {
