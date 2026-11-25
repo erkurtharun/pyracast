@@ -1,1 +1,1 @@
-{% load i18n %}{% translate "Confirm your identity" %}
+{% load i18n %}{% translate "Your Pyracast verification code" %}

@@ -265,10 +265,10 @@ def test_email_verified_notice_without_a_trigger_renders_the_product_copy() -> N
     assert isinstance(message, EmailMultiAlternatives)
     assert message.subject == "Your email address was verified"
     assert message.extra_headers["X-Pyracast-Mail"] == "account/email/email_confirm"
-    assert "The email address of your Pyracast account was verified." in str(message.body)
+    assert str(message.body).startswith("Pyracast\n\nYour email address was verified\n\nTime: ")
     assert "<script>" not in html(message)
     for content in (str(message.body), html(message)):
-        assert "15 November 2026 12:00 UTC" in content
+        assert "Time: 15 Nov 2026, 15:00 (UTC+3)" in content
         assert "192.0.2.4" in content
 
 
