@@ -51,7 +51,7 @@ type ShownOwner = {
 type PreviousEnd = { notice?: "ended" | "changed"; clearInvitation: boolean };
 // The store of saved figures loads only where this flag is set or cannot be read, or a removal is outstanding.
 const savedFlagKey = "pyracast.saved";
-// An outstanding removal's identity: nothing renews the copy before it, and only that removal acknowledges it.
+// An outstanding removal names its token and the departing user and session; only that removal acknowledges it.
 const savedRemovalKey = "pyracast.savedRemoval";
 const savedLimitMs = 2_000;
 type SavedStore = typeof import("./saved/store");
@@ -129,10 +129,6 @@ export function useHandoffFailed() {
     return useSyncExternalStore(subscribeHandoff, handoffFailure, () => false);
 }
 
-export function clearHandoffFailure() {
-    setHandoffFailed(false);
-}
-
 export function useSessionClock() {
     const [now, setNow] = useState(Date.now);
     useEffect(() => {
@@ -179,7 +175,8 @@ function failConfirmation() {
 }
 
 export function confirmIdleSession() {
-    if (state.session?.user && stale()) loadSession().catch(() => {});
+    if (state.session?.user && !handoffFailed && stale())
+        loadSession().catch(() => {});
 }
 
 // The tab's pending invitation lives in a feature module, which this store cannot import.
@@ -285,7 +282,9 @@ function savedCopyFlagged() {
     return readStored(savedFlagKey) !== null;
 }
 
-function forgetSavedCopy() {
+// A flag written anew since the deletion was asked for names another copy.
+function forgetSavedCopy(flag: string | null | undefined) {
+    if (readStored(savedFlagKey) !== flag) return;
     writeStored(savedFlagKey, null);
     writeStored(savedRemovalKey, null);
 }
@@ -344,9 +343,10 @@ export function startSavedCopy() {
         if (outstandingRemoval() !== null) writeStored(savedRemovalKey, null);
         return;
     }
+    const flag = readStored(savedFlagKey);
     void boundedStore((store, limit) => store.start(savedRemoval, limit)).then(
         (outcome) => {
-            if (outcome === "deleted") forgetSavedCopy();
+            if (outcome === "deleted") forgetSavedCopy(flag);
         },
     );
 }
@@ -385,8 +385,9 @@ async function handOff(
     if (handoff === "superseded") return "superseded";
     if (limit.expired()) return "unhanded";
     if (handoff === "cleared") {
+        const flag = readStored(savedFlagKey);
         void boundedStore((store, deletion) =>
-            store.deleteCopy(deletion, forgetSavedCopy),
+            store.deleteCopy(deletion, () => forgetSavedCopy(flag)),
         );
         return "handed";
     }
@@ -401,7 +402,7 @@ async function removeSavedFigures(session: Session | undefined) {
         user: session.user.id,
         session: session.session_tag ?? "",
     };
-    const removal = newRemoval();
+    const removal = JSON.stringify({ removal: newRemoval(), ...signedOut });
     const removed = await boundedStore((store, limit) =>
         store.removeFigures(
             signedOut,
@@ -420,35 +421,50 @@ export async function savedCopyState(): Promise<CopyState> {
     return copy === "on" && outstandingRemoval() !== null ? "paused" : copy;
 }
 
-function failHandoff() {
-    setHandoffFailed(true);
-    return new Error("The figures saved on this device could not be checked.");
+class HandoffFailure extends Error {}
+
+export function isHandoffFailure(error: unknown) {
+    return error instanceof HandoffFailure;
 }
 
-// False when nothing was published: the handoff failed or a later observation superseded this one.
+function failHandoff() {
+    setHandoffFailed(true);
+    return new HandoffFailure(
+        "The figures saved on this device could not be checked.",
+    );
+}
+
+// Superseded: a newer adoption or read was observed meanwhile, so only a new read tells what the server holds.
+export type Adoption = "handed" | "failed" | "superseded";
+
 export function adoptSession(
     session: Session,
     sentAt?: number,
-): Promise<boolean> {
+): Promise<Adoption> {
     if (!handOffNeeded(session)) {
         applySession(session, sentAt);
-        return Promise.resolve(true);
+        return Promise.resolve("handed");
     }
     return adoptHandedOver(session, sentAt);
 }
 
-async function adoptHandedOver(session: Session, sentAt?: number) {
+async function adoptHandedOver(
+    session: Session,
+    sentAt?: number,
+): Promise<Adoption> {
     const since = mark();
     const handoff = await handOff(
         session,
         () => unchangedSince(since),
         Date.now(),
     );
-    if (!unchangedSince(since)) return false;
-    if (handoff === "unhanded") failHandoff();
-    if (handoff !== "handed") return false;
+    if (!unchangedSince(since) || handoff === "superseded") return "superseded";
+    if (handoff === "unhanded") {
+        failHandoff();
+        return "failed";
+    }
     applySession(session, sentAt);
-    return true;
+    return "handed";
 }
 
 function applySession(session: Session, sentAt?: number) {

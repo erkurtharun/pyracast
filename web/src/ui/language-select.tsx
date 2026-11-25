@@ -6,6 +6,7 @@ import { api } from "@/lib/api/client";
 import { reloadPage } from "@/lib/on-demand";
 import {
     adoptSession,
+    loadSession,
     sessionOwner,
     sessionState,
     useSessionState,
@@ -87,12 +88,14 @@ export function LanguageSelect() {
                             }
                             try {
                                 const sentAt = Date.now();
-                                await adoptSession(
+                                const adoption = await adoptSession(
                                     await api.post("/api/session/language/", {
                                         body: { language },
                                     }),
                                     sentAt,
                                 );
+                                if (adoption === "superseded")
+                                    await loadSession();
                                 if (mounted.current)
                                     setState({ status: "idle" });
                             } catch {

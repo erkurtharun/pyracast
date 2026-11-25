@@ -15,10 +15,10 @@ import { reloadPage } from "@/lib/on-demand";
 import { routes } from "@/lib/routes";
 import { browserErrors } from "@/i18n/browser";
 import {
-    clearHandoffFailure,
     clearInvitationWith,
     confirmIdleSession,
     isCurrent,
+    isHandoffFailure,
     loadSession,
     observedTagKey,
     savedCopyState,
@@ -58,11 +58,16 @@ export function AppRoot({ children }: { children: ReactNode }) {
         session !== undefined &&
         handoff.status === "ready" &&
         language.status === "ready";
-    useFocusSessionRead(ready);
+    useFocusSessionRead(ready && !unchecked);
     const restored = useRestoredDocument();
     const ending = retired !== undefined || restored;
     useDocumentReload(ending);
-    const current = useCurrentSession(session, ready, fail, clear);
+    const current = useCurrentSession(
+        session,
+        ready && !unchecked,
+        fail,
+        clear,
+    );
     const unconfirmed = useSessionUnconfirmed();
     return (
         <QueryClientProvider client={client}>
@@ -73,13 +78,7 @@ export function AppRoot({ children }: { children: ReactNode }) {
                 ) : leaving.status !== "idle" ? (
                     <SigningOut state={leaving} />
                 ) : unchecked ? (
-                    <Bootstrap
-                        failure={{ kind: "savedFigures" }}
-                        retry={() => {
-                            clearHandoffFailure();
-                            retry();
-                        }}
-                    />
+                    <SavedFiguresUnchecked />
                 ) : ready && current ? (
                     <QueryOwner value={sessionOwner(session)}>
                         <Screens
@@ -120,22 +119,43 @@ function Bootstrap({
     failure?:
         | { kind: "catalogue" }
         | { kind: "language" }
-        | { kind: "savedFigures" }
         | { kind: "session"; message: string };
     retry: () => void;
 }) {
     const language = useTranslations("Language");
     const page = useTranslations("AppError");
-    const bootstrap = useTranslations("Bootstrap");
     const error =
         failure?.kind === "catalogue"
             ? page("description")
             : failure?.kind === "language"
               ? language("failed")
-              : failure?.kind === "savedFigures"
-                ? bootstrap("savedFiguresUnchecked")
-                : failure?.message;
+              : failure?.message;
     return <LaunchCard failure={error ? { error, retry } : undefined} />;
+}
+
+// Shown until a read is handed over; a retry whose read fails shows that read's error instead.
+function SavedFiguresUnchecked() {
+    const bootstrap = useTranslations("Bootstrap");
+    const [error, setError] = useState<string>();
+    return (
+        <LaunchCard
+            failure={{
+                error: error ?? bootstrap("savedFiguresUnchecked"),
+                retry: () => {
+                    setError(undefined);
+                    loadSession().catch((failure: unknown) => {
+                        if (!isHandoffFailure(failure))
+                            setError(
+                                displayMessage(
+                                    failure,
+                                    browserErrors()("unexpected"),
+                                ),
+                            );
+                    });
+                },
+            }}
+        />
+    );
 }
 
 export function LaunchCard({

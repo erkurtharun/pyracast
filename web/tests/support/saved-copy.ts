@@ -220,8 +220,7 @@ export function readCopy(page: Page): Promise<ReadCopy> {
     });
 }
 
-// Holds a write transaction over the whole copy in another page until `release`, which may first
-// write a holder in it and then lets it commit; the copy's transactions queued meanwhile run after it.
+// Another page holds a write transaction until `release` commits it, with the holder given; later transactions queue behind it.
 export async function holdCopy(page: Page) {
     const other = await page.context().newPage();
     await onBlankPage(other);
@@ -263,8 +262,7 @@ export async function holdCopy(page: Page) {
         );
 }
 
-// Keeps a connection to the copy open in another page that ignores a request to delete it
-// until `release` closes it.
+// Another page keeps a connection open that ignores a request to delete the copy until `release`.
 export async function blockDeletion(page: Page) {
     const other = await page.context().newPage();
     await onBlankPage(other);
@@ -336,6 +334,82 @@ export async function countWrites(page: Page) {
         );
 }
 
+export function markOf(
+    session: string,
+    removal = "fedcba9876543210fedcba9876543210",
+) {
+    return JSON.stringify({ removal, user: 1, session });
+}
+
+// Once armed, the next write of a holder keeps its transaction open until `release` or an abort.
+export async function holdHolderWrite(page: Page) {
+    await page.addInitScript(() => {
+        const put = Object.getOwnPropertyDescriptor(
+            IDBObjectStore.prototype,
+            "put",
+        )!.value as (
+            this: IDBObjectStore,
+            ...operands: unknown[]
+        ) => IDBRequest;
+        IDBObjectStore.prototype.put = function (
+            this: IDBObjectStore,
+            ...operands: unknown[]
+        ) {
+            const request = put.apply(this, operands);
+            if (this.name === "holder" && Reflect.get(window, "holdWrite")) {
+                Reflect.deleteProperty(window, "holdWrite");
+                const { transaction } = this;
+                const keep = () => {
+                    if (!Reflect.get(window, "writeReleased"))
+                        transaction.objectStore("plants").count().onsuccess =
+                            keep;
+                };
+                keep();
+                Object.assign(window, { writeHeld: true });
+            }
+            return request;
+        } as IDBObjectStore["put"];
+    });
+    return {
+        arm: () =>
+            page.evaluate(() => Object.assign(window, { holdWrite: true })),
+        held: () => page.evaluate(() => "writeHeld" in window),
+        release: () =>
+            page.evaluate(() => Object.assign(window, { writeReleased: true })),
+    };
+}
+
+// Records the flag at each success of a deletion this page asks for, before the page's own handler runs.
+export async function watchDeletions(page: Page) {
+    await page.addInitScript(() => {
+        const deleteDatabase = Object.getOwnPropertyDescriptor(
+            IDBFactory.prototype,
+            "deleteDatabase",
+        )!.value as (this: IDBFactory, name: string) => IDBOpenDBRequest;
+        IDBFactory.prototype.deleteDatabase = function (
+            this: IDBFactory,
+            name: string,
+        ) {
+            const request = deleteDatabase.call(this, name);
+            request.addEventListener("success", () => {
+                const flags = (Reflect.get(window, "copyDeletions") ?? []) as (
+                    string | null
+                )[];
+                flags.push(window.localStorage.getItem("pyracast.saved"));
+                Object.assign(window, { copyDeletions: flags });
+            });
+            return request;
+        };
+    });
+    return () =>
+        page.evaluate(
+            () =>
+                (Reflect.get(window, "copyDeletions") ?? []) as (
+                    string | null
+                )[],
+        );
+}
+
 // The store chunk is the only script that names the database; holding it holds the document's copy work.
 export async function watchStoreChunk(page: Page, held = false) {
     let requested = false;
@@ -395,8 +469,7 @@ type LoadedStore = Record<
     (...operands: unknown[]) => Promise<string>
 >;
 
-// Calls an operation of the loaded store under the application's two-second deadline and keeps
-// its answer in the page until `answer` reads it.
+// Calls a loaded store operation under a two-second deadline; the returned function reads its answer.
 export async function callStore(page: Page, operation: keyof LoadedStore) {
     await page.evaluate((name) => {
         const store = Reflect.get(window, "savedStore") as LoadedStore;

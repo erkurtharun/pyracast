@@ -71,16 +71,28 @@ function openExisting(
     });
 }
 
+function abortUnlessCommitting(transaction: IDBTransaction) {
+    try {
+        transaction.abort();
+    } catch {
+        return;
+    }
+}
+
 function run(
     database: IDBDatabase,
     mode: IDBTransactionMode,
     work: (transaction: IDBTransaction) => void,
+    abortAt?: Deadline,
 ): Promise<Outcome> {
     return new Promise<Outcome>((resolve) => {
         try {
             const transaction = database.transaction(storeNames, mode);
             transaction.oncomplete = () => resolve("done");
             transaction.onabort = () => resolve("failed");
+            void abortAt?.reached.then(() =>
+                abortUnlessCommitting(transaction),
+            );
             try {
                 work(transaction);
             } catch {
@@ -92,17 +104,22 @@ function run(
     }).finally(() => database.close());
 }
 
-// A transaction still waiting at the deadline goes on; work that must not land late re-checks inside it.
+// At the deadline an adoption is aborted unless its commit has begun; any other transaction lands.
 async function transact(
     mode: IDBTransactionMode,
     work: (transaction: IDBTransaction) => void,
     limit: Deadline,
+    abortLate = false,
 ): Promise<Outcome> {
     if (limit.expired()) return "pending";
     const database = await openExisting(limit.reached);
     if (typeof database === "string") return database;
+    if (limit.expired()) {
+        database.close();
+        return "pending";
+    }
     return Promise.race([
-        run(database, mode, work),
+        run(database, mode, work, abortLate ? limit : undefined),
         limit.reached.then(() => "pending" as const),
     ]);
 }
@@ -169,6 +186,26 @@ function pause(
     else store.delete(holderKey);
 }
 
+function leavingOf(mark: string): SignedOut | undefined {
+    try {
+        const { user, session } = JSON.parse(mark) as Record<string, unknown>;
+        return typeof user === "number" && typeof session === "string"
+            ? { user, session }
+            : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+// A removal whose departing session cannot be read applies to any holder.
+function meantFor(leaving: SignedOut | undefined, holder: unknown) {
+    return (
+        !isHolder(holder) ||
+        leaving === undefined ||
+        (holder.user === leaving.user && holder.session === leaving.session)
+    );
+}
+
 function current(confirmedAt: number, now: number) {
     return now - confirmedAt <= keptForMs && confirmedAt - now <= dayMs;
 }
@@ -177,6 +214,7 @@ function deleteDatabase(
     limit: Deadline,
     deleted = () => {},
 ): Promise<"deleted" | "failed" | "pending"> {
+    if (limit.expired()) return Promise.resolve("pending");
     return new Promise((resolve) => {
         try {
             const request = indexedDB.deleteDatabase(databaseName);
@@ -213,7 +251,8 @@ async function removeOutstanding(removal: Removal, limit: Deadline) {
             withHolder(transaction, (holder, store) => {
                 const outstanding = removal.outstanding();
                 if (outstanding === null) return;
-                pause(transaction, holder, store);
+                if (meantFor(leavingOf(outstanding), holder))
+                    pause(transaction, holder, store);
                 transaction.addEventListener("complete", () =>
                     removal.acknowledge(outstanding),
                 );
@@ -232,13 +271,8 @@ export async function removeFigures(
         (transaction) => {
             transaction.addEventListener("complete", committed);
             withHolder(transaction, (holder, store) => {
-                if (
-                    isHolder(holder) &&
-                    (holder.user !== signedOut.user ||
-                        holder.session !== signedOut.session)
-                )
-                    return;
-                pause(transaction, holder, store);
+                if (meantFor(signedOut, holder))
+                    pause(transaction, holder, store);
             });
         },
         limit,
@@ -275,23 +309,26 @@ export async function adopt(
                 }
                 const outstanding = removal.outstanding();
                 if (outstanding !== null)
-                    transaction.addEventListener("complete", () =>
-                        removal.acknowledge(outstanding),
-                    );
+                    transaction.addEventListener("complete", () => {
+                        if (!limit.expired()) removal.acknowledge(outstanding);
+                    });
                 if (!isHolder(holder) || holder.user !== observation.user) {
                     read.handoff = "cleared";
                     clearAll(transaction);
                     return;
                 }
+                const removed =
+                    outstanding !== null &&
+                    meantFor(leavingOf(outstanding), holder);
                 if (
-                    outstanding !== null ||
+                    removed ||
                     !current(holder.confirmedAt, observation.adoptedAt)
                 )
                     clearFigures(transaction);
                 store.put(
                     {
                         ...holder,
-                        ...(outstanding !== null && { active: false }),
+                        ...(removed && { active: false }),
                         confirmedAt: observation.adoptedAt,
                         language: observation.language,
                         ...(holder.session !== observation.session && {
@@ -303,6 +340,7 @@ export async function adopt(
                 );
             }),
         limit,
+        true,
     );
     if (outcome === "absent") return "verified";
     if (outcome === "blocked") return "blocked";

@@ -3,7 +3,12 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api/client";
 import { addressWithout, appQuery } from "@/lib/routes";
-import { adoptSession, type Session } from "@/lib/session-client";
+import {
+    adoptSession,
+    isHandoffFailure,
+    loadSession,
+    type Session,
+} from "@/lib/session-client";
 
 export type Handoff =
     { status: "ready" } | { status: "pending" | "failed"; retry: () => void };
@@ -16,6 +21,8 @@ export function useLanguageHandoff(current: Session | undefined): Handoff {
     useEffect(() => {
         if (!current || !language || status !== "pending") return;
         let active = true;
+        const settled = (session: Session) =>
+            Boolean(session.user) || session.language === language;
         const finish = () => {
             window.history.replaceState(
                 window.history.state,
@@ -24,16 +31,23 @@ export function useLanguageHandoff(current: Session | undefined): Handoff {
             );
             setStatus("ready");
         };
-        if (current.user || current.language === language) finish();
+        if (settled(current)) finish();
         else {
             const sentAt = Date.now();
             api.post("/api/session/language/", { body: { language } })
                 .then(async (updated) => {
-                    if (active && (await adoptSession(updated, sentAt)))
-                        finish();
+                    if (!active) return;
+                    const adoption = await adoptSession(updated, sentAt);
+                    // The notice of a failed handoff offers the read that ends this hand-off.
+                    if (adoption === "failed") return;
+                    const shown =
+                        adoption === "handed" || settled(await loadSession());
+                    if (!active) return;
+                    if (shown) finish();
+                    else setStatus("failed");
                 })
-                .catch(() => {
-                    if (active) setStatus("failed");
+                .catch((error: unknown) => {
+                    if (active && !isHandoffFailure(error)) setStatus("failed");
                 });
         }
         return () => {
