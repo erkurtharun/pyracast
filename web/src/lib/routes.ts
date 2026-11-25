@@ -120,6 +120,22 @@ export function appQuery(search: URLSearchParams): {
     };
 }
 
+const unprintable = /\\|(?! )[\p{C}\p{Z}]/u;
+
+// Compared after the browser normalised the address, so a crafted value cannot leave the origin or the prefix.
+export function localPath(value: string, prefix: string, origin: string) {
+    if (
+        value !== value.trim() ||
+        unprintable.test(value) ||
+        !URL.canParse(value, origin)
+    )
+        return undefined;
+    const target = new URL(value, origin);
+    return target.origin === origin && target.pathname.startsWith(prefix)
+        ? `${target.pathname}${target.search}`
+        : undefined;
+}
+
 export function addressWithout(url: URL, names: readonly string[]) {
     const address = new URL(url);
     for (const name of names) address.searchParams.delete(name);

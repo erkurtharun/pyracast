@@ -7,9 +7,19 @@ import { authRequest, type AuthResult } from "@/lib/auth-api";
 import { loadSession, signOut, useSessionState } from "@/lib/session-client";
 import { isLanguage } from "@/i18n/language";
 import { publicPath } from "@/lib/public-metadata";
-import { addressWithout, appQuery, callbackParams, routes } from "@/lib/routes";
+import {
+    addressWithout,
+    appQuery,
+    callbackParams,
+    routes,
+    type SocialCallback,
+} from "@/lib/routes";
 import { ActionForm } from "@/ui/form";
 import { Notice } from "@/ui/ui";
+import {
+    forgetProviderLanding,
+    receiveProviderReturn,
+} from "./provider-return";
 import { SocialProviderButtons } from "./social-provider-buttons";
 import { LanguageSelect } from "@/ui/language-select";
 import { clearWorkspaceInvitation } from "@/features/workspace/workspace-invitation";
@@ -45,6 +55,15 @@ async function completeProviderLogin(): Promise<ProviderCompletion> {
     } catch {
         return "refused";
     }
+}
+
+async function completeProviderReturn(outcome: SocialCallback) {
+    if (outcome === "none") return undefined;
+    receiveProviderReturn(outcome === "succeeded");
+    if (outcome === "failed") return undefined;
+    const completed = await completeProviderLogin();
+    if (completed === "refused") forgetProviderLanding();
+    return completed;
 }
 
 export function Auth({
@@ -87,6 +106,7 @@ export function Auth({
     }
 
     async function leave() {
+        forgetProviderLanding();
         await signOut();
         setAddress("");
         enter("login");
@@ -118,9 +138,7 @@ export function Auth({
         const callbackError = (callbackErrorRef.current ??=
             outcome === "failed");
         const completion = (completionRef.current ??=
-            outcome === "succeeded"
-                ? completeProviderLogin()
-                : Promise.resolve(undefined));
+            completeProviderReturn(outcome));
         let refused = false;
         if (outcome !== "none")
             window.history.replaceState(
