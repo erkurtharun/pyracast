@@ -860,6 +860,93 @@ test("with a changed value Forward and Back each load a document after the brows
     expect(await marked(page)).toBe(true);
 });
 
+// Holds the script that carries the leave guard until every other script of the document has loaded.
+async function holdGuardScript(page: Page) {
+    let release = () => {};
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let hold = () => {};
+    const holding = new Promise<void>((resolve) => (hold = resolve));
+    const held: string[] = [];
+    const answered = new Set<string>();
+    page.on("requestfinished", (request) => answered.add(request.url()));
+    await page.route("**/_next/static/chunks/**", async (route) => {
+        const response = await route.fetch();
+        const body = await response.text();
+        if (body.includes('"beforeunload"')) {
+            held.push(route.request().url());
+            hold();
+            await released;
+        }
+        await route.fulfill({ response, body });
+    });
+    return async () => {
+        await holding;
+        await expect
+            .poll(async () => {
+                const scripts = await page.evaluate(() =>
+                    document.readyState === "loading"
+                        ? null
+                        : [...document.scripts]
+                              .filter(
+                                  (script) => script.src && !script.noModule,
+                              )
+                              .map((script) => script.src),
+                );
+                return (
+                    !!scripts &&
+                    scripts.every(
+                        (src) => held.includes(src) || answered.has(src),
+                    )
+                );
+            })
+            .toBe(true);
+        release();
+    };
+}
+
+for (const scripts of ["answered at once", "the guard's held last"])
+    for (const leave of [false, true])
+        test(`on a document loaded at a deep address with its scripts ${scripts}, Back with a changed value asks, and ${leave ? "Leave loads the entry traversed to as a new document" : "Stay keeps the value at that address"}`, async ({
+            page,
+        }) => {
+            await page.clock.setFixedTime(now);
+            await signIn(page);
+            await serveOutageWrites(page, answers());
+            await serveDirectProduction(page, answers());
+            const loaded =
+                scripts === "answered at once"
+                    ? null
+                    : await holdGuardScript(page);
+            const report = page.getByRole("button", {
+                name: "Report outage",
+                exact: true,
+            });
+            await page.goto("/app/w/1/plants/11/outages/", {
+                waitUntil: "commit",
+            });
+            await loaded?.();
+            await expect(report).toBeVisible();
+            const deep = page.url();
+            await page
+                .getByRole("button", { name: "Production", exact: true })
+                .click();
+            await expect(page).toHaveURL(/\/production\//);
+            await editValue(page, "0,5");
+            await markDocument(page);
+            const sent = routerRequests(page);
+            await answer(page, leave, () => page.goBack());
+            if (leave) {
+                await expectReloaded(page);
+                await expect(page).toHaveURL(deep);
+                await expect(report).toBeVisible();
+            } else {
+                await expect(editorValue(page)).toHaveValue("0,5");
+                expect(page.url()).toBe(deep);
+                expect(await marked(page)).toBe(true);
+            }
+            expect(sent).toEqual([]);
+        });
+
 const unavailable = {
     status: 503,
     contentType: "text/html",
