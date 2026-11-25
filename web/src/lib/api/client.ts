@@ -1,6 +1,7 @@
 import type { paths } from "../schema";
 import { readFailure } from "./errors";
 import { send, type Method } from "./lane";
+import { trackWrite } from "./writes";
 
 type Verb = "get" | "post" | "put" | "patch" | "delete";
 type Operation<P extends keyof paths, V extends Verb> = NonNullable<
@@ -108,11 +109,11 @@ function verb<V extends Verb>(method: Method) {
                 (options as Loose | undefined)?.body ??
                 (method === "POST" ? {} : undefined),
         });
-        return READS.has(path)
-            ? answer.catch((error: unknown) => {
-                  throw readFailure(error);
-              })
-            : answer;
+        if (READS.has(path))
+            return answer.catch((error: unknown) => {
+                throw readFailure(error);
+            });
+        return method === "GET" ? answer : trackWrite(answer);
     };
 }
 
