@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import timedelta
 from threading import Barrier
 from typing import Any
@@ -97,6 +98,23 @@ def test_as_of_correction_and_revert_preserve_old_measurements(
     assert select_measurements(config, start, end, NOW + timedelta(minutes=1))[0][0].energy_mwh == 3
     assert select_measurements(config, start, end, NOW + timedelta(minutes=2))[0] == []
     assert latest_measurement_day(config, end, NOW + timedelta(minutes=2), 1000) is None
+
+
+def test_a_value_imported_again_under_another_source_keeps_its_saved_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    start, _ = local_day_bounds(DAY, system.binding.timezone)
+    saved = write(system, plant, [edit(start, 2)])["ids"][0]
+    exported = ProductionChange(
+        start, start + timedelta(hours=1), saved, "set", 2, "valid", "Girilen"
+    )
+    repeated = write(system, plant, [exported])
+    assert (repeated["created"], repeated["existing"], repeated["ids"]) == (0, 1, [saved])
+    assert ProductionObservation.objects.get().source == "meter"
+    corrected = write(system, plant, [replace(exported, energy=3)])["ids"][0]
+    assert ProductionObservation.objects.get(pk=corrected).source == "Girilen"
+    assert ProductionObservation.objects.get(pk=corrected).supersedes_id == saved
 
 
 def test_batch_rejects_stale_and_overlap_without_partial_changes(

@@ -92,12 +92,13 @@ class PreparedChange:
 
     @property
     def unchanged(self) -> bool:
+        # A downloaded file names only the kind of source, so a repeated value keeps its saved one.
         previous = self.previous
         return (
             not self.replayed
             and previous is not None
-            and (previous.energy_mwh, previous.quality, previous.source, previous.is_reverted)
-            == (self.energy_mwh, self.quality, self.source, self.reverted)
+            and (previous.energy_mwh, previous.quality, previous.is_reverted)
+            == (self.energy_mwh, self.quality, self.reverted)
         )
 
     @property

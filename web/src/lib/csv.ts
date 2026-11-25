@@ -1,10 +1,105 @@
-export type CsvValue = string | number | boolean | null;
+import type { Vocabulary } from "./vocabulary";
+
+export type CsvValue = string | number | null;
+
+export type CsvColumn =
+    | "plant"
+    | "data"
+    | "start"
+    | "end"
+    | "forecast_mwh"
+    | "energy_mwh"
+    | "power_mw"
+    | "irradiance"
+    | "without_outage_mwh"
+    | "with_outage_mwh"
+    | "power_without_outage_mw"
+    | "power_with_outage_mw"
+    | "actual_mwh"
+    | "status"
+    | "source"
+    | "type"
+    | "title"
+    | "panels_in_service_mw"
+    | "inverter_in_service_mw"
+    | "export_in_service_mw"
+    | "notes"
+    | "latitude"
+    | "longitude"
+    | "time_zone"
+    | "panel_capacity_mwp"
+    | "inverter_capacity_mw"
+    | "export_limit_mw"
+    | "meter_point"
+    | "mounting"
+    | "tilt"
+    | "azimuth"
+    | "comparison"
+    | "date"
+    | "reason"
+    | "expected_mwh"
+    | "forecast_difference_mwh"
+    | "expected_difference_mwh"
+    | "realtime"
+    | "number"
+    | "period_start"
+    | "period_end"
+    | "in_use"
+    | "preliminary"
+    | "factor"
+    | "calibration_days"
+    | "test_days"
+    | "error_without_mwh"
+    | "error_with_mwh";
+
+export type CsvWord =
+    | "yes"
+    | "no"
+    | "compared"
+    | "not_compared"
+    | "mixed"
+    | "settlement"
+    | "provisional"
+    | "manual"
+    | "net_export"
+    | "ac_generation"
+    | "fixed"
+    | "tracking"
+    | "unknown";
+
+type Group = keyof Vocabulary;
+type Label = { [G in Group]: { group: G; value: Vocabulary[G] } }[Group];
+
+export type CsvText =
+    | { kind: "word"; word: CsvWord }
+    | ({ kind: "label" } & Label)
+    | { kind: "reason"; reason: string | null };
+
+export type CsvCell = CsvValue | boolean | CsvText;
 
 export type CsvExport = {
     filename: string;
-    header: readonly string[];
-    rows: readonly (readonly CsvValue[])[];
+    header: readonly CsvColumn[];
+    rows: readonly (readonly CsvCell[])[];
 };
+
+export type CsvTexts = {
+    column: (column: CsvColumn) => string;
+    text: (text: CsvText) => string;
+};
+
+export function readable(file: CsvExport, texts: CsvTexts) {
+    const value = (cell: CsvCell): CsvValue =>
+        typeof cell === "boolean"
+            ? texts.text({ kind: "word", word: cell ? "yes" : "no" })
+            : cell !== null && typeof cell === "object"
+              ? texts.text(cell)
+              : cell;
+    return {
+        header: file.header.map(texts.column),
+        rows: file.rows.map((row) => row.map(value)),
+    };
+}
 
 const INVISIBLE = /^[\p{White_Space}\p{Cc}\p{Cf}]$/u;
 const FORMULA_START = "=+-@";
@@ -22,7 +117,6 @@ function cell(value: CsvValue): string {
     if (value === null) return "";
     if (typeof value === "number")
         return Number.isFinite(value) ? String(value) : "";
-    if (typeof value === "boolean") return String(value);
     // Quoting alone does not stop a spreadsheet from evaluating a leading formula character.
     const safe =
         startsFormula(value) && !PLAIN_NUMBER.test(value) ? `'${value}` : value;
@@ -75,6 +169,9 @@ export function plantFilename(
 ): string {
     const tail = [...dates, kind].filter(Boolean).join("-");
     const room = NAME_LIMIT - `pyracast--${tail}`.length;
-    const slug = asciiSlug(plant).slice(0, room).replace(/-$/, "") || "plant";
-    return csvFilename("pyracast", slug, tail);
+    const slug = asciiSlug(plant).slice(0, Math.max(room, 0)).replace(/-$/, "");
+    const name = slug || "plant";
+    if (name.length > room)
+        throw new Error("The file kind and dates leave no room for the plant.");
+    return csvFilename("pyracast", name, tail);
 }

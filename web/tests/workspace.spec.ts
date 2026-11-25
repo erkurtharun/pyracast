@@ -311,7 +311,7 @@ test("CSV selection replaces validated rows and recovers after an invalid file",
     await expect(page.getByText(/rows? read/)).toHaveCount(0);
     await expect(
         page.getByRole("alert").filter({
-            hasText: "Row 2: write the energy as zero or a positive number.",
+            hasText: "Row 2: write energy_kwh as zero or a positive number.",
         }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Preview", exact: true }).click();
@@ -321,7 +321,7 @@ test("CSV selection replaces validated rows and recovers after an invalid file",
     await select("replacement.csv", "777");
     await expect(page.getByText(/replacement\.csv · 1 row read/)).toBeVisible();
     await expect(
-        page.getByText("Row 2: write the energy as zero or a positive number."),
+        page.getByText("Row 2: write energy_kwh as zero or a positive number."),
     ).toHaveCount(0);
     const imported = page.waitForRequest(
         (request) =>
@@ -1262,7 +1262,7 @@ test("forecast crops edge zeros, retains gaps and downloads the full safe CSV", 
         skipEmptyLines: true,
     });
     expect(parsed.errors).toEqual([]);
-    expect(parsed.data.map((row) => row.ghi_wm2)).toEqual([
+    expect(parsed.data.map((row) => row["Irradiance (W/m²)"])).toEqual([
         "0",
         "12.34567",
         "",
@@ -1270,15 +1270,11 @@ test("forecast crops edge zeros, retains gaps and downloads the full safe CSV", 
         "0",
     ]);
     expect(parsed.data[0]).toEqual({
-        plant_id: "21",
-        plant_name: "East array",
-        timezone: region.timezone,
-        date: "2026-01-01",
-        source_kind: "Forecast",
-        starts_at: "2026-01-01T06:00:00+03:00",
-        ends_at: "2026-01-01T07:00:00+03:00",
-        ghi_wm2: "0",
-        quality_flags: "",
+        Plant: "East array",
+        Data: "Forecast",
+        Start: "2026-01-01T06:00:00+03:00",
+        End: "2026-01-01T07:00:00+03:00",
+        "Irradiance (W/m²)": "0",
     });
     expect(csv).not.toContain("SUM(");
 });
@@ -1390,27 +1386,32 @@ test("CSV rejects ambiguous units, offsets, overlaps, invalid energy and oversiz
         "starts_at,ends_at,energy_kwh,energy_mwh,quality,source",
         "starts_at,ends_at,energy_kwh,quality,source,plant",
     ])
-        expect(() => parseProduction(`${columns}\n`, csvTexts())).toThrow(
-            "energy_kwh or energy_mwh",
+        expect(() => parseProduction(`${columns}\n`, ...csvTexts())).toThrow(
+            "Use the columns of a file downloaded under Actual production: Start, End, Actual (MWh), Status and Source.",
         );
     expect(() =>
         parseProduction(
             header + "2026-01-01T09:00:00,2026-01-01T09:30:00,-1,valid,meter",
-            csvTexts(),
+            ...csvTexts(),
         ),
     ).toThrow("with their offset");
     expect(() =>
         parseProduction(
             header + "2026-01-01T09:00:00Z,2026-01-01T09:30:00Z,-1,valid,meter",
-            csvTexts(),
+            ...csvTexts(),
         ),
     ).toThrow("zero or a positive number");
     const row = "2026-01-01T09:00:00Z,2026-01-01T09:30:00Z,1,valid,meter";
     expect(() =>
-        parseProduction(header + row + "\n" + row, csvTexts()),
-    ).toThrow("Some times in the file overlap.");
+        parseProduction(header + row + "\n" + row, ...csvTexts()),
+    ).toThrow(
+        "Rows 2 and 3 cover the same time. Remove one of them or correct its time.",
+    );
     expect(() =>
-        parseProduction(header + Array(2001).fill(row).join("\n"), csvTexts()),
+        parseProduction(
+            header + Array(2001).fill(row).join("\n"),
+            ...csvTexts(),
+        ),
     ).toThrow("2,000");
 });
 
@@ -1419,7 +1420,7 @@ test("CSV preserves quoted commas and multiline source fields and rejects missin
     const interval = "2026-01-01T09:00:00Z,2026-01-01T09:30:00Z";
     const parsed = parseProduction(
         header + interval + ',0,valid,"Meter, north\nroof"\r\n',
-        csvTexts(),
+        ...csvTexts(),
     );
     expect(parsed.unit).toBe("kWh");
     expect(parsed.observations).toEqual([
@@ -1432,12 +1433,12 @@ test("CSV preserves quoted commas and multiline source fields and rejects missin
         },
     ]);
     expect(() =>
-        parseProduction(header + interval + ",,valid,meter", csvTexts()),
+        parseProduction(header + interval + ",,valid,meter", ...csvTexts()),
     ).toThrow("zero or a positive number");
     expect(() =>
         parseProduction(
             header + interval + ',1,valid,"unterminated',
-            csvTexts(),
+            ...csvTexts(),
         ),
     ).toThrow("could not be read as CSV");
 });
@@ -1605,7 +1606,7 @@ test("performance hides stale CSV while a selected range is loading", async ({
         await readFile(await exported.path(), "utf8"),
         { header: true, skipEmptyLines: true },
     );
-    expect(parsed.meta.fields).toContain("comparison");
+    expect(parsed.meta.fields).toContain("Comparison");
     expect(parsed.data).toEqual([]);
 });
 
@@ -1716,16 +1717,17 @@ test("forecast performance shows archived metrics, missing days and selected ran
     ).data;
     expect(exported).toHaveLength(2);
     expect(exported[0]).toMatchObject({
-        plant_name: "East array",
-        timezone: region.timezone,
-        date: "2026-11-01",
-        error_mwh: "-1.5",
+        Plant: "East array",
+        Date: "2026-11-01",
+        Status: "Compared",
+        "Forecast − actual (MWh)": "-1.5",
     });
     expect(exported[0]).not.toHaveProperty("metrics.daily_bias_mwh");
     expect(exported[1]).toMatchObject({
-        date: "2026-11-02",
-        error_mwh: "",
-        reason: "forecast_not_available",
+        Date: "2026-11-02",
+        Status: "Not compared",
+        Reason: "No forecast to compare for this day",
+        "Forecast − actual (MWh)": "",
     });
 });
 
@@ -1804,15 +1806,15 @@ test("calibration detail gives the rejection reasons, its period and days, and t
         { header: true, skipEmptyLines: true },
     ).data;
     expect(exported[0]).toMatchObject({
-        plant_name: "East array",
-        id: "40",
-        status: "rejected",
-        factor: "1.1",
-        activation_blocker: "calibration_not_activatable",
-        training_days: "8",
-        holdout_days: "2",
-        baseline_daily_mae_mwh: "3",
-        candidate_daily_mae_mwh: "2",
+        Plant: "East array",
+        "No.": "40",
+        Status: "Accuracy criteria not met",
+        Preliminary: "Yes",
+        Factor: "1.1",
+        "Calibration days": "8",
+        "Test days": "2",
+        "Error without calibration (MWh)": "3",
+        "Error with this calibration (MWh)": "2",
     });
 });
 
