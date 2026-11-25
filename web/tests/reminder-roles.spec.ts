@@ -17,6 +17,7 @@ const MEMBER = "member@example.test";
 const OUTSIDE = "outside@example.test";
 const THIRD = "third@example.test";
 const JOINER = "joiner@example.test";
+const DELIVERED = "delivered@example.test";
 const TEAM = [ADMIN, MEMBER];
 const TITLE = "Show these addresses to every recipient?";
 const SENTENCE =
@@ -186,31 +187,49 @@ async function tenantsAgain(page: Page) {
     await (await tenants).response();
 }
 
+function watchText(needles: string[]) {
+    const seen: string[] = [];
+    const values = (node: Node) =>
+        node instanceof Element || node instanceof Document
+            ? [
+                  ...(node instanceof HTMLInputElement ? [node] : []),
+                  ...node.querySelectorAll("input"),
+              ].map((input) => input.value)
+            : [];
+    const look = (records: MutationRecord[] = []) => {
+        const shown = [document.body?.textContent ?? "", ...values(document)];
+        for (const record of records) {
+            for (const node of [...record.addedNodes, ...record.removedNodes])
+                shown.push(node.textContent ?? "", ...values(node));
+            if (record.oldValue !== null) shown.push(record.oldValue);
+        }
+        const text = shown.join("\n");
+        for (const needle of needles)
+            if (text.includes(needle) && !seen.includes(needle))
+                seen.push(needle);
+    };
+    new MutationObserver(look).observe(document, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        characterDataOldValue: true,
+        attributes: true,
+    });
+    look();
+    (window as unknown as { seen: string[] }).seen = seen;
+}
+
+const seenOn = (page: Page) => () =>
+    page.evaluate(() => (window as unknown as { seen: string[] }).seen);
+
 async function watchFor(page: Page, needles: string[]) {
-    await page.evaluate((needles) => {
-        const seen: string[] = [];
-        const look = () => {
-            const shown = [
-                document.body.textContent ?? "",
-                ...[...document.querySelectorAll("input")].map(
-                    (input) => input.value,
-                ),
-            ].join("\n");
-            for (const needle of needles)
-                if (shown.includes(needle) && !seen.includes(needle))
-                    seen.push(needle);
-        };
-        new MutationObserver(look).observe(document.body, {
-            subtree: true,
-            childList: true,
-            characterData: true,
-            attributes: true,
-        });
-        look();
-        (window as unknown as { seen: string[] }).seen = seen;
-    }, needles);
-    return () =>
-        page.evaluate(() => (window as unknown as { seen: string[] }).seen);
+    await page.evaluate(watchText, needles);
+    return seenOn(page);
+}
+
+async function watchFromStart(page: Page, needles: string[]) {
+    await page.addInitScript(watchText, needles);
+    return seenOn(page);
 }
 
 async function speaking(page: Page) {
@@ -1511,9 +1530,16 @@ for (const cached of [true, false])
         page,
     }) => {
         let role: "admin" | "viewer" = cached ? "admin" : "viewer";
-        const addresses = [OUTSIDE, THIRD, MEMBER, JOINER];
+        const addresses = [OUTSIDE, THIRD, MEMBER, JOINER, DELIVERED];
         const { persons } = await reminderApi(page, {
             recipients: [OUTSIDE],
+            deliveries: [
+                {
+                    recipients: [DELIVERED],
+                    recipient_roles: [{ address: DELIVERED, role: "bcc" }],
+                    recipient_count: 1,
+                },
+            ],
             members: [
                 ADMIN,
                 { membership: 2, primary: MEMBER, active: !cached },
@@ -1579,8 +1605,8 @@ for (const cached of [true, false])
                 stale.release();
             }
         } else {
+            seen = await watchFromStart(page, addresses);
             await openReminders(page);
-            seen = await watchFor(page, addresses);
             await expect.poll(() => reads.length).toBe(2);
             await reads.at(-1)!.response();
         }
