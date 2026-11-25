@@ -71,8 +71,8 @@ def test_validation_errors_identify_each_item_in_a_list() -> None:
 @pytest.mark.parametrize(
     ("language", "message"),
     [
-        ("en", "The server could not complete this request."),
-        ("tr", "Sunucu bu isteği tamamlayamad\u0131."),
+        ("en", "Something went wrong. Try again."),
+        ("tr", "Bir sorun oluştu. Tekrar deneyin."),
     ],
 )
 def test_non_object_error_responses_receive_the_localized_contract(
@@ -111,7 +111,7 @@ def test_unmapped_client_status_has_a_localized_contract_without_a_length_header
     assert json.loads(result.content) == {
         "status": 418,
         "code": "bad_request",
-        "message": "The request could not be processed.",
+        "message": "Something went wrong. Try again.",
     }
 
 
@@ -187,5 +187,5 @@ def test_framework_refusals_preserve_existing_transport_headers() -> None:
     assert result["WWW-Authenticate"] == "Session"
     assert json.loads(result.content) == {
         "code": "method_not_allowed",
-        "message": "This action is not available here.",
+        "message": "Something went wrong. Try again.",
     }

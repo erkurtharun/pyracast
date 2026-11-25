@@ -28,9 +28,7 @@ export type StatusNotice =
     | "authenticatorActivated"
     | "authenticatorRemoved"
     | "codesCopied"
-    | "codesDownloaded"
     | "codesReplaced"
-    | "recoverySavedAck"
     | "setupKeyCopied"
     | "enterFreshCode";
 

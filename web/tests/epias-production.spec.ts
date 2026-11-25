@@ -260,7 +260,7 @@ test("actual production defaults to generation hours and full day restores every
     state.connected = false;
     await openProduction(page);
     await expect(
-        page.getByRole("button", { name: "Actuals", exact: true }),
+        page.getByRole("button", { name: "Actual production", exact: true }),
     ).toHaveAttribute("aria-current", "page");
     await expect(
         page.getByRole("button", { name: "Comparison", exact: true }),
@@ -906,7 +906,7 @@ test("production uses the server total and exposes invalid saved quality", async
     state.heads.set(8, 1);
     await openProduction(page);
     await expect(page.getByText("Total: —")).toBeVisible();
-    await expect(row(page, "08:00–09:00")).toContainText("Invalid");
+    await expect(row(page, "08:00–09:00")).toContainText("Invalid value");
     await page
         .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
         .click();

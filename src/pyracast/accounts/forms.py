@@ -18,11 +18,11 @@ ADDRESS_TEXT = re.compile(r"://|www\.|@|\b[a-z0-9-]+\.[a-z]{2,}\b", re.IGNORECAS
 def workspace_name(value: str) -> str:
     if any(unicodedata.category(character) in HIDDEN_CATEGORIES for character in value):
         raise forms.ValidationError(
-            _("Workspace names cannot contain control or invisible characters.")
+            _("The company name contains an invisible character. Type the name again.")
         )
     name = " ".join(value.split())
     if ADDRESS_TEXT.search(name):
-        raise forms.ValidationError(_("Workspace names cannot contain web or email addresses."))
+        raise forms.ValidationError(_("Enter the company name without a web or email address."))
     return name
 
 
@@ -41,7 +41,7 @@ class AccountSignupForm(forms.Form):
         if token:
             pending_invitation(str(token), str(data.get("email", "")))
         elif not data.get("company_name") and "company_name" not in self.errors:
-            self.add_error("company_name", _("A workspace name is required."))
+            self.add_error("company_name", _("Enter the company name."))
         return data
 
     def signup(self, request: HttpRequest, user: User) -> None:

@@ -240,7 +240,7 @@ test("a link into an on-demand section opens it on the first load", async ({
     await mockPlant(page);
     await page.goto("/app/w/1/plants/11/outages/");
     await expect(
-        page.getByRole("heading", { name: "Plant outages", exact: true }),
+        page.getByRole("heading", { name: "Outages", exact: true }),
     ).toBeVisible();
     await expect(tab(page, "Outages")).toHaveAttribute("aria-current", "page");
 });
@@ -343,10 +343,10 @@ test("a link into an on-demand section keeps the plant header, tabs and back but
     await expect(
         page.getByRole("status").filter({ hasText: "Loading section…" }),
     ).toHaveCount(1);
-    await expect(page.getByText("Loading plant...")).toHaveCount(0);
+    await expect(page.getByText("Loading plant…")).toHaveCount(0);
     section.release();
     await expect(
-        page.getByRole("heading", { name: "Plant outages", exact: true }),
+        page.getByRole("heading", { name: "Outages", exact: true }),
     ).toBeVisible();
     await expect(page.getByText("Loading section…")).toHaveCount(0);
 });
@@ -372,7 +372,7 @@ test("a refresh that brings an on-demand section replaces only the section slot"
     await page.goto("/app/w/1/plants/11/calibration/");
     await expect(
         page.getByText(
-            "Calibration becomes available after administrator approval and matched production history.",
+            "Calibration is available after Pyracast approves the plant.",
         ),
     ).toBeVisible();
     const section = await interceptScript(page, () => true, "held");
@@ -446,16 +446,14 @@ test("a language hand-off shows no other language before the wanted catalogue ar
     });
     await turkish.reached;
     await expect(
-        page.getByRole("heading", { name: "Create your company account" }),
+        page.getByRole("heading", { name: "Create workspace" }),
     ).toHaveCount(0);
     await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
     turkish.release();
     await expect(
-        page.getByRole("heading", { name: "Şirket hesabınızı oluşturun" }),
+        page.getByRole("heading", { name: "Çalışma alanı oluştur" }),
     ).toBeVisible();
-    expect(await seenHeadings(page)).not.toContain(
-        "Create your company account",
-    );
+    expect(await seenHeadings(page)).not.toContain("Create workspace");
     expect((await Promise.all(bodies)).some(englishCatalogue)).toBe(false);
 });
 
@@ -467,17 +465,17 @@ test("a language hand-off whose catalogue cannot be loaded offers the retry that
     const turkish = await interceptScript(page, turkishCatalogue, "aborted");
     await page.goto("/app/?language=tr&signup=1");
     await expect(page.getByRole("main").getByRole("alert")).toHaveText(
-        "Bu sayfa gösterilirken bir sorun oluştu. Tekrar deneyin; sorun sürerse sayfayı yenileyin.",
+        "Bir sorun oluştu. Tekrar deneyin.",
     );
     await expect(
-        page.getByRole("heading", { name: "Create your company account" }),
+        page.getByRole("heading", { name: "Create workspace" }),
     ).toHaveCount(0);
     turkish.release();
     await page
         .getByRole("button", { name: "Tekrar dene", exact: true })
         .click();
     await expect(
-        page.getByRole("heading", { name: "Şirket hesabınızı oluşturun" }),
+        page.getByRole("heading", { name: "Çalışma alanı oluştur" }),
     ).toBeVisible();
 });
 
@@ -492,7 +490,7 @@ test("a language whose catalogue cannot be loaded is not saved and offers a relo
     ).toBeVisible();
     await page.getByLabel("Language", { exact: true }).selectOption("tr");
     await expect(page.getByRole("main").getByRole("alert")).toHaveText(
-        "The language could not be loaded. Reload the page to try again.",
+        "The language could not be loaded. Reload the page.",
     );
     await expect(page.getByLabel("Language", { exact: true })).toHaveValue(
         "en",
@@ -580,10 +578,7 @@ test("a language another tab saved clears this tab's failed save of it for good"
     await page.route("**/api/session/language/", (route) =>
         route.fulfill({
             status: 500,
-            json: errorBody(
-                "server_error",
-                "The server could not complete this request.",
-            ),
+            json: errorBody("server_error", "Something went wrong. Try again."),
         }),
     );
     await page.goto("/app/");
@@ -592,7 +587,7 @@ test("a language another tab saved clears this tab's failed save of it for good"
     ).toBeVisible();
     await page.getByLabel("Language", { exact: true }).selectOption("tr");
     await expect(
-        page.getByText("Language could not be saved. Please try again."),
+        page.getByText("The language could not be saved. Try again."),
     ).toBeVisible();
     language = "tr";
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
@@ -612,7 +607,7 @@ test("a language another tab saved clears this tab's failed save of it for good"
         "en",
     );
     await expect(
-        page.getByText("Language could not be saved. Please try again."),
+        page.getByText("The language could not be saved. Try again."),
     ).toHaveCount(0);
 });
 
@@ -629,9 +624,7 @@ test("a language changed in another tab whose catalogue cannot be loaded is repo
         page
             .getByRole("alert")
             .filter({ hasText: "The language could not be loaded." }),
-    ).toHaveText(
-        "The language could not be loaded. Reload the page to try again.",
-    );
+    ).toHaveText("The language could not be loaded. Reload the page.");
     await expect(page.getByLabel("Forecast date")).toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     turkish.release();
@@ -673,9 +666,7 @@ test("a language whose catalogue cannot be loaded keeps the workspace in its lan
         page
             .getByRole("alert")
             .filter({ hasText: "The language could not be loaded." }),
-    ).toHaveText(
-        "The language could not be loaded. Reload the page to try again.",
-    );
+    ).toHaveText("The language could not be loaded. Reload the page.");
     await expect(
         page.getByRole("button", { name: "Reload page", exact: true }),
     ).toBeVisible();
@@ -717,10 +708,7 @@ test("a language save refused after the session ended reports nothing on the scr
         await refused;
         await route.fulfill({
             status: 500,
-            json: errorBody(
-                "server_error",
-                "The server could not complete this request.",
-            ),
+            json: errorBody("server_error", "Something went wrong. Try again."),
         });
     });
     await page.goto("/app/");
@@ -744,7 +732,7 @@ test("a language save refused after the session ended reports nothing on the scr
         page.getByRole("heading", { name: "Welcome back" }),
     ).toBeVisible();
     await expect(
-        page.getByText("Language could not be saved. Please try again."),
+        page.getByText("The language could not be saved. Try again."),
     ).toHaveCount(0);
     await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
 });
@@ -792,7 +780,7 @@ test("a catalogue that cannot be loaded offers a retry that loads the page again
     });
     await page.goto("/app/");
     await expect(page.getByRole("main").getByRole("alert")).toHaveText(
-        "Something went wrong while showing this page. Try again; if the problem continues, reload the page.",
+        "Something went wrong. Try again.",
     );
     blocked = false;
     await page.getByRole("button", { name: "Try again", exact: true }).click();

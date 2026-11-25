@@ -226,7 +226,7 @@ def test_nonexistent_or_ambiguous_local_cutoff_is_rejected(
 ) -> None:
     system, plant = make_plant(monkeypatch)
     SiteBinding.objects.filter(pk=system.binding.pk).update(timezone="Europe/Berlin")
-    with pytest.raises(ValidationError, match="ambiguous or does not exist"):
+    with pytest.raises(ValidationError, match="occurs twice because of a clock"):
         forecast_performance(plant, start_date=day, end_date=day, issuance_cutoff=time(2, 30))
 
 

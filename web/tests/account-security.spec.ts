@@ -66,7 +66,7 @@ test("an address code that needs a confirmation opens the prompt and reports no 
     await page.goto("/app/");
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByText("Change email", { exact: true }).click();
-    await page.getByLabel("Email verification code").fill("ABCD-EFGH");
+    await page.getByLabel("Email code").fill("ABCD-EFGH");
     await page.getByRole("button", { name: "Verify new email" }).click();
     await expect(
         emailChange(page).getByRole("heading", {
@@ -93,7 +93,7 @@ test("administrator recovery codes request a fresh authenticator confirmation", 
                         {
                             code: "mfa_reauthentication_required",
                             message:
-                                "Confirm with your authenticator to continue.",
+                                "Enter your authenticator code or a recovery code.",
                         },
                     ],
                 },
@@ -104,10 +104,16 @@ test("administrator recovery codes request a fresh authenticator confirmation", 
     await page.getByRole("button", { name: "Generate recovery codes" }).click();
     await page.getByRole("button", { name: "Replace codes" }).click();
     await expect(
-        page.getByRole("heading", { name: "Confirm with your authenticator" }),
+        page.getByRole("heading", {
+            name: "Confirm with your authenticator app",
+            exact: true,
+        }),
     ).toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Confirm authenticator" }),
+        page.getByLabel("Authenticator code or recovery code", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "Confirm code", exact: true }),
     ).toBeVisible();
 });
 
@@ -148,9 +154,7 @@ test("an email change confirms the password in the shared prompt, resumes the re
         change.getByText(/Other devices are signed out/),
     ).toBeVisible();
     await change.getByLabel("New email address").fill("new@example.test");
-    await change
-        .getByRole("button", { name: "Send verification code" })
-        .click();
+    await change.getByRole("button", { name: "Send email code" }).click();
     await expect(
         change.getByRole("heading", { name: "Confirm your password" }),
     ).toBeVisible();
@@ -168,7 +172,7 @@ test("an email change confirms the password in the shared prompt, resumes the re
         { email: "new@example.test" },
     ]);
     expect(confirmations).toEqual([{ password: "current-password" }]);
-    await change.getByLabel("Email verification code").fill("ABCD-EFGH");
+    await change.getByLabel("Email code").fill("ABCD-EFGH");
     await change.getByRole("button", { name: "Verify new email" }).click();
     await expect(
         change.getByText("new@example.test is now your address."),
@@ -273,12 +277,12 @@ test("the account lists where it is signed in and signs out another session", as
     });
     await page.goto("/app/account/");
     const devices = page.getByRole("region", {
-        name: "Where you are signed in",
+        name: "Active sessions",
     });
     await expect(devices.getByText("This device")).toBeVisible();
     await expect(devices.getByText("Chrome · Windows")).toBeVisible();
     await devices
-        .getByRole("button", { name: "Sign out Safari · iOS" })
+        .getByRole("button", { name: "Sign out of Safari · iOS" })
         .click();
     await expect(devices.getByText("Safari · iOS")).toHaveCount(0);
     expect(ended).toEqual([{ sessions: [2] }]);
@@ -324,10 +328,10 @@ test("one sign-out runs at a time, says it is working and names each session by 
     });
     await page.goto("/app/account/");
     const devices = page.getByRole("region", {
-        name: "Where you are signed in",
+        name: "Active sessions",
     });
     const rows = devices.getByRole("button", {
-        name: /^Sign out Chrome · Windows/,
+        name: /^Sign out of Chrome · Windows/,
     });
     await expect(rows).toHaveCount(2);
     const names = await rows.evaluateAll((buttons) =>
@@ -343,7 +347,7 @@ test("one sign-out runs at a time, says it is working and names each session by 
     await expect(rows).toHaveCount(1);
     await expect(rows).toBeDisabled();
     await expect(
-        devices.getByRole("button", { name: "Sign out all other sessions" }),
+        devices.getByRole("button", { name: "Sign out of other sessions" }),
     ).toBeDisabled();
     await arrived;
     expect(ended).toEqual([{ sessions: [2] }]);
@@ -377,8 +381,8 @@ test("the email change runs one action at a time", async ({ page }) => {
     await page.goto("/app/account/");
     const change = emailChange(page);
     await change.getByText("Change email", { exact: true }).click();
-    await change.getByLabel("Email verification code").fill("ABCD-EFGH");
-    await change.getByRole("button", { name: "Send the code again" }).click();
+    await change.getByLabel("Email code").fill("ABCD-EFGH");
+    await change.getByRole("button", { name: "Send code again" }).click();
     await expect(
         change.getByRole("button", { name: "Working…", exact: true }),
     ).toBeDisabled();
@@ -418,12 +422,12 @@ test("a resend that finds the code expired starts the change again", async ({
     await page.goto("/app/account/");
     const change = emailChange(page);
     await change.getByText("Change email", { exact: true }).click();
-    await change.getByRole("button", { name: "Send the code again" }).click();
+    await change.getByRole("button", { name: "Send code again" }).click();
     await expect(
         change.getByText("The code is no longer valid. Request a new one."),
     ).toBeVisible();
     await expect(change.getByLabel("New email address")).toBeVisible();
-    await expect(change.getByLabel("Email verification code")).toHaveCount(0);
+    await expect(change.getByLabel("Email code")).toHaveCount(0);
 });
 
 test("the address form stays disabled while the confirmed request runs", async ({
@@ -456,9 +460,7 @@ test("the address form stays disabled while the confirmed request runs", async (
     const change = emailChange(page);
     await change.getByText("Change email", { exact: true }).click();
     await change.getByLabel("New email address").fill("new@example.test");
-    await change
-        .getByRole("button", { name: "Send verification code" })
-        .click();
+    await change.getByRole("button", { name: "Send email code" }).click();
     await change
         .getByLabel("Current password", { exact: true })
         .fill("current-password");
@@ -466,7 +468,7 @@ test("the address form stays disabled while the confirmed request runs", async (
     await arrived;
     await expect(change.getByLabel("New email address")).toBeDisabled();
     await expect(
-        change.getByRole("button", { name: "Send verification code" }),
+        change.getByRole("button", { name: "Send email code" }),
     ).toBeDisabled();
     release();
     await expect(

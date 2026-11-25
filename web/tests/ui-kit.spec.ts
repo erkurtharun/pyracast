@@ -24,13 +24,13 @@ test("view navigation names its group and marks the current view", async ({
     await expect(sections.locator("[aria-current]")).toHaveCount(1);
     const views = page.getByRole("navigation", { name: "Forecast views" });
     await expect(
-        views.getByRole("button", { name: "Generation", exact: true }),
+        views.getByRole("button", { name: "Generation forecast", exact: true }),
     ).toHaveAttribute("aria-current", "page");
     await views
-        .getByRole("button", { name: "Irradiance", exact: true })
+        .getByRole("button", { name: "Irradiance forecast", exact: true })
         .click();
     await expect(
-        views.getByRole("button", { name: "Irradiance", exact: true }),
+        views.getByRole("button", { name: "Irradiance forecast", exact: true }),
     ).toHaveAttribute("aria-current", "page");
     await expect(views.locator("[aria-current]")).toHaveCount(1);
     for (const button of await page
@@ -50,7 +50,9 @@ test("labelled controls are reachable by their visible labels", async ({
     await expect(
         page.getByLabel("Forecast date", { exact: true }),
     ).toHaveAttribute("type", "date");
-    await expect(page.getByLabel("Resolution")).toHaveValue("60");
+    await expect(page.getByLabel("Interval", { exact: true })).toHaveValue(
+        "60",
+    );
     await scan(page, ".forecast-controls");
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await expect(page.getByLabel("Day", { exact: true })).toHaveAttribute(
@@ -94,7 +96,7 @@ test("a confirmation names its question, focuses the safe choice and returns foc
         })
         .click();
     const confirmation = page.getByRole("region", {
-        name: "Confirm member removal",
+        name: "Remove from workspace",
     });
     await expect(confirmation).toContainText(viewer.email);
     await expect(
@@ -140,7 +142,7 @@ test("a confirmation moved to another member focuses its safe choice again", asy
             })
             .click();
     const confirmation = page.getByRole("region", {
-        name: "Confirm member removal",
+        name: "Remove from workspace",
     });
     await expect(confirmation).toContainText(second.email);
     await expect(
@@ -268,15 +270,15 @@ test("a select reports its field error like every other control", async ({
     await page.getByRole("button", { name: /East array/ }).click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page
-        .getByRole("button", { name: "Save configuration", exact: true })
+        .getByRole("button", { name: "Save technical details", exact: true })
         .click();
-    const basis = page.getByLabel("Measurement point", { exact: true });
+    const basis = page.getByLabel("Meter point", { exact: true });
     await expect(basis).toHaveAttribute("aria-invalid", "true");
     await expect(basis).toHaveAccessibleDescription(
         "Choose where production is metered.",
     );
     await expect(page.locator(".form-errors").getByRole("listitem")).toHaveText(
-        ["Measurement point: Choose where production is metered."],
+        ["Meter point: Choose where production is metered."],
     );
 });
 
@@ -356,12 +358,12 @@ test("the shell announces action outcomes through one live region that exists be
     await expect(region).toHaveText("");
     await page.getByRole("button", { name: "Members", exact: true }).click();
     const cancel = page.getByRole("button", {
-        name: "Cancel invitation: new@example.test",
+        name: "Withdraw invitation: new@example.test",
         exact: true,
     });
     await expect(cancel).toHaveClass(/secondary/);
     await cancel.click();
-    await expect(region).toHaveText("Invitation cancelled.");
+    await expect(region).toHaveText("Invitation withdrawn.");
     await expect(
         page.getByText("new@example.test", { exact: true }),
     ).toHaveCount(0);
@@ -402,10 +404,10 @@ test("the shell speaks a repeated outcome again", async ({ page }) => {
     await page.getByRole("button", { name: "Members", exact: true }).click();
     const region = page.locator("[data-live-region]");
     const cancel = page.getByRole("button", {
-        name: /^Cancel invitation: invitee\d+@example\.test$/,
+        name: /^Withdraw invitation: invitee\d+@example\.test$/,
     });
     await cancel.first().click();
-    await expect(region).toHaveText("Invitation cancelled.");
+    await expect(region).toHaveText("Invitation withdrawn.");
     await expect(cancel).toHaveCount(1);
     await region.evaluate((element) => {
         (window as unknown as { spoken: Node | null }).spoken =
@@ -422,7 +424,7 @@ test("the shell speaks a repeated outcome again", async ({ page }) => {
             ),
         )
         .toBe(true);
-    await expect(region).toHaveText("Invitation cancelled.");
+    await expect(region).toHaveText("Invitation withdrawn.");
 });
 
 test("a checkbox reports its field error like every other control", async ({
@@ -461,22 +463,20 @@ test("a checkbox reports its field error like every other control", async ({
     await page.getByRole("button", { name: /East array/ }).click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page
-        .getByRole("button", { name: "Data collection", exact: true })
+        .getByRole("button", { name: "Forecast update times", exact: true })
         .click();
     const enabled = page.getByRole("checkbox", {
-        name: "Enable data collection",
+        name: "Update forecasts automatically",
         exact: true,
     });
     await enabled.uncheck();
-    await page
-        .getByRole("button", { name: "Save collection schedule", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(enabled).toHaveAttribute("aria-invalid", "true");
     await expect(enabled).toHaveAccessibleDescription(
         "Approval is required first.",
     );
     await expect(page.locator(".form-errors").getByRole("listitem")).toHaveText(
-        ["Enable data collection: Approval is required first."],
+        ["Update forecasts automatically: Approval is required first."],
     );
     await scan(page, ".form-errors");
 });

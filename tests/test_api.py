@@ -194,7 +194,7 @@ def test_unknown_error_answers_json_with_reference_and_logs_traceback(
     body = response.json()
     assert set(body) == {"code", "message", "request_id"}
     assert body["code"] == "server_error"
-    assert body["message"] == "The server could not complete this request."
+    assert body["message"] == "Something went wrong. Try again."
     assert re.fullmatch(r"[0-9a-f]{32}", body["request_id"])
     assert "private failure detail" not in response.content.decode()
     records = [record for record in pyracast_logs.records if record.name == "pyracast.api"]

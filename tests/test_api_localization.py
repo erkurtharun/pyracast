@@ -27,7 +27,7 @@ def test_turkish_api_validation_preserves_field_names_and_error_code() -> None:
     assert response.status_code == 400
     assert response.json() == {
         "code": "invalid_request",
-        "message": "Bilinmeyen alanlar kabul edilmez.",
+        "message": "Bir sorun oluştu. Tekrar deneyin.",
     }
     response = client.post(
         path,
@@ -38,8 +38,8 @@ def test_turkish_api_validation_preserves_field_names_and_error_code() -> None:
     assert response.status_code == 400
     assert response.json() == {
         "code": "invalid_request",
-        "message": "Geçerli bir IANA saat dilimi girin.",
-        "fields": {"timezone": "Geçerli bir IANA saat dilimi girin."},
+        "message": "Bir saat dilimi seçin.",
+        "fields": {"timezone": "Bir saat dilimi seçin."},
     }
 
 
@@ -53,7 +53,7 @@ def test_location_reason_is_presented_in_turkish_without_changing_domain_contrac
     assert response.status_code == 409
     assert response.json() == {
         "code": "region_revision_changed",
-        "message": "Santral konumu değişti. Santrali yeniden aç\u0131p tekrar deneyin.",
+        "message": "Santralin konumu bu arada değişti. Güncel konumu kontrol edip tekrar deneyin.",
     }
     with (
         translation.override("tr"),
@@ -125,7 +125,5 @@ def test_turkish_forecast_completed_day_validation_preserves_its_code() -> None:
     assert response.status_code == 400
     assert response.json() == {
         "code": "invalid_request",
-        "message": (
-            "Geçmiş tahminleri için son bir y\u0131l içinde tamamlanm\u0131ş bir yerel gün seçin."
-        ),
+        "message": "Bugünden önce ve son bir y\u0131l içinde kalan bir gün seçin.",
     }

@@ -24,7 +24,7 @@ export function ReauthenticationForm({
     autoFocus = false,
 }: {
     mode: ReauthMode;
-    email?: string;
+    email: string;
     onVerified: () => Promise<void> | void;
     onCancel?: () => void;
     disabled?: boolean;
@@ -159,9 +159,14 @@ export function ReauthenticationForm({
                 </div>
             )}
             <fieldset disabled={disabled || submitting}>
-                {mode === "email" && !codeSent ? (
-                    <p>{t("emailReauthDescription")}</p>
-                ) : (
+                {mode === "email" && (
+                    <p>
+                        {codeSent
+                            ? t("emailReauthCheck")
+                            : t("emailReauthDescription", { email })}
+                    </p>
+                )}
+                {(mode !== "email" || codeSent) && (
                     <div className="field">
                         <label htmlFor={inputId}>{defaultLabel}</label>
                         <input

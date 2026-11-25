@@ -94,8 +94,8 @@ msgstr "Kayıtlı kesinti dahil. Kesinti olmasaydı: %(energy)s."
 msgid "The recorded outage is not included in this figure."
 msgstr "Kayıtlı kesinti bu rakama dahil değildir."
 
-msgid "Enter the available capacity in the outage record to include it."
-msgstr "Dahil edilmesi için kesinti kaydına kullanılabilir kapasiteyi girin."
+msgid "Enter the capacity still in service in the outage record to include it."
+msgstr "Dahil edilmesi için kesinti kaydına devrede kalan gücü girin."
 
 msgid "Data is missing for some hours, so no daily total is given."
 msgstr "Bazı saatlerin verisi eksik olduğundan günlük toplam verilmedi."

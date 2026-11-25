@@ -224,7 +224,10 @@ async function openForecast(
     if (!electrical)
         await page
             .getByRole("button", {
-                name: language === "tr" ? "Işınım" : "Irradiance",
+                name:
+                    language === "tr"
+                        ? "Işınım tahmini"
+                        : "Irradiance forecast",
                 exact: true,
             })
             .click();

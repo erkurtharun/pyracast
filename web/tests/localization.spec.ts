@@ -78,21 +78,21 @@ test("a Turkish public signup applies guest language before showing the form and
         .click();
     await requested;
     await expect(
-        page.getByRole("heading", { name: "Create your company account" }),
+        page.getByRole("heading", { name: "Create workspace" }),
     ).toHaveCount(0);
     await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
     release();
     await expect(
-        page.getByRole("heading", { name: "Şirket hesabınızı oluşturun" }),
+        page.getByRole("heading", { name: "Çalışma alanı oluştur" }),
     ).toBeVisible();
     await expect(page).toHaveURL("/app/?signup=1");
     await page.getByLabel("Dil", { exact: true }).selectOption("en");
     await expect(
-        page.getByRole("heading", { name: "Create your company account" }),
+        page.getByRole("heading", { name: "Create workspace" }),
     ).toBeVisible();
     await page.reload();
     await expect(
-        page.getByRole("heading", { name: "Create your company account" }),
+        page.getByRole("heading", { name: "Create workspace" }),
     ).toBeVisible();
 });
 
@@ -160,13 +160,13 @@ for (const outcome of ["success", "failure"] as const) {
             window.history.replaceState(null, "", "/app/?language=en&signup=1"),
         );
         await expect(
-            page.getByRole("heading", { name: "Create your company account" }),
+            page.getByRole("heading", { name: "Create workspace" }),
         ).toBeVisible();
         const finished = page.waitForResponse("**/api/session/language/");
         release();
         await finished;
         await expect(
-            page.getByRole("heading", { name: "Create your company account" }),
+            page.getByRole("heading", { name: "Create workspace" }),
         ).toBeVisible();
         await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
         await expect(page).toHaveURL("/app/?signup=1");
@@ -185,13 +185,13 @@ test("failed public language selection offers a retry in the session language be
     });
     await page.goto("/app/?language=tr&signup=1");
     await expect(page.getByRole("main").getByRole("alert")).toHaveText(
-        "Language could not be saved. Please try again.",
+        "The language could not be saved. Try again.",
     );
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: "Try again" }).click();
     await expect(
-        page.getByRole("heading", { name: "Şirket hesabınızı oluşturun" }),
+        page.getByRole("heading", { name: "Çalışma alanı oluştur" }),
     ).toBeVisible();
     expect(attempts).toBe(2);
 });
@@ -222,12 +222,12 @@ test("focus reads wait while the language hand-off is pending or failed", async 
     await focus();
     release();
     await expect(page.getByRole("main").getByRole("alert")).toHaveText(
-        "Language could not be saved. Please try again.",
+        "The language could not be saved. Try again.",
     );
     await focus();
     await page.getByRole("button", { name: "Try again" }).click();
     await expect(
-        page.getByRole("heading", { name: "Şirket hesabınızı oluşturun" }),
+        page.getByRole("heading", { name: "Çalışma alanı oluştur" }),
     ).toBeVisible();
     expect(attempts).toBe(2);
     expect(reads).toBe(initial);
@@ -324,13 +324,30 @@ test("a failed save keeps the current language and offers an accessible error", 
     await page.goto("/app/");
     await page.getByLabel("Language", { exact: true }).selectOption("tr");
     await expect(page.getByRole("main").getByRole("alert")).toHaveText(
-        "Language could not be saved. Please try again.",
+        "The language could not be saved. Try again.",
     );
     await expect(page.getByLabel("Language", { exact: true })).toHaveValue(
         "en",
     );
     await expect(page.getByLabel("Language", { exact: true })).toBeEnabled();
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
+});
+
+test("a language save whose answer was lost says its outcome is not known", async ({
+    page,
+}) => {
+    await mockLanguage(page, "en", true);
+    await page.route("**/api/session/language/", (route) =>
+        route.fulfill({ status: 502, body: "lost" }),
+    );
+    await page.goto("/app/");
+    await page.getByLabel("Language", { exact: true }).selectOption("tr");
+    await expect(page.getByRole("main").getByRole("alert")).toHaveText(
+        "It is not known whether it was saved. Check before you send it again.",
+    );
+    await expect(page.getByLabel("Language", { exact: true })).toHaveValue(
+        "en",
+    );
 });
 
 test("Turkish mobile navigation remains accessible without horizontal overflow", async ({
@@ -468,7 +485,7 @@ test("Turkish plant search and capacity formatting follow the selected language"
     await page.goto("/app/");
     await page.getByRole("searchbox", { name: "Santral ara" }).fill("ışık");
     await expect(page.getByRole("heading", { name: "IŞIK GES" })).toBeVisible();
-    await expect(page.getByText("1.235 MW DC", { exact: false })).toBeVisible();
+    await expect(page.getByText("1.235 MWp", { exact: true })).toBeVisible();
 });
 
 test("coded forecast errors are explained in the selected language", async ({
@@ -482,8 +499,8 @@ test("coded forecast errors are explained in the selected language", async ({
             json: errorBody(
                 "completed_day_required",
                 cookie.includes("pyracast_language=en")
-                    ? "Choose a completed local day for historical estimates."
-                    : "Geçmiş tahminleri için tamamlanmış bir yerel gün seçin.",
+                    ? "Choose today or an earlier day."
+                    : "Bugünü veya daha önceki bir günü seçin.",
             ),
         });
     });
@@ -491,12 +508,12 @@ test("coded forecast errors are explained in the selected language", async ({
     await page.getByRole("button", { name: /East array/ }).click();
     const failure = page.getByRole("main").getByRole("alert");
     await expect(failure.locator("p")).toHaveText(
-        "Geçmiş tahminleri için tamamlanmış bir yerel gün seçin.",
+        "Bugünü veya daha önceki bir günü seçin.",
     );
     await expect(failure.getByRole("button")).toHaveText("Tekrar dene");
     await page.getByLabel("Dil", { exact: true }).selectOption("en");
     await expect(failure.locator("p")).toHaveText(
-        "Choose a completed local day for historical estimates.",
+        "Choose today or an earlier day.",
     );
     await expect(failure.getByRole("button")).toHaveText("Try again");
 });
@@ -507,12 +524,12 @@ test.describe("the session end notice", () => {
         [
             "en",
             "Plants",
-            "Your session ends at 10:00 PM. Save your work; you will need to sign in again.",
+            "Automatic sign-out at 10:00 PM GMT+3. Save your work.",
         ],
         [
             "tr",
             "Santraller",
-            "Oturumunuz 22:00 saatinde sona erecek. Çalışmanızı kaydedin; yeniden oturum açmanız gerekecek.",
+            "Otomatik çıkış saati: 22:00 GMT+3. Çalışmanızı kaydedin.",
         ],
     ] as const) {
         test(`appears five minutes before the session ends in ${language}`, async ({

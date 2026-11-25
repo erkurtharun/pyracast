@@ -108,9 +108,9 @@ def test_batch_rejects_stale_and_overlap_without_partial_changes(
     with raises_code("production_revision_changed"):
         write(system, plant, [edit(start + timedelta(hours=1)), edit(start, 3)])
     assert ProductionObservation.objects.count() == 1
-    with pytest.raises(ValidationError, match="overlapping"):
+    with pytest.raises(ValidationError, match="overlap in time"):
         write(system, plant, [edit(start, 3, revision_id=first), edit(start, minutes=30)])
-    with pytest.raises(ValidationError, match="overlapping"):
+    with pytest.raises(ValidationError, match="overlap in time"):
         write(system, plant, [edit(start + timedelta(minutes=30), minutes=30)])
     assert ProductionObservation.objects.get(pk=first).is_current
     assert ProductionObservation.objects.count() == 1
@@ -196,9 +196,9 @@ def test_current_configuration_and_meter_basis_boundaries(monkeypatch: pytest.Mo
     assert earlier["id"] == first
     assert history["intervals"][0]["edit_unavailable_reason"] == "configuration_mismatch"
     assert history["intervals"][0]["provider_originals"] == []
-    with pytest.raises(ValidationError, match="previous configuration"):
+    with pytest.raises(ValidationError, match="earlier technical details"):
         write(system, plant, [edit(start, 3, revision_id=first)])
-    with pytest.raises(ValidationError, match="current approved configuration"):
+    with pytest.raises(ValidationError, match="changed after these values were entered"):
         change_production(
             system.member,
             system.tenant.pk,

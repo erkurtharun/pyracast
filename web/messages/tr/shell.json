@@ -7,7 +7,6 @@
     },
     "AppError": {
         "title": "Bu sayfa görüntülenemedi",
-        "description": "Bu sayfa gösterilirken bir sorun oluştu. Tekrar deneyin; sorun sürerse sayfayı yenileyin.",
         "retry": "Tekrar dene",
         "reload": "Sayfayı yenile",
         "start": "Başlangıç ekranına git"
@@ -16,20 +15,19 @@
         "label": "Dil",
         "saving": "Kaydediliyor…",
         "failed": "Dil kaydedilemedi. Tekrar deneyin.",
-        "unavailable": "Dil yüklenemedi. Tekrar denemek için sayfayı yenileyin.",
+        "unavailable": "Dil yüklenemedi. Sayfayı yenileyin.",
         "reload": "Sayfayı yenile"
     },
     "Errors": {
-        "request": "İstek başarısız oldu ({status}). Tekrar deneyin.",
-        "invalidResponse": "Sunucu geçersiz bir yanıt döndürdü. Tekrar deneyin.",
+        "request": "Bir sorun oluştu. Tekrar deneyin.",
+        "invalidResponse": "Bir sorun oluştu. Tekrar deneyin.",
         "reference": "Referans: {reference}",
-        "network": "Sunucuya ulaşılamadı. Bağlantınızı kontrol edip tekrar deneyin.",
-        "unconfirmedTitle": "Değişiklik onaylanmadı",
-        "unconfirmed": "Sunucu değişikliği onaylamadı. Değişiklik kaydedilmiş olabilir; yeniden göndermeden önce kontrol edin.",
-        "unconfirmedRepeatable": "Sunucu değişikliği onaylamadı. Değişiklik kaydedilmiş olabilir. Girdiğiniz bilgiler hâlâ burada: değiştirmeden yeniden gönderirseniz yalnızca bir kez kaydedilir.",
-        "sessionChanged": "Oturum başka bir sekmede değişti. Sayfa artık geçerli oturumu gösteriyor.",
-        "notSentSigningOut": "Oturum kapatma sürdüğü için bu istek gönderilmedi.",
-        "invalidPage": "Sunucu geçersiz bir sonraki sayfa döndürdü.",
-        "unexpected": "Bir sorun oluştu. Lütfen yeniden deneyin."
+        "network": "Pyracast'e ulaşılamadı. Bağlantınızı kontrol edip tekrar deneyin.",
+        "unconfirmedTitle": "Sonuç bilinmiyor",
+        "unconfirmed": "Kaydedilip kaydedilmediği bilinmiyor. Yeniden göndermeden önce kontrol edin.",
+        "unconfirmedRepeatable": "Kaydedilip kaydedilmediği bilinmiyor. Girdiğiniz bilgiler duruyor; yeniden gönderebilirsiniz.",
+        "sessionChanged": "Başka bir sekmede giriş veya çıkış yaptınız.",
+        "notSentSigningOut": "Çıkış yapıldığı için gönderilmedi.",
+        "unexpected": "Bir sorun oluştu. Tekrar deneyin."
     }
 }

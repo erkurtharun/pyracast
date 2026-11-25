@@ -1,15 +1,42 @@
 import { expect, test } from "./support/test";
 import type { Page } from "@playwright/test";
-import { mockApi, paged, plant, region, user } from "./support/workspace";
+import {
+    mockApi,
+    paged,
+    plant,
+    region,
+    tenantRow,
+    user,
+} from "./support/workspace";
 
 const STATES = [
-    ["sending", "Sending"],
-    ["paused_by_user", "Paused"],
-    ["waiting_for_approval", "Waiting for approval"],
-    ["provider_attention", "Provider account needs attention"],
-    ["no_recipients", "No recipients"],
-    ["invalid_recipient", "Invalid recipient"],
-    ["over_recipient_limit", "Over the recipient limit"],
+    ["sending", "On", "Forecast email: Not sent", "approved"],
+    ["paused_by_user", "Off", "Forecast email off", "approved"],
+    [
+        "waiting_for_approval",
+        "Waiting for approval by Pyracast",
+        "Forecast email: Waiting for approval by Pyracast",
+        "pending",
+    ],
+    ["provider_attention", "Paused", "Forecast email: Paused", "approved"],
+    [
+        "no_recipients",
+        "No recipients",
+        "Forecast email: No recipients",
+        "approved",
+    ],
+    [
+        "invalid_recipient",
+        "Invalid address",
+        "Forecast email: Invalid address",
+        "approved",
+    ],
+    [
+        "over_recipient_limit",
+        "Too many recipients",
+        "Forecast email: Too many recipients",
+        "approved",
+    ],
 ] as const;
 
 const LAST = {
@@ -18,10 +45,26 @@ const LAST = {
     last_error: "mail_rejected",
 } as const;
 
-async function plantList(page: Page, reminder: unknown) {
+async function plantList(
+    page: Page,
+    reminder: unknown,
+    status: string = region.status,
+) {
     await page.route("**/api/tenants/1/sites/", (route) =>
-        route.fulfill({ json: paged([{ ...region, plant, reminder }]) }),
+        route.fulfill({
+            json: paged([{ ...region, status, plant, reminder }]),
+        }),
     );
+}
+
+async function openEmail(page: Page) {
+    await page.goto("/app/");
+    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Forecast email", exact: true })
+        .click();
+    return page.getByRole("region", { name: "Forecast email" });
 }
 
 async function reminders(page: Page, state: string) {
@@ -73,39 +116,37 @@ async function reminders(page: Page, state: string) {
     );
 }
 
-for (const [state, label] of STATES) {
+for (const [state, label, line, status] of STATES) {
     test(`the plant list and the reminders screen name the ${state} state with the latest outcome`, async ({
         page,
     }) => {
         await mockApi(page);
-        await plantList(page, { state, last_delivery: LAST });
+        await plantList(page, { state, last_delivery: LAST }, status);
         await reminders(page, state);
         await page.goto("/app/");
         const card = page.getByRole("button", { name: /East array/ });
-        await expect(card).toContainText(`Daily email: ${label}`);
-        await expect(card).toContainText("Last email: Not sent");
+        await expect(card.locator(".fine")).toHaveText([line]);
         await card.click();
         await page
-            .getByRole("button", { name: "Irradiance", exact: true })
+            .getByRole("button", { name: "Irradiance forecast", exact: true })
             .click();
         await page
             .getByRole("button", { name: "Settings", exact: true })
             .click();
         await page
-            .getByRole("button", { name: "Email reminders", exact: true })
+            .getByRole("button", { name: "Forecast email", exact: true })
             .click();
-        const panel = page.getByRole("region", { name: "Email reminders" });
+        const panel = page.getByRole("region", { name: "Forecast email" });
         await expect(panel.getByText(label, { exact: true })).toBeVisible();
-        await expect(panel.getByRole("status")).toContainText(
-            "Last email: Not sent",
-        );
-        await expect(panel.getByRole("status")).toContainText(
-            "The mail service rejected the message.",
-        );
+        const last = panel.getByRole("status").filter({
+            hasText: "Last email",
+        });
+        await expect(last).toContainText("Last email: Not sent");
+        await expect(last).toContainText("The email was rejected.");
     });
 }
 
-test("a plant whose reminders were never saved shows no reminder line", async ({
+test("a plant whose forecast email was never saved shows no forecast email line", async ({
     page,
 }) => {
     await mockApi(page);
@@ -113,16 +154,149 @@ test("a plant whose reminders were never saved shows no reminder line", async ({
     await page.goto("/app/");
     const card = page.getByRole("button", { name: /East array/ });
     await expect(card).toBeVisible();
-    await expect(card).not.toContainText("Daily email");
+    await expect(card).not.toContainText("Forecast email");
 });
 
-test("a plant whose reminders never ran names its state without an outcome", async ({
+for (const [status, outcome] of [
+    ["sent", "was last sent"],
+    [null, "has not been sent yet"],
+] as const)
+    test(`a plant whose forecast email is on and ${outcome} shows no forecast email line`, async ({
+        page,
+    }) => {
+        await mockApi(page);
+        await plantList(page, {
+            state: "sending",
+            last_delivery: status && { ...LAST, status, last_error: "" },
+        });
+        await page.goto("/app/");
+        const card = page.getByRole("button", { name: /East array/ });
+        await expect(card.locator("p")).toHaveText(["5 MWp"]);
+        await expect(card).toContainText("Open plant");
+        await expect(card).not.toContainText("Istanbul");
+    });
+
+test("a plant whose forecast email is on and not known to have been sent says so", async ({
     page,
 }) => {
     await mockApi(page);
-    await plantList(page, { state: "sending", last_delivery: null });
+    await plantList(page, {
+        state: "sending",
+        last_delivery: { ...LAST, status: "uncertain", last_error: "" },
+    });
     await page.goto("/app/");
     const card = page.getByRole("button", { name: /East array/ });
-    await expect(card).toContainText("Daily email: Sending");
-    await expect(card).not.toContainText("Last email");
+    await expect(card).toContainText("Forecast email: Not known whether sent");
+});
+
+for (const [status, lastError] of [
+    ["skipped", "missed_schedule"],
+    ["cancelled", "cancelled_by_settings_change"],
+] as const)
+    test(`a plant whose forecast email is on and whose last email was ${status} says it was not sent`, async ({
+        page,
+    }) => {
+        await mockApi(page);
+        await plantList(page, {
+            state: "sending",
+            last_delivery: { ...LAST, status, last_error: lastError },
+        });
+        await page.goto("/app/");
+        const card = page.getByRole("button", { name: /East array/ });
+        await expect(card.locator("p")).toHaveText([
+            "5 MWp",
+            "Forecast email: Not sent",
+        ]);
+    });
+
+for (const [status, attention, reason] of [
+    ["rejected", "review_rejected", "Pyracast did not approve this plant."],
+    [
+        "suspended",
+        "suspended",
+        "Forecasts for this plant are stopped. Write to Pyracast: info@pyracast.app",
+    ],
+    [
+        "approved",
+        "connection_unavailable",
+        "No new forecast data is arriving for this plant. Write to Pyracast: info@pyracast.app",
+    ],
+] as const)
+    test(`a ${status} plant whose forecast email waits shows only the plant's own reason`, async ({
+        page,
+    }) => {
+        await mockApi(page);
+        await page.route("**/api/tenants/1/sites/", (route) =>
+            route.fulfill({
+                json: paged([
+                    {
+                        ...region,
+                        status,
+                        attention,
+                        plant,
+                        reminder: {
+                            state: "waiting_for_approval",
+                            last_delivery: LAST,
+                        },
+                    },
+                ]),
+            }),
+        );
+        await page.goto("/app/");
+        const card = page.getByRole("button", { name: /East array/ });
+        await expect(card.locator("p")).toHaveText([
+            "5 MWp",
+            `Needs action: ${reason}`,
+        ]);
+    });
+
+for (const state of ["provider_attention", "sending"] as const)
+    test(`the forecast email settings say the email is paused only while no forecast data arrives: ${state}`, async ({
+        page,
+    }) => {
+        await mockApi(page);
+        await plantList(page, { state, last_delivery: LAST });
+        await reminders(page, state);
+        const panel = await openEmail(page);
+        const paused = panel.getByRole("status").filter({
+            hasText: "Forecast email paused",
+        });
+        await expect(paused).toHaveCount(state === "sending" ? 0 : 1);
+        if (state === "sending") return;
+        await expect(
+            paused.getByText("Forecast email paused", { exact: true }),
+        ).toBeVisible();
+        await expect(
+            paused.getByText(
+                "No new forecast data is arriving for this plant. Write to Pyracast: info@pyracast.app",
+                { exact: true },
+            ),
+        ).toBeVisible();
+    });
+
+test("a member of a plant waiting for approval reads when the forecast email can be turned on, not that they can do it", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/api/tenants/", (route) =>
+        route.fulfill({
+            json: paged([
+                tenantRow({ id: 1, name: "Sunfield Energy", role: "viewer" }),
+            ]),
+        }),
+    );
+    await plantList(
+        page,
+        { state: "waiting_for_approval", last_delivery: LAST },
+        "pending",
+    );
+    await reminders(page, "waiting_for_approval");
+    const panel = await openEmail(page);
+    await expect(
+        panel.getByText(
+            "The forecast email can be turned on after Pyracast approves this plant.",
+            { exact: true },
+        ),
+    ).toBeVisible();
+    await expect(panel.getByText(/You can turn on/)).toHaveCount(0);
 });

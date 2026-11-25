@@ -7,7 +7,6 @@
     },
     "AppError": {
         "title": "This page could not be displayed",
-        "description": "Something went wrong while showing this page. Try again; if the problem continues, reload the page.",
         "retry": "Try again",
         "reload": "Reload page",
         "start": "Go to the start screen"
@@ -15,21 +14,20 @@
     "Language": {
         "label": "Language",
         "saving": "Saving…",
-        "failed": "Language could not be saved. Please try again.",
-        "unavailable": "The language could not be loaded. Reload the page to try again.",
+        "failed": "The language could not be saved. Try again.",
+        "unavailable": "The language could not be loaded. Reload the page.",
         "reload": "Reload page"
     },
     "Errors": {
-        "request": "Request failed ({status}). Please try again.",
-        "invalidResponse": "The server returned an invalid response. Please try again.",
+        "request": "Something went wrong. Try again.",
+        "invalidResponse": "Something went wrong. Try again.",
         "reference": "Reference: {reference}",
-        "network": "Could not reach the server. Check your connection and try again.",
-        "unconfirmedTitle": "Change not confirmed",
-        "unconfirmed": "The server did not confirm the change. It may have been saved; check before you send it again.",
-        "unconfirmedRepeatable": "The server did not confirm the change. It may have been saved. Your entry is still here: sending it again unchanged saves it only once.",
-        "sessionChanged": "The session changed in another tab. The page now shows the current session.",
-        "notSentSigningOut": "This request was not sent because signing out was in progress.",
-        "invalidPage": "The server returned an invalid next page.",
-        "unexpected": "Something went wrong. Please try again."
+        "network": "Pyracast could not be reached. Check your connection and try again.",
+        "unconfirmedTitle": "Outcome unknown",
+        "unconfirmed": "It is not known whether it was saved. Check before you send it again.",
+        "unconfirmedRepeatable": "It is not known whether it was saved. Your entry is still here, and you can send it again.",
+        "sessionChanged": "You signed in or out in another tab.",
+        "notSentSigningOut": "Not sent because you are signing out.",
+        "unexpected": "Something went wrong. Try again."
     }
 }

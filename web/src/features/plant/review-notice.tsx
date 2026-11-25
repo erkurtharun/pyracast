@@ -3,34 +3,24 @@ import { useTranslations } from "next-intl";
 import type { RegionScope, Site } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { useRefresh } from "@/lib/api/query";
-import { useFormat } from "@/lib/format/use-format";
 import { contactEmail } from "@/lib/public-metadata";
 import { AsyncButton } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import { useLabel } from "@/ui/vocabulary";
-
-const DECISION_TIME: Intl.DateTimeFormatOptions = {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-};
+import { useCanManageWorkspace } from "@/ui/workspace-access";
 
 export function ReviewNotice({
     region,
     scope,
-    timezone,
 }: {
     region: Site;
     scope: RegionScope;
-    timezone: string;
 }) {
     const t = useTranslations("PlantWorkspace");
     const dashboard = useTranslations("Dashboard");
-    const format = useFormat();
     const label = useLabel();
     const refresh = useRefresh();
+    const canManage = useCanManageWorkspace();
     if (region.status === "approved")
         return region.attention === "connection_unavailable" ? (
             <Notice>
@@ -43,36 +33,19 @@ export function ReviewNotice({
         return (
             <Notice>
                 <p>{t("awaitingApproval")}</p>
-                <ol aria-label={t("nextSteps")}>
-                    <li>{t("nextReview")}</li>
-                    <li>{t("nextForecasts")}</li>
-                    <li>{t("nextSettings")}</li>
-                </ol>
+                {canManage && <p>{t("stillEditable")}</p>}
             </Notice>
         );
+    const rejected = region.status === "rejected";
     return (
         <Notice>
             <p>
-                {region.status === "rejected"
+                {rejected
                     ? t("rejectedNotice")
-                    : t("approvalStatus", {
-                          status: label("RegionStatus", region.status),
-                          contact: contactEmail,
-                      })}
+                    : t("approvalStatus", { contact: contactEmail })}
             </p>
-            {region.review_reason && region.reviewed_at && (
-                <p>
-                    {t("reviewReason", {
-                        date: format.time(
-                            region.reviewed_at,
-                            timezone,
-                            DECISION_TIME,
-                        ),
-                        reason: region.review_reason,
-                    })}
-                </p>
-            )}
-            {region.status === "rejected" && (
+            {region.review_reason && <p>{region.review_reason}</p>}
+            {rejected && canManage && (
                 <>
                     <p>{t("resubmitHelp")}</p>
                     <AsyncButton

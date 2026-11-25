@@ -141,14 +141,14 @@ def test_archive_rejects_invalid_resolution(
     monkeypatch: pytest.MonkeyPatch, resolution: int
 ) -> None:
     _, plant = make_plant(monkeypatch)
-    with pytest.raises(ValidationError, match="Resolution"):
+    with pytest.raises(ValidationError, match="Something went wrong"):
         archived_forecast(plant, DAY, resolution, NOW)
 
 
 @pytest.mark.parametrize("bad_cutoff", [NOW.replace(tzinfo=None), NOW + timedelta(seconds=1)])
 def test_archive_rejects_invalid_cutoff(monkeypatch: pytest.MonkeyPatch, bad_cutoff: Any) -> None:
     _, plant = make_plant(monkeypatch)
-    with pytest.raises(ValidationError, match="as_of"):
+    with pytest.raises(ValidationError, match="Something went wrong"):
         archived_forecast(plant, DAY, 30, NOW, as_of=bad_cutoff)
 
 

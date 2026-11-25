@@ -33,16 +33,16 @@ pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth
 CODE = re.compile(r"^\s*([A-Z0-9]{4}-[A-Z0-9]{4}|[0-9]{6})\s*$", re.MULTILINE)
 PENDING = {"id": "verify_email", "is_pending": True}
 CONFLICT = {
-    "en": "The request conflicts with the current state. Reload and try again.",
-    "tr": "\u0130stek mevcut durumla çak\u0131ş\u0131yor. Sayfay\u0131 yenileyip tekrar deneyin.",
+    "en": "Something changed in the meantime. Check the current values and try again.",
+    "tr": "Bu arada bir değişiklik oldu. Güncel değerleri kontrol edip tekrar deneyin.",
 }
 BUSY = {
-    "en": "The workspace is busy. Try again in a moment.",
-    "tr": "Çal\u0131şma alan\u0131 meşgul. Biraz sonra tekrar deneyin.",
+    "en": "This could not be saved right now. Try again in a moment.",
+    "tr": "Şu anda kaydedilemedi. Biraz sonra tekrar deneyin.",
 }
 THROTTLED = {
-    "en": "Too many requests. Wait a moment and try again.",
-    "tr": "Çok fazla istek gönderildi. Biraz bekleyip tekrar deneyin.",
+    "en": "Too many attempts in a short time. Wait a moment and try again.",
+    "tr": "K\u0131sa sürede çok fazla deneme yap\u0131ld\u0131. Biraz bekleyip tekrar deneyin.",
 }
 
 

@@ -40,7 +40,7 @@ test("an invitee sees the workspace, role and inviter before signing in and then
         "You are invited to join Sunfield Energy.",
     );
     await expect(invitation).toContainText("Role: Member");
-    await expect(invitation).toContainText("invited by owner@example.test");
+    await expect(invitation).toContainText("Invited by: owner@example.test");
     await expect(invitation).toContainText(
         "Sign in or create an account with solar@example.test to accept it.",
     );
@@ -50,7 +50,7 @@ test("an invitee sees the workspace, role and inviter before signing in and then
         .fill("Test-only-cobalt-79!");
     await page.locator("form").getByRole("button", { name: "Sign in" }).click();
     await expect(
-        page.getByRole("heading", { name: "Join workspace" }),
+        page.getByRole("heading", { name: "Invitation", exact: true }),
     ).toBeVisible();
     await expect(
         page.getByText("You are invited to join Sunfield Energy."),
@@ -82,7 +82,7 @@ for (const anonymous of [true, false])
                 status: 400,
                 json: errorBody(
                     "invitation_unavailable",
-                    "The invitation is invalid or expired.",
+                    "This invitation is no longer valid. Ask the workspace administrator for a new one.",
                 ),
             }),
         );
@@ -102,7 +102,7 @@ for (const anonymous of [true, false])
         if (anonymous) {
             await page
                 .getByRole("button", {
-                    name: "Cancel invitation",
+                    name: "Withdraw invitation",
                     exact: true,
                 })
                 .click();
@@ -131,7 +131,7 @@ test("a preview that cannot be loaded still lets the invitee accept", async ({
             headers: { "Retry-After": "1" },
             json: errorBody(
                 "busy",
-                "The workspace is busy. Try again in a moment.",
+                "This could not be saved right now. Try again in a moment.",
                 { retry_after: 1 },
             ),
         }),
@@ -146,7 +146,9 @@ test("a preview that cannot be loaded still lets the invitee accept", async ({
     );
     await page.goto("/app/invitation/#token=invite-secret");
     await expect(
-        page.getByText("The workspace is busy. Try again in a moment."),
+        page.getByText(
+            "This could not be saved right now. Try again in a moment.",
+        ),
     ).toBeVisible();
     await page.getByRole("button", { name: "Accept invitation" }).click();
     await expect(page).toHaveURL("/app/w/1/");
@@ -245,7 +247,7 @@ for (const first of ["resend", "cancel"] as const)
             exact: true,
         });
         const cancel = page.getByRole("button", {
-            name: "Cancel invitation: late@example.test",
+            name: "Withdraw invitation: late@example.test",
             exact: true,
         });
         const [started, other] =
@@ -258,7 +260,7 @@ for (const first of ["resend", "cancel"] as const)
         const region = page.locator("[data-live-region]");
         if (first === "resend") {
             await expect(region).toHaveText(
-                "A new invitation link is being sent to late@example.test.",
+                "A new invitation is being sent to late@example.test.",
             );
             await expect(
                 page
@@ -272,7 +274,7 @@ for (const first of ["resend", "cancel"] as const)
                 [4, "pending"],
             ]);
         } else {
-            await expect(region).toHaveText("Invitation cancelled.");
+            await expect(region).toHaveText("Invitation withdrawn.");
             await expect(page.getByText("No open invitations.")).toBeVisible();
             expect(rows).toEqual([]);
         }

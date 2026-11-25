@@ -26,9 +26,9 @@ export function publicRoute(
 const descriptions = {
     en: {
         home: {
-            title: "Solar production forecasts",
+            title: "Solar generation forecasts",
             description:
-                "Plan your solar operations with production forecasts, reported generation, outage scenarios and scheduled email reports in one workspace.",
+                "Plan your solar plants with generation forecasts, actual production, outages and forecast emails in one workspace.",
         },
         privacy: {
             title: "Privacy policy",
@@ -45,7 +45,7 @@ const descriptions = {
         home: {
             title: "Güneş enerjisi üretim tahmini",
             description:
-                "Güneş santrallerinizin üretim tahminlerini, gerçekleşen üretimini, kesinti senaryolarını ve e-posta raporlarını tek çalışma alanında takip edin.",
+                "Güneş santrallerinizin üretim tahminlerini, gerçekleşen üretimini, kesintilerini ve tahmin e-postalarını tek çalışma alanında takip edin.",
         },
         privacy: {
             title: "Gizlilik politikası",
@@ -68,7 +68,7 @@ export function publicMetadata(language: Language, page: PublicPage): Metadata {
     const imageAlt =
         language === "tr"
             ? "Pyracast — güneş enerjisi üretim tahmini"
-            : "Pyracast — solar production forecasts";
+            : "Pyracast — solar generation forecasts";
     return {
         title: { absolute: `${title} | Pyracast` },
         description,

@@ -73,7 +73,7 @@ export async function fetchList<T>(url: string): Promise<Fetched<Page<T>>> {
             !target.pathname.startsWith("/api/") ||
             visited.has(page)
         )
-            throw new ApiError(browserErrors()("invalidPage"));
+            throw new ApiError(browserErrors()("unexpected"));
         visited.add(page);
         const answer = await send<Page<T>>({ method: "GET", url: page });
         add(answer.results);

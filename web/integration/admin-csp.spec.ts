@@ -241,9 +241,9 @@ test("an MFA administrator reviews plants and operations on desktop and mobile u
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto("/app/w/");
     await expect(
-        page.getByRole("link", { name: "Administration" }),
+        page.getByRole("link", { name: "Pyracast console" }),
     ).toBeVisible();
-    await page.getByRole("link", { name: "Administration" }).click();
+    await page.getByRole("link", { name: "Pyracast console" }).click();
     await expect(page).toHaveURL("/admin/");
     await page.locator("summary").filter({ hasText: "Menu" }).click();
     const signedOutSession = page.waitForResponse(
