@@ -1,5 +1,5 @@
 from bisect import bisect_left, bisect_right
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from itertools import pairwise
 from math import isfinite
@@ -54,7 +54,6 @@ PLAUSIBLE_CAPACITY_FACTOR = 1.25
 type ProductionUnit = Literal["MWh", "kWh"]
 type ProductionAction = Literal["set", "revert"]
 type ProductionOrigin = Literal["editor", "csv_import", "change_request"]
-SOURCE_LABELS = ("settlement", "provisional", "manual")
 
 
 @dataclass(frozen=True)
@@ -64,8 +63,6 @@ class ObservationInput:
     energy: float
     quality: str = ObservationQuality.VALID
     source: str = "operator"
-    quality_label: bool = False
-    source_label: str | None = None
 
 
 class ObservationImportResult(TypedDict):
@@ -426,25 +423,14 @@ def _covers(spans: list[tuple[datetime, datetime]], start: datetime, end: dateti
     return False
 
 
-def _as_shown(
-    row: PreparedChange, item: ObservationInput, shown: Measurement | None
-) -> PreparedChange:
-    # A file shows a derived status and only the kind of source, never the saved text.
-    saved = row.previous
-    if (
-        saved is None
-        or saved.is_reverted
-        or shown is None
-        or shown.snapshot is not None
-        or shown.pk != saved.pk
-    ):
-        return row
-    return replace(
-        row,
-        quality=saved.quality
-        if item.quality_label and row.quality == shown.quality
-        else row.quality,
-        source=saved.source if item.source_label == "manual" else row.source,
+def _repeats_provider_value(
+    row: PreparedChange, shown: Measurement | None, original: Measurement | None
+) -> bool:
+    return (
+        shown is not None
+        and shown.snapshot is not None
+        and original is not None
+        and (row.energy_mwh, row.quality) == (original.energy_mwh, original.quality)
     )
 
 
@@ -472,25 +458,40 @@ def preview_production(
         ]
         prepared = prepare_production_changes(configuration, unit, changes, capture_revisions=True)
         start, end = _hour_span(prepared)
-        current = select_measurements(configuration, start, end, timezone.now())[0]
-        shown = {(row.starts_at, row.ends_at): row for row in current}
-        current_values = {key: row.energy_mwh for key, row in shown.items()}
-        prepared = [
-            _as_shown(row, item, shown.get((row.starts_at, row.ends_at)))
-            for row, item in zip(prepared, observations, strict=True)
+        now = timezone.now()
+        current = {
+            (row.starts_at, row.ends_at): row
+            for row in select_measurements(configuration, start, end, now)[0]
+        }
+        current_values = {key: row.energy_mwh for key, row in current.items()}
+        originals = {
+            (row.starts_at, row.ends_at): row
+            for row in select_provider_measurements(configuration, start, end, now)[0]
+        }
+        kept = [
+            (change, row)
+            for change, row in zip(changes, prepared, strict=True)
+            if not _repeats_provider_value(
+                row,
+                current.get((row.starts_at, row.ends_at)),
+                originals.get((row.starts_at, row.ends_at)),
+            )
         ]
+        if not kept:
+            raise ValidationError(gettext("This file changes no value."))
+        rows = [row for _, row in kept]
         return {
             "changes": [
                 {
-                    "starts_at": row.starts_at,
-                    "ends_at": row.ends_at,
-                    "expected_revision_id": ready.previous.pk if ready.previous else None,
-                    "action": row.action,
-                    "energy": row.energy,
-                    "quality": ready.quality,
-                    "source": ready.source,
+                    "starts_at": change.starts_at,
+                    "ends_at": change.ends_at,
+                    "expected_revision_id": row.previous.pk if row.previous else None,
+                    "action": change.action,
+                    "energy": change.energy,
+                    "quality": change.quality,
+                    "source": change.source,
                 }
-                for row, ready in zip(changes, prepared, strict=True)
+                for change, row in kept
             ],
             "preview": [
                 {
@@ -500,10 +501,10 @@ def preview_production(
                     "new_energy_mwh": row.energy_mwh,
                     "corrected": row.previous is not None and not row.previous.is_reverted,
                 }
-                for row in prepared
+                for row in rows
             ],
-            "warnings": production_change_warnings(configuration, prepared)
-            + capacity_warnings(configuration, prepared),
+            "warnings": production_change_warnings(configuration, rows)
+            + capacity_warnings(configuration, rows),
         }
 
 

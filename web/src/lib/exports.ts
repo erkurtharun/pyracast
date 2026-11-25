@@ -58,16 +58,28 @@ function timeColumns<Row>(
     ];
 }
 
+type ProductionRow = {
+    interval: Schemas["ProductionIntervalOutput"];
+    value: Schemas["ProductionValueOutput"];
+};
+
+function savedQuality({ interval, value }: ProductionRow) {
+    return (
+        interval.observation?.quality ??
+        interval.provider_originals.find(
+            (original) => original.source_kind === value.source_kind,
+        )?.quality ??
+        value.quality
+    );
+}
+
 export function productionExport(
     plant: PlantRef,
     date: string,
     intervals: readonly Schemas["ProductionIntervalOutput"][],
     kind: string,
 ): CsvExport {
-    type Row = {
-        interval: Schemas["ProductionIntervalOutput"];
-        value: Schemas["ProductionValueOutput"];
-    };
+    type Row = ProductionRow;
     return table<Row>(
         plantFilename(plant.name, kind, date),
         [
@@ -79,16 +91,22 @@ export function productionExport(
             ["actual_mwh", (row) => row.value.energy_mwh],
             [
                 "status",
-                ({ value }) =>
-                    value.quality === "mixed"
+                (row) =>
+                    row.value.quality === "mixed"
                         ? word("mixed")
                         : {
                               kind: "label",
                               group: "ObservationQuality",
-                              value: qualityOf(value.quality),
+                              value: qualityOf(savedQuality(row)),
                           },
             ],
-            ["source", (row) => word(productionSource(row.interval))],
+            [
+                "source",
+                ({ interval }) =>
+                    interval.observation
+                        ? interval.observation.source
+                        : word(productionSource(interval)),
+            ],
         ],
         intervals.flatMap((interval) =>
             interval.effective ? [{ interval, value: interval.effective }] : [],

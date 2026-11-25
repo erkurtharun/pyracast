@@ -1380,8 +1380,6 @@ test("CSV preserves quoted commas and multiline source fields and rejects missin
             energy: 0,
             quality: "valid",
             source: "Meter, north\nroof",
-            quality_label: false,
-            source_label: null,
         },
     ]);
     expect(() =>

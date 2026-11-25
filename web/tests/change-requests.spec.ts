@@ -349,6 +349,7 @@ test("a member's staged revert names the EPİAŞ value only where one covers the
                 starts_at: at(from),
                 ends_at: at(to),
                 energy_mwh: energy,
+                quality: "valid",
                 source_kind: "settlement_injection",
                 snapshot_id: 1,
                 collected_at: `${date}T00:00:00Z`,

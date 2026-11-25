@@ -41,44 +41,64 @@ const interval = (
     ends_at: string,
     energy_mwh: number | null,
     source_kind = "manual",
-): Schemas["ProductionIntervalOutput"] => ({
-    starts_at,
-    ends_at,
-    observation: null,
-    previous_configuration_observations: [],
-    revision_id: null,
-    effective:
-        energy_mwh === null
-            ? null
-            : {
+    shown: { quality?: string; source?: string } = {},
+): Schemas["ProductionIntervalOutput"] => {
+    const entered = energy_mwh !== null && source_kind === "manual";
+    const source = shown.source ?? "meter";
+    return {
+        starts_at,
+        ends_at,
+        observation: entered
+            ? {
+                  id: 5,
+                  configuration_id: 31,
+                  starts_at,
+                  ends_at,
                   energy_mwh,
                   quality: "valid",
-                  source: "meter",
-                  source_kind,
-                  provisional: source_kind === "realtime_generation",
-                  aggregated: false,
-              },
-    provider_originals: [
-        {
-            starts_at,
-            ends_at,
-            energy_mwh: 9,
-            source_kind: "realtime_generation",
-            snapshot_id: 3,
-            collected_at: ends_at,
-            available_at: ends_at,
-            content_sha256: "abc",
-            provisional: false,
-        },
-    ],
-    can_edit: true,
-    can_revert: false,
-    edit_unavailable_reason: null,
-    can_propose: false,
-    can_propose_revert: false,
-    proposal_unavailable_reason: null,
-    pending_request_id: null,
-});
+                  source,
+                  recorded_by_id: 1,
+                  created_at: ends_at,
+                  supersedes_id: null,
+                  is_reverted: false,
+              }
+            : null,
+        previous_configuration_observations: [],
+        revision_id: entered ? 5 : null,
+        effective:
+            energy_mwh === null
+                ? null
+                : {
+                      energy_mwh,
+                      quality: shown.quality ?? "valid",
+                      source: entered ? source : source_kind,
+                      source_kind,
+                      provisional: source_kind === "realtime_generation",
+                      aggregated: false,
+                  },
+        provider_originals: [
+            {
+                starts_at,
+                ends_at,
+                energy_mwh: entered ? 9 : (energy_mwh ?? 9),
+                quality: "valid",
+                source_kind: entered ? "realtime_generation" : source_kind,
+                snapshot_id: 3,
+                collected_at: ends_at,
+                available_at: ends_at,
+                content_sha256: "abc",
+                provisional: false,
+            },
+        ],
+        can_edit: true,
+        can_revert: entered,
+        edit_unavailable_reason: null,
+        can_propose: false,
+        can_propose_revert: false,
+        proposal_unavailable_reason: null,
+        pending_request_id: null,
+    };
+};
 
 const outage: Schemas["IncidentOutput"] = {
     id: 51,
@@ -165,7 +185,7 @@ test("only a formula character after invisible ones is neutralised", () => {
     expect(lines.slice(1, 4)).toEqual([`"' \u00ad+x"`, '"x=1"', `"'\u00a0@"`]);
 });
 
-test("the production file names its columns and sources in the reader's language, one row per recorded interval in plant time", () => {
+test("the production file names its columns, saved statuses and sources in the reader's language, one row per recorded interval in plant time", () => {
     const file = productionExport(
         plant,
         "2026-11-10",
@@ -192,14 +212,14 @@ test("the production file names its columns and sources in the reader's language
     );
     expect(lines(file)).toEqual([
         '"Start","End","Actual (MWh)","Status","Source"',
-        '"2026-11-10T08:00:00+03:00","2026-11-10T08:30:00+03:00",0.5,"Normal","Entered"',
+        '"2026-11-10T08:00:00+03:00","2026-11-10T08:30:00+03:00",0.5,"Normal","meter"',
         '"2026-11-10T09:00:00+03:00","2026-11-10T09:30:00+03:00",0.25,"Normal","UEVM"',
         '"2026-11-10T09:30:00+03:00","2026-11-10T10:00:00+03:00",0.125,"Normal","Real-time (EPİAŞ)"',
         "",
     ]);
     expect(lines(file, "tr")).toEqual([
         '"Başlangıç","Bitiş","Gerçekleşen (MWh)","Durum","Kaynak"',
-        '"2026-11-10T08:00:00+03:00","2026-11-10T08:30:00+03:00",0.5,"Normal","Girilen"',
+        '"2026-11-10T08:00:00+03:00","2026-11-10T08:30:00+03:00",0.5,"Normal","meter"',
         '"2026-11-10T09:00:00+03:00","2026-11-10T09:30:00+03:00",0.25,"Normal","UEVM"',
         '"2026-11-10T09:30:00+03:00","2026-11-10T10:00:00+03:00",0.125,"Normal","Gerçek zamanlı (EPİAŞ)"',
         "",
@@ -207,9 +227,43 @@ test("the production file names its columns and sources in the reader's language
     expect(written(file).startsWith("\uFEFF")).toBe(true);
 });
 
-for (const [language, outageWord, source] of [
-    ["en", "Outage", "Entered"],
-    ["tr", "Kesinti", "Girilen"],
+test("a row saved as normal reads Normal while a recorded outage covers it, entered or from the provider", () => {
+    const file = productionExport(
+        plant,
+        "2026-11-10",
+        [
+            interval(
+                "2026-11-10T05:00:00Z",
+                "2026-11-10T06:00:00Z",
+                1,
+                "manual",
+                {
+                    quality: "outage",
+                },
+            ),
+            interval(
+                "2026-11-10T06:00:00Z",
+                "2026-11-10T07:00:00Z",
+                2,
+                "settlement_injection",
+                { quality: "outage" },
+            ),
+        ],
+        "actual-production",
+    );
+    expect(lines(file).slice(1, 3)).toEqual([
+        '"2026-11-10T08:00:00+03:00","2026-11-10T09:00:00+03:00",1,"Normal","meter"',
+        '"2026-11-10T09:00:00+03:00","2026-11-10T10:00:00+03:00",2,"Normal","UEVM"',
+    ]);
+    expect(lines(file, "tr").slice(1, 3)).toEqual([
+        '"2026-11-10T08:00:00+03:00","2026-11-10T09:00:00+03:00",1,"Normal","meter"',
+        '"2026-11-10T09:00:00+03:00","2026-11-10T10:00:00+03:00",2,"Normal","UEVM"',
+    ]);
+});
+
+for (const [language, curtailed] of [
+    ["en", "Production curtailed"],
+    ["tr", "Üretim kısıldı"],
 ] as const)
     test(`a downloaded production file in ${language} is imported again after a value and a status are corrected`, () => {
         const file = productionExport(
@@ -217,7 +271,13 @@ for (const [language, outageWord, source] of [
             "2026-11-10",
             [
                 interval("2026-11-10T05:00:00Z", "2026-11-10T05:30:00Z", 0.5),
-                interval("2026-11-10T05:30:00Z", "2026-11-10T06:00:00Z", 0.25),
+                interval(
+                    "2026-11-10T05:30:00Z",
+                    "2026-11-10T06:00:00Z",
+                    0.25,
+                    "settlement_injection",
+                    { quality: "outage" },
+                ),
             ],
             "actual-production",
         );
@@ -227,7 +287,7 @@ for (const [language, outageWord, source] of [
             first,
             second!
                 .replace(",0.25,", ",0.375,")
-                .replace('"Normal"', `"${outageWord}"`),
+                .replace('"Normal"', `"${curtailed}"`),
         ].join("\r\n");
         for (const reader of ["en", "tr"] as const) {
             const parsed = parseProduction(corrected, ...csvTexts(reader));
@@ -238,18 +298,14 @@ for (const [language, outageWord, source] of [
                     ends_at: "2026-11-10T08:30:00+03:00",
                     energy: 0.5,
                     quality: "valid",
-                    source,
-                    quality_label: true,
-                    source_label: "manual",
+                    source: "meter",
                 },
                 {
                     starts_at: "2026-11-10T08:30:00+03:00",
                     ends_at: "2026-11-10T09:00:00+03:00",
                     energy: 0.375,
-                    quality: "outage",
-                    source,
-                    quality_label: true,
-                    source_label: "manual",
+                    quality: "curtailed",
+                    source: "UEVM",
                 },
             ]);
         }
@@ -259,24 +315,21 @@ const half = (start: string, end: string) =>
     `2026-01-01T${start}:00+03:00,2026-01-01T${end}:00+03:00`;
 
 test("the production import reads the column names of either language and of earlier files, with the unit in the energy column", () => {
-    for (const [header, row, unit, label] of [
+    for (const [header, row, unit] of [
         [
             "Start,End,Actual (kWh),Status,Source",
             `${half("09:00", "09:30")},250,Production curtailed,Meter`,
             "kWh",
-            true,
         ],
         [
             "Başlangıç,Bitiş,Gerçekleşen (MWh),Durum,Kaynak",
             `${half("09:00", "09:30")},0.25,Üretim kısıldı,Meter`,
             "MWh",
-            true,
         ],
         [
             "Kaynak,Status,Gerçekleşen (kWh),End,starts_at",
             "Meter,curtailed,250,2026-01-01T09:30:00+03:00,2026-01-01T09:00:00+03:00",
             "kWh",
-            false,
         ],
     ] as const) {
         const parsed = parseProduction(`${header}\n${row}`, ...csvTexts());
@@ -288,12 +341,64 @@ test("the production import reads the column names of either language and of ear
                 energy: unit === "kWh" ? 250 : 0.25,
                 quality: "curtailed",
                 source: "Meter",
-                quality_label: label,
-                source_label: null,
             },
         ]);
     }
 });
+
+test("status cells are read in either language and source cells as written, whatever the header's language", () => {
+    for (const [header, status, source, quality] of [
+        [
+            "starts_at,ends_at,energy_mwh,quality,source",
+            "valid",
+            "Entered",
+            "valid",
+        ],
+        [
+            "starts_at,ends_at,energy_mwh,quality,source",
+            "valid",
+            "Girilen",
+            "valid",
+        ],
+        ["Start,End,Actual (MWh),Status,Source", "Normal", "Girilen", "valid"],
+        ["Start,End,Actual (MWh),Status,Source", "Kesinti", "UEVM", "outage"],
+        [
+            "Başlangıç,Bitiş,Gerçekleşen (MWh),Durum,Kaynak",
+            "Production curtailed",
+            "Entered",
+            "curtailed",
+        ],
+    ] as const)
+        expect(
+            parseProduction(
+                `${header}\n${half("09:00", "10:00")},1,${status},${source}`,
+                ...csvTexts(),
+            ).observations,
+        ).toEqual([
+            {
+                starts_at: "2026-01-01T09:00:00+03:00",
+                ends_at: "2026-01-01T10:00:00+03:00",
+                energy: 1,
+                quality,
+                source,
+            },
+        ]);
+});
+
+for (const [name, end] of [
+    ["CRLF", "\r\n"],
+    ["LF", "\n"],
+] as const)
+    test(`a file starting with a byte order mark names the line of each row (${name})`, () => {
+        const file = [
+            "\uFEFFStart,End,Actual (MWh),Status,Source",
+            `${half("09:00", "09:30")},1,Normal,Meter`,
+            `${half("09:30", "10:00")},-1,Normal,Meter`,
+        ].join(end);
+        expect(() => parseProduction(file, ...csvTexts())).toThrow(
+            "Row 3: write Actual (MWh) as zero or a positive number.",
+        );
+    });
 
 test("the production import refuses a file with another column and names its columns as the file has them in its messages", () => {
     expect(() =>
@@ -394,6 +499,7 @@ test("an hour of half hours with different statuses is exported as such and refu
         [
             {
                 ...row,
+                observation: null,
                 effective: {
                     energy_mwh: 0.75,
                     quality: "mixed",

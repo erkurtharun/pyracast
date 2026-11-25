@@ -291,7 +291,7 @@
         "choose_a_csv_no_larger_than_2": "En fazla 2 MB boyutunda bir CSV dosyası seçin.",
         "could_not_read_the_production_csv": "Bu dosya okunamadı. Bir CSV dosyası seçin.",
         "csv_format_and_import_rules": "Dosya biçimi",
-        "use_a_csv_with_the_exact_header": "Örnekteki sütunları Türkçe veya İngilizce adlarıyla kullanın. Gerçekleşen üretim bölümünden indirilen dosya, değerleri düzeltildikten sonra da yeniden içe aktarılabilir; yarım saatlerinin durumu farklı olan bir saati önce yarım saatlerine ayırın. Enerjiyi MWh cinsinden yazın; kWh için sütunun adı {kwh} olmalı. Her saati +03:00 gibi saat farkıyla yazın. Saatler çakışamaz; bir dosyada santral saatine göre en fazla 31 günden en fazla 2.000 satır olabilir.",
+        "use_a_csv_with_the_exact_header": "Gerçekleşen üretim bölümünden Türkçe veya İngilizce indirilen bir dosyayı ya da starts_at, ends_at, energy_mwh, quality ve source sütunlarından oluşan bir dosyayı kullanın. Yarım saatlerinin durumu farklı olan bir saati önce yarım saatlerine ayırın. Enerjiyi MWh cinsinden yazın; kWh için sütunun adı {kwh} olmalı. Her saati +03:00 gibi saat farkıyla yazın. Saatler çakışamaz; bir dosyada santral saatine göre en fazla 31 günden en fazla 2.000 satır olabilir.",
         "quality_valid_outage_curtailed_or_invalid_quoted": "{status} sütununa Normal, Kesinti, Üretim kısıldı veya Geçersiz değer; {source} sütununa değerin nereden geldiğini en fazla 200 karakterle yazın. Dosyanın tamamında tek birim kullanılır.",
         "choose_and_validate_a_csv_before_importing": "Önce bir CSV dosyası seçin.",
         "production_csv": "CSV dosyası",

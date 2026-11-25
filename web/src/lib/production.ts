@@ -36,8 +36,6 @@ type Observation = {
     energy: number;
     quality: Quality;
     source: string;
-    quality_label: boolean;
-    source_label: ProductionSource | null;
 };
 type Unit = "MWh" | "kWh";
 export type ProductionFile = { unit: Unit; observations: Observation[] };
@@ -51,18 +49,11 @@ const REQUIRED: readonly Role[] = [
     "status",
     "source",
 ];
-const SOURCES: readonly ProductionSource[] = [
-    "settlement",
-    "provisional",
-    "manual",
-];
-
-type Status = { quality: Quality | "mixed"; label: boolean };
+type Status = Quality | "mixed";
 
 export type ImportWords = {
     columns: ReadonlyMap<string, Column>;
     statuses: ReadonlyMap<string, Status>;
-    sources: ReadonlyMap<string, ProductionSource>;
 };
 
 export function importWords(
@@ -78,12 +69,8 @@ export function importWords(
         ["timezone", { role: "timezone" }],
     ]);
     const statuses = new Map<string, Status>(
-        [...QUALITIES, "mixed" as const].map((quality) => [
-            quality,
-            { quality, label: false },
-        ]),
+        [...QUALITIES, "mixed" as const].map((quality) => [quality, quality]),
     );
-    const sources = new Map<string, ProductionSource>();
     for (const { CsvFile, Enums } of catalogues) {
         const named = CsvFile.columns;
         columns.set(named.start, { role: "start" });
@@ -93,15 +80,10 @@ export function importWords(
         columns.set(named.status, { role: "status" });
         columns.set(named.source, { role: "source" });
         for (const quality of QUALITIES)
-            statuses.set(Enums.ObservationQuality[quality], {
-                quality,
-                label: true,
-            });
-        statuses.set(CsvFile.words.mixed, { quality: "mixed", label: true });
-        for (const source of SOURCES)
-            sources.set(CsvFile.words[source], source);
+            statuses.set(Enums.ObservationQuality[quality], quality);
+        statuses.set(CsvFile.words.mixed, "mixed");
     }
-    return { columns, statuses, sources };
+    return { columns, statuses };
 }
 
 const EXAMPLE = ["start", "end", "actual_mwh", "status", "source"] as const;
@@ -137,7 +119,8 @@ export type CsvTexts = (
 type FileRecord = { line: number; cells: string[] };
 type FileRecords = { fields: string[]; rows: FileRecord[]; readable: boolean };
 
-function fileRecords(text: string, t: CsvTexts): FileRecords {
+function fileRecords(file: string, t: CsvTexts): FileRecords {
+    const text = file.replace(/^\uFEFF/, "");
     if (new TextEncoder().encode(text).length > 2 * 1024 * 1024)
         throw new DisplayError(t("size"));
     const records: FileRecord[] = [];
@@ -175,20 +158,30 @@ export async function readProduction(
     locale: string,
 ): Promise<ProductionFile> {
     const records = fileRecords(text, t);
+    if (records.fields.length === 0) throw new DisplayError(t("header"));
     const language = isLanguage(locale) ? locale : "en";
     const active = await loadCatalogue(language);
-    let words = importWords([active]);
-    if (!fileColumns(records.fields, words)) {
-        const others = await Promise.all(
-            languages
-                .filter((other) => other !== language)
-                .map((other) => loadCatalogue(other)),
-        ).catch(() => {
-            throw new DisplayError(t("names"));
-        });
-        words = importWords([active, ...others]);
-    }
-    return productionFile(records, t, words);
+    const words = importWords([active]);
+    if (readsEveryName(records, words))
+        return productionFile(records, t, words);
+    const others = await Promise.all(
+        languages
+            .filter((other) => other !== language)
+            .map((other) => loadCatalogue(other)),
+    ).catch(() => {
+        throw new DisplayError(t("names"));
+    });
+    return productionFile(records, t, importWords([active, ...others]));
+}
+
+function readsEveryName({ fields, rows }: FileRecords, words: ImportWords) {
+    const columns = fileColumns(fields, words);
+    return (
+        columns !== null &&
+        rows.every(({ cells }) =>
+            words.statuses.has(cells[columns.index("status")] ?? ""),
+        )
+    );
 }
 
 function productionFile(
@@ -231,10 +224,9 @@ function productionFile(
             throw new DisplayError(
                 t("energy", { row, column: name("energy") }),
             );
-        const status = words.statuses.get(cell("status"));
-        if (status?.quality === "mixed")
-            throw new DisplayError(t("mixed", { row }));
-        if (!status || !source || source.length > 200)
+        const quality = words.statuses.get(cell("status"));
+        if (quality === "mixed") throw new DisplayError(t("mixed", { row }));
+        if (!quality || !source || source.length > 200)
             throw new DisplayError(
                 t("quality", {
                     row,
@@ -248,10 +240,8 @@ function productionFile(
                 starts_at,
                 ends_at,
                 energy,
-                quality: status.quality,
+                quality,
                 source,
-                quality_label: status.label,
-                source_label: words.sources.get(source) ?? null,
             },
         };
     });

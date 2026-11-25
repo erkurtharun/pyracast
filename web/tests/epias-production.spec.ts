@@ -100,6 +100,7 @@ async function productionApi(page: Page, viewer = false) {
                                   starts_at,
                                   ends_at,
                                   energy_mwh: energy,
+                                  quality: "valid",
                                   source_kind: "settlement_injection",
                                   snapshot_id: 1,
                                   collected_at: "2026-11-10T00:00:00Z",
@@ -1156,6 +1157,7 @@ test("native timeline preserves half-hour and offset-hour corrections with their
             starts_at: at(start),
             ends_at: at(end),
             energy_mwh: energy,
+            quality: "valid",
             source_kind: "settlement_injection",
             snapshot_id,
         });
@@ -1468,7 +1470,7 @@ for (const [language, texts] of [
             file: "CSV file",
             read: "corrected.csv · 1 row read",
             preview: "Preview",
-            outage: "Outage",
+            curtailed: "Production curtailed",
         },
     ],
     [
@@ -1480,7 +1482,7 @@ for (const [language, texts] of [
             file: "CSV dosyası",
             read: "corrected.csv · 1 satır okundu",
             preview: "Önizle",
-            outage: "Kesinti",
+            curtailed: "Üretim kısıldı",
         },
     ],
 ] as const)
@@ -1523,7 +1525,7 @@ for (const [language, texts] of [
         )!;
         const corrected = hour
             .replace(",1,", ",1.5,")
-            .replace('"Normal"', `"${texts.outage}"`);
+            .replace('"Normal"', `"${texts.curtailed}"`);
         expect(corrected).not.toBe(hour);
         await page.getByRole("button", { name: texts.import }).click();
         await page.getByLabel(texts.file, { exact: true }).setInputFiles({
@@ -1542,10 +1544,8 @@ for (const [language, texts] of [
                     starts_at: "2026-11-09T10:00:00+03:00",
                     ends_at: "2026-11-09T11:00:00+03:00",
                     energy: 1.5,
-                    quality: "outage",
+                    quality: "curtailed",
                     source: "UEVM",
-                    quality_label: true,
-                    source_label: "settlement",
                 },
             ]);
     });
@@ -1572,6 +1572,12 @@ test("a file in the screen's language or with earlier column names is read while
             mimeType: "text/csv",
             buffer: Buffer.from(text),
         });
+    await choose("empty.csv", "");
+    await expect(
+        page.getByText(
+            "Use the columns of a file downloaded under Actual production: Start, End, Actual (MWh), Status and Source.",
+        ),
+    ).toBeVisible();
     for (const [name, text] of [
         [
             "earlier.csv",
@@ -1589,7 +1595,7 @@ test("a file in the screen's language or with earlier column names is read while
     await choose("turkish.csv", turkishFile);
     await expect(
         page.getByText(
-            "The column names of the other language could not be loaded. Try again.",
+            "The names of the other language could not be loaded. Try again.",
         ),
     ).toBeVisible();
     await page.unroute(turkish);
