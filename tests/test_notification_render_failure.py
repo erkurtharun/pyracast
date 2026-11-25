@@ -2,8 +2,10 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
+from django.conf import settings
 from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.db import OperationalError
+from django.template import TemplateSyntaxError, loader
 
 from pyracast.mail.errors import NotSentError
 from pyracast.notifications import jobs
@@ -58,6 +60,54 @@ def test_unexpected_render_failure_sends_a_frozen_plain_unavailable_notice(
     assert messages[0].body == messages[1].body
     assert "This email contains no figures." in messages[0].body
     assert not messages[0].attachments
+
+
+def test_a_broken_html_template_still_sends_the_same_frozen_plain_notice_on_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delivery = ready()
+    region = delivery.schedule.region
+    notice = (
+        "The forecast for Wednesday 11 November 2026 could not be prepared. This email contains "
+        "no figures.\n\nOpen plant in Pyracast:\n"
+        f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/w/{region.tenant_id}/plants/{region.pk}/forecast/"
+        "\n\n--\nYou receive this email because an administrator of Tenant added your address "
+        "to the forecast emails of Site. To stop receiving it, ask a workspace administrator to "
+        "remove your address."
+    )
+    load = loader.get_template
+
+    def failing(name: str, using: str | None = None) -> object:
+        if name.endswith(".html"):
+            raise TemplateSyntaxError(f"{name} cannot be parsed.")
+        return load(name, using=using)
+
+    monkeypatch.setattr(loader, "get_template", failing)
+    messages: list[EmailMessage] = []
+
+    def refuse_first(message: EmailMessage) -> None:
+        messages.append(message)
+        if len(messages) == 1:
+            raise NotSentError
+
+    with replying(refuse_first):
+        assert not jobs.process_notification(delivery.pk, SLOT)
+        delivery.refresh_from_db()
+        prepared = delivery.prepared_message
+        assert delivery.status == "retry"
+        assert prepared == {
+            "format": "plain",
+            "subject": "Site: no forecast for Wed 11 Nov",
+            "body": notice,
+        }
+        assert jobs.process_notification(delivery.pk, delivery.available_at)
+    delivery.refresh_from_db()
+    assert delivery.prepared_message == prepared
+    assert delivery.status == "sent"
+    assert [(message.subject, message.body) for message in messages] == [
+        ("Site: no forecast for Wed 11 Nov", notice)
+    ] * 2
+    assert not any(getattr(message, "alternatives", None) for message in messages)
 
 
 def test_database_failure_during_preparation_remains_durable_unsent_work(

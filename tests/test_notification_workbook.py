@@ -201,7 +201,10 @@ def test_each_day_without_a_total_or_with_an_excluded_outage_has_one_note(langua
 
 
 def test_the_hourly_sheet_is_a_clean_filterable_table() -> None:
-    _, hourly = _sheets(_report())
+    partial = replace(_interval(11, 0.75), complete=False)
+    _, hourly = _sheets(
+        _report(_day(TODAY, intervals=(_interval(10, 0.0), partial)), _day(TOMORROW))
+    )
     assert hourly.max_row == 3
     assert hourly.max_column == 4
     assert hourly.freeze_panes == "A2"
@@ -245,6 +248,37 @@ def test_a_clock_change_adds_each_rows_utc_offset() -> None:
     assert all(hourly.cell(row, 2).number_format == "hh:mm" for row in (2, 3))
     _, plain = _sheets(_report())
     assert plain["E1"].value is None
+
+
+@pytest.mark.parametrize(
+    ("day", "offset"),
+    [(date(2026, 10, 25), "UTC+1"), (date(2026, 3, 29), "UTC+2")],
+)
+def test_a_clock_change_day_adds_the_offset_even_when_only_daylight_rows_are_exported(
+    day: date, offset: str
+) -> None:
+    start = datetime.combine(day, datetime.min.time(), UTC) + timedelta(hours=10)
+    rows = tuple(
+        replace(
+            _interval(10, 1.0),
+            start=start + timedelta(hours=hour),
+            end=start + timedelta(hours=hour + 1),
+        )
+        for hour in range(2)
+    )
+    report = _report(_day(day, intervals=rows), _day(day + timedelta(days=1)))
+    _, hourly = _sheets(report)
+    assert hourly["E1"].value == "UTC offset"
+    assert [hourly.cell(row, 5).value for row in (2, 3)] == [offset, offset]
+
+
+def test_a_long_plant_name_wraps_in_a_row_tall_enough_to_show_it() -> None:
+    name = "A" * 100
+    summary, _ = _sheets(replace(_report(), plant_name=name))
+    assert summary["A1"].value == name
+    assert summary["A1"].alignment.wrap_text
+    assert summary["A1"].alignment.vertical == "top"
+    assert 7 * 18 <= summary.row_dimensions[1].height <= 409
 
 
 def test_values_keep_full_precision_and_a_missing_value_is_never_zero() -> None:

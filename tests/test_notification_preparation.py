@@ -15,6 +15,7 @@ from pyracast.forecasts.models import (
     CollectionSchedule,
     ForecastResult,
     ForecastSnapshot,
+    HistoricalReferenceImport,
 )
 from pyracast.mail.errors import NotSentError
 from pyracast.notifications.jobs import process_notification
@@ -560,3 +561,71 @@ def test_two_clocks_a_day_send_two_editions_each_naming_its_own_clock() -> None:
     assert morning.attachments[0][0].endswith("-2026-11-11-1000.xlsx")
     assert noon.attachments[0][0].endswith("-2026-11-11-1200.xlsx")
     assert morning.extra_headers["Message-ID"] != noon.extra_headers["Message-ID"]
+
+
+def test_a_clock_before_the_schedule_took_effect_does_not_make_the_only_send_an_edition() -> None:
+    system, _ = configured()
+    complete_saved(system)
+    configure_reminders(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        language="en",
+        enabled=True,
+        recipients=["default@example.com"],
+        times=["10:00", "12:00"],
+        now=SLOT + timedelta(hours=1),
+    )
+    noon = SLOT + timedelta(hours=2)
+    (delivery_id,) = enqueue_due(noon)
+    assert process_notification(delivery_id, noon)
+    (message,) = mail.outbox
+    assert message.subject.endswith(": irradiance forecast for Wed 11 Nov")
+    assert message.attachments[0][0].endswith("-2026-11-11.xlsx")
+
+
+@pytest.mark.parametrize("source", ["own partial", "reference import"])
+def test_at_a_collection_clock_only_a_snapshot_of_another_source_is_not_current(
+    source: str,
+) -> None:
+    system, _ = configured()
+    CollectionSchedule.objects.create(
+        region=system.region, times=["10:00"], enabled=True, effective_from=NOW
+    )
+    collected = (
+        SLOT + timedelta(minutes=1) if source == "own partial" else SLOT - timedelta(hours=2)
+    )
+    snapshot = saved(system, collected)
+    if source == "reference import":
+        job = snapshot.job
+        job.reference_import = HistoricalReferenceImport.objects.create(
+            binding=system.binding,
+            content_sha256="a" * 64,
+            source_name="authorized-export.json",
+            source_settings={"product": "historical_rooftop_pv"},
+            imported_by=system.admin,
+            created_at=collected,
+            interval_count=48,
+        )
+        job.endpoint, job.scheduled_for = "historical_import", SLOT
+        job.save()
+        CollectionJob.objects.create(
+            binding=system.binding,
+            scheduled_for=SLOT,
+            target_date=(SLOT + timedelta(days=1)).date(),
+            available_at=SLOT,
+            status="failed",
+        )
+    delivery_id = enqueue_due(SLOT)[0]
+    assert process_notification(delivery_id, SLOT + timedelta(minutes=2))
+    delivery = NotificationDelivery.objects.get(pk=delivery_id)
+    assert delivery.snapshot_id == snapshot.pk
+    body = mail.outbox[0].body
+    local = collected.astimezone(ZoneInfo(system.region.timezone))
+    line = f"Forecast data: 10 Nov 2026, {local:%H:%M} (UTC+3)\n"
+    if source == "own partial":
+        assert delivery.forecast_kind == "saved_partial"
+        assert "\n\n" + line in body
+        assert "Newer forecast data" not in body
+    else:
+        assert "\nNewer forecast data was not available.\n" + line in body

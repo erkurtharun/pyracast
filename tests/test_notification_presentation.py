@@ -9,7 +9,7 @@ from openpyxl import load_workbook
 
 from pyracast.notifications.formats import energy_number, file_name, utc_offset
 from pyracast.notifications.models import NotificationDelivery
-from pyracast.notifications.presentation import STALE_AFTER, present_report
+from pyracast.notifications.presentation import present_report
 from pyracast.notifications.rendering import ForecastMail, render_forecast
 
 START = datetime(2026, 11, 15, 8, tzinfo=UTC)
@@ -182,8 +182,8 @@ def test_partial_interval_preserves_covered_energy_without_claiming_completeness
     ("age", "missed", "stale"),
     [
         (timedelta(hours=20), False, False),
-        (STALE_AFTER, False, False),
-        (STALE_AFTER + timedelta(seconds=1), False, True),
+        (timedelta(hours=26), False, False),
+        (timedelta(hours=26, seconds=1), False, True),
         (timedelta(minutes=5), True, True),
     ],
 )
@@ -294,8 +294,11 @@ def test_tomorrow_leads_with_two_grouped_decimals_and_today_follows(
     message = rendered(context(payload(total=1284.254)), language)
     html, body = message["html"], message["body"]
     assert html.index(tomorrow) < html.index(today)
-    assert f'>{number}&nbsp;<span style="font-size:18px;font-weight:normal;">MWh</span>' in html
-    assert 'font-size:15px;font-weight:normal;">MWh</span>' in html
+    font = "font-family:Arial,Helvetica,sans-serif;"
+    assert (
+        f'>{number}&nbsp;<span style="{font}font-size:18px;font-weight:normal;">MWh</span>' in html
+    )
+    assert f'<span style="{font}font-size:15px;font-weight:normal;">MWh</span>' in html
     assert body.index(words[0]) < body.index(words[1])
     assert html.count("<h1") == 1
     assert ">Example solar plant</h1>" in html
@@ -572,9 +575,9 @@ def test_the_mail_follows_the_frame_and_stays_small() -> None:
     assert "text-transform" not in html
     assert "#475569" not in html
     assert ">Hourly values are in the attached Excel file.</p>" in html
-    assert 'class="mail-button" bgcolor="#09383a" style="padding:12px 20px;' in html
+    assert 'class="mail-button" bgcolor="#09383a" style="mso-padding-alt:12px 22px;' in html
     assert 'text-align:center;">\n    <a href="' in html
-    assert 'style="display:block;' in html
+    assert 'style="display:block;padding:12px 22px;' in html
 
 
 @pytest.mark.parametrize(
@@ -599,6 +602,8 @@ def test_the_offset_is_written_in_hours_and_only_needed_minutes(
         ("İĞNE ŞÜÖÇ \u0131ğşüöç", "07:30", "pyracast-igne-suoc-igsuoc-2026-11-26-0730.xlsx"),
         ("  Plant / Ünit #2 — East  ", None, "pyracast-plant-unit-2-east-2026-11-26.xlsx"),
         ("太陽", None, "pyracast-plant-2026-11-26.xlsx"),
+        ("\u212a", None, "pyracast-plant-2026-11-26.xlsx"),
+        ("Stra\u00dfe \u212aelvin", None, "pyracast-stra-e-elvin-2026-11-26.xlsx"),
         ("a" * 39 + " b", None, f"pyracast-{'a' * 39}-2026-11-26.xlsx"),
     ],
 )
@@ -616,3 +621,26 @@ def test_energy_is_rounded_to_two_grouped_decimals(value: float, en: str, tr: st
     for language, text in (("en", en), ("tr", tr)):
         with translation.override(language):
             assert energy_number(value) == text
+
+
+@pytest.mark.parametrize(
+    ("language", "figure", "without", "preheader"),
+    [
+        ("en", "24.13", "30.13", "Tomorrow 24.13\u00a0MWh · Today 1.25\u00a0MWh"),
+        ("tr", "24,13", "30,13", "Yar\u0131n 24,13\u00a0MWh · Bugün 1,25\u00a0MWh"),
+    ],
+)
+def test_a_half_cent_rounds_up_in_the_mail_as_the_file_displays_it(
+    language: str, figure: str, without: str, preheader: str
+) -> None:
+    source = context(payload(total=30.125), payload(total=24.125), status="estimated")
+    message = rendered(source, language)
+    assert f">{figure}&nbsp;<span" in message["html"]
+    assert f"{figure} MWh" in message["body"]
+    assert f"{without}\u00a0MWh." in message["html"]
+    assert f"{without} MWh." in message["body"]
+    assert f">{preheader}&#847;" in message["html"]
+    book = load_workbook(BytesIO(b64decode(message["attachment_base64"])))
+    summary = book.worksheets[0]
+    assert [summary.cell(10, column).value for column in (2, 3)] == [24.125, 30.125]
+    assert {summary.cell(10, column).number_format for column in (2, 3)} == {"#,##0.00"}

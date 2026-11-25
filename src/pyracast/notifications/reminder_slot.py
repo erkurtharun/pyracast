@@ -37,13 +37,15 @@ def missed_collection(delivery: NotificationDelivery) -> bool:
 
 
 def edition(delivery: NotificationDelivery) -> str | None:
-    """The slot's plant-local clock when the schedule sends more than once on its day."""
+    """The slot's plant-local clock when the scheduler can create more than one send on its
+    day."""
     schedule = delivery.schedule
     zone = ZoneInfo(schedule.region.timezone)
     local = delivery.scheduled_for.astimezone(zone)
     clocks = [
         clock
         for clock in schedule.times[: delivery.binding.provider_account.daily_quota]
-        if local_slot(local.date(), clock, zone) is not None
+        if (slot := local_slot(local.date(), clock, zone)) is not None
+        and slot >= schedule.effective_from
     ]
     return local.strftime("%H:%M") if len(clocks) > 1 else None

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from io import BytesIO
+from textwrap import wrap
 from typing import TYPE_CHECKING, cast
 from zoneinfo import ZoneInfo
 
@@ -15,6 +16,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.properties import PageSetupProperties
 from openpyxl.worksheet.worksheet import Worksheet
 
+from pyracast.irradiance import local_day_bounds
 from pyracast.notifications.formats import day_text, utc_offset
 from pyracast.notifications.presentation import Figure, figure, interval_value
 
@@ -27,6 +29,8 @@ _LEFT = Alignment(horizontal="left", vertical="top")
 _RIGHT = Alignment(horizontal="right", vertical="top")
 _TOTAL = "#,##0.00"
 _INTERVAL = "#,##0.000"
+_TITLE_CHARACTERS = 15
+_TITLE_LINE_POINTS = 19
 
 
 def _text(sheet: Worksheet, row: int, column: int, value: str) -> Cell:
@@ -94,7 +98,11 @@ def _summary(
 ) -> None:
     sheet.title = _("Summary")
     _widths(sheet, (26, 20, 24))
-    _text(sheet, 1, 1, report.plant_name).font = Font(bold=True, size=14)
+    title = _text(sheet, 1, 1, report.plant_name)
+    title.font = Font(bold=True, size=14)
+    title.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+    lines = len(wrap(report.plant_name, _TITLE_CHARACTERS)) or 1
+    sheet.row_dimensions[1].height = min(409, lines * _TITLE_LINE_POINTS + 4)
     _text(
         sheet,
         2,
@@ -148,15 +156,9 @@ def _intervals(
         for day, shown in zip(report.days, figures, strict=True)
         for item in day.intervals
     ]
-    offsets = (
-        len(
-            {
-                utc_offset(instant.astimezone(zone))
-                for *_, item in rows
-                for instant in (item.start, item.end)
-            }
-        )
-        > 1
+    offsets = any(
+        end - start != timedelta(days=1)
+        for start, end in (local_day_bounds(day.day, report.timezone) for day in report.days)
     )
     titles = [_("Date"), _("From"), _("To"), _value_label(report)]
     if outage:

@@ -1,5 +1,6 @@
 import re
 from datetime import date, datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from typing import cast
 
 from django.utils.formats import date_format, number_format
@@ -7,7 +8,8 @@ from django.utils.translation import gettext as _
 from django.utils.translation import pgettext
 
 _TURKISH = str.maketrans("ıİşŞğĞüÜöÖçÇ", "iIsSgGuUoOcC")
-_SEPARATORS = re.compile(r"[^a-z0-9]+")
+_SEPARATORS = re.compile(r"[^A-Za-z0-9]+")
+_CENT = Decimal("0.01")
 
 
 def day_text(day: date) -> str:
@@ -33,7 +35,9 @@ def utc_offset(moment: datetime) -> str:
 
 
 def energy_number(value: float) -> str:
-    return number_format(round(value, 2) + 0.0, decimal_pos=2, force_grouping=True)
+    """Half up from the shortest decimal form, as Excel displays the full-precision cell."""
+    rounded = Decimal(repr(value)).quantize(_CENT, ROUND_HALF_UP) + 0
+    return number_format(rounded, decimal_pos=2, force_grouping=True)
 
 
 def with_edition(subject: str, edition: str | None) -> str:
@@ -43,7 +47,7 @@ def with_edition(subject: str, edition: str | None) -> str:
 
 
 def file_name(plant: str, day: date, edition: str | None) -> str:
-    slug = _SEPARATORS.sub("-", plant.translate(_TURKISH).lower()).strip("-")
+    slug = _SEPARATORS.sub("-", plant.translate(_TURKISH)).lower().strip("-")
     slug = slug[:40].strip("-") or "plant"
     clock = f"-{edition.replace(':', '')}" if edition else ""
     return f"pyracast-{slug}-{day.isoformat()}{clock}.xlsx"
