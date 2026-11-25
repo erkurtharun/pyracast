@@ -24,7 +24,7 @@ export function DailyAccuracyChart({ days }: { days: readonly Day[] }) {
             <div
                 className="chart"
                 role="img"
-                aria-label={t("daily_error_chart", { count: days.length })}
+                aria-label={t("daily_error_title")}
             >
                 {days.map((day) => (
                     <div
@@ -45,7 +45,6 @@ export function DailyAccuracyChart({ days }: { days: readonly Day[] }) {
             </div>
             <div className="chart-axis">
                 <span>{first?.date}</span>
-                <span>{t("absolute_daily_error")}</span>
                 <span>{last?.date}</span>
             </div>
         </>

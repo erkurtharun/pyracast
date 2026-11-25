@@ -1,5 +1,5 @@
 "use client";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import type { Calibration } from "@/lib/api";
 import { calibrationExport } from "@/lib/exports";
 import { useFormat } from "@/lib/format/use-format";
@@ -7,10 +7,12 @@ import { ConfirmAction } from "@/ui/action";
 import { CsvDownload } from "@/ui/csv-download";
 import { useExportPlant } from "@/ui/export-plant";
 import { ScrollRegion } from "@/ui/scroll-region";
-import { JsonDetails, Notice, Stat, Tag } from "@/ui/ui";
-import { StatusTag, useCodeLabel, useLabel } from "@/ui/vocabulary";
+import { JsonDetails, Notice, Stat } from "@/ui/ui";
+import { useCodeLabel } from "@/ui/vocabulary";
+import { CalibrationMarks } from "./calibration-marks";
 import {
-    provisional,
+    calibrationInUse,
+    firstCalibrationDay,
     type Action,
     type AutomationStatus,
     type RequestState,
@@ -28,18 +30,9 @@ const REQUEST_REFUSALS = {
 
 function useValueLabel() {
     const t = useTranslations("Calibrations");
-    const locale = useLocale();
     const code = useCodeLabel("Calibrations.values");
     return (value: string) =>
-        value === ""
-            ? ""
-            : code(
-                  value,
-                  t("unknown_value", {
-                      value:
-                          locale === "en" ? value.replaceAll("_", " ") : value,
-                  }),
-              );
+        value === "" ? "" : code(value, t("unknown_value"));
 }
 
 // What an activation does is stated before it is confirmed: plants/activation.py turns automation on.
@@ -52,13 +45,14 @@ function ActivationEffect({
 }) {
     const t = useTranslations("Calibrations");
     const format = useFormat();
+    const factor = format.number(run.factor, 4);
+    const start = firstCalibrationDay(run);
     return (
         <>
             <p>
-                {t("activate_effect", {
-                    factor: format.number(run.factor, 4),
-                    start: run.window_start,
-                })}
+                {start === null
+                    ? t("activate_effect_undated", { factor })
+                    : t("activate_effect", { factor, start })}
             </p>
             <p>
                 {automation?.enabled
@@ -91,11 +85,7 @@ export function CalibrationRunDetail({
     onRequest: (run: Calibration) => void;
 }) {
     const t = useTranslations("Calibrations");
-    const format = useFormat();
-    const label = useLabel();
     const plant = useExportPlant();
-    const assessment = (value: Calibration["assessment"]) =>
-        value === "" ? "" : label("CalibrationAssessment", value);
     const blocker = run.activation_blocker;
     const activatable =
         canManage && run.selection_state === "candidate" && blocker === null;
@@ -106,33 +96,17 @@ export function CalibrationRunDetail({
         <div className="calibration-detail">
             <div className="section-heading">
                 <h3>{t("calibration_id", { id: run.id })}</h3>
-                <div className="tags">
-                    <StatusTag group="CalibrationStatus" value={run.status} />
-                    <StatusTag
-                        group="SelectionState"
-                        value={run.selection_state}
-                    />
-                    {provisional(run) && (
-                        <Tag tone="warning">{t("provisional_production")}</Tag>
-                    )}
-                </div>
+                <CalibrationMarks
+                    run={run}
+                    inUse={run.id === calibrationInUse(automation)}
+                />
             </div>
-            <p>
-                {t("assessment_factor", {
-                    assessment: assessment(run.assessment),
-                    factor:
-                        run.factor === null
-                            ? t("unavailable")
-                            : format.number(run.factor, 4),
-                })}
-            </p>
             {blocker !== null && run.selection_state !== "active" && (
                 <Notice>
                     <p>
                         {t("blocked", {
-                            blocker: label("ActivationBlocker", blocker),
-                        })}{" "}
-                        {t(`blockers.${blocker}`)}
+                            reason: t(`blockers.${blocker}`),
+                        })}
                     </p>
                     {canManage &&
                         (request === "available" ? (
@@ -188,9 +162,14 @@ export function CalibrationRunDetail({
                 ))}
             <CalibrationAssessment run={run} />
             <CsvDownload
-                label={t("download_calibration_details_csv")}
                 pending={exportPending}
-                build={() => calibrationExport(plant, run)}
+                build={() =>
+                    calibrationExport(
+                        plant,
+                        run,
+                        t("detail_file", { id: run.id }),
+                    )
+                }
             />
             <JsonDetails
                 data={run.result}
@@ -204,7 +183,6 @@ export function CalibrationRunDetail({
 function CalibrationAssessment({ run }: { run: Calibration }) {
     const t = useTranslations("Calibrations");
     const formatter = useFormat();
-    const label = useLabel();
     const valueLabel = useValueLabel();
     const statusMessage = useCodeLabel("Calibrations.status_messages");
     const reasonMessage = useCodeLabel("Calibrations.reasons");
@@ -226,19 +204,15 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
               (reason): reason is string => typeof reason === "string",
           )
         : [];
+    const notes = [
+        statusMessage(run.status, ""),
+        run.assessment === "provisional"
+            ? t("_this_is_a_provisional_assessment_based")
+            : "",
+    ].filter(Boolean);
     return (
         <>
-            <Notice>
-                {statusMessage(
-                    run.status,
-                    t("calibration_status", {
-                        status: label("CalibrationStatus", run.status),
-                    }),
-                )}
-                {run.assessment === "provisional"
-                    ? t("_this_is_a_provisional_assessment_based")
-                    : ""}
-            </Notice>
+            {notes.length > 0 && <Notice>{notes.join(" ")}</Notice>}
             {reasons.length > 0 && (
                 <ul>
                     {reasons.map((reason) => (
@@ -249,6 +223,7 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
                 </ul>
             )}
             <div className="stats">
+                <Stat label={t("factor")} value={format(run.factor)} />
                 <Stat label={t("valid_days")} value={result.valid_days} />
                 <Stat label={t("training_days")} value={result.training_days} />
                 <Stat label={t("heldout_days")} value={result.holdout_days} />
@@ -303,18 +278,9 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
                                     ["bias_mw", t("interval_bias_mw")],
                                     [
                                         "daily_mae_mwh",
-                                        daylightMetrics
-                                            ? t("daylight_energy_mae_mwh")
-                                            : t(
-                                                  "daily_mean_absolute_error_mwh",
-                                              ),
+                                        t("daily_mean_absolute_error_mwh"),
                                     ],
-                                    [
-                                        "daily_bias_mwh",
-                                        daylightMetrics
-                                            ? t("daylight_energy_bias_mwh")
-                                            : t("daily_bias_mwh"),
-                                    ],
+                                    ["daily_bias_mwh", t("daily_bias_mwh")],
                                 ] as const
                             ).map(([key, label]) => (
                                 <tr key={key}>

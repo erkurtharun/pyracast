@@ -1,5 +1,5 @@
 "use client";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import type { PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
@@ -28,7 +28,6 @@ export function CalibrationAutomationPanel({
     onChanged: () => Promise<unknown>;
 }) {
     const t = useTranslations("CalibrationAutomation");
-    const locale = useLocale();
     const format = useFormat();
     const label = useLabel();
     const errorMessage = useErrorMessage();
@@ -93,13 +92,30 @@ export function CalibrationAutomationPanel({
             )}
             {data && (
                 <>
-                    {data.enabled && !data.authorized && (
-                        <Notice>
-                            {t(
-                                "authorization_unavailable_calibration_is_paused",
-                            )}
-                        </Notice>
-                    )}
+                    {data.enabled &&
+                        !data.authorized &&
+                        data.configuration_current &&
+                        (canManage ? (
+                            <Notice>
+                                <p>{t("authorization_paused")}</p>
+                                <button
+                                    className="button secondary"
+                                    type="button"
+                                    disabled={
+                                        disabled || toggle.status === "saving"
+                                    }
+                                    onClick={() => void change(true)}
+                                >
+                                    {t("turn_on")}
+                                </button>
+                            </Notice>
+                        ) : (
+                            <Notice>
+                                {t(
+                                    "authorization_unavailable_calibration_is_paused",
+                                )}
+                            </Notice>
+                        ))}
                     {data.enabled && !data.configuration_current && (
                         <Notice>{t("paused_configuration")}</Notice>
                     )}
@@ -141,18 +157,7 @@ export function CalibrationAutomationPanel({
                                         ),
                                     },
                                 )}{" "}
-                                {reason(
-                                    data.last_attempt.reason,
-                                    t("unknown_reason", {
-                                        reason:
-                                            locale === "en"
-                                                ? data.last_attempt.reason.replaceAll(
-                                                      "_",
-                                                      " ",
-                                                  )
-                                                : data.last_attempt.reason,
-                                    }),
-                                )}
+                                {reason(data.last_attempt.reason, "")}
                             </>
                         ) : (
                             t("no_attempts_yet")

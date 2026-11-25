@@ -66,7 +66,7 @@ for (const role of ["admin", "viewer"] as const) {
         await expect(day).toHaveAttribute("max", "2026-01-08");
         await expect(day).toBeEnabled();
         const table = page.getByRole("table", {
-            name: "Production intervals",
+            name: "Actual production values",
         });
         try {
             await day.fill("2026-01-07");

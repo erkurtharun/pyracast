@@ -1177,6 +1177,7 @@ test("an active member keeps their own role control beside a typed row of their 
         hidden: false,
     });
     await openReminders(page);
+    await expect(group(page, "later@example.test")).toBeVisible();
     persons[2]!.primary = SHARED;
     persons[2]!.verified = [SHARED];
     await refetch(page);

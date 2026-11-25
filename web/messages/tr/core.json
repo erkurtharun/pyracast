@@ -233,16 +233,16 @@
         "changedField": "{field}: {before} → {after}"
     },
     "ProductionCsv": {
-        "size": "En fazla 2 MiB boyutunda bir CSV seçin.",
-        "header": "CSV sütunları starts_at, ends_at, energy_kwh veya energy_mwh, quality ve source olmalı; timezone isteğe bağlıdır.",
-        "parse": "CSV okunamadı: {reason}",
-        "count": "Her seferde 1 ile 2.000 arasında kayıt aktarın.",
-        "interval": "Satır {row}: 30 veya 60 dakikalık aralık için saat dilimi içeren ISO tarihleri kullanın.",
-        "future": "Satır {row}: üretim aralıkları tamamlanmış olmalı.",
-        "energy": "Satır {row}: enerji sıfır veya pozitif bir sayı olmalı.",
-        "quality": "Satır {row}: geçerli bir veri niteliği ve kaynak (en fazla 200 karakter) girin.",
-        "mixed": "Satır {row}: bu aralık farklı veri niteliğindeki kayıtlı aralıkları birleştiriyor; bunun yerine o aralıkları kayıtlı çözünürlükte düzeltin.",
-        "overlap": "CSV içinde çakışan zaman aralıkları var."
+        "size": "En fazla 2 MB boyutunda bir CSV dosyası seçin.",
+        "header": "Dosyada starts_at, ends_at, energy_kwh veya energy_mwh, quality ve source sütunları olmalı; timezone sütunu eklenebilir.",
+        "parse": "Dosya CSV olarak okunamadı. Virgülleri ve tırnak işaretlerini kontrol edin.",
+        "count": "1 ile 2.000 arasında satır içeren bir dosya kullanın.",
+        "interval": "Satır {row}: başlangıç ve bitişi örnekteki gibi saat farkıyla, aralarında 30 veya 60 dakika olacak şekilde yazın.",
+        "future": "Satır {row}: bitiş zamanı gelecekte. Satırı kaldırın veya saatini düzeltin.",
+        "energy": "Satır {row}: enerjiyi sıfır veya pozitif bir sayı olarak yazın.",
+        "quality": "Satır {row}: quality sütununa valid, outage, curtailed veya invalid, source sütununa en fazla 200 karakter yazın.",
+        "mixed": "Satır {row}: bu saatin yarım saatlerinin durumu farklı. Her yarım saati ayrı düzeltin.",
+        "overlap": "Dosyadaki bazı saatler çakışıyor. Çakışan satırları kaldırın."
     },
     "SocialAuth": {
         "continue": {

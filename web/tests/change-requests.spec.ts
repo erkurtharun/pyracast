@@ -121,9 +121,7 @@ function draft(page: Page) {
 }
 
 async function stage(page: Page, start: string, energy: string) {
-    await page
-        .getByRole("button", { name: `Suggest correction for ${start}` })
-        .click();
+    await page.getByRole("button", { name: `Edit ${start}` }).click();
     const editor = page.locator(".production-row-editor");
     await editor.getByRole("textbox").first().fill(energy);
     await editor
@@ -155,7 +153,7 @@ test("the correction reason is named by its label and carries no help text", asy
         });
     });
     await openPlant(page, "Production");
-    await page.getByRole("button", { name: /^Suggest correction for/ }).click();
+    await page.getByRole("button", { name: /^Edit \d/ }).click();
     await expect(
         page
             .locator(".production-row-editor")
@@ -287,7 +285,7 @@ test("member submits a native production correction, sent again after a refusal 
     ).toHaveCount(0);
     canRevert = true;
     await openPlant(page, "Production");
-    await page.getByRole("button", { name: /^Suggest correction for/ }).click();
+    await page.getByRole("button", { name: /^Edit \d/ }).click();
     await page
         .getByRole("button", { name: /^Remove entered value for/ })
         .click();
@@ -309,6 +307,135 @@ test("member submits a native production correction, sent again after a refusal 
         submissions[1]?.idempotency_key,
     );
     expect(direct).toEqual([]);
+});
+
+test("a member's staged revert names the EPİAŞ value only where one covers the interval exactly, and otherwise says the entered value is removed", async ({
+    page,
+}) => {
+    await member(page);
+    const submissions: Record<string, unknown>[] = [];
+    await page.route("**/api/**/production/?*", (route) => {
+        const date = new URL(route.request().url()).searchParams.get(
+            "start_date",
+        )!;
+        const at = (time: string) => `${date}T${time}:00+03:00`;
+        const entered = (
+            start: string,
+            end: string,
+            id: number,
+            originals: [string, string, number][],
+        ): Parameters<typeof nativeProductionHistory>[2][number] => ({
+            starts_at: at(start),
+            ends_at: at(end),
+            effective: reading,
+            can_edit: false,
+            can_propose: true,
+            can_propose_revert: true,
+            revision_id: id,
+            observation: {
+                id,
+                configuration_id: 31,
+                starts_at: at(start),
+                ends_at: at(end),
+                energy_mwh: 1,
+                quality: "valid",
+                source: "meter",
+                recorded_by_id: 2,
+                created_at: `${date}T12:00:00Z`,
+                supersedes_id: null,
+                is_reverted: false,
+            },
+            provider_originals: originals.map(([from, to, energy]) => ({
+                starts_at: at(from),
+                ends_at: at(to),
+                energy_mwh: energy,
+                source_kind: "settlement_injection",
+                snapshot_id: 1,
+                collected_at: `${date}T00:00:00Z`,
+                available_at: `${date}T00:00:00Z`,
+                content_sha256: "",
+                provisional: false,
+            })),
+        });
+        return route.fulfill({
+            json: nativeProductionHistory(date, "Europe/Istanbul", [
+                entered("08:00", "09:00", 4, [["08:00", "09:00", 2]]),
+                entered("09:00", "09:30", 5, [["09:00", "10:00", 3]]),
+                entered("09:30", "10:00", 6, [["09:00", "10:00", 3]]),
+                entered("10:30", "11:30", 7, [
+                    ["10:00", "11:00", 4],
+                    ["11:00", "12:00", 5],
+                ]),
+                entered("12:00", "12:30", 8, []),
+            ]),
+        });
+    });
+    await page.route("**/change-requests/production/", (route) => {
+        submissions.push(route.request().postDataJSON());
+        return route.fulfill({ status: 201, json: proposal() });
+    });
+    await openPlant(page, "Production");
+    const outcomes = [
+        [
+            "08:00–09:00",
+            "Use EPİAŞ value (2 MWh)",
+            "Use EPİAŞ value (2 MWh) for 08:00–09:00",
+            null,
+        ],
+        [
+            "09:00–09:30",
+            "Remove entered value",
+            "Remove entered value for 09:00–09:30",
+            "The entered value is removed.",
+        ],
+        [
+            "10:30–11:30",
+            "Remove entered value",
+            "Remove entered value for 10:30–11:30",
+            "The entered value is removed.",
+        ],
+        [
+            "12:00–12:30",
+            "Remove entered value",
+            "Remove entered value for 12:00–12:30",
+            "This interval will have no value.",
+        ],
+    ] as const;
+    for (const [interval, action, name, consequence] of outcomes) {
+        await page
+            .getByRole("button", { name: `Edit ${interval}`, exact: true })
+            .click();
+        const revert = page
+            .locator(".production-row-editor")
+            .getByRole("button", { name, exact: true });
+        await expect(revert).toHaveText(action);
+        if (consequence) {
+            await expect(revert).toHaveAccessibleDescription(consequence);
+            await expect(
+                page.getByText(consequence, { exact: true }),
+            ).toBeVisible();
+        } else await expect(revert).not.toHaveAttribute("aria-describedby");
+        await revert.click();
+    }
+    const items = draft(page).getByRole("listitem");
+    await expect(items).toHaveCount(4);
+    for (const [index, [interval, action]] of outcomes.entries())
+        await expect(items.nth(index).locator("span").first()).toHaveText(
+            `${interval} ${action}`,
+        );
+    await draft(page).getByLabel("Reason for correction").fill("Checked meter");
+    await draft(page)
+        .getByRole("button", { name: "Send for approval", exact: true })
+        .click();
+    await expect(page.getByText(/^Sent for approval\./)).toBeVisible();
+    expect(submissions[0]).toMatchObject({
+        changes: [
+            { action: "revert", expected_revision_id: 4 },
+            { action: "revert", expected_revision_id: 5 },
+            { action: "revert", expected_revision_id: 7 },
+            { action: "revert", expected_revision_id: 8 },
+        ],
+    });
 });
 
 test("a server error shows its reference", async ({ page }) => {
@@ -1279,7 +1406,7 @@ test("a member sees why an interval cannot be proposed", async ({ page }) => {
     await openPlant(page, "Production");
     const rows = page.locator(".production-table tbody tr");
     await expect(
-        rows.nth(0).getByRole("button", { name: /^Suggest correction for/ }),
+        rows.nth(0).getByRole("button", { name: /^Edit \d/ }),
     ).toBeVisible();
     await expect(rows.nth(1)).toContainText(
         "Only completed intervals can be changed.",
@@ -1302,12 +1429,10 @@ test("a member sees one notice when no interval of the day can be proposed", asy
     await openPlant(page, "Production");
     await expect(
         page.getByText(
-            "Nothing on this day can be changed. Values recorded under an earlier plant configuration cannot be changed.",
+            "Nothing on this day can be changed. Values saved with earlier technical details cannot be changed.",
         ),
     ).toBeVisible();
-    await expect(
-        page.getByRole("button", { name: /^Suggest correction for/ }),
-    ).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Edit \d/ })).toHaveCount(0);
 });
 
 test("an administrator sees why an interval cannot be edited", async ({
@@ -1322,7 +1447,7 @@ test("an administrator sees why an interval cannot be edited", async ({
         rows.nth(0).getByRole("button", { name: /^Edit / }),
     ).toBeVisible();
     await expect(rows.nth(1)).toContainText(
-        "Values recorded under another plant configuration cannot be changed here.",
+        "Values saved with other technical details cannot be changed here.",
     );
 });
 
@@ -1475,12 +1600,10 @@ test("a member stages several intervals of one day and sends them as one request
             .filter({ hasText: /^Added 08:00.08:30 to the change request\.$/ }),
     ).toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Suggest correction for 08:00" }),
+        page.getByRole("button", { name: "Edit 08:00" }),
     ).toBeFocused();
     await stage(page, "08:30", "0,6");
-    await page
-        .getByRole("button", { name: "Suggest correction for 09:00" })
-        .click();
+    await page.getByRole("button", { name: "Edit 09:00" }).click();
     await page
         .getByRole("button", { name: /^Remove entered value for 09:00/ })
         .click();
@@ -1673,10 +1796,10 @@ test("a member sees which intervals wait for approval and opens the request", as
     await expect(marker).toHaveText("Waiting for approval · View");
     await expect(marker).toHaveAttribute("href", "/app/w/1/inbox/?request=7");
     await expect(
-        rows.nth(0).getByRole("button", { name: /^Suggest correction for/ }),
+        rows.nth(0).getByRole("button", { name: /^Edit \d/ }),
     ).toHaveCount(0);
     await expect(
-        rows.nth(1).getByRole("button", { name: /^Suggest correction for/ }),
+        rows.nth(1).getByRole("button", { name: /^Edit \d/ }),
     ).toBeVisible();
     await expect(rows.nth(1).getByRole("link")).toHaveCount(0);
 
@@ -1711,7 +1834,7 @@ test("a waiting marker opened in a new tab leaves the page where it is", async (
     await tab.close();
     expect(page.url()).toBe(before);
     await expect(
-        page.getByRole("group", { name: "Production intervals" }),
+        page.getByRole("group", { name: "Actual production values" }),
     ).toBeVisible();
 });
 
@@ -1857,7 +1980,7 @@ test("an administrator who edits directly sees no proposal draft", async ({
     ).toHaveCount(0);
     await editor.getByRole("textbox").first().fill("0,5");
     await editor.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByText("Production saved.")).toBeVisible();
+    await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
     expect(writes).toHaveLength(1);
     await expect(draft(page)).toHaveCount(0);
 });
@@ -1909,7 +2032,7 @@ test("a staged interval that comes to wait for the member's own request is named
         }),
     ).toBeVisible();
     await expect(
-        rows.nth(0).getByRole("button", { name: /^Suggest correction for/ }),
+        rows.nth(0).getByRole("button", { name: /^Edit \d/ }),
     ).toHaveCount(0);
     const item = draft(page).getByRole("listitem");
     await expect(item).toContainText(
@@ -1928,7 +2051,7 @@ test("editing a staged interval outside daylight shows its row and discarding cl
     await openPlant(page, "Production");
     const fullDay = page.getByRole("checkbox", { name: "Show full day" });
     const night = page.getByRole("button", {
-        name: "Suggest correction for 08:00",
+        name: "Edit 08:00",
     });
     await expect(night).toHaveCount(0);
     await fullDay.check();
@@ -2027,7 +2150,7 @@ test("a reason of only spaces is refused at its field in Turkish", async ({
     await openPlant(page, "Üretim");
     await page
         .getByRole("button", {
-            name: /^08:00.08:30 aralığı için düzeltme öner/,
+            name: /^08:00.08:30 aralığını düzenle/,
         })
         .click();
     const editor = page.locator(".production-row-editor");
@@ -2164,7 +2287,7 @@ test("a draft stays with its day when a link shows another day", async ({
         staged.getByRole("button", { name: "Send for approval", exact: true }),
     ).toBeDisabled();
     await expect(
-        page.getByRole("button", { name: "Suggest correction for 08:00" }),
+        page.getByRole("button", { name: "Edit 08:00" }),
     ).toBeDisabled();
 
     await staged
@@ -2233,7 +2356,7 @@ test("a member promoted while a draft is open can choose another day", async ({
     await expect(
         page.getByRole("status").filter({
             hasText:
-                "You can now edit production directly, so the correction request you were preparing was discarded.",
+                "You can now edit production directly, so the change request you were preparing was discarded.",
         }),
     ).toHaveCount(1);
     await expect(previous).toBeEnabled();
@@ -2247,7 +2370,7 @@ test("the notice of a promotion that discarded a draft goes with the next access
     page,
 }) => {
     const promoted =
-        "You can now edit production directly, so the correction request you were preparing was discarded.";
+        "You can now edit production directly, so the change request you were preparing was discarded.";
     let role: "viewer" | "admin" = "viewer";
     await memberOnClock(page, () => role);
     await serveDays(page, () => [{}, {}]);
@@ -2261,7 +2384,7 @@ test("the notice of a promotion that discarded a draft goes with the next access
     role = "viewer";
     await page.clock.runFor(120_001);
     await expect(
-        page.getByRole("button", { name: "Suggest correction for 08:00" }),
+        page.getByRole("button", { name: "Edit 08:00" }),
     ).toBeVisible();
     await expect(notice).toHaveCount(0);
 
@@ -2368,7 +2491,7 @@ test("while a request is being sent nothing can be staged, edited or removed", a
         .click();
 
     const other = page.getByRole("button", {
-        name: "Suggest correction for 08:30",
+        name: "Edit 08:30",
     });
     await expect(
         staged.getByRole("button", { name: "Sending…", exact: true }),
@@ -2397,9 +2520,7 @@ test("an open editor whose interval comes to wait for the member's own request s
     let pending: number | null = null;
     await serveDays(page, () => [{ pending_request_id: pending }, {}]);
     await openPlant(page, "Production");
-    await page
-        .getByRole("button", { name: "Suggest correction for 08:00" })
-        .click();
+    await page.getByRole("button", { name: "Edit 08:00" }).click();
     const editor = page.locator(".production-row-editor");
     await expect(
         editor.getByRole("button", {
@@ -2411,7 +2532,7 @@ test("an open editor whose interval comes to wait for the member's own request s
     pending = 7;
     await readOnFocus(page);
     await expect(editor.getByRole("alert")).toHaveText(
-        "A request of yours for this interval now waits for approval. Your attempted value is preserved below. Cancel to choose another interval.",
+        "A change request of yours for this interval is waiting for approval. Cancel to choose another interval.",
     );
     await expect(
         editor.getByRole("button", {
@@ -2427,7 +2548,7 @@ test("an open editor whose interval comes to wait for the member's own request s
         }),
     ).toBeVisible();
     await expect(
-        page.getByRole("group", { name: "Production intervals" }),
+        page.getByRole("group", { name: "Actual production values" }),
     ).toBeFocused();
 });
 
@@ -2507,9 +2628,7 @@ test("an editor closes when a link shows a day whose read fails, and refresh rea
             : route.fulfill({ json: dayRows(date, [{}, {}]) });
     });
     await openPlant(page, "Production");
-    await page
-        .getByRole("button", { name: "Suggest correction for 08:00" })
-        .click();
+    await page.getByRole("button", { name: "Edit 08:00" }).click();
     const editor = page.locator(".production-row-editor");
     await expect(editor).toHaveCount(1);
 
@@ -2526,7 +2645,7 @@ test("an editor closes when a link shows a day whose read fails, and refresh rea
     failing = false;
     await refresh.click();
     await expect(
-        page.getByRole("button", { name: "Suggest correction for 08:00" }),
+        page.getByRole("button", { name: "Edit 08:00" }),
     ).toBeEnabled();
     await expect(editor).toHaveCount(0);
 });

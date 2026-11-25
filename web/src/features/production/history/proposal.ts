@@ -1,7 +1,7 @@
 import { ApiError } from "@/lib/api/errors";
 import type { Quality } from "@/lib/production";
 import type { components } from "@/lib/schema";
-import { intervalKey, type Interval } from "./model";
+import { intervalKey, type Interval, type RevertOutcome } from "./model";
 
 type ChangeRow = components["schemas"]["ProductionChangeRow"];
 
@@ -11,7 +11,8 @@ export type StagedChange = {
     ends_at: string;
     expectedRevision: number | null;
 } & (
-    { action: "set"; energy: number; quality: Quality } | { action: "revert" }
+    | { action: "set"; energy: number; quality: Quality }
+    | { action: "revert"; outcome: RevertOutcome }
 );
 
 export type Refusal = { key: string; message: string };

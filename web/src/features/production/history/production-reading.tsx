@@ -16,15 +16,17 @@ export function ProductionReading({
     const format = useFormat();
     const label = useLabel();
     const time = (value: string) => timeFormatter.format(new Date(value));
-    const corrected =
+    const entered =
         row.observation != null || row.effective?.aggregated === true;
     const originals = row.provider_originals;
-    const source =
-        row.effective?.source_kind === "settlement_injection"
-            ? "settlement"
-            : row.effective?.source_kind === "realtime_generation"
-              ? "provisional"
-              : "manual";
+    const corrected = entered && originals.length > 0;
+    const source = entered
+        ? "manual"
+        : row.effective?.source_kind === "settlement_injection"
+          ? "settlement"
+          : row.effective?.source_kind === "realtime_generation"
+            ? "provisional"
+            : "manual";
     const quality = row.effective?.quality;
     return (
         <>
@@ -32,12 +34,24 @@ export function ProductionReading({
                 {row.effective == null
                     ? t("missing")
                     : format.number(row.effective.energy_mwh)}{" "}
-                {corrected ? (
-                    <span className="production-correction">
-                        {t("corrected")}
+                {row.effective && (
+                    <span className="fine">
+                        {source === "settlement" ? (
+                            <abbr title={t("settlement_title")}>
+                                {t("settlement")}
+                            </abbr>
+                        ) : (
+                            t(source)
+                        )}
                     </span>
-                ) : (
-                    row.effective && <span className="fine">{t(source)}</span>
+                )}
+                {corrected && (
+                    <>
+                        {" "}
+                        <span className="production-correction">
+                            {t("corrected")}
+                        </span>
+                    </>
                 )}
             </div>
             {quality && quality !== "valid" && (
@@ -46,30 +60,23 @@ export function ProductionReading({
                 </div>
             )}
             {corrected &&
-                (originals.length ? (
-                    originals.map((original) => (
-                        <div
-                            className="production-original"
-                            key={`${original.snapshot_id}/${original.starts_at}`}
-                        >
-                            {t(
-                                originals.length > 1 ||
-                                    !sameInterval(original, row)
-                                    ? "provider_original_interval"
-                                    : "provider_original",
-                                {
-                                    interval: `${time(original.starts_at)}–${time(original.ends_at)}`,
-                                    value: format.quantity(
-                                        original.energy_mwh,
-                                        "MWh",
-                                    ),
-                                },
-                            )}
-                        </div>
-                    ))
-                ) : (
-                    <div className="production-original">
-                        {t("provider_original", { value: t("missing") })}
+                originals.map((original) => (
+                    <div
+                        className="production-original"
+                        key={`${original.snapshot_id}/${original.starts_at}`}
+                    >
+                        {t(
+                            originals.length > 1 || !sameInterval(original, row)
+                                ? "provider_original_interval"
+                                : "provider_original",
+                            {
+                                interval: `${time(original.starts_at)}–${time(original.ends_at)}`,
+                                value: format.quantity(
+                                    original.energy_mwh,
+                                    "MWh",
+                                ),
+                            },
+                        )}
                     </div>
                 ))}
             {row.previous_configuration_observations.map((observation) => (
@@ -79,7 +86,6 @@ export function ProductionReading({
                             ? "recorded_under"
                             : "recorded_under_interval",
                         {
-                            revision: observation.configuration_revision,
                             interval: `${time(observation.starts_at)}–${time(observation.ends_at)}`,
                             value: format.quantity(
                                 observation.energy_mwh,

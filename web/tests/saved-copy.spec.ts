@@ -1282,9 +1282,7 @@ async function stagedCorrection(page: Page) {
     await page.goto("/app/");
     await page.getByRole("button", { name: /East array/ }).click();
     await page.getByRole("button", { name: "Production", exact: true }).click();
-    await page
-        .getByRole("button", { name: "Suggest correction for 08:00" })
-        .click();
+    await page.getByRole("button", { name: "Edit 08:00" }).click();
     const editor = page.locator(".production-row-editor");
     await editor.getByRole("textbox").first().fill("0,5");
     await editor
