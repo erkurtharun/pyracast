@@ -16,6 +16,7 @@ from django.utils import timezone, translation
 from django.utils.translation import gettext as _
 from django.views.decorators.debug import sensitive_variables
 
+from pyracast.accounts.account_mail import ACCOUNT_ZONE, mail_time
 from pyracast.accounts.addresses import plain_address
 from pyracast.accounts.audit import SecurityEvent, record_security_event, refusal_throttle
 from pyracast.accounts.authorization import authorize_workspace_admin
@@ -269,7 +270,10 @@ def compose_invitation(
             "workspace": invitation.tenant.name,
             "email": invitation.email,
             "action_url": f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/invitation/#token={token}",
-            "administrator": invitation.role == WorkspaceRole.ADMIN,
+            "role": _("Workspace administrator")
+            if invitation.role == WorkspaceRole.ADMIN
+            else _("Member"),
+            "expires": mail_time(invitation.expires_at, ACCOUNT_ZONE),
         }
         message = EmailMultiAlternatives(
             _("Pyracast workspace invitation"),

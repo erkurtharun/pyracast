@@ -1,5 +1,5 @@
 {% extends "account/email/base_message.txt" %}{% load i18n %}
-{% block content %}{% autoescape off %}{% translate "Verify your email" %}
+{% block content %}{% autoescape off %}{% translate "Your Pyracast verification code" %}
 
 {% translate "Enter this code in the Pyracast window where you requested it." %}
 

@@ -160,11 +160,15 @@ def test_only_the_administrators_of_the_plant_workspace_are_warned() -> None:
 @pytest.mark.parametrize(
     ("language", "subject", "phrase"),
     [
-        ("en", "Lake solar park will be deleted permanently", "will be deleted permanently on"),
+        (
+            "en",
+            "Lake solar park will be deleted permanently",
+            "Deleted permanently at: 27 Nov 2026, 12:00 (UTC+3)\n",
+        ),
         (
             "tr",
             "Lake solar park kal\u0131c\u0131 olarak silinecek",
-            "kal\u0131c\u0131 olarak silinecek",
+            "Kal\u0131c\u0131 olarak silineceği zaman: 27 Kas\u0131m 2026, 12:00 (UTC+3)\n",
         ),
     ],
 )
@@ -180,8 +184,6 @@ def test_the_warning_mail_names_the_plant_its_deletion_time_and_the_recycle_bin(
     assert message.to == ["lake@example.com"]
     assert message.subject == subject
     assert phrase in message.body
-    assert "27" in message.body
-    assert "12:00" in message.body
     assert f"{ORIGIN}/app/w/{region.tenant_id}/trash/" in message.body
     assert f"{ORIGIN}/app/w/{region.tenant_id}/trash/" in str(
         cast(EmailMultiAlternatives, message).alternatives[0][0]

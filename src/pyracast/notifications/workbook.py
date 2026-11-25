@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from datetime import date, datetime, timedelta
 from io import BytesIO
+from itertools import zip_longest
 from textwrap import wrap
 from typing import TYPE_CHECKING, cast
 from zoneinfo import ZoneInfo
@@ -56,9 +57,8 @@ def _header(sheet: Worksheet, row: int, titles: list[str]) -> None:
         cell.fill = PatternFill("solid", fgColor=_HEADER)
 
 
-def _widths(sheet: Worksheet, widths: tuple[int, ...]) -> None:
-    for column, width in enumerate(widths, 1):
-        sheet.column_dimensions[get_column_letter(column)].width = width
+def _heading(sheet: Worksheet, row: int, title: str) -> None:
+    _text(sheet, row, 1, title).font = Font(bold=True, size=12)
 
 
 def _print_setup(sheet: Worksheet) -> None:
@@ -88,16 +88,14 @@ def _notes(report: ForecastReport, figures: list[Figure], outage: bool) -> list[
     return notes
 
 
-def _summary(
+def _daily(
     sheet: Worksheet,
     report: ForecastReport,
     figures: list[Figure],
     *,
     outage: bool,
     day_format: str,
-) -> None:
-    sheet.title = _("Summary")
-    _widths(sheet, (26, 20, 24))
+) -> int:
     title = _text(sheet, 1, 1, report.plant_name)
     title.font = Font(bold=True, size=14)
     title.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
@@ -124,11 +122,12 @@ def _summary(
     _text(sheet, 5, 2, f"{report.timezone} ({utc_offset(reference)})")
     _text(sheet, 6, 1, _("Unit"))
     _text(sheet, 6, 2, report.unit)
+    _heading(sheet, 8, _("Daily totals"))
     titles = [_("Date"), _value_label(report)]
     if outage:
         titles.append(_("Without outage (MWh)"))
-    _header(sheet, 8, titles)
-    row = 8
+    _header(sheet, 9, titles)
+    row = 9
     for day, shown in zip(report.days, figures, strict=True):
         row += 1
         _number(sheet, row, 1, day.day, day_format)
@@ -136,11 +135,10 @@ def _summary(
         if outage:
             without = shown.without_outage if shown.outage == "included" else shown.value
             _number(sheet, row, 3, without, _TOTAL)
-    row += 1
     for note in _notes(report, figures, outage):
         row += 1
         _text(sheet, row, 1, note)
-    _print_setup(sheet)
+    return row
 
 
 def _intervals(
@@ -148,10 +146,10 @@ def _intervals(
     report: ForecastReport,
     figures: list[Figure],
     *,
+    after: int,
     outage: bool,
     day_format: str,
-) -> None:
-    sheet.title = _("Hourly") if report.electrical else pgettext("workbook sheet", "Intervals")
+) -> list[int]:
     zone = ZoneInfo(report.timezone)
     rows = [
         (day, shown, item)
@@ -167,9 +165,10 @@ def _intervals(
         titles.append(_("Without outage (MWh)"))
     if offsets:
         titles.append(_("UTC offset"))
-    _widths(sheet, (14, 8, 8, 20, *((24,) if outage else ()), *((12,) if offsets else ())))
-    _header(sheet, 1, titles)
-    for row, (day, shown, item) in enumerate(rows, 2):
+    _heading(sheet, after + 2, _("Hourly values") if report.electrical else _("Interval values"))
+    header = after + 3
+    _header(sheet, header, titles)
+    for row, (day, shown, item) in enumerate(rows, header + 1):
         _number(sheet, row, 1, day.day, day_format)
         _number(sheet, row, 2, item.start.astimezone(zone).replace(tzinfo=None), "hh:mm")
         _number(sheet, row, 3, item.end.astimezone(zone).replace(tzinfo=None), "hh:mm")
@@ -180,11 +179,8 @@ def _intervals(
             column += 1
         if offsets:
             _text(sheet, row, column, utc_offset(item.start.astimezone(zone)))
-    last = get_column_letter(len(titles))
-    sheet.freeze_panes = "A2"
-    sheet.auto_filter.ref = f"A1:{last}{len(rows) + 1}"
-    sheet.print_title_rows = "1:1"
-    _print_setup(sheet)
+    sheet.auto_filter.ref = f"A{header}:{get_column_letter(len(titles))}{header + len(rows)}"
+    return [14, 8, 8, 20, *((24,) if outage else ()), *((12,) if offsets else ())]
 
 
 def build_workbook(report: ForecastReport) -> bytes:
@@ -197,9 +193,18 @@ def build_workbook(report: ForecastReport) -> bytes:
     workbook.properties.title = _ILLEGAL_XML.sub(
         "", f"{report.plant_name} {day_text(report.days[-1].day)}"
     )
-    summary = cast(Worksheet, workbook.active)
-    _summary(summary, report, figures, outage=outage, day_format=day_format)
-    _intervals(workbook.create_sheet(), report, figures, outage=outage, day_format=day_format)
+    sheet = cast(Worksheet, workbook.active)
+    sheet.title = (
+        pgettext("workbook sheet", "Forecast")
+        if report.electrical
+        else pgettext("workbook sheet", "Irradiance")
+    )
+    last = _daily(sheet, report, figures, outage=outage, day_format=day_format)
+    hourly = _intervals(sheet, report, figures, after=last, outage=outage, day_format=day_format)
+    daily = (26, 20, 24 if outage else 0)
+    for column, widths in enumerate(zip_longest(hourly, daily, fillvalue=0), 1):
+        sheet.column_dimensions[get_column_letter(column)].width = max(widths)
+    _print_setup(sheet)
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
