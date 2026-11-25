@@ -146,7 +146,8 @@ def test_ci_reads_the_fixed_libzstd1_from_the_built_backend_and_web_images_befor
 
     assert "for image in pyracast-backend:ci pyracast-web:ci; do" in read["run"]
     assert f'dpkg --compare-versions "$version" ge {FIXED_LIBZSTD1}' in read["run"]
-    assert "md5sum --check --strict var/lib/dpkg/status.d/libzstd1.md5sums" in read["run"]
+    assert 'sha256sum "$files/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.7"' in read["run"]
+    assert '"${digests[0]}" == "${digests[1]}"' in read["run"]
     assert "'libzstd.so.1 libzstd.so.1.5.7'" in read["run"]
     assert step_index(deployment, "deploy/oci-images.sh load") < position
     assert position < step_index(deployment, "deploy/scan-images.sh")
