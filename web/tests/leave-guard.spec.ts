@@ -873,51 +873,89 @@ test("with a changed value Forward and Back each load a document after the brows
     expect(await marked(page)).toBe(true);
 });
 
-// Holds the script that carries the leave guard until every other script of the document has loaded.
-async function holdGuardScript(page: Page) {
-    let release = () => {};
-    const released = new Promise<void>((resolve) => (release = resolve));
-    let hold = () => {};
-    const holding = new Promise<void>((resolve) => (hold = resolve));
-    const held: string[] = [];
-    const answered = new Set<string>();
-    page.on("requestfinished", (request) => answered.add(request.url()));
-    await page.route("**/_next/static/chunks/**", async (route) => {
-        const response = await route.fetch();
-        const body = await response.text();
-        if (body.includes('"beforeunload"')) {
-            held.push(route.request().url());
-            hold();
-            await released;
-        }
-        await route.fulfill({ response, body });
+// Only scripts: a held stylesheet would hold the inline payload scripts and with them the parsed document.
+const script = (url: URL) =>
+    url.pathname.startsWith("/_next/static/chunks/") &&
+    url.pathname.endsWith(".js");
+
+// Holds the application's scripts; the returned step answers the held ones last first.
+async function holdScripts(page: Page) {
+    const held: (() => void)[] = [];
+    let released = false;
+    await page.route(script, async (route) => {
+        if (!released) await new Promise<void>((resolve) => held.push(resolve));
+        await route.continue();
     });
-    return async () => {
-        await holding;
-        await expect
-            .poll(async () => {
-                const scripts = await page.evaluate(() =>
-                    document.readyState === "loading"
-                        ? null
-                        : [...document.scripts]
-                              .filter(
-                                  (script) => script.src && !script.noModule,
-                              )
-                              .map((script) => script.src),
-                );
-                return (
-                    !!scripts &&
-                    scripts.every(
-                        (src) => held.includes(src) || answered.has(src),
-                    )
-                );
-            })
-            .toBe(true);
-        release();
+    return () => {
+        released = true;
+        for (const answer of held.reverse()) answer();
     };
 }
 
-for (const scripts of ["answered at once", "the guard's held last"])
+async function openDeepEntry(page: Page, held: boolean) {
+    const release = held ? await holdScripts(page) : null;
+    await page.goto("/app/w/1/plants/11/outages/", {
+        waitUntil: "domcontentloaded",
+    });
+    release?.();
+    const report = page.getByRole("button", {
+        name: "Report outage",
+        exact: true,
+    });
+    await expect(report).toBeVisible();
+    return report;
+}
+
+// The router's listener reads a traversal's state and the guard's does not, so the reads count what the router took up.
+async function routerTraversals(page: Page) {
+    await page.addInitScript(() => {
+        const state = Object.getOwnPropertyDescriptor(
+            PopStateEvent.prototype,
+            "state",
+        );
+        const received = new Set<Event>();
+        Object.defineProperty(PopStateEvent.prototype, "state", {
+            ...state,
+            get(this: PopStateEvent) {
+                received.add(this);
+                return state?.get?.call(this) as unknown;
+            },
+        });
+        Object.defineProperty(window, "routerTraversals", {
+            get: () => received.size,
+        });
+    });
+    return () =>
+        page.evaluate(() => Reflect.get(window, "routerTraversals") as number);
+}
+
+test("on a document loaded at a deep address with its scripts answered last first, the router takes up Back and Forward until a value changes and then neither", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    await serveOutageWrites(page, answers());
+    await serveDirectProduction(page, answers());
+    const taken = await routerTraversals(page);
+    const report = await openDeepEntry(page, true);
+    const production = page.getByRole("button", { name: /^Edit 08:00/ });
+    await page.getByRole("button", { name: "Production", exact: true }).click();
+    await expect(production).toBeVisible();
+    await traverse(page, "back");
+    await expect(report).toBeVisible();
+    await traverse(page, "forward");
+    await expect(production).toBeVisible();
+    expect(await taken()).toBe(2);
+    await editValue(page, "0,5");
+    await markDocument(page);
+    await stay(page, () => traverse(page, "back"));
+    await stay(page, () => traverse(page, "forward"));
+    await expect(editorValue(page)).toHaveValue("0,5");
+    expect(await taken()).toBe(2);
+    expect(await marked(page)).toBe(true);
+});
+
+for (const scripts of ["answered at once", "answered last first"])
     for (const leave of [false, true])
         test(`on a document loaded at a deep address with its scripts ${scripts}, Back with a changed value asks, and ${leave ? "Leave loads the entry traversed to as a new document" : "Stay keeps the value at that address"}`, async ({
             page,
@@ -926,19 +964,10 @@ for (const scripts of ["answered at once", "the guard's held last"])
             await signIn(page);
             await serveOutageWrites(page, answers());
             await serveDirectProduction(page, answers());
-            const loaded =
-                scripts === "answered at once"
-                    ? null
-                    : await holdGuardScript(page);
-            const report = page.getByRole("button", {
-                name: "Report outage",
-                exact: true,
-            });
-            await page.goto("/app/w/1/plants/11/outages/", {
-                waitUntil: "commit",
-            });
-            await loaded?.();
-            await expect(report).toBeVisible();
+            const report = await openDeepEntry(
+                page,
+                scripts === "answered last first",
+            );
             const deep = page.url();
             await page
                 .getByRole("button", { name: "Production", exact: true })

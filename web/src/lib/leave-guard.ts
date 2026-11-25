@@ -11,14 +11,11 @@ function keep(event: BeforeUnloadEvent) {
     asked = true;
 }
 
-function reload(event: PopStateEvent) {
+export function reloadGuardedTraversal(event: PopStateEvent) {
     if (!dirty.size && !asked) return;
     event.stopImmediatePropagation();
     location.reload();
 }
-
-// Window listeners run in registration order: this one is added when the app layout loads, before the router's.
-if (typeof window !== "undefined") window.addEventListener("popstate", reload);
 
 function listen() {
     if (dirty.size) window.addEventListener("beforeunload", keep);
