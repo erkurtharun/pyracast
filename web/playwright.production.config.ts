@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { BUILD_DIRECTORIES } from "./production-tests/builds";
+import { BUILD_DIRECTORIES } from "./testing/builds";
 
 const serverPort = 3110;
 const frontPort = 3111;

@@ -11,7 +11,7 @@ import {
 } from "../tests/support/plant-screens";
 import { firstAccount, mockApi } from "../tests/support/workspace";
 import { serveSession } from "../tests/support/session";
-import { BUILD_DIRECTORIES } from "./builds";
+import { BUILD_DIRECTORIES } from "../testing/builds";
 
 type Build = keyof typeof BUILD_DIRECTORIES;
 
