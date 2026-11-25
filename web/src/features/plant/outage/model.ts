@@ -74,6 +74,7 @@ export type OutageEvent =
     | { type: "close" }
     | { type: "discard" }
     | { type: "send"; payload: string; key: string; change: OutageChange }
+    | { type: "answered" }
     // The answer and the reload that follows it have both finished.
     | { type: "sent"; receipt: Status | null }
     | SendFailed
@@ -95,6 +96,7 @@ export type OutageControls = {
     editable: boolean;
     close: boolean;
     hold: Hold | null;
+    pending: "unanswered" | "confirmed" | null;
 };
 
 const atLimit = (live: Live) =>
@@ -157,6 +159,11 @@ export function outageControls(
         editable: free,
         close: !!workflow && !busy,
         hold: workflow?.phase.status === "held" ? workflow.phase.hold : null,
+        pending: busy
+            ? workflow?.phase.status === "saved"
+                ? "confirmed"
+                : "unanswered"
+            : null,
     };
 }
 
@@ -219,16 +226,22 @@ export function reduceOutages(
         case "sent":
             if (!sending(workflow)) return screen;
             return { workflow: null, receipt: event.receipt };
+        case "answered":
         case "sendFailed": {
             if (workflow?.phase.status !== "sending") return screen;
             const { sent } = workflow.phase;
             if (
-                workflow.attempt?.payload === sent.payload &&
-                lostAnswerApplied(event)
+                event.type === "answered" ||
+                (workflow.attempt?.payload === sent.payload &&
+                    lostAnswerApplied(event))
             )
                 return {
                     ...screen,
-                    workflow: { ...workflow, phase: { status: "saved" } },
+                    workflow: {
+                        ...workflow,
+                        attempt: null,
+                        phase: { status: "saved" },
+                    },
                 };
             const { current } = event;
             const attempt = outstandingAfter(

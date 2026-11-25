@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "./support/test";
 import { errorBody } from "./support/errors";
 import {
+    answer as apiAnswer,
     mockApi,
     paged,
     plant,
@@ -47,11 +48,12 @@ async function expectReloaded(page: Page) {
     await expect.poll(() => marked(page).catch(() => true)).toBe(false);
 }
 
-// Every question the browser asks before the document is left.
+// Every question the browser asks before the document is left, each answered Leave so the load goes on.
 function questions(page: Page) {
     const asked: string[] = [];
     page.on("dialog", (dialog) => {
         asked.push(dialog.type());
+        void dialog.accept();
     });
     return asked;
 }
@@ -290,22 +292,27 @@ test("a form whose submission is running asks until it is answered", async ({
     expect(await asks(page)).toBe(false);
 });
 
-// Holds the workspace reads a save starts once `hold` is called, until `release`.
-async function holdWorkspaceReads(page: Page) {
-    let holding = false;
+// Holds every read of `url` sent while armed until `release`; `pass` lets later reads through and keeps the held ones.
+async function holdReads(page: Page, url: string) {
+    let armed = false;
     let release = () => {};
     const released = new Promise<void>((resolve) => (release = resolve));
-    await page.route("**/api/tenants/", async (route) => {
-        if (holding) await released;
+    await page.route(url, async (route) => {
+        if (armed && route.request().method() === "GET") await released;
         await route.fallback();
     });
     return {
-        hold: () => {
-            holding = true;
+        arm: () => {
+            armed = true;
+        },
+        pass: () => {
+            armed = false;
         },
         release,
     };
 }
+
+const holdWorkspaceReads = (page: Page) => holdReads(page, "**/api/tenants/");
 
 async function chooseHalfHours(page: Page) {
     await page.getByLabel("Interval", { exact: true }).selectOption("30");
@@ -332,9 +339,15 @@ test("a resolution whose save was answered while its follow-up reads run asks no
     await page.getByRole("button", { name: "End outage", exact: true }).click();
     await page.getByLabel("End", { exact: true }).fill("2026-11-10T13:00");
     await markDocument(page);
+<<<<<<< HEAD
     reads.hold();
     await page.getByRole("button", { name: "End outage", exact: true }).click();
     await expect(page.getByText("Ended", { exact: true })).toBeVisible();
+=======
+    reads.arm();
+    await page.getByRole("button", { name: "Save resolution" }).click();
+    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
+>>>>>>> e7d94e63 (Follow each submission's own write when deciding whether to ask before leaving)
     await expect(
         page.getByRole("button", { name: "Saving…", exact: true }),
     ).toBeVisible();
@@ -359,8 +372,13 @@ test("plant settings whose save was answered while their follow-up reads run ask
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByLabel("Plant name").fill("New name");
     await markDocument(page);
+<<<<<<< HEAD
     reads.hold();
     await page.getByRole("button", { name: "Save technical details" }).click();
+=======
+    reads.arm();
+    await page.getByRole("button", { name: "Save configuration" }).click();
+>>>>>>> e7d94e63 (Follow each submission's own write when deciding whether to ask before leaving)
     await expect(
         page.getByRole("heading", { name: "New name", level: 1 }),
     ).toBeVisible();
@@ -397,6 +415,309 @@ test("a resolution whose save is unanswered loads another plant tab as a documen
     release();
     await expect(page.getByText("Outcome unknown")).toBeVisible();
     expect(await asks(page)).toBe(true);
+});
+
+// Holds every request to `url` until the returned release.
+async function holdRequests(page: Page, url: string) {
+    let release = () => {};
+    const released = new Promise<void>((resolve) => (release = resolve));
+    await page.route(url, async (route) => {
+        await released;
+        await route.fallback();
+    });
+    return release;
+}
+
+const saving = (page: Page) =>
+    page.getByRole("button", { name: "Saving…", exact: true });
+
+async function enterResolution(page: Page) {
+    await page
+        .getByRole("button", { name: "Resolve outage", exact: true })
+        .click();
+    await page
+        .getByLabel("Resolved at", { exact: true })
+        .fill("2026-11-10T13:00");
+}
+
+const saveResolution = (page: Page) =>
+    page.getByRole("button", { name: "Save resolution" }).click();
+
+async function refuseOutageList(page: Page) {
+    let refused = false;
+    await page.route("**/plants/21/outages/", (route) =>
+        refused && route.request().method() === "GET"
+            ? route.fulfill({
+                  status: 404,
+                  json: errorBody("not_found", "Not found."),
+              })
+            : route.fallback(),
+    );
+    return (next: boolean) => {
+        refused = next;
+    };
+}
+
+const lateInvitation = {
+    id: 3,
+    email: "late@example.test",
+    role: "viewer",
+    state: "pending",
+    created_at: "2026-11-09T09:00:00Z",
+    expires_at: "2026-11-16T09:00:00Z",
+    delivery_status: "sent",
+} as const;
+
+test("an answered invitation lets another view open in the page while its reads and another invitation sent again are unanswered, and that send asks before a full load until it is answered", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/api/tenants/1/members/", (route) =>
+        route.fulfill({
+            json: apiAnswer("WorkspaceMembersOutput", {
+                members: [
+                    { id: 1, email: "owner@example.test", role: "admin" },
+                ],
+                plants_at_recipient_limit: 0,
+            }),
+        }),
+    );
+    await page.route("**/api/tenants/1/invitations/", (route) =>
+        route.fulfill(
+            route.request().method() === "POST"
+                ? {
+                      status: 201,
+                      json: apiAnswer("InvitationOutput", {
+                          ...lateInvitation,
+                          id: 4,
+                          email: "new@example.test",
+                      }),
+                  }
+                : {
+                      json: apiAnswer("WorkspaceInvitationsOutput", {
+                          invitations: [lateInvitation],
+                      }),
+                  },
+        ),
+    );
+    await page.route("**/api/tenants/1/invitations/3/resend/", (route) =>
+        route.fulfill({
+            status: 201,
+            json: apiAnswer("InvitationOutput", lateInvitation),
+        }),
+    );
+    const releaseResend = await holdRequests(
+        page,
+        "**/api/tenants/1/invitations/3/resend/",
+    );
+    const reads = await holdWorkspaceReads(page);
+    await page.goto("/app/");
+    await page.getByRole("button", { name: "Members", exact: true }).click();
+    const resend = page.getByRole("button", {
+        name: "Send again: late@example.test",
+        exact: true,
+    });
+    await expect(resend).toBeVisible();
+    await page
+        .getByLabel("Email address", { exact: true })
+        .fill("new@example.test");
+    await markDocument(page);
+    reads.arm();
+    const followed = page.waitForResponse(
+        (response) =>
+            response.url().endsWith("/api/tenants/1/invitations/") &&
+            response.request().method() === "GET",
+    );
+    await page
+        .getByRole("button", { name: "Send invitation", exact: true })
+        .click();
+    await followed;
+    await expect(saving(page)).toBeVisible();
+    const resent = page.waitForRequest("**/invitations/3/resend/");
+    await resend.click();
+    await resent;
+    await page.getByRole("button", { name: "Plants", exact: true }).click();
+    await expect(page).toHaveURL("/app/w/1/");
+    expect(await marked(page)).toBe(true);
+    expect(await asks(page)).toBe(true);
+    releaseResend();
+    await expect.poll(() => asks(page)).toBe(false);
+    reads.release();
+});
+
+test("a resolution repeated after its lost answer asks until the repeat is answered and no more while its reads run", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    await serveOutageWrites(page, answers("drop"), [activeOutage]);
+    const reads = await holdWorkspaceReads(page);
+    await openPlant(page, "Outages");
+    await enterResolution(page);
+    await saveResolution(page);
+    await expect(page.getByText("Change not confirmed")).toBeVisible();
+    expect(await asks(page)).toBe(true);
+    reads.arm();
+    await saveResolution(page);
+    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
+    await expect(saving(page)).toBeVisible();
+    await expect.poll(() => asks(page)).toBe(false);
+    reads.release();
+    await expect(saving(page)).toHaveCount(0);
+});
+
+test("an outage edit repeated after its lost answer, whose conflict shows the edit applied, asks no more while its reads run", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    const server = await serveOutageWrites(page, answers(502), [activeOutage]);
+    const reads = await holdWorkspaceReads(page);
+    await openPlant(page, "Outages");
+    await page
+        .getByRole("button", { name: "Edit report", exact: true })
+        .click();
+    await page.getByLabel("Incident title").fill("Inverter replaced");
+    const save = page.getByRole("button", { name: "Save outage changes" });
+    await save.click();
+    await expect(page.getByText("Change not confirmed")).toBeVisible();
+    expect(await asks(page)).toBe(true);
+    reads.arm();
+    await save.click();
+    await expect(saving(page)).toBeVisible();
+    await expect.poll(() => asks(page)).toBe(false);
+    reads.release();
+    await expect(
+        page.getByRole("heading", { name: "Inverter replaced", exact: true }),
+    ).toBeVisible();
+    expect(server.applied()).toBe(1);
+});
+
+test("a resolution form shown again while the reads after its answered save run lets another plant tab open in the page", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    await serveOutageWrites(page, answers(), [activeOutage]);
+    const refuse = await refuseOutageList(page);
+    const reads = await holdWorkspaceReads(page);
+    await openPlant(page);
+    await chooseHalfHours(page);
+    await page.getByRole("button", { name: "Outages", exact: true }).click();
+    await enterResolution(page);
+    await markDocument(page);
+    reads.arm();
+    refuse(true);
+    await saveResolution(page);
+    await expect(page.getByText("Not found.")).toBeVisible();
+    refuse(false);
+    await page.getByRole("button", { name: "Try again", exact: true }).click();
+    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
+    await expect(saving(page)).toBeVisible();
+    await expectForecastInPage(page);
+    reads.release();
+});
+
+test("a resolution form shown again while its save is unanswered asks before another plant tab", async ({
+    page,
+}) => {
+    await page.clock.install({ time: now });
+    await signIn(page);
+    await serveOutageWrites(page, answers(), [activeOutage]);
+    const refuse = await refuseOutageList(page);
+    const release = await holdRequests(page, "**/outages/51/resolve/");
+    await openPlant(page, "Outages");
+    await enterResolution(page);
+    await saveResolution(page);
+    await expect(saving(page)).toBeVisible();
+    refuse(true);
+    await page.clock.runFor(5_000);
+    await focusWindow(page);
+    await expect(page.getByText("Not found.")).toBeVisible();
+    refuse(false);
+    await page.getByRole("button", { name: "Try again", exact: true }).click();
+    await expect(saving(page)).toBeVisible();
+    await stay(page, () =>
+        page.getByRole("button", { name: "Forecast", exact: true }).click(),
+    );
+    release();
+    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
+});
+
+test("a reload while the reads after an answered resolution run asks nothing and loads the plant again", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    await serveOutageWrites(page, answers(), [activeOutage]);
+    const reads = await holdWorkspaceReads(page);
+    await openPlant(page, "Outages");
+    await enterResolution(page);
+    await markDocument(page);
+    reads.arm();
+    await saveResolution(page);
+    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
+    await expect(saving(page)).toBeVisible();
+    const asked = questions(page);
+    reads.pass();
+    await page.reload();
+    await expect(
+        page.getByRole("button", { name: "Report outage", exact: true }),
+    ).toBeVisible();
+    expect(await marked(page)).toBe(false);
+    expect(asked).toEqual([]);
+});
+
+test("a resolution whose save is unanswered loads another plant tab as a new document when Leave is chosen", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    await serveOutageWrites(page, answers(), [activeOutage]);
+    await holdRequests(page, "**/outages/51/resolve/");
+    await openPlant(page, "Outages");
+    await enterResolution(page);
+    await markDocument(page);
+    await saveResolution(page);
+    await expect(saving(page)).toBeVisible();
+    await answer(page, true, () =>
+        page.getByRole("button", { name: "Forecast", exact: true }).click(),
+    );
+    await expectReloaded(page);
+    await expect(page).toHaveURL(/\/forecast\//);
+    await expect(page.getByLabel("Resolution")).toBeVisible();
+});
+
+test("a password change the server confirmed asks nothing while the session is read again", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route(
+        "**/api/auth/browser/v1/account/password/change",
+        (route) =>
+            route.fulfill({
+                status: 401,
+                json: {
+                    status: 401,
+                    meta: { is_authenticated: false, password_changed: true },
+                },
+            }),
+    );
+    const session = await holdReads(page, "**/api/session/");
+    await page.goto("/app/account/");
+    const password = page.locator(".password-disclosure");
+    await password.locator("summary").click();
+    await password
+        .getByLabel("Current password", { exact: true })
+        .fill("current-password");
+    await password
+        .getByLabel("New password", { exact: true })
+        .fill("a-new-and-long-password");
+    session.arm();
+    await password.getByRole("button", { name: "Change password" }).click();
+    await expect(saving(page)).toBeVisible();
+    await expect.poll(() => asks(page)).toBe(false);
+    session.release();
 });
 
 const schedule = {
@@ -577,22 +898,7 @@ test("the plant wizard asks while it holds entered figures across its steps unti
     expect(await asks(page)).toBe(false);
 });
 
-// Holds every read of the workspace's plants once the test arms it, until it lets them through.
-async function holdSites(page: Page) {
-    let armed = false;
-    let release = () => {};
-    const released = new Promise<void>((resolve) => (release = resolve));
-    await page.route("**/api/tenants/1/sites/", async (route) => {
-        if (armed && route.request().method() === "GET") await released;
-        await route.fallback();
-    });
-    return {
-        arm: () => {
-            armed = true;
-        },
-        release,
-    };
-}
+const holdSites = (page: Page) => holdReads(page, "**/api/tenants/1/sites/");
 
 test("a plant the wizard created opens in the page without a question", async ({
     page,

@@ -174,6 +174,7 @@ const events = {
             key: "key-1",
             change: sentChange(step),
         }),
+    answered: (step: Step) => run(step, { type: "answered" }),
     sent: (step: Step) =>
         run(step, {
             type: "sent",
@@ -297,7 +298,7 @@ const states = {
     "direct:update4/sending+lost": events.send(
         events.lost(events.send(events.openUpdate(directStart))),
     ),
-    "direct:update4/saved+lost": events.conflictSame(
+    "direct:update4/saved": events.conflictSame(
         events.send(events.lost(events.send(events.openUpdate(directStart)))),
     ),
     "none|4resolved": {
@@ -392,6 +393,7 @@ const expected: Record<StateName, Record<EventName, string>> = {
     "create/sending": {
         ...same("create/sending"),
         ...unchanged("create/sending"),
+        answered: "create/saved",
         sent: "none+sent",
         fail: "create/idle",
         lost: "create/idle+lost",
@@ -437,6 +439,7 @@ const expected: Record<StateName, Record<EventName, string>> = {
     "update4/sending": {
         ...same("update4/sending"),
         ...unchanged("update4/sending"),
+        answered: "update4/saved",
         sent: "none+sent",
         fail: "update4/idle",
         lost: "update4/idle+lost",
@@ -492,6 +495,7 @@ const expected: Record<StateName, Record<EventName, string>> = {
     "resolve4/sending": {
         ...same("resolve4/sending"),
         ...unchanged("resolve4/sending"),
+        answered: "resolve4/saved",
         sent: "none+sent",
         fail: "resolve4/idle",
         lost: "resolve4/idle+lost",
@@ -542,6 +546,7 @@ const expected: Record<StateName, Record<EventName, string>> = {
     "cancel4/sending": {
         ...same("cancel4/sending"),
         ...unchanged("cancel4/sending"),
+        answered: "cancel4/saved",
         sent: "none+sent",
         fail: "cancel4/idle",
         lost: "cancel4/idle+lost",
@@ -607,6 +612,7 @@ const expected: Record<StateName, Record<EventName, string>> = {
     "direct:update4/sending": {
         ...same("direct:update4/sending"),
         ...unchanged("direct:update4/sending", true),
+        answered: "direct:update4/saved",
         sent: "direct:none",
         fail: "direct:update4/idle",
         lost: "direct:update4/idle+lost",
@@ -619,24 +625,26 @@ const expected: Record<StateName, Record<EventName, string>> = {
     "direct:update4/sending+lost": {
         ...same("direct:update4/sending+lost"),
         ...unchanged("direct:update4/sending+lost", true),
+        answered: "direct:update4/saved",
         sent: "direct:none",
         fail: "direct:update4/idle",
         lost: "direct:update4/idle+lost",
         conflict: "direct:update4/idle+stale",
-        conflictSame: "direct:update4/saved+lost",
-        conflictHeld: "direct:update4/saved+lost",
+        conflictSame: "direct:update4/saved",
+        conflictHeld: "direct:update4/saved",
         conflictCancelled: "direct:update4/held:cancelled+stale",
         demote: "update4/sending+lost=",
     },
-    "direct:update4/saved+lost": {
-        ...same("direct:update4/saved+lost"),
-        ...unchanged("direct:update4/saved+lost", true),
+    "direct:update4/saved": {
+        ...same("direct:update4/saved"),
+        ...unchanged("direct:update4/saved", true),
         sent: "direct:none",
-        demote: "update4/saved+lost=",
+        demote: "update4/saved=",
     },
     "update4/sending+stale": {
         ...same("update4/sending+stale"),
         ...unchanged("update4/sending+stale"),
+        answered: "update4/saved+stale",
         sent: "none+sent",
         fail: "update4/idle+stale",
         lost: "update4/idle+stale+lost",
@@ -733,6 +741,7 @@ test("every state of the outage screen meets every event as the table says", () 
 
 test("no event other than its answer replaces, closes or changes a workflow that is sending", () => {
     const answers = new Set([
+        "answered",
         "sent",
         "fail",
         "lost",
@@ -766,6 +775,7 @@ function enabled({ screen, live }: Step) {
         editable: derived.editable,
         close: derived.close,
         hold: derived.hold,
+        pending: derived.pending,
     };
 }
 
@@ -777,6 +787,7 @@ const quiet = {
     editable: false,
     close: false,
     hold: null,
+    pending: null,
 };
 const open4 = {
     ...quiet,
@@ -785,7 +796,13 @@ const open4 = {
     editable: true,
     close: true,
 };
-const sending4 = { ...open4, acts: false, send: false, close: false };
+const sending4 = {
+    ...open4,
+    acts: false,
+    send: false,
+    close: false,
+    pending: "unanswered" as const,
+};
 const heldBy = (hold: NonNullable<OutageControls["hold"]>) => ({
     ...open4,
     send: false,
@@ -831,7 +848,7 @@ test("every state of the outage screen enables only the controls whose event it 
         "direct:update4/idle": open4,
         "direct:update4/sending": sending4,
         "direct:update4/sending+lost": sending4,
-        "direct:update4/saved+lost": sending4,
+        "direct:update4/saved": { ...sending4, pending: "confirmed" },
         "none|4resolved": quiet,
         "resolve4/held:cancelled|4cancelled": heldBy("cancelled"),
         "resolve4/held:resolved|4resolved": heldBy("resolved"),

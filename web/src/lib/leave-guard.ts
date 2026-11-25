@@ -1,7 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect } from "react";
-import { confirmedSince } from "./api/writes";
+import { whenWritesChange, writesUnanswered } from "./api/writes";
 
 const entries = new Set<() => boolean>();
 // Set by the first question and never cleared: Next may have left a soft change suspended behind it.
@@ -12,8 +12,9 @@ function holding() {
     return false;
 }
 
+// A full load loses a write still on its way; a route change keeps the document that awaits its answer.
 function keep(event: BeforeUnloadEvent) {
-    if (!holding()) return;
+    if (!holding() && !writesUnanswered()) return;
     event.preventDefault();
     asked = true;
 }
@@ -25,9 +26,12 @@ export function reloadGuardedTraversal(event: PopStateEvent) {
 }
 
 function listen() {
-    if (entries.size) window.addEventListener("beforeunload", keep);
+    if (entries.size || writesUnanswered())
+        window.addEventListener("beforeunload", keep);
     else window.removeEventListener("beforeunload", keep);
 }
+
+whenWritesChange(listen);
 
 function register(holds: () => boolean) {
     entries.add(holds);
@@ -44,11 +48,23 @@ export function useLeaveGuard(unsaved: boolean) {
     }, [unsaved]);
 }
 
-// Holds until a write started after `since` is confirmed; after a refused or lost answer, until `since` is null.
-export function useSubmissionGuard(since: number | null) {
+export type Submission = { holds: () => boolean; confirm: () => void };
+
+// Its owner confirms it once its own change is known applied, which counts before the next commit.
+export function submission(): Submission {
+    let confirmed = false;
+    return {
+        holds: () => !confirmed,
+        confirm: () => {
+            confirmed = true;
+        },
+    };
+}
+
+export function useSubmissionGuard(running: Submission | null) {
     useEffect(() => {
-        if (since !== null) return register(() => !confirmedSince(since));
-    }, [since]);
+        if (running) return register(running.holds);
+    }, [running]);
 }
 
 type Mode = "push" | "replace";
