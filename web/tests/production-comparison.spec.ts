@@ -89,16 +89,10 @@ test("available historical model days appear without empty grid rows", async ({
             .locator(".stat")
             .filter({ hasText: "Absolute error as % of production" }),
     ).toContainText("20 %");
+    await expect(comparison.locator(".stat")).toHaveCount(4);
     await expect(
-        comparison.locator(".stat").filter({
-            hasText: "Improvement over forecasts without calibration",
-        }),
-    ).toContainText("12.5 %");
-    await expect(
-        comparison.getByText(
-            "The improvement uses 3 days outside the calibration days.",
-        ),
-    ).toBeVisible();
+        comparison.getByText(/Improvement over|outside the calibration days/),
+    ).toHaveCount(0);
     await expect(comparison.getByText(/Days not compared/)).toHaveText([
         "Days not compared (22)",
     ]);
@@ -107,13 +101,17 @@ test("available historical model days appear without empty grid rows", async ({
     ).toHaveCount(0);
     await expect(
         comparison.locator(".stat").filter({
-            hasText: "Average daily difference (expected − actual)",
+            hasText: "Average daily difference",
         }),
-    ).toContainText("2");
-    await comparison.getByText("Additional metrics", { exact: true }).click();
+    ).toHaveText("Average daily difference+2.00 MWhProduction below expected");
     await expect(
-        comparison.getByText("Compared: 64 intervals · 64 hours"),
-    ).toBeVisible();
+        comparison.getByText(
+            /Additional metrics|How the comparison is measured|Compared: |Current technical details|compared with actual production/,
+        ),
+    ).toHaveCount(0);
+    await expect(
+        comparison.getByLabel("Start date"),
+    ).toHaveAccessibleDescription("Up to 90 days.");
     await expect(
         comparison.getByRole("columnheader", { name: "Expected (MWh)" }),
     ).toBeVisible();
@@ -295,7 +293,9 @@ test("a failed refresh on return keeps the comparison until a retry loads it", a
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await page.getByRole("button", { name: "Comparison", exact: true }).click();
     const missing = page.getByText("Days not compared (1)", { exact: true });
+    const counts = page.getByText(/Days not compared/);
     await expect(missing).toBeVisible();
+    await expect(counts).toHaveText(["Days not compared (1)"]);
     await page.clock.runFor(5_000);
     unavailable = true;
     const failed = page.waitForResponse(
@@ -314,15 +314,17 @@ test("a failed refresh on return keeps the comparison until a retry loads it", a
         .filter({ hasText: "Could not refresh" });
     await expect(notice).toContainText("Comparison service is busy.");
     await expect(missing).toBeVisible();
+    await expect(counts).toHaveText(["Days not compared (1)"]);
     unavailable = false;
     await notice
         .getByRole("button", { name: "Try again", exact: true })
         .click();
     await expect(notice).toHaveCount(0);
     await expect(missing).toBeVisible();
+    await expect(counts).toHaveText(["Days not compared (1)"]);
 });
 
-test("a forecast accuracy comparison signs the daily difference, and an entered day whose source names real-time production is not marked real-time", async ({
+test("a forecast accuracy comparison signs the daily difference, counts no day not compared, and an entered day whose source names real-time production is not marked real-time", async ({
     page,
 }) => {
     await page.clock.setFixedTime(new Date("2026-11-11T12:00:00Z"));
@@ -372,9 +374,15 @@ test("a forecast accuracy comparison signs the daily difference, and an entered 
     });
     await expect(
         comparison.locator(".stat").filter({
-            hasText: "Average daily difference (forecast − actual)",
+            hasText: "Average daily difference",
         }),
-    ).toContainText("-1");
+    ).toHaveText("Average daily difference−1.00 MWhForecast too low");
+    await expect(
+        comparison.getByText("Days not compared (0)", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        comparison.locator("summary", { hasText: "Days not compared" }),
+    ).toHaveCount(0);
     await expect(
         comparison.getByRole("table", {
             name: "Forecast accuracy · 2026-11-09 – 2026-11-10",

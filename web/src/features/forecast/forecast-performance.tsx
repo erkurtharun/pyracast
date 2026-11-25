@@ -63,7 +63,6 @@ export function ForecastPerformance({
             <div className="section-heading">
                 <div>
                     <h2>{t("production_comparison")}</h2>
-                    <p className="fine">{t("comparison_description")}</p>
                 </div>
             </div>
             <ViewNav
@@ -79,26 +78,21 @@ export function ForecastPerformance({
                     setQuery(request(mode));
                 }}
             />
-            <details>
-                <summary>{t("how_comparison_is_measured")}</summary>
-                <p>
-                    {comparison === "archived_forecast"
-                        ? t("archived_forecast_description")
-                        : t(
-                              "historical_model_uses_saved_weather_estimates_and",
-                          )}
-                </p>
-                <p>{t("daylight_rules")}</p>
-            </details>
             <form className="forecast-controls" onSubmit={load}>
-                <ControlField label={t("start_date")}>
-                    <input
-                        type="date"
-                        required
-                        value={start}
-                        max={end}
-                        onChange={(event) => setStart(event.target.value)}
-                    />
+                <ControlField
+                    label={t("start_date")}
+                    hint={t("daylight_rules")}
+                >
+                    {(describedBy) => (
+                        <input
+                            type="date"
+                            required
+                            value={start}
+                            max={end}
+                            aria-describedby={describedBy}
+                            onChange={(event) => setStart(event.target.value)}
+                        />
+                    )}
                 </ControlField>
                 <ControlField label={t("end_date")}>
                     <input
@@ -147,6 +141,8 @@ function PerformanceResults({
     const plant = useExportPlant();
     const formatter = useFormat();
     const format = (value: number | null) => formatter.number(value);
+    const signed = (value: number | null | undefined) =>
+        formatter.signed(value, 2);
     const percent = (value: number | null) =>
         formatter.quantity(value === null ? null : value * 100, "%", 1);
     const reasonLabel = useCodeLabel("ForecastPerformance.reasons");
@@ -214,85 +210,30 @@ function PerformanceResults({
                                         value={percent(data.relative_error)}
                                     />
                                     <Stat
-                                        label={t("skill_score")}
-                                        value={percent(data.skill_score)}
-                                    />
-                                    <Stat
                                         label={t("matched_days")}
                                         value={data.matched_days}
                                     />
                                 </div>
-                                {historical && (
-                                    <p className="fine">
-                                        {t("skill_days", {
-                                            count: data.skill_days,
-                                        })}
-                                    </p>
-                                )}
                                 <div className="stats">
                                     <Stat
                                         label={t("daylight_energy_error")}
                                         value={data.metrics?.daily_mae_mwh}
                                         unit="MWh"
                                     />
-                                    <Stat
-                                        label={t("daylight_energy_bias", {
-                                            mode,
-                                        })}
-                                        value={data.metrics?.daily_bias_mwh}
-                                        unit="MWh"
+                                    <DifferenceStat
+                                        label={t("daylight_energy_bias")}
+                                        value={signed(
+                                            data.metrics?.daily_bias_mwh,
+                                        )}
+                                        meaning={(direction) =>
+                                            t("difference_meaning", {
+                                                mode,
+                                                direction,
+                                            })
+                                        }
                                     />
                                 </div>
-                                <details>
-                                    <summary>
-                                        {t("additional_metrics_interpretation")}
-                                    </summary>
-                                    <div className="stats">
-                                        <Stat
-                                            label={t(
-                                                "baseline_daylight_energy_error",
-                                            )}
-                                            value={
-                                                data.baseline_metrics
-                                                    ?.daily_mae_mwh
-                                            }
-                                            unit="MWh"
-                                        />
-                                        <Stat
-                                            label={t(
-                                                "generatinginterval_error",
-                                            )}
-                                            value={
-                                                data.metrics
-                                                    ?.source_positive_mae_mw
-                                            }
-                                            unit="MW"
-                                        />
-                                    </div>
-                                    {data.scored_intervals != null && (
-                                        <p className="fine">
-                                            {t("scored_coverage", {
-                                                count: data.scored_intervals,
-                                                hours: format(
-                                                    data.scored_hours,
-                                                ),
-                                            })}
-                                        </p>
-                                    )}
-                                    <p className="fine">
-                                        {t(
-                                            "bias_is_predicted_minus_measured_daily_energy",
-                                        )}
-                                    </p>
-                                </details>
                             </>
-                        )}
-                        {historical && matched.length > 0 && (
-                            <p className="fine">
-                                {t(
-                                    "current_configuration_calibration_from_its_training_period",
-                                )}
-                            </p>
                         )}
                         {!data.metrics && (
                             <Notice>
@@ -364,29 +305,53 @@ function PerformanceResults({
                                 </ScrollRegion>
                             </details>
                         )}
-                        {missingReasons.size > 0 ? (
-                            <details>
-                                <summary>{unavailableDates}</summary>
-                                <ul>
-                                    {[...missingReasons].map(
-                                        ([reason, dates]) => (
-                                            <li key={reason}>
-                                                {t("reason_dates", {
-                                                    reason,
-                                                    dates: dates.join(", "),
-                                                })}
-                                            </li>
-                                        ),
-                                    )}
-                                </ul>
-                            </details>
-                        ) : (
-                            !data.metrics &&
-                            notCompared > 0 && <p>{unavailableDates}</p>
-                        )}
+                        {data.requested_days > 0 &&
+                            (missingReasons.size > 0 ? (
+                                <details>
+                                    <summary>{unavailableDates}</summary>
+                                    <ul>
+                                        {[...missingReasons].map(
+                                            ([reason, dates]) => (
+                                                <li key={reason}>
+                                                    {t("reason_dates", {
+                                                        reason,
+                                                        dates: dates.join(", "),
+                                                    })}
+                                                </li>
+                                            ),
+                                        )}
+                                    </ul>
+                                </details>
+                            ) : (
+                                <p>{unavailableDates}</p>
+                            ))}
                     </>
                 )}
             </Resource>
         </>
+    );
+}
+
+function DifferenceStat({
+    label,
+    value,
+    meaning,
+}: {
+    label: string;
+    value: string;
+    meaning: (direction: "high" | "low") => string;
+}) {
+    const direction = value.startsWith("+")
+        ? "high"
+        : value.startsWith("−")
+          ? "low"
+          : null;
+    return (
+        <Stat
+            label={label}
+            value={value}
+            unit="MWh"
+            note={direction ? meaning(direction) : undefined}
+        />
     );
 }

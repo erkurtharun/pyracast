@@ -6,12 +6,10 @@ import { useFormat } from "@/lib/format/use-format";
 import { ConfirmAction } from "@/ui/action";
 import { CsvDownload } from "@/ui/csv-download";
 import { useExportPlant } from "@/ui/export-plant";
-import { ScrollRegion } from "@/ui/scroll-region";
-import { JsonDetails, Notice, Stat } from "@/ui/ui";
+import { Notice, Stat } from "@/ui/ui";
 import { useCodeLabel } from "@/ui/vocabulary";
 import { CalibrationMarks } from "./calibration-marks";
 import {
-    calibrationInUse,
     firstCalibrationDay,
     type Action,
     type AutomationStatus,
@@ -27,13 +25,6 @@ const REQUEST_REFUSALS = {
     Exclude<RequestState, "available" | "unknown">,
     string
 >;
-
-function useValueLabel() {
-    const t = useTranslations("Calibrations");
-    const code = useCodeLabel("Calibrations.values");
-    return (value: string) =>
-        value === "" ? "" : code(value, t("unknown_value"));
-}
 
 // What an activation does is stated before it is confirmed: plants/activation.py turns automation on.
 function ActivationEffect({
@@ -65,6 +56,7 @@ function ActivationEffect({
 
 export function CalibrationRunDetail({
     run,
+    inUse,
     action,
     automation,
     canManage,
@@ -75,6 +67,7 @@ export function CalibrationRunDetail({
     onRequest,
 }: {
     run: Calibration;
+    inUse: boolean;
     action: Action;
     automation: AutomationStatus | undefined;
     canManage: boolean;
@@ -96,10 +89,7 @@ export function CalibrationRunDetail({
         <div className="calibration-detail">
             <div className="section-heading">
                 <h3>{t("calibration_id", { id: run.id })}</h3>
-                <CalibrationMarks
-                    run={run}
-                    inUse={run.id === calibrationInUse(automation)}
-                />
+                <CalibrationMarks run={run} inUse={inUse} />
             </div>
             {blocker !== null && run.selection_state !== "active" && (
                 <Notice>
@@ -171,11 +161,6 @@ export function CalibrationRunDetail({
                     )
                 }
             />
-            <JsonDetails
-                data={run.result}
-                label={t("evaluation_metrics_exclusions")}
-            />
-            <JsonDetails data={run} label={t("run_provenance")} />
         </div>
     );
 }
@@ -183,7 +168,6 @@ export function CalibrationRunDetail({
 function CalibrationAssessment({ run }: { run: Calibration }) {
     const t = useTranslations("Calibrations");
     const formatter = useFormat();
-    const valueLabel = useValueLabel();
     const statusMessage = useCodeLabel("Calibrations.status_messages");
     const reasonMessage = useCodeLabel("Calibrations.reasons");
 
@@ -193,12 +177,7 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
             : {};
     const result = asRecord(run.result),
         baseline = asRecord(result.baseline),
-        candidate = asRecord(result.candidate),
-        incumbent = asRecord(result.incumbent),
-        support = asRecord(result.training_support),
-        exclusions = asRecord(result.exclusions),
-        daylightMetrics = result.metric_scope === "daylight_intervals";
-    const format = (value: unknown) => formatter.number(value, 4);
+        candidate = asRecord(result.candidate);
     const reasons = Array.isArray(result.reasons)
         ? result.reasons.filter(
               (reason): reason is string => typeof reason === "string",
@@ -217,104 +196,37 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
                 <ul>
                     {reasons.map((reason) => (
                         <li key={reason}>
-                            {reasonMessage(reason, valueLabel(reason))}
+                            {reasonMessage(reason, t("unknown_value"))}
                         </li>
                     ))}
                 </ul>
             )}
             <div className="stats">
-                <Stat label={t("factor")} value={format(run.factor)} />
-                <Stat label={t("valid_days")} value={result.valid_days} />
+                <Stat
+                    label={t("factor")}
+                    value={formatter.number(run.factor, 4)}
+                />
+                <Stat
+                    label={t("window")}
+                    value={`${run.window_start} – ${run.window_end}`}
+                />
                 <Stat label={t("training_days")} value={result.training_days} />
                 <Stat label={t("heldout_days")} value={result.holdout_days} />
-                {Object.keys(support).length > 0 && (
-                    <Stat
-                        label={t("informative_training_days")}
-                        value={t("support_required", {
-                            days: format(support.informative_days),
-                            minimum: format(support.minimum_days),
-                        })}
-                    />
+                {Object.keys(candidate).length > 0 && (
+                    <>
+                        <Stat
+                            label={t("baseline")}
+                            value={formatter.number(baseline.daily_mae_mwh, 2)}
+                            unit="MWh"
+                        />
+                        <Stat
+                            label={t("candidate")}
+                            value={formatter.number(candidate.daily_mae_mwh, 2)}
+                            unit="MWh"
+                        />
+                    </>
                 )}
             </div>
-            {daylightMetrics && (
-                <p className="fine">
-                    {t(
-                        "metrics_use_whole_meter_intervals_intersecting_daylight",
-                    )}
-                </p>
-            )}
-            {Object.keys(candidate).length > 0 && (
-                <ScrollRegion label={t("heldout_accuracy_comparison")}>
-                    <table>
-                        <caption>
-                            {t(
-                                "heldout_accuracy_comparison_lower_error_is_better",
-                            )}
-                        </caption>
-                        <thead>
-                            <tr>
-                                <th>{t("metric")}</th>
-                                <th>{t("baseline")}</th>
-                                <th>{t("candidate")}</th>
-                                {Object.keys(incumbent).length > 0 && (
-                                    <th>
-                                        {t("training_selection", {
-                                            factor: format(
-                                                result.incumbent_factor,
-                                            ),
-                                        })}
-                                    </th>
-                                )}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {(
-                                [
-                                    [
-                                        "interval_mae_mw",
-                                        t("interval_mean_absolute_error_mw"),
-                                    ],
-                                    ["bias_mw", t("interval_bias_mw")],
-                                    [
-                                        "daily_mae_mwh",
-                                        t("daily_mean_absolute_error_mwh"),
-                                    ],
-                                    ["daily_bias_mwh", t("daily_bias_mwh")],
-                                ] as const
-                            ).map(([key, label]) => (
-                                <tr key={key}>
-                                    <th>{label}</th>
-                                    <td>{format(baseline[key])}</td>
-                                    <td>{format(candidate[key])}</td>
-                                    {Object.keys(incumbent).length > 0 && (
-                                        <td>{format(incumbent[key])}</td>
-                                    )}
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </ScrollRegion>
-            )}
-            {Object.entries(exclusions).some(
-                ([, value]) => typeof value === "number" && value > 0,
-            ) && (
-                <div className="provenance">
-                    <strong>{t("excluded_observations")}</strong>
-                    <ul>
-                        {Object.entries(exclusions)
-                            .filter(
-                                ([, value]) =>
-                                    typeof value === "number" && value > 0,
-                            )
-                            .map(([key, value]) => (
-                                <li key={key}>
-                                    {valueLabel(key)}: {formatter.number(value)}
-                                </li>
-                            ))}
-                    </ul>
-                </div>
-            )}
         </>
     );
 }
