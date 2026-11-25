@@ -44,20 +44,18 @@ test("a customer manages one plant site through the real API", async ({
 
     await page.getByRole("button", { name: /Site/ }).click();
     await expect(
-        page.getByRole("heading", { name: "Complete plant setup" }),
+        page.getByRole("heading", { name: "Finish adding plant" }),
     ).toBeVisible();
     await page.getByLabel("Plant name").fill("Browser plant");
-    await page.getByLabel("DC nameplate capacity (MW)").fill("130");
-    await page.getByLabel("Inverter AC capacity (MW, optional)").fill("100");
+    await page.getByLabel("Panel capacity (MWp)").fill("130");
+    await page.getByLabel("Inverter capacity (MW AC, optional)").fill("100");
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     const created = page.waitForResponse(
         (response) =>
             response.request().method() === "POST" &&
             /\/plants\/$/.test(new URL(response.url()).pathname),
     );
-    await page
-        .getByRole("button", { name: "Submit plant for approval" })
-        .click();
+    await page.getByRole("button", { name: "Send for approval" }).click();
     const createdPlant = (await (await created).json()) as {
         id: number;
         region_id: number;
@@ -105,7 +103,7 @@ test("a customer manages one plant site through the real API", async ({
     ).toBeVisible();
     await page.getByRole("button", { name: "Generation", exact: true }).click();
     await page.getByLabel("Forecast date").fill(process.env.BROWSER_DATE!);
-    await page.getByLabel("Resolution").selectOption("60");
+    await page.getByLabel("Interval", { exact: true }).selectOption("60");
     await expect(
         page.getByText("View interval data (12 intervals)"),
     ).toBeVisible();
@@ -183,7 +181,7 @@ test("a customer manages one plant site through the real API", async ({
         expect(localTime(positive.at(-1)?.ends_at ?? "")).toBe("18:00");
     }
     await expectFullForecastCsv(24);
-    await page.getByLabel("Resolution").selectOption("30");
+    await page.getByLabel("Interval", { exact: true }).selectOption("30");
     await expect(
         page.getByText("View interval data (24 intervals)"),
     ).toBeVisible();
@@ -218,13 +216,11 @@ test("a customer manages one plant site through the real API", async ({
     await page
         .getByRole("button", { name: "Report outage", exact: true })
         .click();
-    await page.getByLabel("Incident title").fill("Browser inverter outage");
     await page
-        .getByLabel("Started at", { exact: true })
-        .fill(outageTimes.starts);
-    await page
-        .getByRole("button", { name: "Save outage", exact: true })
-        .click();
+        .getByLabel("Title", { exact: true })
+        .fill("Browser inverter outage");
+    await page.getByLabel("Start", { exact: true }).fill(outageTimes.starts);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(
         page.getByRole("heading", { name: "Browser inverter outage" }),
     ).toBeVisible();
@@ -274,11 +270,9 @@ test("a customer manages one plant site through the real API", async ({
     });
     await page.getByRole("button", { name: "Outages", exact: true }).click();
     await page
-        .getByRole("button", { name: "Edit report", exact: true })
+        .getByRole("button", { name: "Edit outage", exact: true })
         .click();
-    await page
-        .getByLabel("Started at", { exact: true })
-        .fill(outageTimes.edited);
+    await page.getByLabel("Start", { exact: true }).fill(outageTimes.edited);
     const outageList = (await page.evaluate(async (url) => {
         const response = await fetch(`${url}outages/`);
         return response.json();
@@ -312,14 +306,14 @@ test("a customer manages one plant site through the real API", async ({
             response.request().method() === "PUT" &&
             response.url().endsWith(`/outages/${reported.id}/`),
     );
-    await page.getByRole("button", { name: "Save outage changes" }).click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
     expect((await stale).status()).toBe(409);
     await expect(
         page.getByText(
             "Title: Browser inverter outage → Inverter outage changed elsewhere",
         ),
     ).toBeVisible();
-    await expect(page.getByLabel("Started at", { exact: true })).toHaveValue(
+    await expect(page.getByLabel("Start", { exact: true })).toHaveValue(
         outageTimes.edited,
     );
     const applied = page.waitForResponse(
@@ -327,18 +321,14 @@ test("a customer manages one plant site through the real API", async ({
             response.request().method() === "PUT" &&
             response.url().endsWith(`/outages/${reported.id}/`),
     );
-    await page.getByRole("button", { name: "Save outage changes" }).click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
     expect((await applied).status()).toBe(200);
     await expect(
         page.getByRole("heading", { name: "Browser inverter outage" }),
     ).toBeVisible();
-    await page
-        .getByRole("button", { name: "Resolve outage", exact: true })
-        .click();
-    await page
-        .getByLabel("Resolved at", { exact: true })
-        .fill(outageTimes.ends);
-    await page.getByRole("button", { name: "Save resolution" }).click();
+    await page.getByRole("button", { name: "End outage", exact: true }).click();
+    await page.getByLabel("End", { exact: true }).fill(outageTimes.ends);
+    await page.getByRole("button", { name: "End outage", exact: true }).click();
     await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Forecast", exact: true }).click();
     await expect(
@@ -494,18 +484,16 @@ test("a customer manages one plant site through the real API", async ({
     await page
         .getByRole("button", { name: "Data collection", exact: true })
         .click();
-    await page.getByLabel("Collection time 1", { exact: true }).fill("09:00");
-    await page.getByRole("button", { name: "+ Add time" }).click();
-    await page.getByLabel("Collection time 2", { exact: true }).fill("16:00");
-    await page
-        .getByRole("button", { name: "Save collection schedule" })
-        .click();
-    await expect(
-        page.getByLabel("Collection time 1", { exact: true }),
-    ).toHaveValue("09:00");
-    await expect(
-        page.getByLabel("Collection time 2", { exact: true }),
-    ).toHaveValue("16:00");
+    await page.getByLabel("Update time 1", { exact: true }).fill("09:00");
+    await page.getByRole("button", { name: "Add time" }).click();
+    await page.getByLabel("Update time 2", { exact: true }).fill("16:00");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByLabel("Update time 1", { exact: true })).toHaveValue(
+        "09:00",
+    );
+    await expect(page.getByLabel("Update time 2", { exact: true })).toHaveValue(
+        "16:00",
+    );
     await page.getByRole("button", { name: "Email reminders" }).click();
     const reminders = page.getByRole("region", {
         name: "Email reminders",
@@ -524,9 +512,7 @@ test("a customer manages one plant site through the real API", async ({
                 response.request().method() === "POST" &&
                 response.url().endsWith("/reminders/preview/"),
         );
-        await page
-            .getByRole("button", { name: "Save reminders", exact: true })
-            .click();
+        await page.getByRole("button", { name: "Save", exact: true }).click();
         const preview = await previewed;
         expect(preview.status()).toBe(200);
         const { disclosure } = (await preview.json()) as { disclosure: string };
@@ -535,7 +521,7 @@ test("a customer manages one plant site through the real API", async ({
             reviewDialog.getByText(hidden, { exact: true }),
         ).toBeVisible();
         await expect(
-            reviewDialog.getByText("No address will appear in To or Copy.", {
+            reviewDialog.getByText("No address will appear in To or Cc.", {
                 exact: true,
             }),
         ).toBeVisible();
@@ -561,21 +547,21 @@ test("a customer manages one plant site through the real API", async ({
             reminders.getByText("Saved successfully.", { exact: true }),
         ).toBeVisible();
     }
-    await page.getByLabel("Enable forecast emails for this plant").check();
-    await page.getByLabel("Delivery time 1", { exact: true }).fill("10:00");
+    await page.getByLabel("Send forecast email for this plant").check();
+    await page.getByLabel("Send time 1", { exact: true }).fill("10:00");
     await page
         .getByLabel("Email address 1", { exact: true })
         .fill("member@example.com");
-    await saveShownReminders("Hidden (Bcc): 1 recipient");
+    await saveShownReminders("Bcc: 1 recipient");
     await expect(
         page.getByLabel("Email address 1", { exact: true }),
     ).toHaveValue("member@example.com");
-    await expect(
-        page.getByLabel("Delivery time 1", { exact: true }),
-    ).toHaveValue("10:00");
+    await expect(page.getByLabel("Send time 1", { exact: true })).toHaveValue(
+        "10:00",
+    );
     await expect(reminders.getByText("Sending", { exact: true })).toBeVisible();
     await expect(savedReminders).toContainText("1 / 5");
-    await expect(savedReminders).toContainText("Hidden (Bcc): 1 recipient");
+    await expect(savedReminders).toContainText("Bcc: 1 recipient");
     await page
         .getByLabel("Email address 1", { exact: true })
         .fill("forecast-one@example.test");
@@ -583,7 +569,7 @@ test("a customer manages one plant site through the real API", async ({
     await page
         .getByLabel("Email address 2", { exact: true })
         .fill("forecast-two@example.test");
-    await saveShownReminders("Hidden (Bcc): 2 recipients");
+    await saveShownReminders("Bcc: 2 recipients");
     await expect(
         page.getByLabel("Email address 1", { exact: true }),
     ).toHaveValue("forecast-one@example.test");
@@ -591,7 +577,7 @@ test("a customer manages one plant site through the real API", async ({
         page.getByLabel("Email address 2", { exact: true }),
     ).toHaveValue("forecast-two@example.test");
     await expect(savedReminders).toContainText("2 / 5");
-    await expect(savedReminders).toContainText("Hidden (Bcc): 2 recipients");
+    await expect(savedReminders).toContainText("Bcc: 2 recipients");
     await expect(
         savedReminders.getByText(
             "All recipients are hidden: the email shows no recipient address.",
@@ -609,9 +595,9 @@ test("a customer manages one plant site through the real API", async ({
     await expect(
         page.getByLabel("Email address 2", { exact: true }),
     ).toHaveValue("forecast-two@example.test");
-    await expect(
-        page.getByLabel("Delivery time 1", { exact: true }),
-    ).toHaveValue("10:00");
+    await expect(page.getByLabel("Send time 1", { exact: true })).toHaveValue(
+        "10:00",
+    );
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({
         path: testInfo.outputPath("reminders-mobile.png"),
@@ -652,9 +638,7 @@ test("a customer manages one plant site through the real API", async ({
             new URL(response.url()).pathname ===
                 `/api/tenants/${tenantId}/regions/${createdPlant.region_id}/`,
     );
-    await page
-        .getByRole("button", { name: "Move plant to recycle bin" })
-        .click();
+    await page.getByRole("button", { name: "Delete", exact: true }).click();
     expect((await siteDeleted).status()).toBe(204);
     await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
     await expect(
@@ -683,27 +667,25 @@ test("a customer manages one plant site through the real API", async ({
         .fill(process.env.BROWSER_HISTORY_DATE!);
     await expect(firstHour).toContainText("1.25");
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByLabel("Mounting type").selectOption("fixed");
-    await page.getByLabel("Surface tilt (degrees, optional)").fill("33");
-    await page.getByLabel("Surface azimuth (degrees, optional)").fill("180");
+    await page.getByLabel("Mounting").selectOption("fixed");
+    await page.getByLabel("Panel tilt (°, optional)").fill("33");
+    await page.getByLabel("Panel azimuth (°, optional)").fill("180");
     const configurationSaved = page.waitForResponse(
         (response) =>
             response.request().method() === "PUT" &&
             new URL(response.url()).pathname === plantUrl,
     );
-    await page.getByRole("button", { name: "Save configuration" }).click();
+    await page.getByRole("button", { name: "Save technical details" }).click();
     expect((await configurationSaved).ok()).toBeTruthy();
     await expect(
         page.getByText("Saved successfully.", { exact: true }),
     ).toBeVisible();
     await page.reload();
-    await expect(page.getByLabel("Mounting type")).toHaveValue("fixed");
-    await expect(
-        page.getByLabel("Surface tilt (degrees, optional)"),
-    ).toHaveValue("33");
-    await expect(
-        page.getByLabel("Surface azimuth (degrees, optional)"),
-    ).toHaveValue("180");
+    await expect(page.getByLabel("Mounting")).toHaveValue("fixed");
+    await expect(page.getByLabel("Panel tilt (°, optional)")).toHaveValue("33");
+    await expect(page.getByLabel("Panel azimuth (°, optional)")).toHaveValue(
+        "180",
+    );
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await page.getByRole("button", { name: "Comparison", exact: true }).click();
     await expect(
