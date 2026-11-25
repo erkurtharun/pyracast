@@ -4,11 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import type { Site } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { ApiError, displayMessage } from "@/lib/api/errors";
+import { writesStarted } from "@/lib/api/writes";
 import { useApiList, useRefresh } from "@/lib/api/query";
 import { MISSING } from "@/lib/format/number";
 import { deviceZone } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
-import { useLeaveGuard } from "@/lib/leave-guard";
+import { useLeaveGuard, useSubmissionGuard } from "@/lib/leave-guard";
 import type { components } from "@/lib/schema";
 import {
     Field,
@@ -40,7 +41,7 @@ type Trashed = components["schemas"]["TrashedRegionOutput"];
 type LocationRefusal = components["schemas"]["LocationRefusal"];
 type Submission =
     | { kind: "idle" }
-    | { kind: "saving" }
+    | { kind: "saving"; since: number }
     | { kind: "saved" }
     | {
           kind: "error";
@@ -51,7 +52,8 @@ type Submission =
 type Found = { row: Trashed; others: number };
 type Offer =
     | { kind: "none" }
-    | ({ kind: "offered" | "restoring" } & Found)
+    | ({ kind: "offered" } & Found)
+    | ({ kind: "restoring"; since: number } & Found)
     | ({ kind: "failed"; message: string } & Found);
 
 const stepLabels = {
@@ -173,7 +175,14 @@ function Wizard({
     const saved = status.kind === "saved";
     const busy = saving || saved || offer.kind === "restoring";
     const [entered, setEntered] = useState(false);
-    const release = useLeaveGuard(!saved && (entered || busy));
+    useSubmissionGuard(
+        status.kind === "saving"
+            ? status.since
+            : offer.kind === "restoring"
+              ? offer.since
+              : null,
+    );
+    useLeaveGuard(!busy && entered);
     const fields = status.kind === "error" ? status.fields : {};
     const holder = status.kind === "error" ? status.holder : null;
     const failure =
@@ -224,7 +233,7 @@ function Wizard({
     async function restore(found: Found) {
         if (running.current) return;
         running.current = true;
-        setOffer({ ...found, kind: "restoring" });
+        setOffer({ ...found, kind: "restoring", since: writesStarted() });
         try {
             await api.post(
                 "/api/tenants/{tenant_id}/regions/{region_id}/restore/",
@@ -241,7 +250,6 @@ function Wizard({
         }
         forget(found.row.id);
         setStatus({ kind: "saved" });
-        release();
         await refresh.workspace(tenant);
         running.current = false;
         if (open.current) onOpen(found.row.id);
@@ -249,7 +257,7 @@ function Wizard({
     async function submit(data: FormData) {
         if (running.current) return;
         running.current = true;
-        setStatus({ kind: "saving" });
+        setStatus({ kind: "saving", since: writesStarted() });
         try {
             const body = configurationInput(data);
             const site = existing
@@ -284,7 +292,6 @@ function Wizard({
                   });
             running.current = false;
             setStatus({ kind: "saved" });
-            release();
             if (open.current) onCreated(site);
         } catch (error) {
             running.current = false;

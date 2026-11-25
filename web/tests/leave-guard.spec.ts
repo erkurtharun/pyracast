@@ -290,6 +290,121 @@ test("a form whose submission is running asks until it is answered", async ({
     expect(await asks(page)).toBe(false);
 });
 
+// Holds the workspace reads a save starts once `hold` is called, until `release`.
+async function holdWorkspaceReads(page: Page) {
+    let holding = false;
+    let release = () => {};
+    const released = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/api/tenants/", async (route) => {
+        if (holding) await released;
+        await route.fallback();
+    });
+    return {
+        hold: () => {
+            holding = true;
+        },
+        release,
+    };
+}
+
+async function chooseHalfHours(page: Page) {
+    await page.getByLabel("Resolution").selectOption("30");
+}
+
+async function expectForecastInPage(page: Page) {
+    await page.getByRole("button", { name: "Forecast", exact: true }).click();
+    await expect(page.getByLabel("Resolution")).toHaveValue("30");
+    expect(await marked(page)).toBe(true);
+}
+
+test("a resolution whose save was answered while its follow-up reads run asks nothing, and another plant tab opens in the page", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    await serveOutageWrites(page, answers(), [activeOutage]);
+    const reads = await holdWorkspaceReads(page);
+    await openPlant(page);
+    await chooseHalfHours(page);
+    await page.getByRole("button", { name: "Outages", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Resolve outage", exact: true })
+        .click();
+    await page
+        .getByLabel("Resolved at", { exact: true })
+        .fill("2026-11-10T13:00");
+    await markDocument(page);
+    reads.hold();
+    await page.getByRole("button", { name: "Save resolution" }).click();
+    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "Saving…", exact: true }),
+    ).toBeVisible();
+    expect(await asks(page)).toBe(false);
+    await expectForecastInPage(page);
+    reads.release();
+});
+
+test("plant settings whose save was answered while their follow-up reads run ask nothing, and another plant tab opens in the page", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    await page.route("**/api/tenants/1/regions/11/plants/21/", (route) =>
+        route.fulfill({
+            json: { ...plant, name: "New name", parameters_revision: 2 },
+        }),
+    );
+    const reads = await holdWorkspaceReads(page);
+    await openPlant(page);
+    await chooseHalfHours(page);
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByLabel("Plant name").fill("New name");
+    await markDocument(page);
+    reads.hold();
+    await page.getByRole("button", { name: "Save configuration" }).click();
+    await expect(
+        page.getByRole("heading", { name: "New name", level: 1 }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "Saving…", exact: true }),
+    ).toBeVisible();
+    expect(await asks(page)).toBe(false);
+    await expectForecastInPage(page);
+    reads.release();
+});
+
+test("a resolution whose save is unanswered loads another plant tab as a document after the browser asks, and its lost answer keeps asking", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(now);
+    await signIn(page);
+    await serveOutageWrites(page, answers(502), [activeOutage]);
+    let release = () => {};
+    const released = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/outages/51/resolve/", async (route) => {
+        await released;
+        await route.fallback();
+    });
+    await openPlant(page, "Outages");
+    await page
+        .getByRole("button", { name: "Resolve outage", exact: true })
+        .click();
+    await page
+        .getByLabel("Resolved at", { exact: true })
+        .fill("2026-11-10T13:00");
+    await page.getByRole("button", { name: "Save resolution" }).click();
+    await expect(
+        page.getByRole("button", { name: "Saving…", exact: true }),
+    ).toBeVisible();
+    await stay(page, () =>
+        page.getByRole("button", { name: "Forecast", exact: true }).click(),
+    );
+    release();
+    await expect(page.getByText("Change not confirmed")).toBeVisible();
+    expect(await asks(page)).toBe(true);
+});
+
 const schedule = {
     enabled: true,
     times: ["09:00", "12:00"],

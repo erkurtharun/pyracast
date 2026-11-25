@@ -12,7 +12,7 @@ A platform administrator reaches `/admin/` either through the SPA hand-off (`can
 - `POST /admin/language/` - `access.language` (shell switcher; stores the account preference, returns to `next`).
 - `GET /admin/password_change/` - `RedirectView` to `/app/account/`.
 - SPA: `web/src/features/session/entry.tsx` `Entry` (at `/app/`, for `can_admin` it does `window.location.replace` to the checked `next` or `/admin/`) and the `Administration` link in `web/src/features/workspace/workspace-shell.tsx`.
-- Shell: `src/pyracast/regions/templates/admin/workspace/base.html`, `admin-workspace.css`, `admin-workspace.js`.
+- Shell: `src/pyracast/regions/templates/admin/workspace/base.html`, `admin-workspace.css`, `admin-workspace.js`. The rail draws the brand kit's mark (decorative, fills from `.brand-mark-sun` and `.brand-mark-bar`) beside "Pyracast operations". `admin-workspace.css` declares every console colour once in its one `:root` (the brand families under the web names and values, the `--teal-*` accent and `--success`, `--success-soft`, `--success-line` for positive badges, completed steps and default notices); rules and console templates write no colour literal.
 - Operator: `pyracast bootstrap_admin` creates the administrator and its TOTP factor (`platform-admin-bootstrap`).
 
 ## Sequence
@@ -93,6 +93,6 @@ sequenceDiagram
 
 ## Tests
 
-- `tests/test_console_navigation.py`, `tests/test_provider_console_return.py`, `tests/test_console_step_up.py` (stale evidence refused for every route and unsafe method, confirmation, language needs confirmation and sign-out does not), `tests/test_console_failures.py`, `tests/test_admin_workspace.py`.
+- `tests/test_console_stylesheet.py` (colours only from the `:root` tokens, no second `:root`, no repeated or relocated property, no colour in a template, every read property declared, the kit's colours), `tests/test_console_navigation.py` (also the rail mark against `web/tests/support/brand-artwork.json`), `tests/test_provider_console_return.py`, `tests/test_console_step_up.py` (stale evidence refused for every route and unsafe method, confirmation, language needs confirmation and sign-out does not), `tests/test_console_failures.py`, `tests/test_admin_workspace.py`.
 - Playwright: `web/tests/auth-registration.spec.ts`, `web/integration/admin-csp.spec.ts` (live credentials).
 - Gaps: browser coverage of the `social_callback` and invitation exemptions of `Entry`, and of console behaviour after session expiry.
