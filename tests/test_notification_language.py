@@ -103,10 +103,10 @@ def test_mail_rendering_restores_the_caller_language_and_preserves_typed_workboo
     )
     assert "Yar\u0131n (11 Kas\u0131m 2026 Çarşamba): 3,30 kWh/m²" in message.body
     sheet = attached_sheet(message)
-    assert sheet.title == "Özet"
-    assert sheet["A9"].value == datetime(2026, 11, 10)
-    assert sheet["A9"].number_format == "dd.mm.yyyy"
-    assert isinstance(sheet["B9"].value, float)
+    assert sheet.title == "Iş\u0131n\u0131m"
+    assert sheet["A10"].value == datetime(2026, 11, 10)
+    assert sheet["A10"].number_format == "dd.mm.yyyy"
+    assert isinstance(sheet["B10"].value, float)
 
 
 def test_delivery_language_is_database_constrained() -> None:

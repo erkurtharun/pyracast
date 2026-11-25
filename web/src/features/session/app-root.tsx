@@ -11,7 +11,7 @@ import {
 import { displayMessage } from "@/lib/api/errors";
 import { createQueryClient, QueryOwner } from "@/lib/api/query";
 import { captureInstallPrompt } from "@/lib/install-prompt";
-import { reloadPage } from "@/lib/on-demand";
+import { reloadAfter, reloadPage } from "@/lib/on-demand";
 import { routes } from "@/lib/routes";
 import { browserErrors } from "@/i18n/browser";
 import {
@@ -21,6 +21,7 @@ import {
     isHandoffFailure,
     loadSession,
     observedTagKey,
+    savedCopyAnswered,
     savedCopyState,
     sessionOwner,
     sessionState,
@@ -294,12 +295,12 @@ function useCurrentSession(
     return current;
 }
 
-// The reload runs after the ending document's screens and their leave listeners are gone.
+// The reload runs after the ending document's screens and their leave listeners are gone and the copy answered: a deletion's success reaches only its document.
 function useDocumentReload(ending: boolean, signedIn: boolean) {
     useEffect(() => {
         if (!ending) return;
         if (signedIn) openProviderLanding();
-        reloadPage();
+        return reloadAfter(savedCopyAnswered());
     }, [ending, signedIn]);
 }
 
