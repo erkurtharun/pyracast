@@ -603,6 +603,10 @@ test("an edit sent again after an unanswered try to an outage cancelled meanwhil
             .getByRole("alert")
             .filter({ hasText: "did not confirm the change" }),
     ).toBeVisible();
+    // The export waits for the reads the unanswered try started; one answered after the cancellation removes Save.
+    await expect(
+        page.getByRole("button", { name: "Download outages CSV", exact: true }),
+    ).toBeEnabled();
     state.elsewhere({ status: "cancelled" });
     reachable = true;
     await save.click();
