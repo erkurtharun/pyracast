@@ -50,7 +50,7 @@ sequenceDiagram
 | Table | R/W | What |
 | --- | --- | --- |
 | `accounts_membership` | R | Role per (tenant, user); unique pair, one `admin` per tenant (partial unique). Written by invitation, removal and reassignment flows |
-| `accounts_tenant` | R, `FOR UPDATE` | Lock row of every writer that checks a role (`tenant_membership(lock=True)`, `authorize_workspace_admin`), and of `reassign_workspace_admin`; first among the workspace rows |
+| `accounts_tenant` | R, `FOR UPDATE` | Lock row of every writer that checks a role (`tenant_membership(lock=True)`, `authorize_workspace_admin`), and of `reassign_workspace_admin`; first among the workspace rows. Account erasure holds it `FOR NO KEY UPDATE` (`account-erasure`): that conflicts with a writer's `FOR UPDATE`, while a foreign-key check (`FOR KEY SHARE`) waits only for `FOR UPDATE` |
 | `auth_user`, `mfa_authenticator`, `django_session` | R; `auth_user` `FOR NO KEY UPDATE` before workspace rows where a transaction locks the person | `is_active` joined into membership queries; `is_staff`, `is_superuser`; `has_mfa_evidence` needs a live authenticator whose id is in the session's authentication records |
 | `regions_region` | R | Only table below the tenant with `tenant_id`; plants and deeper rows reach it through `region_id` |
 

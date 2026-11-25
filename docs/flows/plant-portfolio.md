@@ -78,12 +78,13 @@ sequenceDiagram
 | Not a member | 403 `membership_required` |
 | Region of another tenant, trashed or unknown on `plants/`; `?page=` past the end | 404 `not_found` |
 | Another request of the same session holds the session lock over 5 s | 429 `session_busy`, `Retry-After: 1`; the browser repeats the read once after at most 2 s, then shows a failed poll |
-| Sites read fails (HTTP error, or a `next` link outside `/api/` or repeated), nothing loaded yet | Alert and a retry button instead of cards |
-| Sites read fails with data on screen | Alert `refreshFailed` beside the cards or the open plant; a 403 or 404 drops the data |
+| Sites read fails (HTTP error, or a `next` link outside `/api/` or repeated), nothing loaded yet | The error and Retry (`ReadFailed`) instead of cards, also on the open plant (`plant-site.tsx`) |
+| Sites read fails with data on screen | Alert `refreshFailed` beside the cards or the open plant; a 403 or 404 drops the data until a later read is answered, through later failures and language changes |
 | Id of the plant address not in the list (unknown, foreign, trashed) | Notice `siteUnavailable` and an "All plants" button |
 | Site without plant, viewer | Notice `plantUnavailable`; with `edit_blocked_reason`, that reason as for an administrator |
 | Region not approved | Tag and review notice in the shell (`ReviewNotice`); tabs stay usable. An approved plant whose connection is not current repeats the card's attention sentence there |
-| Code of an on-demand section cannot load | Plant route error (`web/src/app/app/w/[tenantId]/plants/error.tsx`); its retry reloads the page, since a failed chunk stays failed for the document (`recovery`) |
+| Code of an on-demand section cannot load, or another render failure under the plant routes | Plant route error (`web/src/app/app/w/[tenantId]/plants/error.tsx`, `RouteError`) beside "Reload page": "Try again" reloads the page for a section that could not load, since a failed chunk stays failed for the document (`recovery`), and renders again otherwise |
+| Any other render failure under `/app/`, outside the plant routes | `web/src/app/app/error.tsx` (`RouteError` with "Try again", "Reload page" and a link "Go to the start screen" to `/app/`); an unknown `/app/` address shows `web/src/app/app/not-found.tsx` with a link to `/app/` |
 
 ## Rules and invariants
 
