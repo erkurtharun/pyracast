@@ -414,15 +414,15 @@ def test_a_second_clock_of_the_day_names_its_edition_in_subject_and_file(
             "unknown",
             "en",
             "2.50",
-            "The recorded outage is not included in this figure. Enter the available capacity "
-            "in the outage record to include it.",
+            "The recorded outage is not included in this figure. Enter the capacity still in "
+            "service in the outage record to include it.",
         ),
         (
             "unknown",
             "tr",
             "2,50",
             "Kay\u0131tl\u0131 kesinti bu rakama dahil değildir. Dahil edilmesi için "
-            "kesinti kayd\u0131na kullan\u0131labilir kapasiteyi girin.",
+            "kesinti kayd\u0131na devrede kalan gücü girin.",
         ),
         ("excluded", "en", "2.50", "The recorded outage is not included in this figure.</p>"),
         ("excluded", "tr", "2,50", "Kay\u0131tl\u0131 kesinti bu rakama dahil değildir.</p>"),
