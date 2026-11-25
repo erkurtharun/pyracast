@@ -35,7 +35,8 @@ def decoding(kind: str, identity: int) -> Iterator[None]:
     except DamagedStoredDataError:
         raise
     except (KeyError, TypeError, ValueError, OverflowError) as error:
-        raise DamagedStoredDataError(kind, identity, type(error).__name__) from error
+        # Not chained: a traceback would quote the stored value.
+        raise DamagedStoredDataError(kind, identity, type(error).__name__) from None
 
 
 def snapshot_row(row: object, snapshot_id: int) -> AbstractContextManager[None]:

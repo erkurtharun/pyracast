@@ -146,16 +146,26 @@ class NativeProduction:
     days: tuple[NativeProductionDay, ...]
 
 
-def native_production_days(
-    plant: Plant, start_date: date, end_date: date, now: datetime
-) -> NativeProduction:
-    configuration = (
+def _current_configuration(plant: Plant) -> PlantConfiguration | None:
+    return (
         PlantConfiguration.objects.select_related("binding__provider_account").get(
             pk=plant.current_configuration_id
         )
         if plant.current_configuration_id is not None
         else None
     )
+
+
+def production_timezone(plant: Plant) -> str:
+    """The timezone production days of the plant are counted in."""
+    configuration = _current_configuration(plant)
+    return configuration.binding.timezone if configuration else plant.region.timezone
+
+
+def native_production_days(
+    plant: Plant, start_date: date, end_date: date, now: datetime
+) -> NativeProduction:
+    configuration = _current_configuration(plant)
     location = configuration.binding if configuration else plant.region
     zone = location.timezone
     range_start, _ = local_day_bounds(start_date, zone)
@@ -232,13 +242,7 @@ def production_history(
     native_intervals: bool = False,
     actor: User | None = None,
 ) -> dict[str, Any]:
-    configuration = (
-        PlantConfiguration.objects.select_related("binding__provider_account").get(
-            pk=plant.current_configuration_id
-        )
-        if plant.current_configuration_id is not None
-        else None
-    )
+    configuration = _current_configuration(plant)
     zone = configuration.binding.timezone if configuration else plant.region.timezone
     now = timezone.now()
     first, last = available_date_bounds(configuration, now) if configuration else (None, None)

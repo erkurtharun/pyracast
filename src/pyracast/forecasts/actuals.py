@@ -16,7 +16,6 @@ from pyracast.forecasts.composition import (
     compose_forecasts,
 )
 from pyracast.forecasts.coverage import history_day_complete
-from pyracast.forecasts.faults import decoding
 from pyracast.forecasts.intraday import (
     PreparedIntradaySource,
     actual_coverage_complete,
@@ -31,7 +30,7 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
     SnapshotSourceKind,
 )
-from pyracast.forecasts.sources import covering_ids, stored_intervals
+from pyracast.forecasts.sources import covering_ids, snapshot_rows, stored_intervals
 from pyracast.irradiance import local_day_bounds
 from pyracast.solar import daylight_window
 
@@ -51,7 +50,7 @@ class ArchivedActualSource:
         return (
             self.composition.intervals
             if self.composition is not None
-            else tuple(self.snapshot.normalized_intervals)
+            else snapshot_rows(self.snapshot)
         )
 
     @property
@@ -246,21 +245,6 @@ def _archived_actual_source(
     return source
 
 
-def _valid_actual_intervals(snapshot: ForecastSnapshot) -> tuple[dict[str, Any], ...]:
-    intervals = []
-    with decoding("forecast_snapshot", snapshot.pk):
-        for row in snapshot.normalized_intervals:
-            if not isinstance(row, dict) or not all(
-                isinstance(row.get(key), str) for key in ("start", "end")
-            ):
-                raise ValueError("Saved estimated-actual timestamps must be ISO strings.")
-            start, end = (datetime.fromisoformat(row[key]) for key in ("start", "end"))
-            if start.utcoffset() is None or end.utcoffset() is None or end <= start:
-                continue
-            intervals.append(row)
-    return tuple(intervals)
-
-
 def _compose_native_source(
     binding: SiteBinding,
     target_date: date,
@@ -274,7 +258,7 @@ def _compose_native_source(
                 snapshot.pk,
                 cast(datetime, snapshot.coverage_start),
                 cast(datetime, snapshot.coverage_end),
-                _valid_actual_intervals(snapshot),
+                snapshot_rows(snapshot),
             )
             for snapshot in snapshots
         ],

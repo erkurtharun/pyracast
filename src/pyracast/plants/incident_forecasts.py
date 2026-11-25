@@ -10,7 +10,7 @@ from pyracast.forecasts.intraday import (
     apply_intraday_source,
 )
 from pyracast.forecasts.models import ForecastSnapshot
-from pyracast.forecasts.sources import mark_forecast_fallback
+from pyracast.forecasts.sources import mark_forecast_fallback, snapshot_rows
 from pyracast.incidents.evidence import IncidentEvidence, select_incidents
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_sources import apply_composition, replay_composition
@@ -82,7 +82,7 @@ def _limited_forecast(
     daylight, energy_windows = forecast_daylight(
         configuration,
         bounds[0].astimezone(ZoneInfo(configuration.binding.timezone)).date(),
-        snapshot.normalized_intervals if source_intervals is None else source_intervals,
+        snapshot_rows(snapshot) if source_intervals is None else source_intervals,
     )
     result: dict[str, Any] = forecast(
         affected_power(

@@ -7,6 +7,7 @@ from pyracast.forecasts.composition import (
     compose_forecasts,
 )
 from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.forecasts.sources import snapshot_rows
 from pyracast.plants.models import PlantConfiguration
 
 SELECTION_POLICY = "latest-forecast-coverage-v2"
@@ -21,7 +22,7 @@ def compose_snapshots(
                 snapshot.pk,
                 cast(datetime, snapshot.coverage_start),
                 cast(datetime, snapshot.coverage_end),
-                tuple(snapshot.normalized_intervals),
+                snapshot_rows(snapshot),
             )
             for snapshot in snapshots
         ],

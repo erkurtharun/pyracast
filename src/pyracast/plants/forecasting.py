@@ -19,6 +19,7 @@ from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.forecasts.outlook import Policy, plant_days_include
 from pyracast.forecasts.projections import saved_day_payload
+from pyracast.forecasts.sources import snapshot_rows
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import (
     CalibrationActivation,
@@ -37,6 +38,8 @@ from pyracast.plants.transfer import (
 from pyracast.solar import Daylight, TimeWindows, daylight_energy_windows, daylight_window
 
 RETROSPECTIVE_ACTIVATIONS = 60
+SCENARIO_STATUSES = ("estimated", "unknown_impact")
+SUMMARY_FIGURES = ("energy_mwh", "partial_energy_mwh", "coverage_fraction")
 
 
 def power_limit(configuration: PlantConfiguration) -> float | None:
@@ -58,7 +61,7 @@ def power_intervals(
     capacity = configuration.binding.capacity_kw
     if not isfinite(capacity) or capacity <= 0:
         raise ValueError("Invalid reference capacity")
-    for row in snapshot.normalized_intervals if source_intervals is None else source_intervals:
+    for row in snapshot_rows(snapshot) if source_intervals is None else source_intervals:
         with snapshot_row(row, snapshot.pk):
             begin, stop, power = _source_row(row)
         result.append(
@@ -216,14 +219,11 @@ def forecast_payload(
     """`model_version` is the transfer the result is computed under and records: a new result
     takes `transfer_model(configuration, calibration)`, a recomputation the stored version."""
     start, end = local_day_bounds(target_date, configuration.binding.timezone)
+    selected = snapshot_rows(snapshot) if source_intervals is None else source_intervals
     intervals = power_intervals(
-        snapshot, configuration, model_version=model_version, source_intervals=source_intervals
+        snapshot, configuration, model_version=model_version, source_intervals=selected
     )
-    daylight, energy_windows = forecast_daylight(
-        configuration,
-        target_date,
-        snapshot.normalized_intervals if source_intervals is None else source_intervals,
-    )
+    daylight, energy_windows = forecast_daylight(configuration, target_date, selected)
     result = forecast(
         intervals,
         start=start,
@@ -248,7 +248,6 @@ def forecast_payload(
     )
     if snapshot.source_kind == "estimated_actuals":
         flags.append("estimated_actuals_not_metered")
-        selected = snapshot.normalized_intervals if source_intervals is None else source_intervals
         if configuration.created_at > start and any(
             row.get("source_kind", snapshot.source_kind) == "estimated_actuals"
             and datetime.fromisoformat(row.get("original_start", row["start"]))
@@ -323,22 +322,67 @@ def archived_forecast(
 def _issued(
     issuance: ForecastIssuance, resolution: str
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """The stored result and outage scenario as the read answers them: objects whose numbers
-    are finite, since the answer is JSON."""
+    """The stored result and outage scenario as the reads answer and project them: objects
+    whose numbers are finite, since the answer is JSON."""
     with decoding("forecast_issuance", issuance.pk):
         payloads, scenarios = issuance.payloads, issuance.outage_scenarios
         if not isinstance(payloads, dict) or not isinstance(scenarios, dict):
             raise TypeError("Stored issuance payloads are not objects.")
-        result, scenario = payloads[resolution], scenarios.get(resolution)
-        if not isinstance(result, dict) or not isinstance(result["quality_flags"], list):
-            raise TypeError("A stored result is not an object with quality flags.")
-        if scenario is not None and (
-            not isinstance(scenario, dict) or not isinstance(scenario["result"], dict)
-        ):
-            raise TypeError("A stored outage scenario is not an object with a result.")
+        result, scenario = _stored_result(payloads[resolution]), scenarios.get(resolution)
+        if scenario is not None:
+            _stored_scenario(scenario)
         finite_numbers(result)
         finite_numbers(scenario)
     return deepcopy(result), deepcopy(scenario)
+
+
+def _stored_scenario(scenario: object) -> None:
+    if not isinstance(scenario, dict):
+        raise TypeError("A stored outage scenario is not an object.")
+    if scenario["status"] not in SCENARIO_STATUSES:
+        raise ValueError("A stored outage scenario has no known status.")
+    _stored_result(scenario["result"])
+
+
+def _stored_result(result: object) -> dict[str, Any]:
+    if not isinstance(result, dict) or not isinstance(result["quality_flags"], list):
+        raise TypeError("A stored result is not an object with quality flags.")
+    intervals, provenance = result["intervals"], result["provenance"]
+    daylight = result.get("daylight")
+    if not isinstance(intervals, list) or not isinstance(provenance, dict):
+        raise TypeError("A stored result has no interval array or provenance object.")
+    if daylight is not None and not isinstance(daylight, dict):
+        raise TypeError("A stored daylight summary is not an object.")
+    for summary in (result, daylight or {}):
+        for key in SUMMARY_FIGURES:
+            _stored_figure(summary.get(key))
+    if provenance.get("collected_at") is not None:
+        _stored_instant(provenance["collected_at"])
+    for row in intervals:
+        if not isinstance(row, dict):
+            raise TypeError("A stored interval is not an object.")
+        _stored_instant(row["start"])
+        _stored_instant(row["end"])
+        _stored_figure(row.get("energy_mwh"))
+    return result
+
+
+def _stored_figure(value: object) -> None:
+    if value is None:
+        return
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise TypeError("A stored figure is not a number.")
+    if not isfinite(float(value)):
+        raise ValueError("A stored figure is not finite.")
+
+
+def _stored_instant(value: object) -> None:
+    if not isinstance(value, str):
+        raise TypeError("A stored instant is not text.")
+    moment = datetime.fromisoformat(value)
+    if moment.utcoffset() is None:
+        raise ValueError("A stored instant has no UTC offset.")
+    moment.astimezone(UTC)
 
 
 def issued_forecast(

@@ -64,22 +64,23 @@ def plant_outlook(
         region = Region.objects.active().get(pk=region_id, tenant_id=tenant_id)
         plant = Plant.objects.get(pk=plant_id, region=region)
         plant.region = region
-        result = _plant_outlook(
-            plant,
-            target_date=target_date,
-            resolution_minutes=resolution_minutes,
-            as_of=as_of,
-            source=source,
-        )
-        scenario_at = as_of or timezone.now()
-        frozen = "outage_scenario" in result
-        if not frozen:
-            _evaluate_outage_scenario(result, target_date, resolution_minutes, scenario_at)
-        result["production_diagnostic"] = (
-            production_diagnostic(result, target_date, scenario_at)
-            if as_of is None and not frozen
-            else None
-        )
+        with stored_data("plant", plant.pk, target_date, "outlook"):
+            result = _plant_outlook(
+                plant,
+                target_date=target_date,
+                resolution_minutes=resolution_minutes,
+                as_of=as_of,
+                source=source,
+            )
+            scenario_at = as_of or timezone.now()
+            frozen = "outage_scenario" in result
+            if not frozen:
+                _evaluate_outage_scenario(result, target_date, resolution_minutes, scenario_at)
+            result["production_diagnostic"] = (
+                production_diagnostic(result, target_date, scenario_at)
+                if as_of is None and not frozen
+                else None
+            )
         return result
 
 

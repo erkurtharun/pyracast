@@ -3,11 +3,12 @@ from collections.abc import Iterable
 from datetime import date, datetime
 
 from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.forecasts.sources import snapshot_rows
 from pyracast.irradiance import local_day_bounds
 
 
 def history_day_complete(snapshot: ForecastSnapshot, target: date, timezone: str) -> bool:
-    return intervals_cover_day(snapshot.normalized_intervals, target, timezone)
+    return intervals_cover_day(snapshot_rows(snapshot), target, timezone)
 
 
 def intervals_cover_day(intervals: Iterable[object], target: date, timezone: str) -> bool:

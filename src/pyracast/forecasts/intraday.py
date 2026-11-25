@@ -19,7 +19,7 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
     SnapshotSourceKind,
 )
-from pyracast.forecasts.sources import covering_snapshots
+from pyracast.forecasts.sources import covering_snapshots, snapshot_rows
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_sources import apply_composition, compose_snapshots
 from pyracast.solar import Daylight, daylight_energy_windows, daylight_window
@@ -230,7 +230,7 @@ def prepare_intraday_source(
             snapshot.pk,
             cast(datetime, snapshot.coverage_start),
             cast(datetime, snapshot.coverage_end),
-            tuple(snapshot.normalized_intervals),
+            snapshot_rows(snapshot),
         )
         for snapshot in forecasts
     )
@@ -326,7 +326,7 @@ def replay_intraday_composition(
         native = next(
             (
                 row
-                for row in snapshot.normalized_intervals
+                for row in snapshot_rows(snapshot)
                 if datetime.fromisoformat(row.get("original_start", row["start"])) == original_start
                 and datetime.fromisoformat(row.get("original_end", row["end"])) == original_end
             ),

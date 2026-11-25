@@ -1,4 +1,3 @@
-from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from math import isfinite
@@ -11,10 +10,15 @@ from django.utils import timezone
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.db import read_snapshot
 from pyracast.errors import DomainError, ErrorCode
-from pyracast.forecasts.faults import DamagedStoredDataError, decoding, log_fault, stored_data
+from pyracast.forecasts.faults import DamagedStoredDataError, log_fault, stored_data
 from pyracast.plants.history import automatic_outlook
 from pyracast.plants.models import Plant
-from pyracast.plants.production import NativeProduction, NativeSlot, native_production_days
+from pyracast.plants.production import (
+    NativeProduction,
+    NativeSlot,
+    native_production_days,
+    production_timezone,
+)
 from pyracast.regions.models import Region
 
 FORECAST_DAYS_BEFORE = 7
@@ -106,18 +110,11 @@ def _forecast_day(plant: Plant, day: date, today: date, now: datetime) -> Foreca
     try:
         with stored_data("plant", plant.pk, day, "days"):
             outlook = cast(dict[str, Any], automatic_outlook(plant, day, RESOLUTION_MINUTES, now))
-            with _archived(outlook):
-                return _projected(day, outlook)
     except DomainError as refusal:
         if refusal.code != ErrorCode.CALCULATION_OUT_OF_RANGE:
             raise
         return _refused_day(plant, day, today)
-
-
-def _archived(outlook: dict[str, Any]) -> AbstractContextManager[None]:
-    """An archived day projects the payload its issuance stored."""
-    issuance = outlook.get("issuance_id")
-    return decoding("forecast_issuance", issuance) if issuance is not None else nullcontext()
+    return _projected(day, outlook)
 
 
 def _projected(day: date, outlook: dict[str, Any]) -> ForecastDay:
@@ -228,18 +225,19 @@ def _production_days(plant: Plant, today: date, now: datetime) -> tuple[Producti
     try:
         return _answered(native_production_days(plant, first, last, now))
     except DamagedStoredDataError:
+        zone = production_timezone(plant)
         return tuple(
-            _production_day(plant, today - timedelta(days=offset), now)
+            _production_day(plant, today - timedelta(days=offset), now, zone)
             for offset in range(PRODUCTION_DAYS_BEFORE, 0, -1)
         )
 
 
-def _production_day(plant: Plant, day: date, now: datetime) -> ProductionDay:
+def _production_day(plant: Plant, day: date, now: datetime, zone: str) -> ProductionDay:
     try:
         [answered] = _answered(native_production_days(plant, day, day, now))
     except DamagedStoredDataError as damage:
         log_fault("plant", plant.pk, day, "days", damage)
-        return ProductionDay(day, plant.region.timezone, None, False, ())
+        return ProductionDay(day, zone, None, False, ())
     return answered
 
 
