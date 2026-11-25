@@ -108,15 +108,18 @@ test("a customer manages one plant site through the real API", async ({
     await page.getByRole("button", { name: "Generation", exact: true }).click();
     await page.getByLabel("Forecast date").fill(process.env.BROWSER_DATE!);
     await page.getByLabel("Resolution").selectOption("60");
-    async function expectTableRows(name: string, rows: number) {
-        const toggle = page.getByText("Show table", { exact: true });
+    async function expectTableRows(date: string, name: string, rows: number) {
+        const panel = page
+            .locator("section.panel")
+            .filter({ has: page.getByText(date, { exact: true }) });
+        const toggle = panel.getByText("Show table", { exact: true });
         await toggle.click();
         await expect(
-            page.getByRole("table", { name }).getByRole("row"),
+            panel.getByRole("table", { name }).getByRole("row"),
         ).toHaveCount(rows + 1);
         await toggle.click();
     }
-    await expectTableRows("Hourly values", 12);
+    await expectTableRows(process.env.BROWSER_DATE!, "Hourly values", 12);
     await page.getByText("Show table", { exact: true }).click();
     await expect(
         page
@@ -149,7 +152,7 @@ test("a customer manages one plant site through the real API", async ({
     }
     const hourlyDaylight = await daylightForecast(60);
     const daylightEnergy = new Intl.NumberFormat("en", {
-        maximumFractionDigits: 3,
+        maximumFractionDigits: 2,
     }).format(hourlyDaylight.energy_mwh);
     await expect(
         page.locator(".stat").filter({ hasText: /^Daily total/ }),
@@ -190,7 +193,7 @@ test("a customer manages one plant site through the real API", async ({
     }
     await expectFullForecastCsv(24);
     await page.getByLabel("Resolution").selectOption("30");
-    await expectTableRows("Half-hourly values", 24);
+    await expectTableRows(process.env.BROWSER_DATE!, "Half-hourly values", 24);
     expect((await daylightForecast(30)).energy_mwh).toBe(
         hourlyDaylight.energy_mwh,
     );
@@ -356,7 +359,7 @@ test("a customer manages one plant site through the real API", async ({
     await page.getByLabel("Forecast date").fill(process.env.BROWSER_TODAY!);
     await expect(page.getByText(/^Forecast data: /)).toBeVisible();
     await expect(page.getByText(/^Model: /)).toHaveCount(0);
-    await expectTableRows("Half-hourly values", 48);
+    await expectTableRows(process.env.BROWSER_TODAY!, "Half-hourly values", 48);
     await expect(
         page.getByRole("heading", {
             name: "No technical details for this day.",
@@ -371,13 +374,17 @@ test("a customer manages one plant site through the real API", async ({
             name: "Production calculated from satellite data",
         }),
     ).toBeVisible();
-    await expectTableRows("Half-hourly values", 24);
+    await expectTableRows(
+        process.env.BROWSER_HISTORY_DATE!,
+        "Half-hourly values",
+        24,
+    );
     await page.screenshot({
         path: testInfo.outputPath("plant-history-desktop.png"),
         fullPage: true,
     });
     await page.getByLabel("Forecast date").fill(process.env.BROWSER_DATE!);
-    await expectTableRows("Half-hourly values", 24);
+    await expectTableRows(process.env.BROWSER_DATE!, "Half-hourly values", 24);
 
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await expect(page.getByLabel("EPİAŞ plant ID")).toHaveCount(0);

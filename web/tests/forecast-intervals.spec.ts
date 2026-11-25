@@ -229,7 +229,13 @@ for (const electrical of [true, false]) {
                     : "Irradiance forecast",
             }),
         ).toBeVisible();
-        await expect(panel(page).getByText(/^Forecast data: /)).toHaveCount(1);
+        await expect(panel(page).getByText(/^Forecast data: /)).toHaveText(
+            `Forecast data: ${new Intl.DateTimeFormat("en", {
+                dateStyle: "medium",
+                timeStyle: "short",
+                timeZone: region.timezone,
+            }).format(new Date("2026-11-14T10:00:00Z"))}`,
+        );
         await expect(panel(page).getByText(/^Satellite data: /)).toHaveCount(0);
         await expect(panel(page).locator(".tag")).toHaveCount(0);
         await page.getByText("Show table", { exact: true }).click();

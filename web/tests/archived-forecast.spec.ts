@@ -1,6 +1,15 @@
 import { expect, test } from "./support/test";
 import { mockApi, region } from "./support/workspace";
 
+const liveAt = "2026-11-11T05:00:00Z";
+const archivedAt = "2026-11-11T02:30:00Z";
+const plantTime = (value: string) =>
+    new Intl.DateTimeFormat("en", {
+        dateStyle: "medium",
+        timeStyle: "short",
+        timeZone: region.timezone,
+    }).format(new Date(value));
+
 test("the last forecast before sunrise is requested and shown without tags", async ({
     page,
 }) => {
@@ -12,6 +21,7 @@ test("the last forecast before sunrise is requested and shown without tags", asy
             new URL(route.request().url()).searchParams.get("data_source") ??
             "";
         sources.push(source);
+        const archived = source === "archived_forecast";
         return route.fulfill({
             json: {
                 date: "2026-11-11",
@@ -21,13 +31,13 @@ test("the last forecast before sunrise is requested and shown without tags", asy
                 configuration_id: 3,
                 result: {
                     complete: true,
-                    energy_mwh: 12.5,
+                    energy_mwh: archived ? 11.25 : 12.5,
                     coverage_fraction: 1,
                     intervals: [],
-                    quality_flags:
-                        source === "archived_forecast"
-                            ? ["archived_forecast"]
-                            : [],
+                    quality_flags: archived ? ["archived_forecast"] : [],
+                    provenance: {
+                        collected_at: archived ? archivedAt : liveAt,
+                    },
                 },
             },
         });
@@ -45,14 +55,21 @@ test("the last forecast before sunrise is requested and shown without tags", asy
     await expect(
         choice.getByRole("option", { name: "Last forecast before sunrise" }),
     ).toHaveAttribute("value", "archived_forecast");
+    const panel = page.locator("section.panel");
+    const total = panel.locator(".stat strong");
     await page.getByLabel("Forecast date").fill("2026-11-11");
+    await expect(total).toHaveText("12.5 MWh");
+    await expect(panel.getByText(/^Forecast data: /)).toHaveText(
+        `Forecast data: ${plantTime(liveAt)}`,
+    );
     await choice.selectOption("archived_forecast");
     await expect.poll(() => sources.at(-1)).toBe("archived_forecast");
     await expect(choice).toHaveValue("archived_forecast");
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-11");
-    await expect(
-        page.locator("section.panel").getByText("12.5", { exact: false }),
-    ).toBeVisible();
+    await expect(total).toHaveText("11.25 MWh");
+    await expect(panel.getByText(/^Forecast data: /)).toHaveText(
+        `Forecast data: ${plantTime(archivedAt)}`,
+    );
     await expect(page.locator("section.panel .tag")).toHaveCount(0);
     await expect(page.getByText(/original calibration/)).toHaveCount(0);
     await expect(page.getByText(/Configuration 3/)).toHaveCount(0);
