@@ -1,5 +1,5 @@
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -39,7 +39,7 @@ from tests.support.invariants import (
     REVOKED_RECIPIENTS_RULE,
     violations,
 )
-from tests.support.migrations import constraints, leaf_nodes, migrate
+from tests.support.migrations import constraints, leaf_nodes, migrate, reset_to_leaf
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -100,15 +100,6 @@ BEFORE_LINK_EXPIRY = {
 
 def through_checks() -> list[tuple[str, str]]:
     return [BEFORE_LINK_EXPIRY.get(app, (app, name)) for app, name in leaf_nodes()]
-
-
-@pytest.fixture
-def leaf() -> Iterator[None]:
-    targets = leaf_nodes()
-    try:
-        yield
-    finally:
-        migrate(*targets)
 
 
 def installed(table: str) -> set[str]:
@@ -449,3 +440,18 @@ def test_migrations_refuse_rows_no_writer_stores_and_change_nothing(
     migrate(*through_checks())
     assert installed(table) == NEW[table]
     assert broken_rules() == {}
+
+
+@pytest.mark.usefixtures("leaf")
+def test_the_schema_returns_to_the_leaf_from_a_migration_that_refused_stored_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case = make_request_case(monkeypatch)
+    migrate(*PREVIOUS.values())
+    schedule_shape(recipient_memberships={ADDRESS: 1})(case)
+    with pytest.raises(ValueError, match=r"notifications_reminderschedule holds 1 row"):
+        migrate(*through_checks())
+
+    reset_to_leaf()
+
+    assert MigrationExecutor(connection).migration_plan(leaf_nodes()) == []

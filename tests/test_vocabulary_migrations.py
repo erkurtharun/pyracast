@@ -1,4 +1,4 @@
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from datetime import timedelta
 
 import pytest
@@ -19,7 +19,7 @@ from tests.support.domain import NOW, System, make_system
 from tests.support.epias_api import archive_source
 from tests.support.incident_calibration import incident
 from tests.support.metering import connected
-from tests.support.migrations import checks, forward, leaf_nodes, migrate
+from tests.support.migrations import checks, forward, migrate
 from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -66,15 +66,6 @@ UNAVAILABLE_MESSAGE = {
     "body": "Tomorrow's saved forecast could not be prepared.",
     "prepared_at": NOW.isoformat(),
 }
-
-
-@pytest.fixture
-def leaf() -> Iterator[None]:
-    targets = leaf_nodes()
-    try:
-        yield
-    finally:
-        migrate(*targets)
 
 
 def _installed() -> set[str]:

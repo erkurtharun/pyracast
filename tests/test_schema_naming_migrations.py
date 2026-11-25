@@ -1,6 +1,5 @@
 import json
 import re
-from collections.abc import Iterator
 from datetime import timedelta
 from io import StringIO
 from typing import Any
@@ -26,7 +25,7 @@ from tests.support.change_request_boundaries import (
 )
 from tests.support.domain import NOW
 from tests.support.metering import FixtureClient, connect
-from tests.support.migrations import forward, leaf_nodes, migrate
+from tests.support.migrations import forward, migrate
 from tests.support.plant_operations import request_run, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -94,15 +93,6 @@ RENAME = re.compile(
     rf"ALTER TABLE {NAME} RENAME (?:COLUMN|CONSTRAINT) {NAME} TO {NAME}"
     rf"|ALTER INDEX {NAME} RENAME TO {NAME}"
 )
-
-
-@pytest.fixture
-def leaf() -> Iterator[None]:
-    targets = leaf_nodes()
-    try:
-        yield
-    finally:
-        migrate(*targets)
 
 
 def statements(app: str, name: str, *, backwards: bool = False) -> list[str]:
