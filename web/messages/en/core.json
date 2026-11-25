@@ -437,7 +437,7 @@
             "not_validated": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}",
             "binding_not_current": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}",
             "schedule_disabled": "Automatic forecast updates are turned off for this plant.",
-            "quota_too_low": "This plant has no forecast update times. Write to Pyracast: {contact}",
+            "quota_too_low": "No new forecast data is arriving for this plant. Write to Pyracast: {contact}",
             "provider_unavailable": "Forecasts are not being updated right now."
         },
         "SiteAttention": {

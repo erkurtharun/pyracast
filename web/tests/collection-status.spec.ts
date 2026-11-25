@@ -240,7 +240,7 @@ const inactive = [
         reason: "provider_unavailable",
         label: "Güncellenmiyor",
         sentence: "Tahminler şu anda güncellenmiyor.",
-        next: "2 Oca 2026",
+        next: null,
     },
     {
         language: "en",
@@ -259,15 +259,6 @@ const inactive = [
         sentence:
             "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: info@pyracast.app",
         next: "Planlanmadı",
-    },
-    {
-        language: "en",
-        state: "collecting",
-        reason: "quota_too_low",
-        label: "Updating automatically",
-        sentence:
-            "This plant has no forecast update times. Write to Pyracast: info@pyracast.app",
-        next: "Jan 2, 2026, 12:00 AM",
     },
 ] as const;
 
@@ -292,15 +283,50 @@ for (const item of inactive)
             status.getByText(item.label, { exact: true }),
         ).toBeVisible();
         await expect(status.getByRole("status")).toHaveText(item.sentence);
+        const next = status.getByText(collecting[item.language].next);
+        if (item.next === null) {
+            await expect(next).toHaveCount(0);
+            await expect(
+                status.getByText(collecting[item.language].time),
+            ).toHaveCount(0);
+            return;
+        }
+        await expect(next.locator("..")).toContainText(item.next);
+    });
+
+const quota = {
+    en: {
+        time: "Update time 1",
+        sentence:
+            "No new forecast data is arriving for this plant. Write to Pyracast: info@pyracast.app",
+    },
+    tr: {
+        time: "Güncelleme saati 1",
+        sentence:
+            "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: info@pyracast.app",
+    },
+};
+
+for (const language of ["en", "tr"] as const)
+    test(`a plant whose quota allows no forecast update keeps its saved times and says no new forecast data is arriving (${language})`, async ({
+        page,
+    }) => {
+        const status = await openCollection(
+            page,
+            language,
+            schedule({
+                inactive_reason: "quota_too_low",
+                times: ["16:00"],
+                max_forecast_times: 0,
+            }),
+        );
+
         await expect(
-            status
-                .getByText(
-                    item.language === "tr"
-                        ? "Planlanan sonraki güncelleme"
-                        : "Next planned update",
-                )
-                .locator(".."),
-        ).toContainText(item.next);
+            page.getByLabel(quota[language].time, { exact: true }),
+        ).toHaveValue("16:00");
+        await expect(status.getByRole("status")).toHaveText(
+            quota[language].sentence,
+        );
     });
 
 const plantStates = [
@@ -395,7 +421,7 @@ for (const [cause, jobs] of [
         [job({ status: "succeeded", last_error: "" })],
     ],
 ] as const)
-    test(`a plant whose provider account refuses requests says only that forecasts are not updated: ${cause}`, async ({
+    test(`a plant whose provider account refuses requests says only that forecasts are not updated and shows no planned update: ${cause}`, async ({
         page,
     }) => {
         const status = await openCollection(
@@ -414,7 +440,6 @@ for (const [cause, jobs] of [
         await expect(status.getByRole("status")).toHaveText(
             "Forecasts are not being updated right now.",
         );
-        await expect(
-            status.getByText("Next planned update").locator(".."),
-        ).toContainText("Jan 2, 2026, 12:00 AM");
+        await expect(status.getByText("Next planned update")).toHaveCount(0);
+        await expect(status.getByText("Jan 2, 2026, 12:00 AM")).toHaveCount(0);
     });

@@ -437,7 +437,7 @@
             "not_validated": "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: {contact}",
             "binding_not_current": "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: {contact}",
             "schedule_disabled": "Bu santral için tahminlerin otomatik güncellenmesi kapalı.",
-            "quota_too_low": "Bu santralin tahmin güncelleme saati yok. Pyracast'e yazın: {contact}",
+            "quota_too_low": "Bu santral için yeni tahmin verisi gelmiyor. Pyracast'e yazın: {contact}",
             "provider_unavailable": "Tahminler şu anda güncellenmiyor."
         },
         "SiteAttention": {

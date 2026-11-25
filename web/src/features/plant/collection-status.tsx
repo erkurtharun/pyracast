@@ -36,10 +36,15 @@ export function CollectionStatus({
                     label={t("lastSuccess")}
                     value={moment(data.last_success_at, t("notYet"))}
                 />
-                <Stat
-                    label={t("nextCollection")}
-                    value={moment(data.next_collection_at, t("notScheduled"))}
-                />
+                {data.state !== "provider_attention" && (
+                    <Stat
+                        label={t("nextCollection")}
+                        value={moment(
+                            data.next_collection_at,
+                            t("notScheduled"),
+                        )}
+                    />
+                )}
             </div>
         </section>
     );
