@@ -339,15 +339,9 @@ test("a resolution whose save was answered while its follow-up reads run asks no
     await page.getByRole("button", { name: "End outage", exact: true }).click();
     await page.getByLabel("End", { exact: true }).fill("2026-11-10T13:00");
     await markDocument(page);
-<<<<<<< HEAD
-    reads.hold();
+    reads.arm();
     await page.getByRole("button", { name: "End outage", exact: true }).click();
     await expect(page.getByText("Ended", { exact: true })).toBeVisible();
-=======
-    reads.arm();
-    await page.getByRole("button", { name: "Save resolution" }).click();
-    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
->>>>>>> e7d94e63 (Follow each submission's own write when deciding whether to ask before leaving)
     await expect(
         page.getByRole("button", { name: "Saving…", exact: true }),
     ).toBeVisible();
@@ -372,13 +366,8 @@ test("plant settings whose save was answered while their follow-up reads run ask
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByLabel("Plant name").fill("New name");
     await markDocument(page);
-<<<<<<< HEAD
-    reads.hold();
-    await page.getByRole("button", { name: "Save technical details" }).click();
-=======
     reads.arm();
-    await page.getByRole("button", { name: "Save configuration" }).click();
->>>>>>> e7d94e63 (Follow each submission's own write when deciding whether to ask before leaving)
+    await page.getByRole("button", { name: "Save technical details" }).click();
     await expect(
         page.getByRole("heading", { name: "New name", level: 1 }),
     ).toBeVisible();
@@ -431,16 +420,12 @@ const saving = (page: Page) =>
     page.getByRole("button", { name: "Saving…", exact: true });
 
 async function enterResolution(page: Page) {
-    await page
-        .getByRole("button", { name: "Resolve outage", exact: true })
-        .click();
-    await page
-        .getByLabel("Resolved at", { exact: true })
-        .fill("2026-11-10T13:00");
+    await page.getByRole("button", { name: "End outage", exact: true }).click();
+    await page.getByLabel("End", { exact: true }).fill("2026-11-10T13:00");
 }
 
 const saveResolution = (page: Page) =>
-    page.getByRole("button", { name: "Save resolution" }).click();
+    page.getByRole("button", { name: "End outage", exact: true }).click();
 
 async function refuseOutageList(page: Page) {
     let refused = false;
@@ -554,7 +539,7 @@ test("a resolution repeated after its lost answer asks until the repeat is answe
     await openPlant(page, "Outages");
     await enterResolution(page);
     await saveResolution(page);
-    await expect(page.getByText("Change not confirmed")).toBeVisible();
+    await expect(page.getByText("Outcome unknown")).toBeVisible();
     expect(await asks(page)).toBe(true);
     const releaseRepeat = await holdRequests(page, "**/outages/51/resolve/");
     reads.arm();
@@ -564,7 +549,7 @@ test("a resolution repeated after its lost answer asks until the repeat is answe
     await expect(saving(page)).toBeVisible();
     expect(await asks(page)).toBe(true);
     releaseRepeat();
-    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
+    await expect(page.getByText("Ended", { exact: true })).toBeVisible();
     await expect(saving(page)).toBeVisible();
     await expect.poll(() => asks(page)).toBe(false);
     reads.release();
@@ -587,7 +572,7 @@ test("an outage report whose answer was lost keeps asking while another report i
     await title.fill("Grid fault");
     const save = form.getByRole("button", { name: "Save", exact: true });
     await save.click();
-    await expect(form.getByText("Change not confirmed")).toBeVisible();
+    await expect(form.getByText("Outcome unknown")).toBeVisible();
     await title.fill("Inverter fault");
     reads.arm();
     await save.click();
@@ -598,7 +583,7 @@ test("an outage report whose answer was lost keeps asking while another report i
     expect(await asks(page)).toBe(true);
     reads.release();
     await expect(form).toHaveCount(0);
-    await expect(page.getByText("Change not confirmed")).toBeVisible();
+    await expect(page.getByText("Outcome unknown")).toBeVisible();
     expect(await asks(page)).toBe(true);
 });
 
@@ -611,12 +596,12 @@ test("an outage edit repeated after its lost answer, whose conflict shows the ed
     const reads = await holdWorkspaceReads(page);
     await openPlant(page, "Outages");
     await page
-        .getByRole("button", { name: "Edit report", exact: true })
+        .getByRole("button", { name: "Edit outage", exact: true })
         .click();
-    await page.getByLabel("Incident title").fill("Inverter replaced");
-    const save = page.getByRole("button", { name: "Save outage changes" });
+    await page.getByLabel("Title").fill("Inverter replaced");
+    const save = page.getByRole("button", { name: "Save", exact: true });
     await save.click();
-    await expect(page.getByText("Change not confirmed")).toBeVisible();
+    await expect(page.getByText("Outcome unknown")).toBeVisible();
     expect(await asks(page)).toBe(true);
     reads.arm();
     await save.click();
@@ -648,7 +633,7 @@ test("a resolution form shown again while the reads after its answered save run 
     await expect(page.getByText("Not found.")).toBeVisible();
     refuse(false);
     await page.getByRole("button", { name: "Try again", exact: true }).click();
-    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
+    await expect(page.getByText("Ended", { exact: true })).toBeVisible();
     await expect(saving(page)).toBeVisible();
     await expectForecastInPage(page);
     reads.release();
@@ -677,7 +662,7 @@ test("a resolution form shown again while its save is unanswered asks before ano
         page.getByRole("button", { name: "Forecast", exact: true }).click(),
     );
     release();
-    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
+    await expect(page.getByText("Ended", { exact: true })).toBeVisible();
 });
 
 test("a reload while the reads after an answered resolution run asks nothing and loads the plant again", async ({
@@ -692,7 +677,7 @@ test("a reload while the reads after an answered resolution run asks nothing and
     await markDocument(page);
     reads.arm();
     await saveResolution(page);
-    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
+    await expect(page.getByText("Ended", { exact: true })).toBeVisible();
     await expect(saving(page)).toBeVisible();
     const asked = questions(page);
     reads.pass();
@@ -721,7 +706,7 @@ test("a resolution whose save is unanswered loads another plant tab as a new doc
     );
     await expectReloaded(page);
     await expect(page).toHaveURL(/\/forecast\//);
-    await expect(page.getByLabel("Resolution")).toBeVisible();
+    await expect(page.getByLabel("Interval", { exact: true })).toBeVisible();
 });
 
 test("a password change the server confirmed asks nothing while the session is read again", async ({
