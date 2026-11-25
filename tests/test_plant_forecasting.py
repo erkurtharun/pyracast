@@ -6,6 +6,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import Client
 
+from pyracast.forecasts.faults import DamagedStoredDataError
 from pyracast.plants import forecasting
 from pyracast.plants.activation import activate_calibration
 from pyracast.plants.forecasting import power_intervals, power_limit
@@ -323,8 +324,9 @@ def test_corrupt_source_power_is_rejected(monkeypatch: pytest.MonkeyPatch, value
     configuration = PlantConfiguration.objects.select_related("binding").get(
         pk=plant.current_configuration_id
     )
-    with pytest.raises(ValueError, match="Invalid source power"):
+    with pytest.raises(DamagedStoredDataError) as damage:
         power_intervals(source, configuration, model_version=MODEL_VERSION)
+    assert (damage.value.kind, damage.value.fault) == ("forecast_snapshot", "ValueError")
 
 
 def test_corrupt_source_metadata_and_changed_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -339,8 +341,9 @@ def test_corrupt_source_metadata_and_changed_timezone(monkeypatch: pytest.Monkey
         power_intervals(source, configuration, model_version=MODEL_VERSION)
     configuration.binding.capacity_kw = 1
     source.normalized_intervals[0]["start"] = 1
-    with pytest.raises(ValueError, match="Invalid source interval timestamps"):
+    with pytest.raises(DamagedStoredDataError) as damage:
         power_intervals(source, configuration, model_version=MODEL_VERSION)
+    assert (damage.value.kind, damage.value.fault) == ("forecast_snapshot", "ValueError")
     system.region.timezone = "UTC"
     system.region.save()
     replay = plant_outlook(

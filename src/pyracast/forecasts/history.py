@@ -18,7 +18,7 @@ from pyracast.forecasts.actuals import (
 from pyracast.forecasts.capacity_normalization import normalization_provenance
 from pyracast.forecasts.composition import ForecastComposition
 from pyracast.forecasts.coverage import history_day_complete
-from pyracast.forecasts.faults import FROZEN_PAYLOAD_FAULTS, stored_data
+from pyracast.forecasts.faults import stored_data
 from pyracast.forecasts.intraday import (
     VINTAGE_SCOPE,
     ActualsMode,
@@ -37,8 +37,8 @@ from pyracast.forecasts.sources import (
     current_forecast_snapshots,
     mark_forecast_fallback,
     snapshot_data,
+    stored_intervals,
 )
-from pyracast.intervals import NormalizedInterval
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_sources import apply_composition, compose_snapshots
 from pyracast.regions.models import Region
@@ -109,7 +109,7 @@ def historical_irradiance(snapshot: ForecastSnapshot, target_date: date) -> dict
         target_date,
         ProviderData(
             raw_payload=snapshot.raw_payload,
-            intervals=NormalizedInterval.from_rows(snapshot.normalized_intervals),
+            intervals=stored_intervals(snapshot),
             issued_at=snapshot.issued_at,
             collected_at=snapshot.collected_at,
             source_kind="estimated_actuals",
@@ -317,7 +317,7 @@ def regional_composed_forecast(
         snapshots = current_forecast_snapshots(
             binding_id=binding.pk, start=start, end=end, as_of=cutoff
         )
-    with stored_data("region", region.pk, target_date, "actuals", FROZEN_PAYLOAD_FAULTS):
+    with stored_data("region", region.pk, target_date, "actuals"):
         source = (
             prepare_intraday_source(
                 binding,

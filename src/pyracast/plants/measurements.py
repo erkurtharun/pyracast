@@ -425,7 +425,7 @@ def _provider_measurements(
             begin = datetime.fromisoformat(reading["period_start"])
             finish = datetime.fromisoformat(reading["period_end"])
             energy = float(reading["total_mwh"])
-        except ValueError, TypeError, KeyError:
+        except ValueError, TypeError, KeyError, OverflowError:
             continue
         local_begin = begin.astimezone(TIMEZONE) if begin.utcoffset() is not None else begin
         if (

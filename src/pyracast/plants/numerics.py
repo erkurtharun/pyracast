@@ -9,6 +9,7 @@ from statistics import median
 from typing import Literal, cast
 from zoneinfo import ZoneInfo
 
+from pyracast.forecasts.faults import CalculationOutOfRangeError
 from pyracast.solar import Daylight, TimeWindows, daylight_energy_windows, summarize_daylight
 
 MODEL_VERSION = "reference-power-transfer-v1"
@@ -89,7 +90,7 @@ def _positive(value: float, name: str) -> None:
 
 def _finite(value: float, name: str) -> float:
     if not isfinite(value):
-        raise ValueError(f"{name} must be finite")
+        raise CalculationOutOfRangeError(f"{name} must be finite")
     return value
 
 
@@ -98,8 +99,10 @@ def _validate(intervals: tuple[PowerInterval, ...]) -> tuple[PowerInterval, ...]
     for interval in intervals:
         start, end = _bounds(interval.start, interval.end)
         power = interval.power_mw
-        if power is not None and (not isfinite(power) or power < 0):
-            raise ValueError("Power must be finite and nonnegative, or missing")
+        if power is not None and not isfinite(power):
+            raise CalculationOutOfRangeError("Power must be finite or missing")
+        if power is not None and power < 0:
+            raise ValueError("Power must be nonnegative or missing")
         normalized.append(PowerInterval(start, end, power))
     normalized.sort(key=lambda item: item.start)
     if any(a.end > b.start for a, b in pairwise(normalized)):
@@ -126,7 +129,7 @@ def _energy(pieces: tuple[tuple[float, float], ...], factor: float, cap: float |
         for power, hours in pieces
     )
     if not isfinite(energy):
-        raise ValueError("Calculated energy must be finite")
+        raise CalculationOutOfRangeError("Calculated energy must be finite")
     return energy
 
 

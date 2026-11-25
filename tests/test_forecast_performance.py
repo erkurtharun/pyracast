@@ -10,6 +10,7 @@ from django.test.utils import CaptureQueriesContext
 
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.connections.models import SiteBinding
+from pyracast.forecasts.faults import DamagedStoredDataError
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_archive import prepare_forecast_issuances
 from pyracast.plants.models import (
@@ -181,8 +182,9 @@ def test_performance_excludes_incomplete_days_and_retrospective_configuration(
         configuration.save()
         reason = "forecast_not_available"
     if kind == "invalid":
-        with pytest.raises(ValueError, match="Invalid source power"):
+        with pytest.raises(DamagedStoredDataError) as damage:
             publish(source)
+        assert (damage.value.kind, damage.value.identity) == ("forecast_snapshot", source.pk)
     else:
         publish(source)
     result = forecast_performance(plant, start_date=DAY, end_date=DAY)

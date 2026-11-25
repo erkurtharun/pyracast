@@ -1,13 +1,15 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from pyracast.forecasts.composition import ForecastVintage, compose_forecasts
+from pyracast.forecasts.faults import DamagedStoredDataError
 
 START = datetime(2026, 11, 11, tzinfo=UTC)
+NULL_ROW = cast(tuple[dict[str, Any], ...], (None,))
 
 
 def _at(hours: float) -> datetime:
@@ -231,25 +233,40 @@ def test_invalid_target_bounds_reject(start: datetime, end: datetime, message: s
 
 @pytest.mark.parametrize(
     "vintage",
-    [
-        ForecastVintage(1, _at(0).replace(tzinfo=None), _at(1), ()),
-        _vintage(1, 1, 0),
-        _vintage(1, 0, 1, {"start": 0, "end": _at(1).isoformat()}),
-        _vintage(1, 0, 1, {"start": _at(0).isoformat()}),
-        _vintage(1, 0, 1, {"start": "invalid", "end": _at(1).isoformat()}),
-        _vintage(1, 0, 1, {"start": "2026-11-11T00:00:00", "end": _at(1).isoformat()}),
-        _vintage(1, 0, 1, _row(0.5, 0.5, 1)),
-        _vintage(1, 0, 1, _row(-0.5, 0.5, 1)),
-        _vintage(1, 0, 1, _row(0.5, 1.5, 1)),
-        _vintage(1, 0, 2, _row(0, 1.5, 1), _row(1, 2, 1)),
-    ],
+    [ForecastVintage(1, _at(0).replace(tzinfo=None), _at(1), ()), _vintage(1, 1, 0)],
 )
 def test_invalid_native_coverage_rejects_without_falling_back(vintage: ForecastVintage) -> None:
-    with pytest.raises(
-        ValueError,
-        match=r"timezone-aware|positive duration|Invalid|within forecast coverage|must not overlap",
-    ):
+    with pytest.raises(ValueError, match=r"timezone-aware|positive duration"):
         compose_forecasts((vintage, _vintage(2, 0, 2, _row(0, 2, 3))), _at(0), _at(2))
+
+
+@pytest.mark.parametrize(
+    ("vintage", "fault"),
+    [
+        (ForecastVintage(1, _at(0), _at(1), NULL_ROW), "TypeError"),
+        (_vintage(1, 0, 1, {"start": 0, "end": _at(1).isoformat()}), "ValueError"),
+        (_vintage(1, 0, 1, {"start": _at(0).isoformat()}), "ValueError"),
+        (_vintage(1, 0, 1, {"start": "invalid", "end": _at(1).isoformat()}), "ValueError"),
+        (
+            _vintage(1, 0, 1, {"start": "2026-11-11T00:00:00", "end": _at(1).isoformat()}),
+            "ValueError",
+        ),
+        (_vintage(1, 0, 1, _row(0.5, 0.5, 1)), "ValueError"),
+        (_vintage(1, 0, 1, _row(-0.5, 0.5, 1)), "ValueError"),
+        (_vintage(1, 0, 1, _row(0.5, 1.5, 1)), "ValueError"),
+        (_vintage(1, 0, 2, _row(0, 1.5, 1), _row(1, 2, 1)), "ValueError"),
+    ],
+)
+def test_a_damaged_native_row_names_its_snapshot_without_falling_back(
+    vintage: ForecastVintage, fault: str
+) -> None:
+    with pytest.raises(DamagedStoredDataError) as damage:
+        compose_forecasts((vintage, _vintage(2, 0, 2, _row(0, 2, 3))), _at(0), _at(2))
+    assert (damage.value.kind, damage.value.identity, damage.value.fault) == (
+        "forecast_snapshot",
+        1,
+        fault,
+    )
 
 
 def test_priority_is_caller_order_instead_of_snapshot_id() -> None:

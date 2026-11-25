@@ -706,6 +706,162 @@ def only_the_reference_day_refused(
     assert f"error={fault}" in warning.getMessage()
 
 
+def test_the_forecast_read_refuses_a_stored_number_without_a_finite_float(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    system, plant, old_id = reference_transition(monkeypatch)
+    issuance = ForecastIssuance.objects.get(snapshot_id=old_id)
+    stored_as_json_text(issuance, ["60", "intervals", "3", "energy_mwh"], f"1{'0' * 400}.1")
+    with caplog.at_level(logging.WARNING, logger=FAULTS):
+        refusal = client_for(system.member).get(
+            plant_path(system, plant, "forecast"),
+            {"date": REFERENCE_DAY.isoformat(), "data_source": "auto", "resolution_minutes": "60"},
+        )
+    assert refusal.status_code == 400, refusal.content
+    assert refusal.json()["code"] == "calculation_out_of_range"
+    [warning] = [record for record in caplog.records if record.name == FAULTS]
+    assert f"record=forecast_issuance:{issuance.pk} error=ValueError" in warning.getMessage()
+
+
+def test_a_live_snapshot_row_that_is_not_an_object_refuses_only_its_day(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    forecast_window(system)
+    for offset in range(1, 31):
+        metered(system, plant, TODAY - timedelta(days=offset))
+    before = days_of(system, plant)
+    snapshot = ForecastSnapshot.objects.get(job__target_date=TODAY, source_kind="forecast")
+    rows: list[Any] = [dict(row) for row in snapshot.normalized_intervals]
+    rows[3] = None
+    stored_again(snapshot, normalized_intervals=rows)
+    with caplog.at_level(logging.WARNING, logger=FAULTS):
+        after = days_of(system, plant)
+    refused = by_date(after["forecast"])[TODAY]
+    assert refused == {
+        "date": TODAY.isoformat(),
+        "timezone": "Europe/Istanbul",
+        "source_kind": "forecast",
+        "freshness": "missing",
+        "stale_reason": None,
+        "unavailable_reason": "calculation_out_of_range",
+        "collected_at": None,
+        "total_mwh": None,
+        "partial": False,
+        "affected": None,
+        "rows": [],
+    }
+    assert [day for day in after["forecast"] if day is not refused] == [
+        day for day in before["forecast"] if day["date"] != TODAY.isoformat()
+    ]
+    assert after["production"] == before["production"]
+    [warning] = [record for record in caplog.records if record.name == FAULTS]
+    assert f"record=forecast_snapshot:{snapshot.pk} error=TypeError" in warning.getMessage()
+    refusal = client_for(system.member).get(
+        plant_path(system, plant, "forecast"),
+        {"date": TODAY.isoformat(), "data_source": "auto", "resolution_minutes": "60"},
+    )
+    assert refusal.status_code == 400, refusal.content
+    assert refusal.json()["code"] == "calculation_out_of_range"
+
+
+def test_a_meter_value_beyond_a_float_is_a_missing_hour_of_its_day(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    configuration = plant.current_configuration
+    assert configuration is not None
+    snapshot = acquisition((configuration, provider(system, plant)))
+    before = days_of(system, plant)
+    readings = deepcopy(snapshot.readings)
+    readings[5]["total_mwh"] = 10**400
+    stored_again(snapshot, readings=readings)
+    after = days_of(system, plant)
+    damaged = by_date(after["production"])[PROVISIONAL_DAY]
+    assert production_with_instants(damaged) == native_production_day(
+        client_for(system.member), system, plant, PROVISIONAL_DAY
+    )
+    untouched = by_date(before["production"])[PROVISIONAL_DAY]
+    assert damaged["complete"] is False
+    assert damaged["rows"][5]["mwh"] is None
+    assert [row for index, row in enumerate(damaged["rows"]) if index != 5] == [
+        row for index, row in enumerate(untouched["rows"]) if index != 5
+    ]
+    assert [day for day in after["production"] if day["date"] != PROVISIONAL_DAY.isoformat()] == [
+        day for day in before["production"] if day["date"] != PROVISIONAL_DAY.isoformat()
+    ]
+    assert after["forecast"] == before["forecast"]
+
+
+def test_an_outage_revision_without_a_start_refuses_only_the_days_it_can_reach(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    forecast_window(system)
+    for offset in range(1, 31):
+        metered(system, plant, TODAY - timedelta(days=offset))
+    zone = system.binding.timezone
+    ended = TODAY - timedelta(days=20)
+    old_start, _ = local_day_bounds(TODAY - timedelta(days=60), zone)
+    start, _ = local_day_bounds(ended, zone)
+    old = incident(system, plant, old_start + timedelta(hours=9), old_start + timedelta(hours=15))
+    reaching = incident(system, plant, start + timedelta(hours=9), start + timedelta(hours=15))
+    before = days_of(system, plant)
+    for outage in (old, reaching):
+        revision = outage.revisions.get()
+        recorded = dict(revision.snapshot)
+        del recorded["starts_at"]
+        stored_again(revision, snapshot=recorded)
+    with caplog.at_level(logging.WARNING, logger=FAULTS):
+        after = days_of(system, plant)
+    assert after["forecast"] == before["forecast"]
+    for answered, earlier in zip(after["production"], before["production"], strict=True):
+        if date.fromisoformat(answered["date"]) > ended:
+            assert answered == earlier
+        else:
+            assert answered == {
+                "date": answered["date"],
+                "timezone": "Europe/Istanbul",
+                "total_mwh": None,
+                "complete": False,
+                "rows": [],
+            }
+    warnings = [record.getMessage() for record in caplog.records if record.name == FAULTS]
+    assert len(warnings) == (ended - (TODAY - timedelta(days=30))).days + 1
+    revision_id = reaching.revisions.get().pk
+    assert all(f"record=incident_revision:{revision_id} error=KeyError" in w for w in warnings)
+    client = client_for(system.member)
+    reached = client.get(
+        plant_path(system, plant, "production"),
+        {"start_date": ended.isoformat(), "end_date": ended.isoformat()},
+    )
+    assert reached.status_code == 400, reached.content
+    assert reached.json()["code"] == "calculation_out_of_range"
+    later = TODAY - timedelta(days=1)
+    assert native_production_day(client, system, plant, later) == production_with_instants(
+        by_date(after["production"])[later]
+    )
+
+
+def test_a_programming_error_inside_a_day_fails_the_read_without_a_damage_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    forecast_window(system)
+
+    def defect(*args: object, **kwargs: object) -> dict[str, object]:
+        raise KeyError("energy_mwh")
+
+    monkeypatch.setattr("pyracast.plants.current_forecast.forecast_payload", defect)
+    client = Client(raise_request_exception=False)
+    client.force_login(system.member)
+    with caplog.at_level(logging.WARNING, logger=FAULTS):
+        answer = client.get(plant_path(system, plant))
+    assert answer.status_code == 500
+    assert answer.json()["code"] == "server_error"
+    assert [record for record in caplog.records if record.name == FAULTS] == []
+
+
 @pytest.mark.parametrize(
     ("error", "status", "code"),
     [

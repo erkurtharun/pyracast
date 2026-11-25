@@ -9,7 +9,12 @@ from django.core.exceptions import ValidationError
 
 from pyracast.errors import UNEXPECTED, DomainError, ErrorCode
 from pyracast.forecasts.capacity_normalization import normalization_provenance
-from pyracast.forecasts.faults import FROZEN_PAYLOAD_FAULTS, stored_data
+from pyracast.forecasts.faults import (
+    decoding,
+    finite_numbers,
+    snapshot_row,
+    stored_data,
+)
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.forecasts.outlook import Policy, plant_days_include
@@ -19,6 +24,7 @@ from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
     CalibrationStatus,
+    ForecastIssuance,
     Plant,
     PlantConfiguration,
 )
@@ -53,17 +59,8 @@ def power_intervals(
     if not isfinite(capacity) or capacity <= 0:
         raise ValueError("Invalid reference capacity")
     for row in snapshot.normalized_intervals if source_intervals is None else source_intervals:
-        start, end, power = row.get("start"), row.get("end"), row.get("power_kw")
-        if not isinstance(start, str) or not isinstance(end, str):
-            raise ValueError("Invalid source interval timestamps")
-        if power is not None and (
-            isinstance(power, bool)
-            or not isinstance(power, int | float)
-            or not isfinite(power)
-            or power < 0
-        ):
-            raise ValueError("Invalid source power")
-        begin, stop = datetime.fromisoformat(start), datetime.fromisoformat(end)
+        with snapshot_row(row, snapshot.pk):
+            begin, stop, power = _source_row(row)
         result.append(
             PowerInterval(
                 begin,
@@ -76,6 +73,24 @@ def power_intervals(
             )
         )
     return tuple(result)
+
+
+def _source_row(row: object) -> tuple[datetime, datetime, float | None]:
+    if not isinstance(row, dict):
+        raise TypeError("A source interval is not an object.")
+    start, end, power = row.get("start"), row.get("end"), row.get("power_kw")
+    if not isinstance(start, str) or not isinstance(end, str):
+        raise ValueError("Invalid source interval timestamps")
+    if power is not None and (
+        isinstance(power, bool)
+        or not isinstance(power, int | float)
+        or not isfinite(power)
+        or power < 0
+    ):
+        raise ValueError("Invalid source power")
+    for key in ("original_start", "original_end"):
+        datetime.fromisoformat(row.get(key, start))
+    return datetime.fromisoformat(start), datetime.fromisoformat(end), power
 
 
 def _fits(run: CalibrationRun, configuration: PlantConfiguration, as_of: datetime) -> bool:
@@ -305,6 +320,27 @@ def archived_forecast(
     )
 
 
+def _issued(
+    issuance: ForecastIssuance, resolution: str
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """The stored result and outage scenario as the read answers them: objects whose numbers
+    are finite, since the answer is JSON."""
+    with decoding("forecast_issuance", issuance.pk):
+        payloads, scenarios = issuance.payloads, issuance.outage_scenarios
+        if not isinstance(payloads, dict) or not isinstance(scenarios, dict):
+            raise TypeError("Stored issuance payloads are not objects.")
+        result, scenario = payloads[resolution], scenarios.get(resolution)
+        if not isinstance(result, dict) or not isinstance(result["quality_flags"], list):
+            raise TypeError("A stored result is not an object with quality flags.")
+        if scenario is not None and (
+            not isinstance(scenario, dict) or not isinstance(scenario["result"], dict)
+        ):
+            raise TypeError("A stored outage scenario is not an object with a result.")
+        finite_numbers(result)
+        finite_numbers(scenario)
+    return deepcopy(result), deepcopy(scenario)
+
+
 def issued_forecast(
     plant: Plant,
     target_date: date,
@@ -350,14 +386,13 @@ def issued_forecast(
             "outage_scenario": None,
         }
     configuration, snapshot = issuance.configuration, issuance.snapshot
-    with stored_data("plant", plant.pk, target_date, "archived_forecast", FROZEN_PAYLOAD_FAULTS):
-        result = deepcopy(issuance.payloads[str(resolution_minutes)])
-        flags = cast(list[str], result["quality_flags"])
-        flags.append("archived_forecast")
-        if configuration.pk != plant.current_configuration_id:
-            flags.append("previous_configuration")
-        regional = saved_day_payload(snapshot, target_date)
-        scenario = deepcopy(issuance.outage_scenarios.get(str(resolution_minutes)))
+    with stored_data("plant", plant.pk, target_date, "archived_forecast"):
+        result, scenario = _issued(issuance, str(resolution_minutes))
+    flags = cast(list[str], result["quality_flags"])
+    flags.append("archived_forecast")
+    if configuration.pk != plant.current_configuration_id:
+        flags.append("previous_configuration")
+    regional = saved_day_payload(snapshot, target_date)
     return {
         "plant_id": plant.pk,
         "date": target_date.isoformat(),

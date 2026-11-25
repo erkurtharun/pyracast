@@ -1,4 +1,5 @@
 from datetime import timedelta
+from typing import Any
 
 import pytest
 from django.test import Client
@@ -192,18 +193,16 @@ def test_region_current_forecast_marks_any_old_or_invalid_source_stale(
     assert result["result"]["complete"] is True
 
 
-@pytest.mark.parametrize("error", [ValueError, ArithmeticError])
+@pytest.mark.parametrize("damage", ["09.11.2026 03:00", None], ids=["start-text", "null-row"])
 def test_region_current_forecast_maps_invalid_saved_inputs_to_validation_error(
-    monkeypatch: pytest.MonkeyPatch, error: type[Exception]
+    monkeypatch: pytest.MonkeyPatch, damage: str | None
 ) -> None:
     monkeypatch.setattr(timezone, "now", lambda: NOW)
     system = make_system(approved=True)
-    publish_snapshot(snapshot_for(system, NOW.date()))
-
-    def invalid_calculation(*args: object) -> dict[str, object]:
-        raise error("Invalid archived source")
-
-    monkeypatch.setattr("pyracast.forecasts.history.calculate", invalid_calculation)
+    saved = publish_snapshot(snapshot_for(system, NOW.date()))
+    rows: list[Any] = [dict(row) for row in saved.normalized_intervals]
+    rows[3] = None if damage is None else {**rows[3], "start": damage}
+    stored_again(saved, normalized_intervals=rows)
     client = Client()
     client.force_login(system.member)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"

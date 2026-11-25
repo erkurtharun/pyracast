@@ -4,6 +4,8 @@ from datetime import UTC, datetime
 from itertools import pairwise
 from typing import Any
 
+from pyracast.forecasts.faults import decoding
+
 
 @dataclass(frozen=True, slots=True)
 class ForecastVintage:
@@ -47,19 +49,26 @@ def _bounds(start: datetime, end: datetime) -> tuple[datetime, datetime]:
 
 def _validate(vintage: ForecastVintage) -> _Vintage:
     start, end = _bounds(vintage.starts_at, vintage.ends_at)
-    intervals = []
-    for row in vintage.intervals:
-        row_start, row_end = row.get("start"), row.get("end")
-        if not isinstance(row_start, str) or not isinstance(row_end, str):
-            raise ValueError("Invalid source interval timestamps")
-        begin, stop = _bounds(datetime.fromisoformat(row_start), datetime.fromisoformat(row_end))
-        if begin < start or stop > end:
-            raise ValueError("Source intervals must lie within forecast coverage")
-        intervals.append(_NativeInterval(row, begin, stop))
-    intervals.sort(key=lambda interval: interval.start)
-    if any(left.end > right.start for left, right in pairwise(intervals)):
-        raise ValueError("Source intervals must not overlap")
+    with decoding("forecast_snapshot", vintage.snapshot_id):
+        intervals = sorted(
+            (_native(row, start, end) for row in vintage.intervals),
+            key=lambda interval: interval.start,
+        )
+        if any(left.end > right.start for left, right in pairwise(intervals)):
+            raise ValueError("Source intervals must not overlap")
     return _Vintage(vintage.snapshot_id, start, end, tuple(intervals))
+
+
+def _native(row: object, start: datetime, end: datetime) -> _NativeInterval:
+    if not isinstance(row, dict):
+        raise TypeError("A source interval is not an object.")
+    row_start, row_end = row.get("start"), row.get("end")
+    if not isinstance(row_start, str) or not isinstance(row_end, str):
+        raise ValueError("Invalid source interval timestamps")
+    begin, stop = _bounds(datetime.fromisoformat(row_start), datetime.fromisoformat(row_end))
+    if begin < start or stop > end:
+        raise ValueError("Source intervals must lie within forecast coverage")
+    return _NativeInterval(row, begin, stop)
 
 
 def _ownership(

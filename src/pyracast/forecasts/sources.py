@@ -6,6 +6,7 @@ from django.db.models import Q, QuerySet
 
 from pyracast.connections.contracts import ProviderData
 from pyracast.errors import BusyError, ErrorCode
+from pyracast.forecasts.faults import decoding, snapshot_row
 from pyracast.forecasts.models import CollectionJobStatus, ForecastSnapshot
 from pyracast.intervals import NormalizedInterval
 from pyracast.irradiance import SourceKind
@@ -81,14 +82,25 @@ def covering_snapshots(
     return selected
 
 
+def stored_intervals(
+    snapshot: ForecastSnapshot, rows: Iterable[object] | None = None
+) -> tuple[NormalizedInterval, ...]:
+    with decoding("forecast_snapshot", snapshot.pk):
+        source = snapshot.normalized_intervals if rows is None else rows
+        return tuple(_stored_interval(row, snapshot.pk) for row in source)
+
+
+def _stored_interval(row: object, snapshot_id: int) -> NormalizedInterval:
+    with snapshot_row(row, snapshot_id):
+        return NormalizedInterval.from_row(row)
+
+
 def snapshot_data(
     snapshot: ForecastSnapshot, *, intervals: Iterable[Mapping[str, object]] | None = None
 ) -> ProviderData:
     return ProviderData(
         raw_payload=snapshot.raw_payload,
-        intervals=NormalizedInterval.from_rows(
-            snapshot.normalized_intervals if intervals is None else intervals
-        ),
+        intervals=stored_intervals(snapshot, intervals),
         issued_at=snapshot.issued_at,
         collected_at=snapshot.collected_at,
         source_kind=cast(SourceKind, snapshot.source_kind),

@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -242,6 +243,31 @@ def test_history_api_validates_bounds_and_tenant_scope(monkeypatch: pytest.Monke
         client.get(url.replace(f"tenants/{system.tenant.pk}", f"tenants/{other.pk}")).status_code
         == 404
     )
+
+
+def test_a_damaged_saved_day_refuses_the_production_read_with_one_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    source = saved_actuals(system, DAY)
+    rows = [dict(row) for row in source.normalized_intervals]
+    rows[3]["start"] = "08.11.2026 03:00"
+    stored_again(source, normalized_intervals=rows)
+    client = Client()
+    client.force_login(system.member)
+    url = (
+        f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/production/"
+    )
+    with caplog.at_level(logging.WARNING, logger="pyracast.forecasts.faults"):
+        response = client.get(url, {"start_date": DAY.isoformat(), "end_date": DAY.isoformat()})
+    assert response.status_code == 400, response.content
+    assert response.json()["code"] == "calculation_out_of_range"
+    [warning] = [r.getMessage() for r in caplog.records if r.name == "pyracast.forecasts.faults"]
+    assert (
+        f"plant {plant.pk} day={DAY.isoformat()} step=production "
+        f"record=forecast_snapshot:{source.pk} error=ValueError"
+    ) in warning
+    assert "08.11.2026" not in warning
 
 
 def test_configless_history_and_source_interval_validation(monkeypatch: pytest.MonkeyPatch) -> None:

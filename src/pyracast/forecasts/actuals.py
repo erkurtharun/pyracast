@@ -16,6 +16,7 @@ from pyracast.forecasts.composition import (
     compose_forecasts,
 )
 from pyracast.forecasts.coverage import history_day_complete
+from pyracast.forecasts.faults import decoding
 from pyracast.forecasts.intraday import (
     PreparedIntradaySource,
     actual_coverage_complete,
@@ -30,8 +31,7 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
     SnapshotSourceKind,
 )
-from pyracast.forecasts.sources import covering_ids
-from pyracast.intervals import NormalizedInterval
+from pyracast.forecasts.sources import covering_ids, stored_intervals
 from pyracast.irradiance import local_day_bounds
 from pyracast.solar import daylight_window
 
@@ -248,15 +248,16 @@ def _archived_actual_source(
 
 def _valid_actual_intervals(snapshot: ForecastSnapshot) -> tuple[dict[str, Any], ...]:
     intervals = []
-    for row in snapshot.normalized_intervals:
-        if not isinstance(row, dict) or not all(
-            isinstance(row.get(key), str) for key in ("start", "end")
-        ):
-            raise ValueError("Saved estimated-actual timestamps must be ISO strings.")
-        start, end = (datetime.fromisoformat(row[key]) for key in ("start", "end"))
-        if start.utcoffset() is None or end.utcoffset() is None or end <= start:
-            continue
-        intervals.append(row)
+    with decoding("forecast_snapshot", snapshot.pk):
+        for row in snapshot.normalized_intervals:
+            if not isinstance(row, dict) or not all(
+                isinstance(row.get(key), str) for key in ("start", "end")
+            ):
+                raise ValueError("Saved estimated-actual timestamps must be ISO strings.")
+            start, end = (datetime.fromisoformat(row[key]) for key in ("start", "end"))
+            if start.utcoffset() is None or end.utcoffset() is None or end <= start:
+                continue
+            intervals.append(row)
     return tuple(intervals)
 
 
@@ -368,7 +369,7 @@ def archived_actual_irradiance(
         target_date,
         ProviderData(
             source.snapshot.raw_payload,
-            NormalizedInterval.from_rows(source.intervals),
+            stored_intervals(source.snapshot, source.intervals),
             source.snapshot.issued_at,
             source.snapshot.collected_at,
             source_kind="estimated_actuals",
