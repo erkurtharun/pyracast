@@ -1,3 +1,4 @@
+import type { Forecast } from "@/lib/api";
 import { dataIntervalRange } from "@/lib/intervals";
 import type { components } from "@/lib/schema";
 import type { ForecastInterval as Interval } from "../forecast-intervals";
@@ -9,29 +10,49 @@ export type ProductionDiagnostic = Schemas["ProductionDiagnosticOutput"];
 export type ForecastResult =
     Schemas["IrradianceResultOutput"] | Schemas["PlantForecastResultOutput"];
 
-type Energy = Partial<
-    Record<
-        | "energy_mwh"
-        | "partial_energy_mwh"
-        | "energy_kwh_m2"
-        | "partial_energy_kwh_m2",
-        number | null
-    >
->;
+type Energy = Partial<Record<"energy_mwh" | "energy_kwh_m2", number | null>>;
 
-// Generation reports MWh and irradiance kWh/m²; a partial day reports only the energy of its covered intervals.
-export function dayEnergy(
-    summary: Energy | undefined,
-    electrical: boolean,
-    partial: boolean,
-) {
-    if (electrical)
-        return partial ? summary?.partial_energy_mwh : summary?.energy_mwh;
-    return partial ? summary?.partial_energy_kwh_m2 : summary?.energy_kwh_m2;
+// Generation reports MWh and irradiance kWh/m².
+export function dayEnergy(summary: Energy | undefined, electrical: boolean) {
+    return electrical ? summary?.energy_mwh : summary?.energy_kwh_m2;
 }
 
 export function hasFlag(result: ForecastResult, flag: string) {
     return result.quality_flags?.includes(flag) ?? false;
+}
+
+// The newest collection among the data the figures use, as the forecast email states it.
+export function collectedAt(
+    forecast: Pick<Forecast, "collected_at">,
+    result: ForecastResult,
+): string | undefined {
+    const provenance = result.provenance;
+    const times = [
+        forecast.collected_at,
+        provenance?.collected_at,
+        ...(provenance?.source_snapshots ?? []).map(
+            (source) => source.collected_at,
+        ),
+    ].filter(
+        (time): time is string =>
+            typeof time === "string" && Number.isFinite(Date.parse(time)),
+    );
+    return times.reduce<string | undefined>(
+        (latest, time) =>
+            latest === undefined || Date.parse(time) > Date.parse(latest)
+                ? time
+                : latest,
+        undefined,
+    );
+}
+
+export function hourly(result: ForecastResult, rows: Interval[]): boolean {
+    if ("resolution_minutes" in result && result.resolution_minutes)
+        return result.resolution_minutes >= 60;
+    const steps = rows.map(
+        (row) => Date.parse(row.end) - Date.parse(row.start),
+    );
+    return Math.min(...steps) >= 3_600_000;
 }
 
 export function fullDayIntervals(

@@ -2,7 +2,6 @@
 import { useTranslations } from "next-intl";
 import type { Forecast } from "@/lib/api";
 import { Empty } from "@/ui/ui";
-import { Freshness } from "./freshness";
 
 export function ForecastUnavailable({
     forecast,
@@ -12,23 +11,18 @@ export function ForecastUnavailable({
     electrical: boolean;
 }) {
     const t = useTranslations("Forecast");
-    return (
-        <>
-            <Freshness forecast={forecast} />
-            {forecast.unavailable_reason === "estimated_actuals_unavailable" ? (
-                <Empty title={t("no_estimated_actuals_for_this_day")}>
-                    {t("estimated_actuals_are_not_available_for_this")}
-                </Empty>
-            ) : electrical &&
-              forecast.unavailable_reason === "configuration_unavailable" ? (
-                <Empty title={t("no_configuration_for_this_day")}>
-                    {t("no_configuration_existed_before_the_selected_day")}
-                </Empty>
-            ) : (
-                <Empty title={t("no_forecast_for_this_day_yet")}>
-                    {t("a_missing_forecast_is_not_zero_production")}
-                </Empty>
-            )}
-        </>
+    return forecast.unavailable_reason === "estimated_actuals_unavailable" ? (
+        <Empty title={t("no_estimated_actuals_for_this_day")}>
+            {t("estimated_actuals_are_not_available_for_this")}
+        </Empty>
+    ) : electrical &&
+      forecast.unavailable_reason === "configuration_unavailable" ? (
+        <Empty title={t("no_configuration_for_this_day")}>
+            {t("no_configuration_existed_before_the_selected_day")}
+        </Empty>
+    ) : (
+        <Empty title={t("no_forecast_for_this_day_yet")}>
+            {t("a_missing_forecast_is_not_zero_production")}
+        </Empty>
     );
 }

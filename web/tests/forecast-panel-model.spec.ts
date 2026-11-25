@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import {
     chartIntervals,
     fullDayIntervals,
+    hourly,
     scenarioIntervals,
 } from "../src/features/forecast/panel/model";
 
@@ -90,4 +91,15 @@ test("the chart shows the generation hours unless the full day is chosen", () =>
         night.slice(0, 2),
     );
     expect(chartIntervals([], "ghi_wm2", false, day)).toEqual([]);
+});
+
+test("the table takes its interval from the returned resolution, also when the day's last hour is cut short", () => {
+    const clipped = [
+        interval(5, 1),
+        { ...interval(6, 1), end: "2026-11-20T06:30:00.000Z" },
+    ];
+    expect(hourly({ resolution_minutes: 60 }, clipped)).toBe(true);
+    expect(hourly({ resolution_minutes: 30 }, [interval(5, 1)])).toBe(false);
+    expect(hourly({}, clipped)).toBe(false);
+    expect(hourly({}, [interval(5, 1)])).toBe(true);
 });
