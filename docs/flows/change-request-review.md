@@ -60,8 +60,11 @@ sequenceDiagram
     Op->>DB: "link applied ids, status approved, reviewed_by, closed_at"
     V->>DB: "summary built in the same transaction, then COMMIT"
     V-->>UI: "200 summary, the UI then refetches detail, list and tenant counters"
-    opt any approve error
-        UI-->>A: "error plus contextChanged notice, Approve disabled until Refresh details loads a new detail"
+    opt "an answered approve refusal other than 429"
+        UI-->>A: "error plus contextChanged notice; Approve held for the fingerprint it was sent with until Refresh details loads a new detail"
+    end
+    opt "answer lost"
+        UI-->>A: "Change not confirmed; the detail is read again; no hold"
     end
 ```
 
@@ -117,6 +120,7 @@ Rejection takes the Tenant, Region, Plant and ChangeRequest locks and the same s
 - `reviewed_context` (version 1) freezes the decision-time view; approved and rejected production details are rendered from it, not from live data (pending and withdrawn ones are computed live).
 - Approval runs as the administrator: new observations and incident revisions record the admin, while the request keeps the proposer. Production is applied with origin `change_request` and the approval counts as the plausibility confirmation. Unchanged production values reuse the existing head as `applied_observation`. When the deciding admin is also the proposer, `outcome_seen_at` is set at close, so no unread badge appears.
 - Visibility, pending, unread, authorship and former-member rules live in `change_requests.policy`, shared with the workspace counters. Decision answers are the request summary, built in the decision's transaction.
+- Approval hold: an answered, non-429 refusal holds Approve for the review fingerprint it was sent with; Refresh details releases only the hold it saw when it started. An unconfirmed decision sets no hold and reads the detail again by a read started after it; its notice stays through Refresh details and shows the repeatable text while the same decision with the same fingerprint (or reason) can be sent. A rejection's notice and failure are told once, by its form while it is shown and by the detail otherwise, and the form shown again keeps the reason as typed.
 - The detail never takes row locks; its conflict check can be stale by the time Approve is pressed, which the locked revalidation and fingerprint check catch. Submission times show as device times with their offset; request kinds, statuses, qualities and outage kinds come from the vocabulary; a failed decision shows a localized message.
 
 ## Tests
@@ -125,5 +129,5 @@ Rejection takes the Tenant, Region, Plant and ChangeRequest locks and the same s
 - `tests/test_change_request_boundaries.py`: role and tenant isolation, opposite decisions, rejoined proposer, admin transfer, deactivated user, tenant badge counters, cross-tenant ids for every endpoint. `tests/test_change_request_policy.py`: summary answers, only a reviewer receives the fingerprint, visibility and unread rules. `tests/test_change_request_constraints.py`: rejection reason.
 - `tests/test_change_request_concurrency.py`: real PostgreSQL threads for concurrent approvals, lock winners, direct writes versus waiting approval, member removal and admin transfer versus waiting approval, provider publication versus waiting review and versus an unlocked detail read.
 - `tests/test_change_request_contracts.py`: localized conflict detail, approve and reject over HTTP with a repeated rejection and the `history` and `plant_id` filters, compiled Turkish text, frozen rejected history, period and outage in summaries, query counts. `tests/test_mark_all_read.py`: seen-all.
-- Playwright `web/tests/change-requests.spec.ts` (mocked API): mobile review where a 409 approve blocks until Refresh details, paging and required rejection reason, role changes clearing controls, last-page navigation including the 404 page, review cards with period, count and outage title.
+- Playwright `web/tests/change-requests.spec.ts` (mocked API): mobile review where a 409 approve blocks until Refresh details, paging and required rejection reason, role changes clearing controls, last-page navigation including the 404 page, review cards with period, count and outage title. `web/tests/unconfirmed-writes.spec.ts`: lost approvals and rejections sent again once.
 - Gaps: no Playwright test against the real backend (`web/integration` does not cover the inbox); the 503 `busy` mapping is pinned only generically in `tests/test_api_contention.py`, not through these views; no UI test distinguishing a 503 `busy` approve error from a stale context; no test for the `ObjectDoesNotExist` branch of the detail conflict text; no backend test posts a blank or over-long rejection reason or a missing fingerprint.

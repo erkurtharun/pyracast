@@ -73,12 +73,14 @@ sequenceDiagram
 | Missing or wrong CSRF token | 403 `csrf_failed` |
 | Unknown field, missing or over-long token | 400 `invalid_request` |
 | Unknown token, expired, cancelled, superseded, closed by member removal or administrator change, accepted by another account, administrator invitation while an administrator exists | 400 `invitation_unavailable` (identical for all) |
-| Actor inactive or without a verified address equal to the invited one (including a different signed-in account) | 403 `invitation_email_unverified`; "Use another account" signs out and keeps the token |
+| Actor inactive or without a verified address equal to the invited one (including a different signed-in account) | 403 `invitation_email_unverified`; "Use another account" signs out with `keepInvitation` and ends in a fresh document at `/app/invitation/` with the token; accepting and "Use another account" disable each other while pending, and an acceptance answered after a sign-out began navigates nowhere |
 | Tenant or invitation lock not obtained within 5 s; same-session request still running | 503 `busy` / 429 `session_busy`, `Retry-After: 1` |
 | More than 30 acceptances an hour, or 60 previews an hour | 429 `throttled` |
 | Signup with an invalid token or another email, or over the signup limit (5 per hour per IP, password and provider) | 400 non-field `invitation_unavailable`, no account created; 429 for the limit |
 | Preview of an unusable or malformed token | 400 `invitation_unavailable`; a failed preview still lets the invitee accept |
+| Preview whose answer was lost | Shown as a failed read with Try again (`ReadFailed`), which reads it again |
 | `sessionStorage` unavailable | Token lives only in the current page load; lost on reload |
+| The signed-in session ends (sign-out here or elsewhere, expiry) while a token is stored | The fresh document clears the token, except after "Use another account"; leaving a pending sign-in stage keeps it |
 
 ## Rules and invariants
 
