@@ -241,7 +241,7 @@ test("after a release a navigation in an open window takes the new build's paylo
     await plant.click();
     await loaded;
     await expect(
-        page.getByRole("button", { name: "Forecast" }),
+        page.getByRole("button", { name: "Forecast", exact: true }),
     ).toHaveAttribute("aria-current", "page");
     const destination = new URL(page.url()).pathname;
     expect(seen).toEqual([
