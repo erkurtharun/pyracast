@@ -37,6 +37,7 @@ import { Brand } from "@/ui/brand";
 import { useErrorMessage } from "@/ui/form";
 import { LiveRegion } from "@/ui/live-region";
 import { clearWorkspaceInvitation } from "@/features/workspace/workspace-invitation";
+import { openProviderLanding } from "@/features/auth/provider-return";
 import { useLanguageHandoff } from "./language-handoff";
 import { SessionLanguage, useSessionLanguage } from "./session-language";
 import { Notice } from "@/ui/ui";
@@ -61,7 +62,7 @@ export function AppRoot({ children }: { children: ReactNode }) {
     useFocusSessionRead(ready && !unchecked);
     const restored = useRestoredDocument();
     const ending = retired !== undefined || restored;
-    useDocumentReload(ending);
+    useDocumentReload(ending, retired === "otherOwner");
     const current = useCurrentSession(
         session,
         ready && !unchecked,
@@ -294,10 +295,12 @@ function useCurrentSession(
 }
 
 // The reload runs after the ending document's screens and their leave listeners are gone.
-function useDocumentReload(ending: boolean) {
+function useDocumentReload(ending: boolean, signedIn: boolean) {
     useEffect(() => {
-        if (ending) reloadPage();
-    }, [ending]);
+        if (!ending) return;
+        if (signedIn) openProviderLanding();
+        reloadPage();
+    }, [ending, signedIn]);
 }
 
 // A document restored from the back-forward cache may show a session that ended meanwhile.
