@@ -13,10 +13,10 @@ async function pendingFlows(page: Page) {
 
 async function requestReset(page: Page, email: string) {
     await page
-        .getByRole("button", { name: "Forgot password?", exact: true })
+        .getByRole("button", { name: "Forgot password", exact: true })
         .click();
     await page.getByLabel("Email", { exact: true }).fill(email);
-    await page.getByRole("button", { name: "Send reset code" }).click();
+    await page.getByRole("button", { name: "Send email code" }).click();
     await expect(
         page.getByText(
             `If an account uses ${email}, we sent a code to it. Enter the code and choose a new password.`,
@@ -64,7 +64,7 @@ test("a new company signs up and verifies its email, leaves and loses a password
     await page.getByLabel("Company name").fill("Browser signup company");
     await page.getByLabel("Email", { exact: true }).fill(email);
     await page.getByLabel("Password", { exact: true }).fill(password);
-    await page.getByRole("button", { name: "Create company account" }).click();
+    await page.getByRole("button", { name: "Create workspace" }).click();
     await expect(
         page.getByRole("heading", { name: "Verify your email" }),
     ).toBeVisible();
