@@ -8,7 +8,8 @@ a readable page or file whose calls to action hand off to the private applicatio
 
 - Pages: `web/src/app/page.tsx` (`/`) and `web/src/app/tr/page.tsx` render `WebsiteData` and `HomePage`; `web/src/app/privacy/page.tsx`,
   `web/src/app/terms/page.tsx` and their `tr/` twins render `LegalPage` with `legalCopy(language, kind)`. All wrap `SiteShell`.
-- Discovery: `sitemap.ts`, `robots.ts`, `opengraph-image.tsx`, `web/src/app/tr/opengraph-image.tsx` (`createSocialImage`), `icon.svg`.
+- Discovery: `sitemap.ts`, `robots.ts`, `opengraph-image.tsx`, `web/src/app/tr/opengraph-image.tsx` (`createSocialImage`, which draws the brand kit's dark-surface logo through `Brand` in `web/src/ui/brand.tsx`), `icon.svg` (the kit's favicon).
+- Root layout `web/src/app/layout.tsx`: every page it renders, public pages and the root 404 included, links `/app/manifest.webmanifest` (no `crossorigin`), the touch icon `/app/icons/apple-touch-icon.png`, `application-name` and `apple-mobile-web-app-title` "Pyracast", and one favicon `/icon.svg` declared in its `icons` (declaring `icons` drops the link Next generates from `app/icon.svg`); public pages carry no theme colour and no capability meta.
 - Handoff: `/app/?signup=1&language=<lang>` (sign-up) and `/app/?language=<lang>` (header sign-in) for `AppRoot`
   (`useLanguageHandoff`) and `RequireUser`; `Auth` links back. Traefik router `frontend` (`deploy/routes.yml`) takes
   every path the `api`, `authentication`, `admin` and `backend` routers do not (`/api`, `/admin`, `/static/`, `/health/`).
@@ -23,7 +24,7 @@ sequenceDiagram
     participant D as AppRoot
     participant A as Django API
     V->>P: GET path via Traefik
-    alt "sitemap, robots, image, icon or identity/ file"
+    alt "sitemap, robots, image, icon, identity/ or application file"
         V->>N: "matcher skips proxy.ts"
         N-->>V: "file without CSP, noindex or private no-store"
     else "any other path"
@@ -60,7 +61,7 @@ sequenceDiagram
 - None by design: every public page is anonymous and indexable (`robots: index, follow` in `publicMetadata`).
 - `web/src/proxy.ts` is not a gate: `publicRoute` in `web/src/lib/public-metadata.ts` maps the six public paths (built
   from `languages` and `publicPages`) to a language and page; every other matched path gets `X-Robots-Tag: noindex,
-  nofollow`. Its matcher skips the discovery files and `identity/`, so they carry no page headers. It deletes a client-sent `x-pyracast-public-language` before setting its
+  nofollow`. Its matcher skips the discovery files, `identity/` and the application's manifest, icons and `/app/sw.js` (flow `security-headers-and-proxy-trust`), so they carry no page headers. It deletes a client-sent `x-pyracast-public-language` before setting its
   own, so `i18n/request.ts` can prefer that header over the `pyracast_language` cookie.
 - Handoff: `SessionView` and `SessionLanguageView` are public routes of `RoutePolicy`; the language POST is `csrf_protect` and a `ChoiceField` rejects other languages.
 
@@ -89,8 +90,8 @@ sequenceDiagram
 - `web/tests/public-site.spec.ts`: per page, no-JS render at 320px with spoofed header and cookie, status, no
   `X-Robots-Tag`, CSP, title, `lang`, canonical, hreflang, og/twitter image, robots meta, no `/api/` call, language
   switch, home JSON-LD; axe on three pages; 200% text; sitemap, robots, `/app/` noindex, image size;
-  discovery files without page headers; localized not-found page. `web/tests/app-routes.spec.ts` (`/?account=security` stays on the home page). `web/tests/public-routes.spec.ts`: every public path
+  discovery files without page headers; localized not-found page; every page links `/icon.svg` as `image/svg+xml` and it answers 200 with the kit mark. `web/tests/brand.spec.ts`: the logo's accessible name "Pyracast", variant and drawing in the header and footer links of `/` and `/tr/`, the sign-in story and the workspace sidebar, the brand palette of the page and sidebar; the logo, favicon and console mark are compared with `web/tests/support/brand-artwork.json`. `web/tests/app-install.spec.ts`: the manifest link, touch icon and name metas as direct children of the served `head` on public pages and the 404s. `web/tests/app-routes.spec.ts` (`/?account=security` stays on the home page). `web/tests/public-routes.spec.ts`: every public path
   round-trips through `publicRoute`; slash-less paths answer 308.
 - `web/tests/localization.spec.ts` (guest language first, retry, no write when signed in or matching; auth links),
   `auth-registration.spec.ts` (sign-up public links), `tests/test_language.py` (CSRF, anonymous cookie).
-- Gaps: HTML cache, legal dates, header link.
+- Gaps: HTML cache, legal dates.
