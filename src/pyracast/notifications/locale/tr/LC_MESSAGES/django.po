@@ -12,53 +12,171 @@ msgid "A supported reminder language is required."
 msgstr "Desteklenen bir hatırlatıcı dili seçilmelidir."
 
 #, python-format
-msgid "Forecast for %(plant)s"
-msgstr "%(plant)s için tahmin"
-
-msgid "%(plant)s: forecast unavailable for %(date)s"
-msgstr "%(plant)s: %(date)s tahmini kullanılamıyor"
-
-#, python-format
-msgid ""
-"Tomorrow's saved forecast for %(plant)s could not be prepared. No forecast energy "
-"total is available.\n"
-"Scheduled reminder: %(time)s (%(zone)s)\n"
-"Check the plant page for collection status: %(url)s"
-msgstr ""
-"%(plant)s için yarının kayıtlı tahmini hazırlanamadı. Tahmini enerji toplamı "
-"mevcut değil.\n"
-"Planlanan hatırlatma: %(time)s (%(zone)s)\n"
-"Veri toplama durumunu santral sayfasından kontrol edin: %(url)s"
-
 msgid ""
 "You receive this email because an administrator of %(workspace)s added your "
-"address to the reminders of %(plant)s. To stop them, ask that administrator to "
-"remove your address."
+"address to the forecast emails of %(plant)s. To stop receiving it, ask a "
+"workspace administrator to remove your address."
 msgstr ""
-"Bu e-postayı, %(workspace)s yöneticilerinden biri adresinizi %(plant)s "
-"hatırlatmalarına eklediği için alıyorsunuz. Durdurmak için o yöneticiden "
-"adresinizi çıkarmasını isteyin."
+"Bu e-postayı, %(workspace)s çalışma alanının bir yöneticisi adresinizi "
+"%(plant)s tahmin e-postalarına eklediği için alıyorsunuz. Almak istemiyorsanız "
+"çalışma alanı yöneticisinden adresinizin çıkarılmasını isteyin."
 
-msgid "Forecast"
-msgstr "Tahmin"
+msgctxt "forecast mail day"
+msgid "D j M Y"
+msgstr "j F Y l"
 
-msgid "Updated"
-msgstr "Güncelleme"
+msgctxt "forecast mail subject day"
+msgid "D j M"
+msgstr "j F l"
 
-msgid "Unavailable"
-msgstr "Veri yok"
+msgctxt "forecast mail sentence day"
+msgid "l j F Y"
+msgstr "j F Y l"
+
+msgctxt "forecast mail time"
+msgid "j M Y, H:i"
+msgstr "j F Y, H:i"
+
+msgctxt "Excel date format"
+msgid "dd mmm yyyy"
+msgstr "dd.mm.yyyy"
+
+#, python-format
+msgid "%(subject)s (%(clock)s edition)"
+msgstr "%(subject)s (%(clock)s gönderimi)"
+
+#, python-format
+msgid "%(plant)s: forecast for %(date)s"
+msgstr "%(plant)s: %(date)s üretim tahmini"
+
+#, python-format
+msgid "%(plant)s: irradiance forecast for %(date)s"
+msgstr "%(plant)s: %(date)s ışınım tahmini"
+
+#, python-format
+msgid "%(plant)s: forecast for %(date)s is incomplete"
+msgstr "%(plant)s: %(date)s tahmini eksik"
+
+#, python-format
+msgid "%(plant)s: no forecast for %(date)s"
+msgstr "%(plant)s: %(date)s tahmini hazırlanamadı"
+
+msgid "Generation forecast"
+msgstr "Üretim tahmini"
+
+msgid "Solar irradiance forecast (GHI), not electricity generation"
+msgstr "Güneş ışınımı tahmini (GHI); elektrik üretimi değildir"
+
+#, python-format
+msgid "%(plant)s: generation forecast"
+msgstr "%(plant)s: üretim tahmini"
+
+#, python-format
+msgid "%(plant)s: solar irradiance forecast (GHI), not electricity generation"
+msgstr "%(plant)s: güneş ışınımı tahmini (GHI); elektrik üretimi değildir"
+
+msgid "Tomorrow"
+msgstr "Yarın"
+
+msgid "Today"
+msgstr "Bugün"
+
+msgid "Tomorrow's forecast is incomplete"
+msgstr "Yarının tahmini eksik"
+
+msgid "No forecast for tomorrow"
+msgstr "Yarının tahmini hazırlanamadı"
+
+#, python-format
+msgid "Includes the recorded outage. Without it: %(energy)s."
+msgstr "Kayıtlı kesinti dahil. Kesinti olmasaydı: %(energy)s."
+
+msgid "The recorded outage is not included in this figure."
+msgstr "Kayıtlı kesinti bu rakama dahil değildir."
+
+msgid "Enter the available capacity in the outage record to include it."
+msgstr "Dahil edilmesi için kesinti kaydına kullanılabilir kapasiteyi girin."
+
+msgid "Data is missing for some hours, so no daily total is given."
+msgstr "Bazı saatlerin verisi eksik olduğundan günlük toplam verilmedi."
+
+msgid "No forecast data for this day."
+msgstr "Bu gün için tahmin verisi yok."
+
+#, python-format
+msgid "Forecast data: %(time)s (%(offset)s)"
+msgstr "Tahmin verisi: %(time)s (%(offset)s)"
+
+msgid "Newer forecast data was not available."
+msgstr "Daha yeni tahmin verisi alınamadı."
+
+msgid "Hourly values are in the attached Excel file."
+msgstr "Saatlik değerler ekteki Excel dosyasındadır."
+
+msgid "Interval values are in the attached Excel file."
+msgstr "Aralık değerleri ekteki Excel dosyasındadır."
+
+msgid "Open forecast in Pyracast"
+msgstr "Tahmini Pyracast'te aç"
+
+#, python-format
+msgid "The forecast for %(date)s could not be prepared. This email contains no figures."
+msgstr "%(date)s için üretim tahmini hazırlanamadı. Bu e-postada rakam yoktur."
+
+msgid "Open plant in Pyracast"
+msgstr "Santrali Pyracast'te aç"
+
+msgid "Summary"
+msgstr "Özet"
+
+msgid "Generation forecast · Pyracast"
+msgstr "Üretim tahmini · Pyracast"
+
+msgid "Solar irradiance forecast (GHI) · Pyracast"
+msgstr "Güneş ışınımı tahmini (GHI) · Pyracast"
+
+msgid "Forecast data"
+msgstr "Tahmin verisi"
+
+msgid "Time zone"
+msgstr "Saat dilimi"
+
+msgid "Unit"
+msgstr "Birim"
 
 msgid "Date"
 msgstr "Tarih"
 
-msgid "Coverage"
-msgstr "Kapsam"
+msgid "Forecast (MWh)"
+msgstr "Tahmin (MWh)"
 
-msgid "Outage coverage"
-msgstr "Kesinti senaryosu kapsamı"
+msgid "Irradiance (kWh/m²)"
+msgstr "Işınım (kWh/m²)"
 
-msgid "Status"
-msgstr "Durum"
+msgid "Without outage (MWh)"
+msgstr "Kesinti olmadan (MWh)"
+
+msgid "The Forecast column includes the recorded outage."
+msgstr "Tahmin sütunu kayıtlı kesintiyi içerir."
+
+#, python-format
+msgid "%(date)s: the recorded outage is not included."
+msgstr "%(date)s: kayıtlı kesinti dahil değildir."
+
+#, python-format
+msgid "%(date)s: data is missing for some hours; no daily total."
+msgstr "%(date)s: bazı saatlerin verisi eksik; günlük toplam verilmedi."
+
+#, python-format
+msgid "%(date)s: no forecast data."
+msgstr "%(date)s: tahmin verisi yok."
+
+msgid "Hourly"
+msgstr "Saatlik"
+
+msgctxt "workbook sheet"
+msgid "Intervals"
+msgstr "Aralıklar"
 
 msgid "From"
 msgstr "Başlangıç"
@@ -66,90 +184,11 @@ msgstr "Başlangıç"
 msgid "To"
 msgstr "Bitiş"
 
-#, python-format
-msgid "Normal operation (%(unit)s)"
-msgstr "Normal çalışma (%(unit)s)"
-
-#, python-format
-msgid "Forecast (%(unit)s)"
-msgstr "Tahmin (%(unit)s)"
-
-#, python-format
-msgid "With reported outage (%(unit)s)"
-msgstr "Kayıtlı kesintiyle (%(unit)s)"
-
-msgid "Normal operation"
-msgstr "Normal çalışma"
-
-msgid "With reported outage"
-msgstr "Kayıtlı kesintiyle"
-
-msgid "Partial estimate"
-msgstr "Tahmin kısmi"
-
-msgid "Outage partial"
-msgstr "Kesinti senaryosu kısmi"
-
-msgid "Estimate unavailable"
-msgstr "Tahmin yok"
-
-msgid "Irradiance estimate, not plant electricity."
-msgstr "Işınım tahminidir; santral üretimi değildir."
-
-msgid "Forecast data is over 24 hours old."
-msgstr "Tahmin verisi 24 saatten eski."
-
-msgid "Using the last saved forecast."
-msgstr "Son kayıtlı tahmin kullanılıyor."
-
-msgid "The outage scenario follows the recorded outage times and limits."
-msgstr ""
-"Kesinti senaryosu, kayıtlı kesinti saatlerini ve kapasite sınırlarını esas "
-"alır."
-
-#, python-format
-msgid "Partial: %(energy)s %(unit)s (%(coverage)s%% coverage)"
-msgstr "Kısmi: %(energy)s %(unit)s (%(coverage)s%% kapsam)"
-
-#, python-format
-msgid "Updated: %(time)s (%(timezone)s)"
-msgstr "Güncelleme: %(time)s (%(timezone)s)"
-
-msgid "Tomorrow's forecast is unavailable."
-msgstr "Yarının tahmini mevcut değil."
-
-#, python-format
-msgid "%(plant)s — forecast for %(date)s"
-msgstr "%(plant)s — %(date)s tahmini"
-
-msgid "Interval forecasts are in the attached Excel file."
-msgstr "Aralık tahminleri ekteki Excel dosyasındadır."
-
-msgid "View forecasts"
-msgstr "Tahminleri aç"
-
-msgid "Outage impact unknown"
-msgstr "Kesintinin etkisi belirsiz"
-
-msgid ""
-"Outage impact is unknown. Update the outage capacity to get an estimate."
-msgstr ""
-"Kesintinin etkisi belirsiz. Tahmin için kesinti kapasitesini güncelleyin."
-
-msgid "Outage unavailable"
-msgstr "Kesinti tahmini yok"
+msgid "UTC offset"
+msgstr "UTC farkı"
 
 msgid "Estimated actuals"
 msgstr "Gerçekleşen tahmini"
-
-msgid "Estimated + forecast"
-msgstr "Gerçekleşen tahmini + öngörü"
-
-msgid "Estimate (%(unit)s)"
-msgstr "Tahmin (%(unit)s)"
-
-msgid "Source"
-msgstr "Kaynak"
 
 msgid "This plant allows at most %(limit)s delivery times a day."
 msgstr "Bu santral günde en fazla %(limit)s gönderim saatine izin verir."

@@ -45,6 +45,7 @@ from tests.support.notifications import (
     mailboxes,
     moved,
     parsed,
+    saved,
     smtp_wire,
     store,
     ties,
@@ -351,6 +352,75 @@ def test_the_smtp_headers_and_envelope_carry_each_plain_address_as_typed(eight_b
     assert transaction.data.isascii()
 
 
+AUTOMATIC = {
+    "Auto-Submitted": "auto-generated",
+    "X-Auto-Response-Suppress": "OOF, AutoReply",
+    "Content-Language": "en",
+}
+
+
+def assert_automatic(message: WireMessage) -> None:
+    assert {name: message[name] for name in AUTOMATIC} == AUTOMATIC
+    assert message["List-Unsubscribe"] == "<mailto:reminders@example.com?subject=unsubscribe>"
+    assert message["Message-ID"].startswith("<reminder.")
+    for name in ("In-Reply-To", "References", "Thread-Topic", "Thread-Index"):
+        assert message[name] is None
+
+
+SHAPES = {
+    "file": [
+        "multipart/mixed",
+        "multipart/alternative",
+        "text/plain",
+        "text/html",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ],
+    "no figures": ["multipart/alternative", "text/plain", "text/html"],
+    "notice": ["text/plain"],
+}
+
+
+def prepare_shape(system: System, monkeypatch: pytest.MonkeyPatch, shape: str) -> None:
+    if shape == "file":
+        saved(system)
+    if shape == "notice":
+
+        def broken(*args: object, **kwargs: object) -> EmailMessage:
+            raise RuntimeError("The renderer cannot be used.")
+
+        monkeypatch.setattr(jobs, "build_message", broken)
+
+
+def assert_shape(message: WireMessage, shape: str) -> None:
+    assert [part.get_content_type() for part in message.walk()] == SHAPES[shape]
+    files = [part.get_filename() for part in message.walk() if part.get_filename()]
+    assert files == (["pyracast-site-2026-11-11.xlsx"] if shape == "file" else [])
+    body = message.get_body(("plain",))
+    assert body is not None
+    text = body.get_content()
+    assert ("This email contains no figures." in text) is (shape != "file")
+    assert ("Open plant in Pyracast:" in text) is (shape != "file")
+
+
+@pytestdb
+@pytest.mark.parametrize("shape", list(SHAPES))
+def test_smtp_carries_the_automatic_mail_headers_and_parts_of_each_mail_shape(
+    monkeypatch: pytest.MonkeyPatch, shape: str
+) -> None:
+    system = workspace()
+    typed_schedule(system)
+    prepare_shape(system, monkeypatch, shape)
+
+    with smtp_wire() as script:
+        delivery_id = send_on()
+
+    assert NotificationDelivery.objects.get(pk=delivery_id).status == "sent"
+    (transaction,) = script.transactions
+    message = parsed(transaction.data)
+    assert_automatic(message)
+    assert_shape(message, shape)
+
+
 @pytest.fixture
 def gmail_requests(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[bytes]]:
     sent: list[bytes] = []
@@ -395,6 +465,24 @@ def test_the_gmail_request_carries_each_plain_address_as_typed(
         typed_as(CC),
         typed_as(BCC),
     ]
+
+
+@pytestdb
+@pytest.mark.parametrize("shape", list(SHAPES))
+def test_gmail_carries_the_automatic_mail_headers_and_parts_of_each_mail_shape(
+    gmail_requests: list[bytes], monkeypatch: pytest.MonkeyPatch, shape: str
+) -> None:
+    system = workspace()
+    typed_schedule(system)
+    prepare_shape(system, monkeypatch, shape)
+
+    delivery_id = send_on()
+
+    assert NotificationDelivery.objects.get(pk=delivery_id).status == "sent"
+    (raw,) = gmail_requests
+    message = parsed(raw)
+    assert_automatic(message)
+    assert_shape(message, shape)
 
 
 @pytestdb
