@@ -218,7 +218,7 @@ async function workspace(
                 date: "2026-11-12",
                 timezone: region.timezone,
                 freshness: "fresh",
-                source_kind: "Forecast",
+                source_kind: "forecasts",
                 result,
                 outage_scenario: active
                     ? {
@@ -338,7 +338,7 @@ test("outage lifecycle preserves metadata, compares both scenarios and restores 
         plant_name: "Outage plant",
         timezone: "Europe/Istanbul",
         date: "2026-11-12",
-        source_kind: "forecasts",
+        source_kind: "Forecast",
         starts_at: "2026-11-12T12:00:00+03:00",
         ends_at: "2026-11-12T13:00:00+03:00",
         normal_mean_power_mw: "2",

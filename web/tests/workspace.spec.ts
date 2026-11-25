@@ -250,9 +250,7 @@ test("missing plant configuration explains the selected day", async ({
         }),
     ).toBeVisible();
     await expect(
-        page.getByText(
-            "No configuration existed before the selected day began. Choose a later date.",
-        ),
+        page.getByText("Choose a later date.", { exact: true }),
     ).toBeVisible();
     await expect(page.getByText("configuration_unavailable")).toHaveCount(0);
 });
@@ -1070,17 +1068,14 @@ test("the data choice names what each view shows and keeps the date", async ({
     await choice.selectOption("forecast");
     await expect(day).toHaveValue("2026-03-29");
     await expect(page.getByLabel("Resolution")).toHaveValue("60");
-    await expect
-        .poll(() =>
-            plantRequests.at(-1)?.searchParams.get("resolution_minutes"),
-        )
-        .toBe("60");
-    await expect
-        .poll(() => plantRequests.at(-1)?.searchParams.get("data_source"))
-        .toBe("auto");
     await expect(heading).toHaveText("Generation forecast");
     await expect(choice).toHaveValue("forecast");
     await expect(generation).toContainText("129.29");
+    expect(
+        plantRequests
+            .map((url) => url.search)
+            .filter((search) => search.includes("date=2026-03-29")),
+    ).toEqual(["?date=2026-03-29&resolution_minutes=60&data_source=auto"]);
     await day.fill("2026-03-27");
     await expect(generation).toContainText("127.27");
     await expect(heading).toHaveText(
