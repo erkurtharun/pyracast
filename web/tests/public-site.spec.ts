@@ -3,6 +3,7 @@ import path from "node:path";
 import { test, expect } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
 import { legalCopy } from "../src/features/public-site/legal-copy";
+import { publicMetadata } from "../src/lib/public-metadata";
 import enCore from "../messages/en/core.json";
 import trCore from "../messages/tr/core.json";
 
@@ -362,8 +363,45 @@ test("the privacy notice sends a disconnection to the account section that offer
         const section = legalCopy(language, "privacy").sections.find(
             ({ id }) => id === "sign-in",
         );
-        expect(section!.paragraphs.join(" ")).toContain(
+        const text = section!.paragraphs.join(" ");
+        const direction = text.indexOf(
             `${catalogue.Dashboard.account} → ${catalogue.SocialAuth.linkedAccounts}`,
         );
+        expect(direction).toBeGreaterThan(-1);
+        const prerequisite = text.indexOf(
+            language === "en"
+                ? "You can disconnect it once your account has a password or another connected account."
+                : "Hesabınızda şifre veya başka bir bağlı hesap varsa bağlantıyı kaldırabilirsiniz.",
+        );
+        expect(prerequisite).toBeGreaterThan(-1);
+        expect(prerequisite).toBeLessThan(direction);
+    }
+});
+
+test("the legal pages name Pyracast as the actor and use the account names of the app", () => {
+    for (const kind of ["privacy", "terms"] as const) {
+        const english = JSON.stringify(legalCopy("en", kind));
+        expect(english, kind).not.toMatch(/\b(we|us|our)\b/i);
+        expect(english, kind).not.toMatch(
+            /two-factor|sign-ins|production forecasts/i,
+        );
+        expect(english, kind).not.toMatch(/(?<!active )\bsessions?\b/i);
+        const turkish = JSON.stringify(legalCopy("tr", kind));
+        expect(turkish, kind).not.toMatch(/\bbize\b|\w+(ımız|imiz)\b/i);
+        expect(turkish, kind).not.toMatch(/(?<!açık )oturum/i);
+    }
+});
+
+test("the link preview image is described as the page metadata describes it", () => {
+    for (const [language, route] of [
+        ["en", "src/app/opengraph-image.tsx"],
+        ["tr", "src/app/tr/opengraph-image.tsx"],
+    ] as const) {
+        const source = readFileSync(path.resolve(route), "utf8");
+        const alt = /export const alt = "([^"]+)";/.exec(source)?.[1];
+        expect(alt, language).toBeDefined();
+        expect(publicMetadata(language, "home").openGraph?.images).toEqual([
+            expect.objectContaining({ alt }),
+        ]);
     }
 });

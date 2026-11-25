@@ -65,6 +65,7 @@ export function TwoFactorSettings({
     }>();
     const writeErrorMessage = useWriteErrorMessage();
     const stepHeadingRef = useRef<HTMLHeadingElement>(null);
+    const titleRef = useRef<HTMLHeadingElement>(null);
     const errorRef = useRef<HTMLDivElement>(null);
     const inFlight = useRef(false);
     const blobUrls = useRef<Set<{ url: string; timer: number }>>(new Set());
@@ -302,7 +303,9 @@ export function TwoFactorSettings({
     return (
         <section className="panel narrow" aria-busy={busy || undefined}>
             <div className="mfa-header">
-                <h2>{t("twoFactor")}</h2>
+                <h2 ref={titleRef} tabIndex={-1}>
+                    {t("twoFactor")}
+                </h2>
                 <TwoFactorStatusTag view={view} mfaRequired={mfaRequired} />
             </div>
             {notice && (
@@ -419,7 +422,8 @@ export function TwoFactorSettings({
                     onAcknowledge={() => {
                         setError(undefined);
                         setNotice(undefined);
-                        show({ kind: "enabled", facts });
+                        setView({ kind: "enabled", facts });
+                        requestAnimationFrame(() => titleRef.current?.focus());
                     }}
                 />
             )}

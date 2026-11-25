@@ -25,7 +25,7 @@ const askAuthenticator = {
         errors: [
             {
                 code: "mfa_reauthentication_required",
-                message: "Confirm with your authenticator app to continue.",
+                message: "Confirm with your authenticator to continue.",
             },
         ],
     },
@@ -211,6 +211,12 @@ test("a viewer enrolls with one code and receives the recovery codes with the ac
         page.getByRole("heading", { name: "Save your recovery codes" }),
     ).toHaveCount(0);
     await expect(twoFactorPanel(page).getByRole("status")).toHaveCount(0);
+    await expect(
+        page.getByRole("heading", {
+            name: "Two-step verification",
+            exact: true,
+        }),
+    ).toBeFocused();
     await page.reload();
     await page.getByRole("button", { name: "Account" }).click();
     await expect(
@@ -377,6 +383,40 @@ test("MFA setup and recovery codes remain accessible on desktop and a 320px scre
         fullPage: true,
     });
 });
+
+for (const [unused, warning] of [
+    [0, "No recovery codes left. Create new ones."],
+    [2, "Only a few recovery codes remain."],
+] as const) {
+    test(`an authenticator with ${unused} unused recovery codes says what to do`, async ({
+        page,
+    }) => {
+        await mockTwoFactor(page, { enabled: true });
+        await page.route(`**${authenticatorsPath}`, (route) =>
+            route.fulfill({
+                json: {
+                    status: 200,
+                    data: [
+                        {
+                            type: "totp",
+                            created_at: 1767225600,
+                            last_used_at: null,
+                        },
+                        {
+                            type: "recovery_codes",
+                            unused_code_count: unused,
+                            total_code_count: 10,
+                        },
+                    ],
+                },
+            }),
+        );
+        await openSettings(page);
+        await expect(twoFactorPanel(page).getByRole("status")).toHaveText(
+            warning,
+        );
+    });
+}
 
 test("an enabled authenticator shows its facts and replaces codes only after confirmation", async ({
     page,

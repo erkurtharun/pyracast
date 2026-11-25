@@ -93,7 +93,7 @@ test("administrator recovery codes request a fresh authenticator confirmation", 
                         {
                             code: "mfa_reauthentication_required",
                             message:
-                                "Confirm with your authenticator app to continue.",
+                                "Confirm with your authenticator to continue.",
                         },
                     ],
                 },
@@ -104,10 +104,16 @@ test("administrator recovery codes request a fresh authenticator confirmation", 
     await page.getByRole("button", { name: "Generate recovery codes" }).click();
     await page.getByRole("button", { name: "Replace codes" }).click();
     await expect(
-        page.getByRole("heading", { name: "Confirm with your authenticator" }),
+        page.getByRole("heading", {
+            name: "Confirm with your authenticator app",
+            exact: true,
+        }),
     ).toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Confirm code" }),
+        page.getByLabel("Authenticator code or recovery code", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "Confirm code", exact: true }),
     ).toBeVisible();
 });
 

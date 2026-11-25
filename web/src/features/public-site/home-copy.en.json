@@ -36,7 +36,7 @@
     ],
     "startEyebrow": "Getting started",
     "startTitle": "Start with your plant.",
-    "startText": "Create a workspace and add your plant. Forecasts start once Pyracast approves the plant.",
+    "startText": "Create a workspace and add your plant. Pyracast needs to approve the plant before forecasts can start.",
     "updated": "Last updated",
     "contents": "On this page",
     "back": "Back to home"

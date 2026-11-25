@@ -362,7 +362,9 @@ test("the code stage names the address and leaving it ends the pending sign-up o
         page.getByRole("heading", { name: "Verify your email", exact: true }),
     ).toBeVisible();
     await expect(
-        page.getByText("Enter the email code sent to owner@example.test."),
+        page.getByText(
+            "Check your email at owner@example.test and enter the email code.",
+        ),
     ).toBeVisible();
     await expect(
         page.getByRole("navigation", { name: "Account access" }),
@@ -380,7 +382,7 @@ for (const [flow, title, guide, leave] of [
     [
         "verify_email",
         "Verify your email",
-        "Enter the email code sent to the address you entered.",
+        "Check your email and enter the email code.",
         "Use a different address",
     ],
     [
@@ -392,7 +394,7 @@ for (const [flow, title, guide, leave] of [
     [
         "password_reset_by_code",
         "Choose a new password",
-        "If an account uses the address you entered, an email code was sent to it. Enter the code and choose a new password.",
+        "If an account uses the address you entered, Pyracast sends an email code to it. Enter the code and choose a new password.",
         "Cancel password reset",
     ],
     [
@@ -527,7 +529,9 @@ for (const [status, code, title] of [
                 exact: true,
             })
             .click();
-        await expect(page.getByText("A new code was sent.")).toBeVisible();
+        await expect(
+            page.getByText("Check your email for a new code.", { exact: true }),
+        ).toBeVisible();
         await page.getByLabel("Email code").fill("ABCD-EFGH");
         await page
             .getByRole("button", { name: "Verify email", exact: true })
@@ -535,7 +539,9 @@ for (const [status, code, title] of [
         await expect(
             page.getByRole("heading", { name: title, exact: true }),
         ).toBeFocused();
-        await expect(page.getByText("A new code was sent.")).toHaveCount(0);
+        await expect(
+            page.getByText("Check your email for a new code.", { exact: true }),
+        ).toHaveCount(0);
     });
 }
 
@@ -721,11 +727,19 @@ test("resend is disabled with a countdown after a code is sent", async ({
             exact: true,
         }),
     ).toBeDisabled();
+    await expect(
+        page.getByRole("button", {
+            name: "Send code again in 30 s",
+            exact: true,
+        }),
+    ).toHaveJSProperty("textContent", "Send code again in 30\u00a0s");
     await page.clock.runFor(30_000);
     await page
         .getByRole("button", { name: "Send email code again", exact: true })
         .click();
-    await expect(page.getByText("A new code was sent.")).toBeVisible();
+    await expect(
+        page.getByText("Check your email for a new code.", { exact: true }),
+    ).toBeVisible();
     await expect(
         page.getByRole("button", {
             name: "Send code again in 60 s",
@@ -1093,7 +1107,7 @@ test("a completed password reset returns to sign in", async ({ page }) => {
     ).toBeVisible();
     await expect(
         page.getByText(
-            "If an account uses owner@example.test, an email code was sent to it. Enter the code and choose a new password.",
+            "If an account uses owner@example.test, Pyracast sends an email code to it. Enter the code and choose a new password.",
             { exact: true },
         ),
     ).toBeVisible();

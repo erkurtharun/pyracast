@@ -354,11 +354,20 @@ test("social-only accounts confirm email before disconnecting the selected provi
         path: test.info().outputPath("linked-reauth-mobile.png"),
         fullPage: true,
     });
+    const accounts = page.getByRole("region", { name: "Connected accounts" });
+    await expect(
+        accounts.getByText(`Pyracast sends the email code to ${user.email}.`, {
+            exact: true,
+        }),
+    ).toHaveCount(1);
     await page.getByRole("button", { name: "Send email code" }).click();
-    await page
-        .getByRole("region", { name: "Connected accounts" })
-        .getByLabel("Email code", { exact: true })
-        .fill("123456");
+    await expect(
+        accounts.getByText("Check your email for the code.", { exact: true }),
+    ).toHaveCount(1);
+    await expect(
+        accounts.getByText(/Pyracast sends the email code/),
+    ).toHaveCount(0);
+    await accounts.getByLabel("Email code", { exact: true }).fill("123456");
     await page
         .getByRole("button", { name: "Confirm code", exact: true })
         .click();
@@ -801,7 +810,7 @@ test("a provider connection that needs a confirmation asks for the factor it nam
             errors: [
                 {
                     code: "mfa_reauthentication_required",
-                    message: "Confirm with your authenticator app to continue.",
+                    message: "Confirm with your authenticator to continue.",
                 },
             ],
         },
@@ -867,7 +876,9 @@ test("a refused provider connection shows the callback error", async ({
         status: 403,
         json: { status: 403 },
     });
-    await expect(accounts.getByRole("alert")).toContainText("did not complete");
+    await expect(accounts.getByRole("alert")).toHaveText(
+        "This account could not be connected. Try again.",
+    );
     await expect(
         accounts.getByText("Account connected.", { exact: true }),
     ).toHaveCount(0);
@@ -899,7 +910,13 @@ test("a connected account says when it cannot be disconnected or used to sign in
     await expect(
         accounts.getByText("Cannot be used to sign in", { exact: true }),
     ).toBeVisible();
-    await expect(accounts.getByText(/Your only way to sign in/)).toBeVisible();
+    await expect(
+        accounts.getByText(
+            "To disconnect it, set a password or connect another account first.",
+            { exact: true },
+        ),
+    ).toBeVisible();
+    await expect(accounts.getByText(/Your only way to sign in/)).toHaveCount(0);
 });
 
 test("a disconnection answered with a refusal that is not allauth's shows an error and keeps the account", async ({

@@ -1571,9 +1571,6 @@ pre,
     top: 48px;
     left: 56px;
 }
-.auth-story .eyebrow {
-    color: var(--amber-300);
-}
 .auth-story h1,
 .auth-story h2 {
     max-width: 9.5em;
