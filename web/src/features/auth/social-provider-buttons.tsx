@@ -40,16 +40,20 @@ export function SocialProviderButtons({
     process = "login",
     enabledProviders,
 }: {
-    process?: "login" | "connect";
+    process?: "login" | "signup" | "connect";
     enabledProviders?: SocialProvider[];
 }) {
     const t = useTranslations("SocialAuth");
     const csrfToken = useSessionState().session?.csrf_token ?? "";
     const providers = useSocialProviders(enabledProviders);
+    const flow = process === "connect" ? "connect" : "login";
+    const label = (
+        { login: "continue", signup: "signUp", connect: "connect" } as const
+    )[process];
     // A console link to return to after the sign-in; the server keeps it only when it is a console
     // path of this site.
     const next =
-        process === "login" && typeof window !== "undefined"
+        flow === "login" && typeof window !== "undefined"
             ? new URLSearchParams(window.location.search).get("next")
             : null;
     if (!providers.length) return null;
@@ -67,7 +71,7 @@ export function SocialProviderButtons({
                         value={csrfToken}
                     />
                     <input type="hidden" name="provider" value={provider} />
-                    <input type="hidden" name="process" value={process} />
+                    <input type="hidden" name="process" value={flow} />
                     {next && <input type="hidden" name="next" value={next} />}
                     <input
                         type="hidden"
@@ -89,13 +93,7 @@ export function SocialProviderButtons({
                             height={20}
                             alt=""
                         />
-                        <span>
-                            {t(
-                                process === "connect"
-                                    ? `connect.${provider}`
-                                    : `continue.${provider}`,
-                            )}
-                        </span>
+                        <span>{t(`${label}.${provider}`)}</span>
                     </button>
                 </form>
             ))}
@@ -104,7 +102,7 @@ export function SocialProviderButtons({
                     {t("microsoftHint")}
                 </p>
             )}
-            {process === "login" && (
+            {flow === "login" && (
                 <div className="auth-divider">
                     <span>{t("emailDivider")}</span>
                 </div>

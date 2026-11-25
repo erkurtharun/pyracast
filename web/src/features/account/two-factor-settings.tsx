@@ -14,6 +14,7 @@ import {
     type AuthenticatorRecord,
     type AuthResult,
 } from "@/lib/auth-api";
+import { contactEmail } from "@/lib/public-metadata";
 import { refreshExpiredSession } from "./security-reauthentication";
 import { StepUpPrompt, stepUpMode, useStepUp } from "./step-up";
 import { AuthenticatorSetup } from "./authenticator-setup";
@@ -284,7 +285,7 @@ export function TwoFactorSettings({
             }, 1000),
         };
         blobUrls.current.add(entry);
-        setNotice("codesDownloaded");
+        setNotice(undefined);
     }
 
     const facts: Facts = "facts" in view ? view.facts : {};
@@ -304,7 +305,6 @@ export function TwoFactorSettings({
                 <h2>{t("twoFactor")}</h2>
                 <TwoFactorStatusTag view={view} mfaRequired={mfaRequired} />
             </div>
-            {view.kind === "disabled" && <p>{t("authenticatorHelp")}</p>}
             {notice && (
                 <div className="notice" role="status">
                     {t(notice)}
@@ -353,7 +353,9 @@ export function TwoFactorSettings({
                 <div className="mfa-actions">
                     {mfaRequired ? (
                         <div className="notice" role="status">
-                            {t("policySetupUnavailable")}
+                            {t("policySetupUnavailable", {
+                                contact: contactEmail,
+                            })}
                         </div>
                     ) : (
                         <button
@@ -416,7 +418,7 @@ export function TwoFactorSettings({
                     onDownload={() => download(view.codes)}
                     onAcknowledge={() => {
                         setError(undefined);
-                        setNotice("recoverySavedAck");
+                        setNotice(undefined);
                         show({ kind: "enabled", facts });
                     }}
                 />

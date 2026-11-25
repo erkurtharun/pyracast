@@ -25,7 +25,7 @@ const askAuthenticator = {
         errors: [
             {
                 code: "mfa_reauthentication_required",
-                message: "Confirm with your authenticator to continue.",
+                message: "Confirm with your authenticator app to continue.",
             },
         ],
     },
@@ -139,7 +139,7 @@ async function openSettings(page: Page) {
 function twoFactorPanel(page: Page) {
     return page.locator("section").filter({
         has: page.getByRole("heading", {
-            name: "Two-factor authentication",
+            name: "Two-step verification",
             exact: true,
         }),
     });
@@ -180,7 +180,7 @@ test("a viewer enrolls with one code and receives the recovery codes with the ac
     expect(
         jsQR(new Uint8ClampedArray(png.data), png.width, png.height)?.data,
     ).toBe(provisioningUri);
-    await page.getByText("Can't scan? Use setup key", { exact: true }).click();
+    await page.getByText("Show setup key", { exact: true }).click();
     await expect(page.getByText(secret, { exact: true })).toBeVisible();
     await expect(
         twoFactorPanel(page).getByText("Enabled", { exact: true }),
@@ -207,6 +207,10 @@ test("a viewer enrolls with one code and receives the recovery codes with the ac
     await page
         .getByRole("button", { name: "I have saved my codes", exact: true })
         .click();
+    await expect(
+        page.getByRole("heading", { name: "Save your recovery codes" }),
+    ).toHaveCount(0);
+    await expect(twoFactorPanel(page).getByRole("status")).toHaveCount(0);
     await page.reload();
     await page.getByRole("button", { name: "Account" }).click();
     await expect(
@@ -239,7 +243,7 @@ test("failed enrollment retains the key and a corrected code can be submitted", 
     });
     await openSettings(page);
     await page.getByRole("button", { name: "Set up authenticator" }).click();
-    await page.getByText("Can't scan? Use setup key", { exact: true }).click();
+    await page.getByText("Show setup key", { exact: true }).click();
     await page.getByLabel("Authenticator code", { exact: true }).fill("000000");
     await page.getByRole("button", { name: "Activate authenticator" }).click();
     await expect(
@@ -260,7 +264,7 @@ test("cancelling setup clears the provisioning key without enabling MFA", async 
     const state = await mockTwoFactor(page);
     await openSettings(page);
     await page.getByRole("button", { name: "Set up authenticator" }).click();
-    await page.getByText("Can't scan? Use setup key", { exact: true }).click();
+    await page.getByText("Show setup key", { exact: true }).click();
     await expect(page.getByText(secret, { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(page.getByText(secret, { exact: true })).not.toBeVisible();
@@ -299,7 +303,7 @@ test("an authenticator read refused for a renewed session key is read again afte
     expect(reads).toContain("answered");
     expect(reads.indexOf("session")).toBeLessThan(reads.indexOf("answered"));
     await setup.click();
-    await page.getByText("Can't scan? Use setup key", { exact: true }).click();
+    await page.getByText("Show setup key", { exact: true }).click();
     await expect(page.getByText(secret, { exact: true })).toBeVisible();
     expect(state.setupRequests).toBe(1);
 });
@@ -433,18 +437,18 @@ test("removing an optional authenticator requires confirmation and cancellation 
     const state = await mockTwoFactor(page, { enabled: true, viewer: true });
     await openSettings(page);
     await page
-        .getByRole("button", { name: "Remove authenticator", exact: true })
+        .getByRole("button", { name: "Remove authenticator app", exact: true })
         .click();
     await expect(
-        page.getByRole("heading", { name: "Remove authenticator?" }),
+        page.getByRole("heading", { name: "Remove authenticator app?" }),
     ).toBeVisible();
     expect(state.removals).toBe(0);
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await page
-        .getByRole("button", { name: "Remove authenticator", exact: true })
+        .getByRole("button", { name: "Remove authenticator app", exact: true })
         .click();
     await page
-        .getByRole("button", { name: "Remove authenticator", exact: true })
+        .getByRole("button", { name: "Remove authenticator app", exact: true })
         .click();
     await expect(
         page.getByRole("button", { name: "Set up authenticator" }),
@@ -461,12 +465,10 @@ test("a platform administrator sees required MFA without customer enrollment or 
     const state = await mockTwoFactor(page, { enabled: true, admin: true });
     await openSettings(page);
     await expect(
-        page.getByText(
-            "Two-factor authentication is required for this account.",
-        ),
+        page.getByText("Two-step verification is required for this account."),
     ).toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Remove authenticator" }),
+        page.getByRole("button", { name: "Remove authenticator app" }),
     ).not.toBeVisible();
     await expect(
         page.getByRole("button", { name: "Set up authenticator" }),
@@ -576,10 +578,10 @@ for (const resumeAllowed of [true, false]) {
                 name: "Confirm with your authenticator",
             }),
         ).toBeVisible();
-        await panel.getByLabel("Authenticator or recovery code").fill("000001");
         await panel
-            .getByRole("button", { name: "Confirm authenticator" })
-            .click();
+            .getByLabel("Authenticator code or recovery code")
+            .fill("000001");
+        await panel.getByRole("button", { name: "Confirm code" }).click();
         if (resumeAllowed)
             await expect(
                 panel.getByText("20000001", { exact: true }),
@@ -589,7 +591,7 @@ for (const resumeAllowed of [true, false]) {
                 panel.getByText("This change needs your confirmation again."),
             ).toBeVisible();
             await expect(
-                panel.getByLabel("Authenticator or recovery code"),
+                panel.getByLabel("Authenticator code or recovery code"),
             ).toHaveValue("");
             await expect(
                 panel.getByRole("heading", {
@@ -637,6 +639,9 @@ test("recovery codes can be copied or downloaded without persisting them in brow
         .getByRole("button", { name: "Download (.txt)", exact: true })
         .click();
     const download = await downloading;
+    await expect(twoFactorPanel(page).getByRole("status")).toHaveText([
+        "Save these codes now. They are shown once, and each works once.",
+    ]);
     expect(download.suggestedFilename()).toBe("pyracast-recovery-codes.txt");
     expect(await readFile(await download.path(), "utf8")).toBe(
         "20000001\n20000002\n20000003\n",
@@ -661,7 +666,7 @@ test("switching language preserves the in-progress QR, code draft and shown-once
     });
     await openSettings(page);
     await page.getByRole("button", { name: "Set up authenticator" }).click();
-    await page.getByText("Can't scan? Use setup key", { exact: true }).click();
+    await page.getByText("Show setup key", { exact: true }).click();
     const panel = page
         .locator("section")
         .filter({ has: page.locator(".mfa-header") });
@@ -813,7 +818,7 @@ for (const operation of ["remove", "replace"] as const) {
             .getByRole("button", {
                 name:
                     operation === "remove"
-                        ? "Remove authenticator"
+                        ? "Remove authenticator app"
                         : "Replace recovery codes",
                 exact: true,
             })
@@ -822,21 +827,21 @@ for (const operation of ["remove", "replace"] as const) {
             .getByRole("button", {
                 name:
                     operation === "remove"
-                        ? "Remove authenticator"
+                        ? "Remove authenticator app"
                         : "Replace codes",
                 exact: true,
             })
             .click();
-        await panel.getByLabel("Authenticator or recovery code").fill("012345");
+        await panel
+            .getByLabel("Authenticator code or recovery code")
+            .fill("012345");
         const authenticating = page.waitForRequest(
             "**/api/auth/browser/v1/auth/2fa/reauthenticate",
         );
         const authenticated = page.waitForResponse(
             "**/api/auth/browser/v1/auth/2fa/reauthenticate",
         );
-        await panel
-            .getByRole("button", { name: "Confirm authenticator" })
-            .click();
+        await panel.getByRole("button", { name: "Confirm code" }).click();
         await authenticating;
         await page.getByRole("button", { name: "Plants", exact: true }).click();
         await expect(

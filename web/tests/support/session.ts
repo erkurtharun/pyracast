@@ -15,7 +15,7 @@ export const secondUser = {
 };
 export const secondAccount = { user: secondUser, tag: "tag-b" };
 
-export const expiredNotice = "Your session has expired. Please sign in again.";
+export const expiredNotice = "You were signed out. Sign in again.";
 export const changedNotice =
     "The session changed in another tab. The page now shows the current session.";
 

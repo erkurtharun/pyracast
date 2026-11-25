@@ -8,7 +8,6 @@ export function AuthStory() {
         <section className="auth-story" aria-label="Pyracast">
             <Brand surface="dark" />
             <div>
-                <p className="eyebrow">{t("solarIntelligence")}</p>
                 <h2>
                     {t("portfolio")}
                     <br />

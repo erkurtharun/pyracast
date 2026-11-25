@@ -38,7 +38,7 @@ function privacyEnglish(operator: PublicOperator): LegalContent {
         kind: "privacy",
         title: "Privacy policy",
         intro: "How Pyracast handles your account and solar forecasting data.",
-        updated: "2026-11-23",
+        updated: "2026-11-25",
         sections: [
             {
                 id: "operator",
@@ -55,8 +55,8 @@ function privacyEnglish(operator: PublicOperator): LegalContent {
                 ],
                 bullets: [
                     "Account identifiers, email, password hashes where used, preferences, membership and security settings.",
-                    "Workspace and plant details, locations, production, forecasts, incidents and change histories.",
-                    "Recipient addresses, schedules, messages and delivery records.",
+                    "Workspace and plant details, locations, production, forecasts, outages and change histories.",
+                    "Recipient addresses, send times, messages and delivery records.",
                     "Sessions, IP addresses, authentication and operational logs.",
                 ],
             },
@@ -64,7 +64,7 @@ function privacyEnglish(operator: PublicOperator): LegalContent {
                 id: "purposes",
                 title: "Why we use it",
                 paragraphs: [
-                    "We use information to manage access, provide forecasts, send service messages and requested reminders, support users and investigate failures or abuse.",
+                    "We use information to manage access, provide forecasts, send service messages and forecast emails, support users and investigate failures or abuse.",
                     "Processing relies on contract performance where applicable, our legitimate interest in service security subject to your rights, and applicable legal obligations.",
                 ],
             },
@@ -73,7 +73,7 @@ function privacyEnglish(operator: PublicOperator): LegalContent {
                 title: "Google and Microsoft sign-in",
                 paragraphs: [
                     "If you choose Google or Microsoft sign-in, we receive identity, email and basic profile information to authenticate or link your account. We retain the identifier and email, without sign-in access or refresh tokens. Sign-in gives no mailbox access.",
-                    "Disconnect in Account → Security once another sign-in method works. Disconnecting does not delete account or workspace records.",
+                    "Disconnect it under Account → Connected accounts. Disconnecting does not delete account or workspace records.",
                 ],
                 links: [
                     {
@@ -86,7 +86,7 @@ function privacyEnglish(operator: PublicOperator): LegalContent {
                 id: "sharing",
                 title: "Who receives information",
                 paragraphs: [
-                    "Workspace members access shared records according to their roles; the operator accesses them for administration and support. Selected recipients receive configured messages. A reminder can show recipients' addresses to the other recipients of that reminder, including recipients outside the workspace; the workspace administrator chooses whose address is shown.",
+                    "Workspace members access shared records according to their roles; the operator accesses them for administration and support. Selected recipients receive configured messages. A forecast email can show recipients' addresses to the other recipients of that email, including recipients outside the workspace; the workspace administrator chooses whose address is shown.",
                     "Hosting, traffic security, email, sign-in and forecast or production data providers process information needed for those functions, including relevant plant identifiers and coordinates. Processing may occur abroad. Authorities may receive legally required disclosures.",
                 ],
             },
@@ -101,8 +101,8 @@ function privacyEnglish(operator: PublicOperator): LegalContent {
                 id: "retention",
                 title: "Retention and deletion",
                 paragraphs: [
-                    "Records are kept as needed for the service, shared workspaces, security and legal obligations, within these limits: sign-in sessions are removed when they expire; a sign-up that was never completed is removed after 7 days; copies of outgoing mail are removed 7 days after they are sent or fail; invitations are removed 90 days after they are accepted, cancelled or expire; the text of reminder messages is cleared after 90 days; security records are kept for up to 365 days. Deleted plants and locations have a 30-day restore period. Backups are configured to expire after seven days; data removed from the live system remains in backups until they expire.",
-                    `Request account erasure at ${operator.email}. We may verify identity and workspace ownership. Erasure anonymizes the account: its sign-in details, name, addresses, two-factor authentication, connected sign-ins, sessions, memberships and preferences are removed, as are the invitations, mail and reminder recipient entries that name its addresses. Records shared with a workspace and the audit trail remain, linked only to the anonymized account. Security records, which hold the account's identifier, the IP address of a request and, for some events, a keyed hash of the email address entered, but no name and no readable email address, are not removed by an erasure and expire after at most 365 days. Removing membership or connections preserves shared records. We explain any required retention.`,
+                    "Records are kept as needed for the service, shared workspaces, security and legal obligations, within these limits: sign-in sessions are removed when they expire; a sign-up that was never completed is removed after 7 days; copies of outgoing mail are removed 7 days after they are sent or fail; invitations are removed 90 days after they are accepted, cancelled or expire; the text of forecast emails is cleared after 90 days; security records are kept for up to 365 days. Deleted plants can be restored for 30 days. Backups are configured to expire after seven days; data removed from the live system remains in backups until they expire.",
+                    `Request account erasure at ${operator.email}. We may verify identity and workspace ownership. Erasure anonymizes the account: its sign-in details, name, addresses, two-factor authentication, connected sign-ins, sessions, memberships and preferences are removed, as are the invitations, mail and forecast email recipient entries that name its addresses. Records shared with a workspace and the audit trail remain, linked only to the anonymized account. Security records, which hold the account's identifier, the IP address of a request and, for some events, a keyed hash of the email address entered, but no name and no readable email address, are not removed by an erasure and expire after at most 365 days. Removing membership or connections preserves shared records. We explain any required retention.`,
                 ],
             },
             {
@@ -122,7 +122,7 @@ function privacyTurkish(operator: PublicOperator): LegalContent {
         kind: "privacy",
         title: "Gizlilik politikası",
         intro: "Pyracast hesap bilgilerinizi ve güneş enerjisi tahmin verilerini nasıl işler?",
-        updated: "2026-11-23",
+        updated: "2026-11-25",
         sections: [
             {
                 id: "operator",
@@ -138,9 +138,9 @@ function privacyTurkish(operator: PublicOperator): LegalContent {
                     "Bilgileri sizden, çalışma alanı yöneticilerinden ve hizmet sağlayıcılarından; elektronik formlar, bağlı hizmetler ve otomatik güvenlik kayıtları yoluyla toplarız.",
                 ],
                 bullets: [
-                    "Hesap kimlikleri, e-posta, varsa parola özetleri, tercihler, üyelik ve güvenlik ayarları.",
-                    "Çalışma alanı ve santral bilgileri, konumlar, üretim, tahminler, olaylar ve değişiklik geçmişi.",
-                    "Alıcı adresleri, programlar, mesajlar ve gönderim kayıtları.",
+                    "Hesap kimlikleri, e-posta, varsa şifre özetleri, tercihler, üyelik ve güvenlik ayarları.",
+                    "Çalışma alanı ve santral bilgileri, konumlar, üretim, tahminler, kesintiler ve değişiklik geçmişi.",
+                    "Alıcı adresleri, gönderim saatleri, mesajlar ve gönderim kayıtları.",
                     "Oturumlar, IP adresleri, kimlik doğrulama kayıtları ve işletim günlükleri.",
                 ],
             },
@@ -148,7 +148,7 @@ function privacyTurkish(operator: PublicOperator): LegalContent {
                 id: "purposes",
                 title: "Neden kullanıyoruz?",
                 paragraphs: [
-                    "Bilgileri erişimi yönetmek, tahmin sunmak, hizmet mesajları ve talep edilen hatırlatmaları göndermek, destek sağlamak ve hataları veya kötüye kullanımı incelemek için kullanırız.",
+                    "Bilgileri erişimi yönetmek, tahmin sunmak, hizmet mesajları ve tahmin e-postaları göndermek, destek sağlamak ve hataları veya kötüye kullanımı incelemek için kullanırız.",
                     "İşlemenin hukuki sebepleri, uygulanabildiği ölçüde sözleşmenin ifası, haklarınız gözetilerek hizmet güvenliğini sağlamaya yönelik meşru menfaatimiz ve hukuki yükümlülüklerimizdir.",
                 ],
             },
@@ -157,7 +157,7 @@ function privacyTurkish(operator: PublicOperator): LegalContent {
                 title: "Google ve Microsoft ile giriş",
                 paragraphs: [
                     "Google veya Microsoft ile giriş yaparsanız, girişinizi doğrulamak veya hesabınızı bağlamak için kimlik, e-posta ve temel profil bilgilerini alırız. Sağlayıcı kimliğini ve e-postayı saklarız; giriş için kullanılan erişim veya yenileme belirteçlerini saklamayız. Giriş yapmak posta kutunuza erişim vermez.",
-                    "Başka bir giriş yöntemi çalışır durumdaysa Hesap → Güvenlik bölümünden bağlantıyı kaldırabilirsiniz. Bu işlem hesabınızı veya çalışma alanı kayıtlarını silmez.",
+                    "Hesap → Bağlı hesaplar bölümünden bağlantıyı kaldırın. Bu işlem hesabınızı veya çalışma alanı kayıtlarını silmez.",
                 ],
                 links: [
                     {
@@ -170,7 +170,7 @@ function privacyTurkish(operator: PublicOperator): LegalContent {
                 id: "sharing",
                 title: "Bilgiler kimlere aktarılır?",
                 paragraphs: [
-                    "Çalışma alanı üyeleri rollerinin izin verdiği kayıtlara erişir. İşletmeci hizmet yönetimi ve destek için kayıtlara erişir. Seçilen alıcılar, ayarlanan mesajları alır. Bir hatırlatıcı, alıcıların adreslerini o hatırlatıcının diğer alıcılarına, çalışma alanı dışındakiler dahil, gösterebilir; kimin adresinin gösterileceğini çalışma alanı yöneticisi belirler.",
+                    "Çalışma alanı üyeleri rollerinin izin verdiği kayıtlara erişir. İşletmeci hizmet yönetimi ve destek için kayıtlara erişir. Seçilen alıcılar, ayarlanan mesajları alır. Bir tahmin e-postası, alıcıların adreslerini o e-postanın diğer alıcılarına, çalışma alanı dışındakiler dahil, gösterebilir; kimin adresinin gösterileceğini çalışma alanı yöneticisi belirler.",
                     "Barındırma, trafik güvenliği, e-posta, giriş ve tahmin veya üretim verisi hizmetleri sunan sağlayıcılar, ilgili işlevler için gereken bilgileri işler; bunlara ilgili santral kimlikleri ve koordinatları da dahildir. İşlemler yurt dışında da gerçekleşebilir. Kanunen gerekli bilgiler yetkili mercilerle paylaşılabilir.",
                 ],
             },
@@ -185,8 +185,8 @@ function privacyTurkish(operator: PublicOperator): LegalContent {
                 id: "retention",
                 title: "Saklama ve silme",
                 paragraphs: [
-                    "Kayıtlar; hizmet, paylaşılan çalışma alanları, güvenlik ve hukuki yükümlülükler için gerektiği sürece ve şu sınırlar içinde saklanır: giriş oturumları süresi dolduğunda silinir; tamamlanmamış hesap kayıtları 7 gün sonra silinir; giden e-postaların kopyaları gönderildikten veya gönderimi başarısız olduktan 7 gün sonra silinir; davetler kabul edildikten, iptal edildikten veya süresi dolduktan 90 gün sonra silinir; hatırlatma mesajlarının metni 90 gün sonra silinir; güvenlik kayıtları en fazla 365 gün saklanır. Silinen santral ve konumlar 30 gün içinde geri yüklenebilir. Yedekler yedi gün sonra temizlenecek şekilde ayarlanır; canlı sistemden silinen veriler yedeklerin süresi dolana kadar yedeklerde kalır.",
-                    `Hesabınızın anonim hale getirilmesi talebinizi ${operator.email} adresine iletin. Kimliğinizi ve çalışma alanı sahipliğini doğrulamamız gerekebilir. Anonim hale getirmede hesabın giriş bilgileri, adı, adresleri, iki adımlı doğrulaması, bağlı giriş hesapları, oturumları, üyelikleri ve tercihleri; bu adresleri içeren davetler, e-postalar ve hatırlatma alıcısı kayıtları da silinir. Çalışma alanıyla paylaşılan kayıtlar ve denetim kayıtları yalnızca anonim hale getirilmiş hesaba bağlı olarak kalır. Hesabın kimlik numarasını, bir isteğin IP adresini ve bazı olaylarda girilen e-posta adresinin anahtarlı özetini içeren, ancak ad ve okunabilir e-posta adresi içermeyen güvenlik kayıtları anonim hale getirmeyle silinmez ve en geç 365 gün sonra silinir. Üyeliği veya bağlantıları kaldırmak ortak kayıtları silmez. Saklanması gereken bilgilerin nedenlerini açıklarız.`,
+                    "Kayıtlar; hizmet, paylaşılan çalışma alanları, güvenlik ve hukuki yükümlülükler için gerektiği sürece ve şu sınırlar içinde saklanır: giriş oturumları süresi dolduğunda silinir; tamamlanmamış hesap kayıtları 7 gün sonra silinir; giden e-postaların kopyaları gönderildikten veya gönderimi başarısız olduktan 7 gün sonra silinir; davetler kabul edildikten, iptal edildikten veya süresi dolduktan 90 gün sonra silinir; tahmin e-postalarının metni 90 gün sonra silinir; güvenlik kayıtları en fazla 365 gün saklanır. Silinen santraller 30 gün içinde geri yüklenebilir. Yedekler yedi gün sonra temizlenecek şekilde ayarlanır; canlı sistemden silinen veriler yedeklerin süresi dolana kadar yedeklerde kalır.",
+                    `Hesabınızın anonim hale getirilmesi talebinizi ${operator.email} adresine iletin. Kimliğinizi ve çalışma alanı sahipliğini doğrulamamız gerekebilir. Anonim hale getirmede hesabın giriş bilgileri, adı, adresleri, iki adımlı doğrulaması, bağlı giriş hesapları, oturumları, üyelikleri ve tercihleri; bu adresleri içeren davetler, e-postalar ve tahmin e-postası alıcı kayıtları da silinir. Çalışma alanıyla paylaşılan kayıtlar ve denetim kayıtları yalnızca anonim hale getirilmiş hesaba bağlı olarak kalır. Hesabın kimlik numarasını, bir isteğin IP adresini ve bazı olaylarda girilen e-posta adresinin anahtarlı özetini içeren, ancak ad ve okunabilir e-posta adresi içermeyen güvenlik kayıtları anonim hale getirmeyle silinmez ve en geç 365 gün sonra silinir. Üyeliği veya bağlantıları kaldırmak ortak kayıtları silmez. Saklanması gereken bilgilerin nedenlerini açıklarız.`,
                 ],
             },
             {
@@ -206,7 +206,7 @@ function termsEnglish(operator: PublicOperator): LegalContent {
         kind: "terms",
         title: "Terms of use",
         intro: "Using Pyracast and understanding its solar forecasts.",
-        updated: "2026-11-21",
+        updated: "2026-11-25",
         sections: [
             {
                 id: "service",
@@ -228,7 +228,7 @@ function termsEnglish(operator: PublicOperator): LegalContent {
                 id: "accounts",
                 title: "Accounts and workspaces",
                 paragraphs: [
-                    "Protect your sign-in methods and promptly report suspected unauthorized access. Workspace administrators manage membership, shared settings and reminder recipients. Only add recipients authorized to receive the messages and plant information.",
+                    "Protect your sign-in methods and promptly report suspected unauthorized access. Workspace administrators manage membership, shared settings and forecast email recipients. Only add recipients authorized to receive the messages and plant information.",
                     "Removing a member preserves shared records. Manage security and notifications in the application; contact us to request account erasure.",
                 ],
             },
@@ -257,7 +257,7 @@ function termsTurkish(operator: PublicOperator): LegalContent {
         kind: "terms",
         title: "Kullanım koşulları",
         intro: "Pyracast kullanımı ve güneş enerjisi tahminlerinin değerlendirilmesi.",
-        updated: "2026-11-21",
+        updated: "2026-11-25",
         sections: [
             {
                 id: "service",
@@ -279,7 +279,7 @@ function termsTurkish(operator: PublicOperator): LegalContent {
                 id: "accounts",
                 title: "Hesaplar ve çalışma alanları",
                 paragraphs: [
-                    "Giriş yöntemlerinizi koruyun; izinsiz erişim şüphenizi gecikmeden bildirin. Çalışma alanı yöneticileri üyelikleri, ortak ayarları ve hatırlatma alıcılarını yönetir. Yalnızca mesajları ve santral bilgilerini almaya yetkili alıcıları ekleyin.",
+                    "Giriş yöntemlerinizi koruyun; izinsiz erişim şüphenizi gecikmeden bildirin. Çalışma alanı yöneticileri üyelikleri, ortak ayarları ve tahmin e-postası alıcılarını yönetir. Yalnızca mesajları ve santral bilgilerini almaya yetkili alıcıları ekleyin.",
                     "Bir üyenin çıkarılması ortak kayıtları silmez. Güvenlik ve bildirim ayarlarını uygulamadan yönetin; hesabınızın anonim hale getirilmesi için bize ulaşın.",
                 ],
             },

@@ -55,7 +55,7 @@ export function Auth({
     initialMode: "login" | "register";
 }) {
     const t = useTranslations("Auth");
-    const dashboard = useTranslations("Dashboard");
+    const security = useTranslations("Security");
     const { ended } = useSessionState();
     const locale = useLocale();
     const language = isLanguage(locale) ? locale : "en";
@@ -165,9 +165,12 @@ export function Auth({
         };
     }, []);
 
+    const createLabel = invitationToken
+        ? t("createAccount")
+        : t("createCompany");
     const titles: Record<Mode, string> = {
         login: t("welcome"),
-        register: t("registerTitle"),
+        register: createLabel,
         verify: t("verifyTitle"),
         mfa: t("twoFactor"),
         forgot: t("forgotTitle"),
@@ -210,14 +213,16 @@ export function Auth({
                             ? t(`${refusal}.title`)
                             : titles[mode]}
                     </h1>
-                    {ended && <Notice>{dashboard("sessionExpired")}</Notice>}
+                    {ended && <Notice>{security("sessionExpired")}</Notice>}
                     {socialError && (
                         <p className="notice error" role="alert">
                             {social("callbackError")}
                         </p>
                     )}
                     {(mode === "login" || mode === "register") && (
-                        <SocialProviderButtons />
+                        <SocialProviderButtons
+                            process={mode === "login" ? "login" : "signup"}
+                        />
                     )}
                     {message && <p role="status">{t(message)}</p>}
                     {pending && refusal ? (
@@ -248,14 +253,12 @@ export function Auth({
                                 submit={
                                     {
                                         login: t("signIn"),
-                                        register: invitationToken
-                                            ? t("createAccount")
-                                            : t("createCompany"),
+                                        register: createLabel,
                                         verify: t("verifyEmail"),
                                         mfa: t("verifyCode"),
                                         forgot: t("sendReset"),
                                         reset: t("resetPassword"),
-                                        socialSignup: social("completeSignup"),
+                                        socialSignup: createLabel,
                                     }[mode]
                                 }
                                 onSubmit={async (data) => {

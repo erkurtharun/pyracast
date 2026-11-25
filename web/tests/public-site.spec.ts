@@ -3,13 +3,15 @@ import path from "node:path";
 import { test, expect } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
 import { legalCopy } from "../src/features/public-site/legal-copy";
+import enCore from "../messages/en/core.json";
+import trCore from "../messages/tr/core.json";
 
 const pages = [
     {
         path: "/",
         language: "en",
         alternate: "/tr/",
-        title: "Solar production forecasts",
+        title: "Solar generation forecasts",
     },
     {
         path: "/tr/",
@@ -349,5 +351,19 @@ test("the privacy notice names every period of the retention table in both langu
                     new RegExp(`(?<!\\d)${days} ${wording[language].days}`),
                 );
         }
+    }
+});
+
+test("the privacy notice sends a disconnection to the account section that offers it in both languages", () => {
+    for (const [language, catalogue] of [
+        ["en", enCore],
+        ["tr", trCore],
+    ] as const) {
+        const section = legalCopy(language, "privacy").sections.find(
+            ({ id }) => id === "sign-in",
+        );
+        expect(section!.paragraphs.join(" ")).toContain(
+            `${catalogue.Dashboard.account} → ${catalogue.SocialAuth.linkedAccounts}`,
+        );
     }
 });

@@ -446,16 +446,14 @@ test("a language hand-off shows no other language before the wanted catalogue ar
     });
     await turkish.reached;
     await expect(
-        page.getByRole("heading", { name: "Create your company account" }),
+        page.getByRole("heading", { name: "Create workspace" }),
     ).toHaveCount(0);
     await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
     turkish.release();
     await expect(
-        page.getByRole("heading", { name: "Şirket hesabınızı oluşturun" }),
+        page.getByRole("heading", { name: "Çalışma alanı oluştur" }),
     ).toBeVisible();
-    expect(await seenHeadings(page)).not.toContain(
-        "Create your company account",
-    );
+    expect(await seenHeadings(page)).not.toContain("Create workspace");
     expect((await Promise.all(bodies)).some(englishCatalogue)).toBe(false);
 });
 
@@ -470,14 +468,14 @@ test("a language hand-off whose catalogue cannot be loaded offers the retry that
         "Bu sayfa gösterilirken bir sorun oluştu. Tekrar deneyin; sorun sürerse sayfayı yenileyin.",
     );
     await expect(
-        page.getByRole("heading", { name: "Create your company account" }),
+        page.getByRole("heading", { name: "Create workspace" }),
     ).toHaveCount(0);
     turkish.release();
     await page
         .getByRole("button", { name: "Tekrar dene", exact: true })
         .click();
     await expect(
-        page.getByRole("heading", { name: "Şirket hesabınızı oluşturun" }),
+        page.getByRole("heading", { name: "Çalışma alanı oluştur" }),
     ).toBeVisible();
 });
 

@@ -720,10 +720,10 @@ test("a covered window with saved figures offers them and asks before it leaves 
     const now = await page.evaluate(() => Date.now());
     await page.clock.pauseAt(now + idleLimit + tick);
     await expect(
-        page.getByRole("heading", { name: "Could not confirm your session" }),
+        page.getByRole("heading", { name: "Pyracast cannot be reached" }),
     ).toBeVisible();
     const showSaved = page.getByRole("button", {
-        name: "Show saved figures",
+        name: "Show last loaded figures",
         exact: true,
     });
     const questions: string[] = [];
