@@ -285,37 +285,42 @@ export async function serveDirectProduction(
             ),
         }),
     );
+    const change = (body: { changes: ChangeRow[] }) => {
+        const [row] = body.changes;
+        if (!row) throw new Error("A production change has no row.");
+        const current = head();
+        const energy = row.energy ?? current?.energy ?? 0;
+        if ((current?.id ?? null) === row.expected_revision_id)
+            revisions.push({
+                id: revisions.length + 1,
+                supersedes: current?.id ?? null,
+                energy,
+                quality: row.quality ?? "valid",
+                source: row.source ?? "operator",
+                reverted: row.action === "revert",
+                by: "person",
+            });
+        else if (!replays(row, current, energy))
+            return { status: 409, json: conflict() };
+        return {
+            status: 200,
+            json: { created: 1, existing: 0, count: 1, ids: [head()!.id] },
+        };
+    };
     await page.route("**/production/changes/", (route) => {
         const body = route.request().postDataJSON() as { changes: ChangeRow[] };
         requests.push(body);
         const answering = next();
         const early = refusedEarly(route, answering);
         if (early) return early;
-        const [change] = body.changes;
-        if (!change) throw new Error("A production change has no row.");
-        const current = head();
-        const energy = change.energy ?? current?.energy ?? 0;
-        if ((current?.id ?? null) === change.expected_revision_id)
-            revisions.push({
-                id: revisions.length + 1,
-                supersedes: current?.id ?? null,
-                energy,
-                quality: change.quality ?? "valid",
-                source: change.source ?? "operator",
-                reverted: change.action === "revert",
-                by: "person",
-            });
-        else if (!replays(change, current, energy))
-            return route.fulfill({ status: 409, json: conflict() });
-        return fulfil(route, answering, {
-            created: 1,
-            existing: 0,
-            count: 1,
-            ids: [head()!.id],
-        });
+        const { status, json } = change(body);
+        return status === 409
+            ? route.fulfill({ status, json })
+            : fulfil(route, answering, json);
     });
     return {
         requests,
+        change,
         day,
         applied: () => revisions.filter((row) => row.by === "person").length,
         energy: () => head()?.energy,

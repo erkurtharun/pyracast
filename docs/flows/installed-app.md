@@ -11,10 +11,10 @@ build, and the browser asks first while something typed is unsaved. The server h
 - Every page rendered in the root layout (`web/src/app/layout.tsx`: the public pages, both 404 pages, sign-in and the
   workspace) links `/app/manifest.webmanifest` without `crossorigin`, the touch icon `/app/icons/apple-touch-icon.png`
   and `application-name` and `apple-mobile-web-app-title` "Pyracast", as direct children of the served `head`. A page
-  that links no manifest is installed by browsers as itself (Chromium gives it a default manifest whose identity and
-  start address are that page; Safari opens any page added to the Home Screen as a web app), so an icon made from it
-  would reopen that page. With the link every engine installs the one application wherever the person started. The
-  root failure screen (`web/src/app/global-error.tsx`) replaces the root layout and links none of them; the Django
+  that links no manifest names only itself (Chromium derives a default manifest whose identity and start address are
+  that page), so an icon made from it would reopen that page. With the link every page names one identity and one
+  start address, `/app/`, wherever the person started; whether the chosen menu action makes an app or a shortcut is
+  the browser's decision, which the device checklist records. The root failure screen (`web/src/app/global-error.tsx`) replaces the root layout and links none of them; the Django
   pages (console, provider steps, maintenance) link nothing.
 - `web/public/app/manifest.webmanifest`: `id`, `start_url` and `scope` `/app/`, `display: standalone`, the brand as
   `name` and `short_name`, one theme and background colour, icons `icons/{any,maskable}-{192,512}.png`. The browser
@@ -68,7 +68,7 @@ sequenceDiagram
 | Store | R/W | What |
 | --- | --- | --- |
 | Worker registration | W | Scope `/app/`, script `/app/sw.js`, made by `WorkerRegistration`; the browser checks the script at every document load under `/app/` and at every `register()` call |
-| `pyracast-saved` (IndexedDB) | R, W | Read by the worker only after a navigation failed; written by it in two cases only, each one transaction that empties `plants` and `days` and sets the holder's `active` false: a copy whose `confirmedAt` is more than 90 days old or more than a day ahead of the clock, and `/app/?saved=remove&token=<removal>` with the stored token. The application's side is `web/src/lib/saved/store.ts` |
+| `pyracast-saved` (IndexedDB) | R, W | The application (`web/src/lib/saved/store.ts`) sets the holder's `confirmedAt` to the moment of every signed-in session it adopts, also on focus or a visibility change (`AppRoot`), and clears the figures of a copy that had expired. No current screen turns a copy on, so only a copy that already exists is read. The worker reads it only after a navigation failed and writes it in two cases, each one transaction: a copy whose `confirmedAt` is more than 90 days old or more than a day ahead of the clock loses `plants` and `days` and keeps its holder unchanged; `/app/?saved=remove&token=<removal>` with the stored token empties `plants` and `days` and sets the holder's `active` false (`web/public/app/sw.js`) |
 
 No database table, Cache Storage entry, stored document, script or API answer is involved.
 
@@ -76,8 +76,9 @@ No database table, Cache Storage entry, stored document, script or API answer is
 
 - The worker reads no session and sends no API request. It handles only GET navigations whose address is inside
   `/app/` (`request.mode === "navigate"`); every other request goes to the network untouched.
-- A saved page needs no session: the copy exists only where the person turned it on and is shown for 90 days after
-  the holder's last signed-in start. Its removal link carries the copy's token, so no other site can trigger it.
+- A saved page needs no session: it is shown while the holder is active and its `confirmedAt` lies at most 90 days
+  back, that is, for 90 days after the last signed-in session the application adopted on the device. Its removal link
+  carries the copy's token, so no other site can trigger it.
 - `web/src/proxy.ts` gives every page the policy with `worker-src 'self'`; `/app/sw.js` is the only same-origin
   JavaScript answer with a page inside its directory, and a scope cannot exceed that directory. The matcher skips the
   manifest, `/app/sw.js` and the icons by exact name; `web/next.config.ts` serves the manifest and icons with
@@ -105,8 +106,9 @@ No database table, Cache Storage entry, stored document, script or API answer is
   browser makes of an install (an app or a shortcut), of the installing tab and of a resumed window is not promised.
 - A release keeps no compatibility while the product is in development: request shapes, stored formats and the
   manifest change in place (`docs/DEPLOYMENT.md`, "Releases under open windows").
-- The Next client compares the build id of every navigation answer with its own and loads a document when they differ
-  or the answer is not a 200 RSC answer. No deployment id, release header or "new version" notice exists. Two builds
+- The pinned Next router (`next` 16.4.6, `dist/client/components/router-reducer/fetch-server-response.js`) loads a
+  document instead of a soft change when the navigation answer is not a successful (2xx) Flight answer
+  (`text/x-component`) with a body, or when the build id in it differs from its own. No deployment id, release header or "new version" notice exists. Two builds
   of one source share their static file names; a file of a replaced build that is gone shows the section's error
   screen with Reload.
 - The worker calls `skipWaiting()` on install and enables navigation preload on activate; it never calls
@@ -134,12 +136,17 @@ No database table, Cache Storage entry, stored document, script or API answer is
   `web/tests/leave-guard.spec.ts` (questions before a document load).
 - Playwright, production build (`web/playwright.production.config.ts`, workers allowed): two `next start` servers, of
   `.next` and of a second build of the same source into `.next-second` (the build ids differ by themselves), behind
-  `web/testing/front.ts`, which switches the build behind one origin (`PUT /__front/build`) and what `/app/sw.js`
-  answers (`PUT /__front/script`). `web/production-tests/app-worker.spec.ts` (scope, notice, policy, replacement by
-  the withdrawal script), `web/production-tests/saved-pages.spec.ts` (saved pages from a seeded copy) and
-  `web/production-tests/release.spec.ts` (a navigation after a release loads the new build; with an unsaved value the
-  browser asks on a shell entry and on the Actuals to Comparison switch, Stay keeps the old build's document, its save
-  is answered while the new build serves, and the next navigation loads the new build; a sign-in on an old sign-in
-  screen at a deep address ends on the new build). CI job `web_production` builds twice before it runs them.
-- `tests/test_operations_contracts.py` runs the smoke's `app_file` checks of `deploy/smoke.sh` (the worker, manifest
-  and icon headers through the gateway).
+  `web/testing/front.ts`, which switches the build behind one origin (`PUT /__front/build`), sends `/api/` to the API
+  mock of the selected build (`API_PORTS` in `web/testing/builds.ts`), names the build that answered in the
+  `x-front-build` header and chooses what `/app/sw.js` answers (`PUT /__front/script`).
+  `web/production-tests/app-worker.spec.ts` (scope, notice, policy, replacement by the withdrawal script),
+  `web/production-tests/saved-pages.spec.ts` (saved pages from a seeded copy) and
+  `web/production-tests/release.spec.ts`: after a release a navigation takes the new build's Flight answer and then
+  loads its document; with an unsaved value the browser asks on a shell entry and on the Actuals to Comparison switch
+  before any router request, Stay keeps the old build's document at its address with the editor usable, its save goes
+  through the front to the new build's API mock, which refuses another session tag as the server does, and the next
+  navigation loads the new build; a sign-in on an old sign-in screen at a deep address ends on the new build. CI job
+  `web_production` builds twice before it runs them.
+- `tests/test_operations_contracts.py` checks that `deploy/smoke.sh` holds the `app_file` statements for the worker,
+  manifest, icons and pages, and runs the worker and icon statements against a fake `curl` (POSIX only). The gateway
+  check itself is `deploy/smoke.sh` after a deployment.

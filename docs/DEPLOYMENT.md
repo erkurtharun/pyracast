@@ -388,9 +388,10 @@ Inspect the host from `/opt/pyracast/current` as root with
 A release stops the old web container before the new one serves, so one build answers at a time. An
 open window keeps the build it loaded until it navigates: the next in-app navigation meets an answer
 of another build id and loads a document of the new build, and while a value is unsaved the browser
-asks first (`docs/flows/installed-app.md`). A document shows signed-in screens only for the session
-it loaded with, so it sends its last signed-in request at most 12 h (the absolute session limit)
-after its own load. While the product is in development no release keeps request shapes, stored
+asks first (`docs/flows/installed-app.md`). The server accepts the session an old document signed in
+with for at most 12 h after that sign-in (the absolute session limit,
+`src/pyracast/accounts/sessions.py`); a document suspended for longer can still send a request later
+and is refused. While the product is in development no release keeps request shapes, stored
 formats or the manifest compatible for such a document: the new release answers its requests as it
 stands, and the next navigation loads the current build. Files of the replaced build
 are not kept.

@@ -14,6 +14,11 @@ const BUILDS = new Map([
     ["first", new URL(required("FRONT_UPSTREAM"))],
     ["second", new URL(required("FRONT_SECOND_UPSTREAM"))],
 ]);
+const APIS = new Map([
+    ["first", new URL(required("FRONT_API_UPSTREAM"))],
+    ["second", new URL(required("FRONT_SECOND_API_UPSTREAM"))],
+]);
+const BUILD_HEADER = "x-front-build";
 
 type State = { script: string; upstream: string; build: string };
 const initial: State = {
@@ -110,7 +115,10 @@ function forward(request: http.IncomingMessage, response: http.ServerResponse) {
         delete headers["if-none-match"];
         delete headers["if-modified-since"];
     }
-    const target = BUILDS.get(state.build)!;
+    const build = state.build;
+    const target = (pathOf(request).startsWith("/api/") ? APIS : BUILDS).get(
+        build,
+    )!;
     const upstream = http.request(
         {
             hostname: target.hostname,
@@ -122,7 +130,10 @@ function forward(request: http.IncomingMessage, response: http.ServerResponse) {
         (answer) => {
             const status = answer.statusCode ?? 502;
             if (!replacement) {
-                response.writeHead(status, answer.headers);
+                response.writeHead(status, {
+                    ...answer.headers,
+                    [BUILD_HEADER]: build,
+                });
                 answer.pipe(response);
                 return;
             }

@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { BUILD_DIRECTORIES } from "./testing/builds";
+import { API_PORTS, BUILD_DIRECTORIES } from "./testing/builds";
 
 const serverPort = 3110;
 const frontPort = 3111;
@@ -41,6 +41,8 @@ export default defineConfig({
                 FRONT_PORT: String(frontPort),
                 FRONT_UPSTREAM: `http://127.0.0.1:${serverPort}`,
                 FRONT_SECOND_UPSTREAM: `http://127.0.0.1:${secondServerPort}`,
+                FRONT_API_UPSTREAM: `http://127.0.0.1:${API_PORTS.first}`,
+                FRONT_SECOND_API_UPSTREAM: `http://127.0.0.1:${API_PORTS.second}`,
             },
             url: `http://127.0.0.1:${frontPort}/__front/state`,
             reuseExistingServer: false,
