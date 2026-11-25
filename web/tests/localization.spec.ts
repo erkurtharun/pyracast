@@ -78,21 +78,21 @@ test("a Turkish public signup applies guest language before showing the form and
         .click();
     await requested;
     await expect(
-        page.getByRole("heading", { name: "Create your company account" }),
+        page.getByRole("heading", { name: "Create workspace" }),
     ).toHaveCount(0);
     await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
     release();
     await expect(
-        page.getByRole("heading", { name: "Şirket hesabınızı oluşturun" }),
+        page.getByRole("heading", { name: "Çalışma alanı oluştur" }),
     ).toBeVisible();
     await expect(page).toHaveURL("/app/?signup=1");
     await page.getByLabel("Dil", { exact: true }).selectOption("en");
     await expect(
-        page.getByRole("heading", { name: "Create your company account" }),
+        page.getByRole("heading", { name: "Create workspace" }),
     ).toBeVisible();
     await page.reload();
     await expect(
-        page.getByRole("heading", { name: "Create your company account" }),
+        page.getByRole("heading", { name: "Create workspace" }),
     ).toBeVisible();
 });
 
@@ -160,13 +160,13 @@ for (const outcome of ["success", "failure"] as const) {
             window.history.replaceState(null, "", "/app/?language=en&signup=1"),
         );
         await expect(
-            page.getByRole("heading", { name: "Create your company account" }),
+            page.getByRole("heading", { name: "Create workspace" }),
         ).toBeVisible();
         const finished = page.waitForResponse("**/api/session/language/");
         release();
         await finished;
         await expect(
-            page.getByRole("heading", { name: "Create your company account" }),
+            page.getByRole("heading", { name: "Create workspace" }),
         ).toBeVisible();
         await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
         await expect(page).toHaveURL("/app/?signup=1");
@@ -191,7 +191,7 @@ test("failed public language selection offers a retry in the session language be
     await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: "Try again" }).click();
     await expect(
-        page.getByRole("heading", { name: "Şirket hesabınızı oluşturun" }),
+        page.getByRole("heading", { name: "Çalışma alanı oluştur" }),
     ).toBeVisible();
     expect(attempts).toBe(2);
 });
@@ -227,7 +227,7 @@ test("focus reads wait while the language hand-off is pending or failed", async 
     await focus();
     await page.getByRole("button", { name: "Try again" }).click();
     await expect(
-        page.getByRole("heading", { name: "Şirket hesabınızı oluşturun" }),
+        page.getByRole("heading", { name: "Çalışma alanı oluştur" }),
     ).toBeVisible();
     expect(attempts).toBe(2);
     expect(reads).toBe(initial);
@@ -507,12 +507,12 @@ test.describe("the session end notice", () => {
         [
             "en",
             "Plants",
-            "Your session ends at 10:00 PM. Save your work; you will need to sign in again.",
+            "Automatic sign-out at 10:00 PM GMT+3. Save your work.",
         ],
         [
             "tr",
             "Santraller",
-            "Oturumunuz 22:00 saatinde sona erecek. Çalışmanızı kaydedin; yeniden oturum açmanız gerekecek.",
+            "Otomatik çıkış saati: 22:00 GMT+3. Çalışmanızı kaydedin.",
         ],
     ] as const) {
         test(`appears five minutes before the session ends in ${language}`, async ({

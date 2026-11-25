@@ -1,0 +1,129 @@
+{
+    "privacy": {
+        "title": "Privacy policy",
+        "intro": "How Pyracast handles your account and solar forecasting data.",
+        "updated": "2026-11-25",
+        "sections": [
+            {
+                "id": "operator",
+                "title": "Who operates Pyracast",
+                "paragraphs": [
+                    "{name} is the data controller operating Pyracast. Location: {address}, {country}. Contact: {email}."
+                ]
+            },
+            {
+                "id": "information",
+                "title": "Information Pyracast handles",
+                "paragraphs": [
+                    "Pyracast collects information electronically through forms, connected services and automatic security records, from you, workspace administrators and service providers."
+                ],
+                "bullets": [
+                    "Account identifiers, email, password hashes where used, preferences, membership and security settings.",
+                    "Workspace and plant details, locations, production, forecasts, outages and change histories.",
+                    "Recipient addresses, send times, messages and delivery records.",
+                    "Active sessions, IP addresses, authentication and operational logs."
+                ]
+            },
+            {
+                "id": "purposes",
+                "title": "Why Pyracast uses it",
+                "paragraphs": [
+                    "Pyracast uses information to manage access, provide forecasts, send service messages and forecast emails, support users and investigate failures or abuse.",
+                    "Processing relies on contract performance where applicable, Pyracast's legitimate interest in service security subject to your rights, and applicable legal obligations."
+                ]
+            },
+            {
+                "id": "sign-in",
+                "title": "Google and Microsoft sign-in",
+                "paragraphs": [
+                    "If you sign in with Google or Microsoft, Pyracast receives identity, email and basic profile information to authenticate or connect your account. Pyracast retains the identifier and email, without sign-in access or refresh tokens. Sign-in gives no mailbox access.",
+                    "You can disconnect it once your account has a password or another connected account. Disconnect it under Account → Connected accounts. Disconnecting does not delete account or workspace records."
+                ],
+                "links": [
+                    {
+                        "label": "Google API Services User Data Policy",
+                        "href": "https://developers.google.com/terms/api-services-user-data-policy"
+                    }
+                ]
+            },
+            {
+                "id": "sharing",
+                "title": "Who receives information",
+                "paragraphs": [
+                    "Workspace members access shared records according to their roles; the operator accesses them for administration and support. Selected recipients receive configured messages. A forecast email can show recipients' addresses to the other recipients of that email, including recipients outside the workspace; the workspace administrator chooses whose address is shown.",
+                    "Hosting, traffic security, email, sign-in and forecast or production data providers process information needed for those functions, including relevant plant identifiers and coordinates. Processing may occur abroad. Authorities may receive legally required disclosures."
+                ]
+            },
+            {
+                "id": "storage",
+                "title": "Cookies and browser storage",
+                "paragraphs": [
+                    "Cookies and browser storage support secure sign-in, invitations and language preferences. The application includes no advertising or behavioral analytics trackers. You can clear browser data; this may sign you out or reset preferences."
+                ]
+            },
+            {
+                "id": "retention",
+                "title": "Retention and deletion",
+                "paragraphs": [
+                    "Records are kept as needed for the service, shared workspaces, security and legal obligations, within these limits: active sessions are removed when they expire; a sign-up that was never completed is removed after 7 days; copies of outgoing mail are removed 7 days after they are sent or fail; invitations are removed 90 days after they are accepted, withdrawn or expire; the text of forecast emails is cleared after 90 days; security records are kept for up to 365 days. Deleted plants can be restored for 30 days. Backups are configured to expire after seven days; data removed from the live system remains in backups until they expire.",
+                    "Request account erasure at {email}. Pyracast may verify identity and workspace ownership. Erasure anonymizes the account: its sign-in details, name, addresses, two-step verification, connected accounts, active sessions, memberships and preferences are removed, as are the invitations, mail and forecast email recipient entries that name its addresses. Records shared with a workspace and the audit trail remain, linked only to the anonymized account. Security records, which hold the account's identifier, the IP address of a request and, for some events, a keyed hash of the email address entered, but no name and no readable email address, are not removed by an erasure and expire after at most 365 days. Removing membership or connections preserves shared records. Pyracast explains any required retention."
+                ]
+            },
+            {
+                "id": "rights",
+                "title": "Your questions and rights",
+                "paragraphs": [
+                    "Contact {email} to learn whether and how your data is processed, its purposes, proper use and recipients, or request access, correction or deletion. Applicable rights include recipient notification of corrections or deletions, objections to adverse automated decisions, compensation for unlawful processing and complaints to authorities. KVKK requests are concluded within 30 days.",
+                    "Pyracast updates this dated notice when practices change."
+                ]
+            }
+        ]
+    },
+    "terms": {
+        "title": "Terms of use",
+        "intro": "Using Pyracast and understanding its solar forecasts.",
+        "updated": "2026-11-25",
+        "sections": [
+            {
+                "id": "service",
+                "title": "The service",
+                "paragraphs": [
+                    "Pyracast is operated by {name}, {address}, {country}. Contact {email} about the service or these terms.",
+                    "Pyracast brings together solar plant information, generation forecasts and energy estimates. Features and data depend on plant approval, authorized access and service availability."
+                ]
+            },
+            {
+                "id": "authorized-use",
+                "title": "Authorized use",
+                "paragraphs": [
+                    "Only submit or access plant information, production records and recipient addresses you are authorized to use. Keep declarations accurate and respect applicable permissions and licences.",
+                    "Do not bypass access controls, misuse credentials, access other workspaces without permission, disrupt the service or use it unlawfully. Pyracast may restrict access as reasonably needed to address abuse or protect the service. For a mistaken restriction, write to Pyracast: {email}."
+                ]
+            },
+            {
+                "id": "accounts",
+                "title": "Accounts and workspaces",
+                "paragraphs": [
+                    "Protect your sign-in methods and promptly report suspected unauthorized access. Workspace administrators manage membership, shared settings and forecast email recipients. Only add recipients authorized to receive the messages and plant information.",
+                    "Removing a member preserves shared records. Manage security and notifications in the application. To request account erasure, write to Pyracast: {email}."
+                ]
+            },
+            {
+                "id": "estimates",
+                "title": "Understand the estimates",
+                "paragraphs": [
+                    "Forecasts and energy estimates are model outputs, not metered production or guarantees of generation or financial performance. Weather, missing inputs, plant details, outages and calibration affect results. Check units, timestamps, completeness and assumptions.",
+                    "Verify information against your operational requirements and independent sources before consequential decisions. Data availability and email delivery are not guaranteed."
+                ]
+            },
+            {
+                "id": "changes",
+                "title": "Changes and questions",
+                "paragraphs": [
+                    "Pyracast may update these dated terms as the service changes. Separate agreements with the operator continue to govern the matters they cover. The privacy policy explains how information is handled.",
+                    "For questions, corrections or access concerns, write to {email}."
+                ]
+            }
+        ]
+    }
+}

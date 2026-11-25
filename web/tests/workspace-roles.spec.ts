@@ -134,14 +134,14 @@ test("viewer reads shared settings without write controls or requests", async ({
         page.getByRole("heading", { name: "Technical details" }),
     ).toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Save configuration" }),
+        page.getByRole("button", { name: "Save technical details" }),
     ).toHaveCount(0);
     await expect(
         page.getByRole("button", { name: "Delete plant", exact: true }),
     ).toHaveCount(0);
     await expect(page.locator(".readonly-form input").first()).toBeDisabled();
     await page
-        .getByRole("button", { name: "Email reminders", exact: true })
+        .getByRole("button", { name: "Forecast email", exact: true })
         .click();
     await expect(page.locator(".readonly-form input").first()).toBeDisabled();
     await expect(page.locator(".readonly-form button:visible")).toHaveCount(0);
@@ -359,6 +359,9 @@ test("invitation signup preserves token without creating another workspace", asy
     await page
         .getByRole("button", { name: "Create account", exact: true })
         .click();
+    await expect(
+        page.getByRole("heading", { level: 1, name: "Create account" }),
+    ).toBeVisible();
     await expect(page.locator('input[name="company_name"]')).toHaveCount(0);
     await page.getByLabel("Email", { exact: true }).fill("viewer@example.test");
     await page

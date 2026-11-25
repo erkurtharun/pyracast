@@ -19,21 +19,17 @@ test("a temporary site refresh failure preserves an open technical draft", async
     await page.goto("/app/");
     await page.getByRole("button", { name: /East array/ }).click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByLabel("DC nameplate capacity (MW)").fill("6.25");
+    await page.getByLabel("Panel capacity (MWp)").fill("6.25");
     fail = true;
     await page.clock.fastForward(120_000);
-    await expect(page.getByLabel("DC nameplate capacity (MW)")).toHaveValue(
-        "6.25",
-    );
+    await expect(page.getByLabel("Panel capacity (MWp)")).toHaveValue("6.25");
     await expect(page.locator("main").getByRole("alert")).toContainText(
         message,
     );
     fail = false;
     await page.clock.fastForward(120_000);
     await expect(page.locator("main").getByRole("alert")).toHaveCount(0);
-    await expect(page.getByLabel("DC nameplate capacity (MW)")).toHaveValue(
-        "6.25",
-    );
+    await expect(page.getByLabel("Panel capacity (MWp)")).toHaveValue("6.25");
 });
 
 test("an older pending submission cannot replace a saved technical update", async ({
@@ -78,12 +74,12 @@ test("an older pending submission cannot replace a saved technical update", asyn
     await page.goto("/app/");
     await page.getByRole("button", { name: /East array/ }).click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByLabel("DC nameplate capacity (MW)").fill("6.25");
+    await page.getByLabel("Panel capacity (MWp)").fill("6.25");
     hold = true;
     await page.clock.fastForward(120_000);
     await observed;
-    await page.getByRole("button", { name: "Save configuration" }).click();
-    const capacity = page.getByLabel("DC nameplate capacity (MW)");
+    await page.getByRole("button", { name: "Save technical details" }).click();
+    const capacity = page.getByLabel("Panel capacity (MWp)");
     const refreshed = page.waitForResponse("**/sites/");
     try {
         await expect(capacity).toHaveValue("6.25");
@@ -169,7 +165,7 @@ test("technical details shown before a reload ends follow the reloaded revision"
     await page.goto("/app/");
     await page.getByRole("button", { name: /East array/ }).click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    const capacity = page.getByLabel("DC nameplate capacity (MW)");
+    const capacity = page.getByLabel("Panel capacity (MWp)");
     await expect(capacity).toHaveValue("5");
     reloaded = true;
     const answered = page.waitForResponse("**/sites/");
@@ -222,23 +218,25 @@ test("saves from older revisions in a row keep every edit and name what changed"
     await page.goto("/app/");
     await page.getByRole("button", { name: /East array/ }).click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    const save = page.getByRole("button", { name: "Save configuration" });
-    const capacity = page.getByLabel("DC nameplate capacity (MW)");
+    const save = page.getByRole("button", { name: "Save technical details" });
+    const capacity = page.getByLabel("Panel capacity (MWp)");
     const exportLimit = page.getByLabel("Grid export limit (MW, optional)");
     await exportLimit.fill("3");
     await save.click();
     await expect(page.locator("main").getByRole("alert")).toContainText(
         conflictMessage,
     );
-    await expect(
-        page.getByText("DC nameplate capacity (MW): 5 → 6"),
-    ).toBeVisible();
+    const first = page.getByText("Panel capacity (MWp): 5 → 6", {
+        exact: true,
+    });
+    const second = page.getByText("Panel capacity (MWp): 5 → 8", {
+        exact: true,
+    });
+    await expect(first).toBeVisible();
     await expect(capacity).toHaveValue("6");
     await expect(exportLimit).toHaveValue("3");
     await save.click();
-    await expect(
-        page.getByText("DC nameplate capacity (MW): 5 → 8"),
-    ).toBeVisible();
+    await expect(second).toBeVisible();
     await expect(capacity).toHaveValue("8");
     await expect(exportLimit).toHaveValue("3");
     await save.click();
@@ -249,9 +247,8 @@ test("saves from older revisions in a row keep every edit and name what changed"
         export_limit_mw: 3,
     });
     await expect(page.locator("main").getByRole("alert")).toHaveCount(0);
-    await expect(
-        page.getByText(/DC nameplate capacity \(MW\): 5 →/),
-    ).toHaveCount(0);
+    await expect(first).toHaveCount(0);
+    await expect(second).toHaveCount(0);
 });
 
 test("a value both sides changed keeps the typed one beside the server's", async ({
@@ -275,19 +272,17 @@ test("a value both sides changed keeps the typed one beside the server's", async
     await page.goto("/app/");
     await page.getByRole("button", { name: /East array/ }).click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    const capacity = page.getByLabel("DC nameplate capacity (MW)");
+    const capacity = page.getByLabel("Panel capacity (MWp)");
     await capacity.fill("7");
-    await page.getByRole("button", { name: "Save configuration" }).click();
+    await page.getByRole("button", { name: "Save technical details" }).click();
     await expect(page.locator("main").getByRole("alert")).toContainText(
         conflictMessage,
     );
     await expect(
-        page.getByText(
-            "DC nameplate capacity (MW): 5 → 6 (your entry 7 is kept)",
-        ),
+        page.getByText("Panel capacity (MWp): 5 → 6 (your entry 7 is kept)"),
     ).toBeVisible();
     await expect(capacity).toHaveValue("7");
-    await page.getByRole("button", { name: "Save configuration" }).click();
+    await page.getByRole("button", { name: "Save technical details" }).click();
     await expect.poll(() => bodies.length).toBe(2);
     expect(bodies[1]).toMatchObject({
         expected_revision: 2,
@@ -360,18 +355,18 @@ for (const section of ["Forecast", "Settings"] as const) {
         await page
             .getByRole("button", { name: "Continue", exact: true })
             .click();
-        await page.getByLabel("DC nameplate capacity (MW)").fill("5");
+        await page.getByLabel("Panel capacity (MWp)").fill("5");
         await page
             .getByRole("button", { name: "Continue", exact: true })
             .click();
-        await page
-            .getByRole("button", { name: "Submit plant for approval" })
-            .click();
+        await page.getByRole("button", { name: "Send for approval" }).click();
         await expect(
-            page.getByText(/Awaiting administrator approval/),
+            page.getByText(/Waiting for approval by Pyracast/),
         ).toBeVisible();
         await expect(
-            page.getByRole("list", { name: "Next steps" }),
+            page.getByText(
+                "You can still change the technical details and the location.",
+            ),
         ).toBeVisible();
         await expect(
             page.getByRole("heading", {
@@ -382,7 +377,7 @@ for (const section of ["Forecast", "Settings"] as const) {
             await page
                 .getByRole("button", { name: "Settings", exact: true })
                 .click();
-            await page.getByLabel("DC nameplate capacity (MW)").fill("6.25");
+            await page.getByLabel("Panel capacity (MWp)").fill("6.25");
         }
         approved = true;
         await page.clock.fastForward(120_000);
@@ -390,15 +385,15 @@ for (const section of ["Forecast", "Settings"] as const) {
             "Approved",
         );
         await expect(
-            page.getByText(/Awaiting administrator approval/),
+            page.getByText(/Waiting for approval by Pyracast/),
         ).toHaveCount(0);
         if (section === "Settings") {
             await expect(
                 page.getByRole("button", { name: "Settings", exact: true }),
             ).toHaveAttribute("aria-current", "page");
-            await expect(
-                page.getByLabel("DC nameplate capacity (MW)"),
-            ).toHaveValue("6.25");
+            await expect(page.getByLabel("Panel capacity (MWp)")).toHaveValue(
+                "6.25",
+            );
             await page
                 .getByRole("button", { name: "Forecast", exact: true })
                 .click();
@@ -445,25 +440,19 @@ test("plant submission errors preserve review and every field for retry", async 
     await page.getByLabel("Latitude").fill("37");
     await page.getByLabel("Longitude").fill("31");
     await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.getByLabel("DC nameplate capacity (MW)").fill("5");
+    await page.getByLabel("Panel capacity (MWp)").fill("5");
     await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page
-        .getByRole("button", { name: "Submit plant for approval" })
-        .click();
+    await page.getByRole("button", { name: "Send for approval" }).click();
     await expect(page.locator("main").getByRole("alert")).toContainText(
         "already has a plant at this location",
     );
     await expect(
-        page.getByRole("heading", { name: "Check your plant details" }),
+        page.getByRole("heading", { name: "Check the details" }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Back", exact: true }).click();
-    await expect(page.getByLabel("DC nameplate capacity (MW)")).toHaveValue(
-        "5",
-    );
+    await expect(page.getByLabel("Panel capacity (MWp)")).toHaveValue("5");
     await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page
-        .getByRole("button", { name: "Submit plant for approval" })
-        .click();
+    await page.getByRole("button", { name: "Send for approval" }).click();
     await expect(
         page.getByRole("heading", { name: "West plant" }),
     ).toBeVisible();
@@ -492,13 +481,11 @@ test("an existing location without a plant offers complete setup", async ({
     await page.goto("/app/");
     await page.getByRole("button", { name: /Complete setup/ }).click();
     await expect(
-        page.getByRole("heading", { name: "Complete plant setup" }),
+        page.getByRole("heading", { name: "Finish adding plant" }),
     ).toBeVisible();
-    await page.getByLabel("DC nameplate capacity (MW)").fill("5");
+    await page.getByLabel("Panel capacity (MWp)").fill("5");
     await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page
-        .getByRole("button", { name: "Submit plant for approval" })
-        .click();
+    await page.getByRole("button", { name: "Send for approval" }).click();
     await expect(page.getByRole("heading", { name: plant.name })).toBeVisible();
 });
 
@@ -542,7 +529,5 @@ test("portfolio filters span all pages and a plant section survives refresh", as
     await expect(
         page.getByRole("button", { name: "Settings", exact: true }),
     ).toHaveAttribute("aria-current", "page");
-    await expect(page.getByLabel("DC nameplate capacity (MW)")).toHaveValue(
-        "5",
-    );
+    await expect(page.getByLabel("Panel capacity (MWp)")).toHaveValue("5");
 });

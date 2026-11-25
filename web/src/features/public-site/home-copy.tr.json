@@ -1,0 +1,43 @@
+{
+    "nav": "Ürün",
+    "startNav": "Başlangıç",
+    "login": "Giriş yap",
+    "signup": "Çalışma alanı oluştur",
+    "skip": "İçeriğe geç",
+    "privacy": "Gizlilik",
+    "terms": "Kullanım koşulları",
+    "contact": "İletişim",
+    "footer": "Güneş üretimine daha net bir bakış.",
+    "eyebrow": "Güneş santralleri için üretim tahmini",
+    "title": "Yarının üretimini bugünden planlayın.",
+    "intro": "Santrallerinizin üretim tahminlerini, gerçekleşen üretimini ve kesintilerini bir araya getirin. Ekibinizle bir sonraki güne hazırlanın.",
+    "secondary": "Ürünü inceleyin",
+    "chartTitle": "Günlük üretim",
+    "chartAxis": "Güç",
+    "chartDescription": "Günlük güç profilinde tahmin eğrisini ve sabah saatlerinde gerçekleşen üretimi gösteren şema.",
+    "forecast": "Tahmin",
+    "actual": "Gerçekleşen üretim",
+    "chartNote": "Tahmin ve gerçekleşen üretimi gösteren temsili günlük profil.",
+    "productEyebrow": "Santral çalışma alanı",
+    "productTitle": "Tahmin, üretim ve operasyon aynı yerde.",
+    "features": [
+        {
+            "title": "Yarın için üretim tahmini",
+            "text": "Gün boyunca üretim tahminini ve günlük toplamı santral saatiyle görün."
+        },
+        {
+            "title": "Gerçekleşen üretimle karşılaştırın",
+            "text": "Gerçekleşen üretimi tahminle yan yana görün; eksik saatler görünür kalır."
+        },
+        {
+            "title": "Ekibinizle paylaşın",
+            "text": "Santral bilgilerini paylaşın, kesintileri kaydedin ve Excel dosyası ekli tahmin e-postaları gönderin."
+        }
+    ],
+    "startEyebrow": "Başlangıç",
+    "startTitle": "Santralinizle başlayın.",
+    "startText": "Çalışma alanınızı oluşturun ve santralinizi ekleyin. Tahminlerin başlayabilmesi için Pyracast'in santrali onaylaması gerekir.",
+    "updated": "Son güncelleme",
+    "contents": "Bu sayfada",
+    "back": "Ana sayfaya dön"
+}

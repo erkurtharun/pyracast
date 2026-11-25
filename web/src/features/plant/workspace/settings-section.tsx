@@ -93,7 +93,14 @@ export function SettingsSection({
                         />
                     </>
                 ) : view === "location" ? (
-                    <RegionSettings region={region} scope={scope} />
+                    <RegionSettings
+                        region={region}
+                        scope={scope}
+                        forecastsStopped={
+                            region.status === "pending" &&
+                            !!plant.current_configuration
+                        }
+                    />
                 ) : view === "collection" ? (
                     <CollectionSchedule scope={scope} region={region} />
                 ) : (

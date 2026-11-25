@@ -152,7 +152,7 @@ test("a changed plant settings form asks until it is saved", async ({
     await openPlant(page, "Settings");
     await page.getByLabel("Plant name").fill("New name");
     expect(await asks(page)).toBe(true);
-    await page.getByRole("button", { name: "Save configuration" }).click();
+    await page.getByRole("button", { name: "Save technical details" }).click();
     await expect(page.getByText("Saved successfully.")).toBeVisible();
     expect(await asks(page)).toBe(false);
 });
@@ -185,11 +185,13 @@ test("a changed location form asks until it is submitted", async ({ page }) => {
     await requestLocation(page);
     await openPlant(page, "Settings");
     await page.getByRole("button", { name: "Location", exact: true }).click();
-    await page.getByText("Request location change", { exact: true }).click();
+    await page.getByText("Change location", { exact: true }).click();
     await page.getByLabel("Latitude (°)").fill("37");
     expect(await asks(page)).toBe(true);
     await page.getByLabel("Longitude (°)").fill("31");
-    await page.getByRole("button", { name: "Submit location request" }).click();
+    await page
+        .getByRole("button", { name: "Send location change to Pyracast" })
+        .click();
     await expect(page.getByText("37°, 31° · Europe/Istanbul")).toBeVisible();
     expect(await asks(page)).toBe(false);
 });
@@ -251,18 +253,14 @@ test("an outage form asks until it is closed, and a resolution time until it is 
     await page
         .getByRole("button", { name: "Report outage", exact: true })
         .click();
-    await page.getByLabel("Incident title").fill("Grid fault");
+    await page.getByLabel("Title").fill("Grid fault");
     expect(await asks(page)).toBe(true);
-    await page.getByRole("button", { name: "Close editor" }).click();
+    await page.getByRole("button", { name: "Close" }).click();
     expect(await asks(page)).toBe(false);
-    await page
-        .getByRole("button", { name: "Resolve outage", exact: true })
-        .click();
-    await page
-        .getByLabel("Resolved at", { exact: true })
-        .fill("2026-11-10T13:00");
+    await page.getByRole("button", { name: "End outage", exact: true }).click();
+    await page.getByLabel("End", { exact: true }).fill("2026-11-10T13:00");
     expect(await asks(page)).toBe(true);
-    await page.getByRole("button", { name: "Save resolution" }).click();
+    await page.getByRole("button", { name: "End outage" }).click();
     await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
     expect(await asks(page)).toBe(false);
 });
@@ -280,11 +278,9 @@ test("a form whose submission is running asks until it is answered", async ({
         await route.fallback();
     });
     await openPlant(page, "Outages");
-    await page
-        .getByRole("button", { name: "Resolve outage", exact: true })
-        .click();
+    await page.getByRole("button", { name: "End outage", exact: true }).click();
     expect(await asks(page)).toBe(false);
-    await page.getByRole("button", { name: "Save resolution" }).click();
+    await page.getByRole("button", { name: "End outage" }).click();
     await expect(
         page.getByRole("button", { name: "Saving…", exact: true }),
     ).toBeVisible();
@@ -439,17 +435,15 @@ test("a removed collection time asks until the schedule is saved, without typing
         return route.fulfill({ json: saved });
     });
     await openPlant(page, "Settings");
-    await page.getByRole("button", { name: "Data collection" }).click();
+    await page
+        .getByRole("button", { name: "Forecast update times", exact: true })
+        .click();
     expect(await asks(page)).toBe(false);
-    await page
-        .getByRole("button", { name: "Remove collection time 2" })
-        .click();
+    await page.getByRole("button", { name: "Remove update time 2" }).click();
     expect(await asks(page)).toBe(true);
-    await page
-        .getByRole("button", { name: "Save collection schedule" })
-        .click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(
-        page.getByRole("button", { name: "Remove collection time 2" }),
+        page.getByRole("button", { name: "Remove update time 2" }),
     ).toHaveCount(0);
     expect(saved.times).toEqual(["09:00"]);
     expect(await asks(page)).toBe(false);
@@ -466,13 +460,13 @@ test("swapped collection times save nothing and ask no more once saved", async (
         return route.fulfill({ json: schedule });
     });
     await openPlant(page, "Settings");
-    await page.getByRole("button", { name: "Data collection" }).click();
-    await page.getByLabel("Collection time 1", { exact: true }).fill("12:00");
-    await page.getByLabel("Collection time 2", { exact: true }).fill("09:00");
-    expect(await asks(page)).toBe(true);
     await page
-        .getByRole("button", { name: "Save collection schedule" })
+        .getByRole("button", { name: "Forecast update times", exact: true })
         .click();
+    await page.getByLabel("Update time 1", { exact: true }).fill("12:00");
+    await page.getByLabel("Update time 2", { exact: true }).fill("09:00");
+    expect(await asks(page)).toBe(true);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText("Saved successfully.")).toBeVisible();
     expect(await asks(page)).toBe(false);
     expect(puts).toBe(0);
@@ -496,19 +490,20 @@ test("a saved schedule whose next read is held asks nothing, and saving it again
         await route.fulfill({ json: saved });
     });
     await openPlant(page, "Settings");
-    await page.getByRole("button", { name: "Data collection" }).click();
     await page
-        .getByRole("button", { name: "Remove collection time 2" })
+        .getByRole("button", { name: "Forecast update times", exact: true })
         .click();
+    await page.getByRole("button", { name: "Remove update time 2" }).click();
     holding = true;
     const save = page.getByRole("button", {
-        name: "Save collection schedule",
+        name: "Save",
+        exact: true,
     });
     await save.click();
     const confirmed = page.getByText("Saved successfully.");
     await expect(confirmed).toBeVisible();
     expect(await asks(page)).toBe(false);
-    const time = page.getByLabel("Collection time 1", { exact: true });
+    const time = page.getByLabel("Update time 1", { exact: true });
     await time.fill("10:00");
     await expect(confirmed).toHaveCount(0);
     await time.fill("09:00");
@@ -526,11 +521,13 @@ test("a first time added to an empty saved schedule asks", async ({ page }) => {
         route.fulfill({ json: { ...schedule, enabled: false, times: [] } }),
     );
     await openPlant(page, "Settings");
-    await page.getByRole("button", { name: "Data collection" }).click();
+    await page
+        .getByRole("button", { name: "Forecast update times", exact: true })
+        .click();
     expect(await asks(page)).toBe(false);
-    await page.getByRole("button", { name: "+ Add time", exact: true }).click();
+    await page.getByRole("button", { name: "Add time", exact: true }).click();
     await expect(
-        page.getByLabel("Collection time 1", { exact: true }),
+        page.getByLabel("Update time 1", { exact: true }),
     ).toBeVisible();
     expect(await asks(page)).toBe(true);
 });
@@ -541,11 +538,11 @@ async function saveReminders(page: Page) {
             response.request().method() === "PUT" &&
             response.url().endsWith("/reminders/"),
     );
-    await page.getByRole("button", { name: "Save reminders" }).click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
     await saved;
 }
 
-for (const removed of ["Remove email address 2", "Remove delivery time 1"])
+for (const removed of ["Remove email address 2", "Remove send time 1"])
     test(`a reminder edit made by "${removed}" asks until the reminders are saved`, async ({
         page,
     }) => {
@@ -556,7 +553,7 @@ for (const removed of ["Remove email address 2", "Remove delivery time 1"])
         await page
             .getByRole("button", { name: "Add time", exact: true })
             .click();
-        await page.getByLabel("Delivery time 2", { exact: true }).fill("17:30");
+        await page.getByLabel("Send time 2", { exact: true }).fill("17:30");
         await saveReminders(page);
         await expect.poll(() => asks(page)).toBe(false);
         const remove = page.getByRole("button", { name: removed, exact: true });
@@ -614,7 +611,7 @@ test("a plant the wizard created opens in the page without a question", async ({
     await page.getByLabel("Latitude (°)").fill("37");
     await page.getByLabel("Longitude (°)").fill("31");
     await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.getByLabel("DC nameplate capacity (MW)").fill("5");
+    await page.getByLabel("Panel capacity (MWp)").fill("5");
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await markDocument(page);
     const asked = questions(page);
@@ -624,9 +621,7 @@ test("a plant the wizard created opens in the page without a question", async ({
             response.url().endsWith("/api/tenants/1/sites/") &&
             response.request().method() === "POST",
     );
-    await page
-        .getByRole("button", { name: "Submit plant for approval" })
-        .click();
+    await page.getByRole("button", { name: "Send for approval" }).click();
     await created;
     await expect.poll(() => asks(page)).toBe(false);
     sites.release();
@@ -1215,7 +1210,7 @@ async function serveConfiguration(page: Page) {
 }
 
 const discardedNotice =
-    "The plant's configuration changed; your unsent entries were discarded.";
+    "The plant details changed; your unsent entries were discarded.";
 
 async function stageEight(page: Page) {
     await page

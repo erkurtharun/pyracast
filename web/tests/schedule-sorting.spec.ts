@@ -22,10 +22,12 @@ test("reminder times are sent as entered and a repeated time is refused by the s
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Irradiance forecast", exact: true })
+        .click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("button", { name: "Email reminders" }).click();
-    await page.getByLabel("Enable forecast emails for this plant").check();
+    await page.getByRole("button", { name: "Forecast email" }).click();
+    await page.getByLabel("Send forecast email for this plant").check();
     for (const [index, time] of [
         "10:00",
         "09:30",
@@ -37,14 +39,14 @@ test("reminder times are sent as entered and a repeated time is refused by the s
                 .getByRole("button", { name: "Add time", exact: true })
                 .click();
         await page
-            .getByLabel(`Delivery time ${index + 1}`, { exact: true })
+            .getByLabel(`Send time ${index + 1}`, { exact: true })
             .fill(time);
     }
     const outgoing = page.waitForRequest(
         (request) =>
             request.method() === "PUT" && request.url().includes("/reminders/"),
     );
-    await page.getByRole("button", { name: "Save reminders" }).click();
+    await page.getByRole("button", { name: "Save" }).click();
     expect((await outgoing).postDataJSON().times).toEqual([
         "10:00",
         "09:30",
@@ -54,7 +56,7 @@ test("reminder times are sent as entered and a repeated time is refused by the s
     await expect(page.locator(".notice[role=alert]")).toContainText(
         "Use each send time once.",
     );
-    await expect(
-        page.getByLabel("Delivery time 4", { exact: true }),
-    ).toHaveValue("09:30");
+    await expect(page.getByLabel("Send time 4", { exact: true })).toHaveValue(
+        "09:30",
+    );
 });

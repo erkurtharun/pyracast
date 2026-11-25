@@ -24,13 +24,13 @@ test("view navigation names its group and marks the current view", async ({
     await expect(sections.locator("[aria-current]")).toHaveCount(1);
     const views = page.getByRole("navigation", { name: "Forecast views" });
     await expect(
-        views.getByRole("button", { name: "Generation", exact: true }),
+        views.getByRole("button", { name: "Generation forecast", exact: true }),
     ).toHaveAttribute("aria-current", "page");
     await views
-        .getByRole("button", { name: "Irradiance", exact: true })
+        .getByRole("button", { name: "Irradiance forecast", exact: true })
         .click();
     await expect(
-        views.getByRole("button", { name: "Irradiance", exact: true }),
+        views.getByRole("button", { name: "Irradiance forecast", exact: true }),
     ).toHaveAttribute("aria-current", "page");
     await expect(views.locator("[aria-current]")).toHaveCount(1);
     for (const button of await page
@@ -50,7 +50,9 @@ test("labelled controls are reachable by their visible labels", async ({
     await expect(
         page.getByLabel("Forecast date", { exact: true }),
     ).toHaveAttribute("type", "date");
-    await expect(page.getByLabel("Resolution")).toHaveValue("60");
+    await expect(page.getByLabel("Interval", { exact: true })).toHaveValue(
+        "60",
+    );
     await scan(page, ".forecast-controls");
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await expect(page.getByLabel("Day", { exact: true })).toHaveAttribute(
@@ -268,15 +270,15 @@ test("a select reports its field error like every other control", async ({
     await page.getByRole("button", { name: /East array/ }).click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page
-        .getByRole("button", { name: "Save configuration", exact: true })
+        .getByRole("button", { name: "Save technical details", exact: true })
         .click();
-    const basis = page.getByLabel("Measurement point", { exact: true });
+    const basis = page.getByLabel("Meter point", { exact: true });
     await expect(basis).toHaveAttribute("aria-invalid", "true");
     await expect(basis).toHaveAccessibleDescription(
         "Choose where production is metered.",
     );
     await expect(page.locator(".form-errors").getByRole("listitem")).toHaveText(
-        ["Measurement point: Choose where production is metered."],
+        ["Meter point: Choose where production is metered."],
     );
 });
 
@@ -461,22 +463,20 @@ test("a checkbox reports its field error like every other control", async ({
     await page.getByRole("button", { name: /East array/ }).click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page
-        .getByRole("button", { name: "Data collection", exact: true })
+        .getByRole("button", { name: "Forecast update times", exact: true })
         .click();
     const enabled = page.getByRole("checkbox", {
-        name: "Enable data collection",
+        name: "Update forecasts automatically",
         exact: true,
     });
     await enabled.uncheck();
-    await page
-        .getByRole("button", { name: "Save collection schedule", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(enabled).toHaveAttribute("aria-invalid", "true");
     await expect(enabled).toHaveAccessibleDescription(
         "Approval is required first.",
     );
     await expect(page.locator(".form-errors").getByRole("listitem")).toHaveText(
-        ["Enable data collection: Approval is required first."],
+        ["Update forecasts automatically: Approval is required first."],
     );
     await scan(page, ".form-errors");
 });
