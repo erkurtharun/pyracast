@@ -162,7 +162,7 @@ def test_saved_forecast_email_hides_the_provider_in_all_alternatives() -> None:
     message = build_message(delivery)
     assert "solcast" not in message.body.casefold()
     assert "private-account" not in message.body
-    assert "Irradiance estimate, not plant electricity." in message.body
+    assert "solar irradiance forecast (GHI), not electricity generation" in message.body
     for alternative in message.alternatives:
         assert isinstance(alternative[0], str)
         assert "solcast" not in alternative[0].casefold()
@@ -175,7 +175,7 @@ def test_saved_forecast_email_hides_the_provider_in_all_alternatives() -> None:
                 assert "solcast" not in content
                 assert "private-account" not in content
                 assert "test-only-solcast-key" not in content
-    assert attached_sheet(message)["C4"].value == "Forecast (kWh/m²)"
+    assert attached_sheet(message)["B8"].value == "Irradiance (kWh/m²)"
     account.refresh_from_db()
     assert account.provider == "solcast"
     assert account.external_account_id == "private-account"

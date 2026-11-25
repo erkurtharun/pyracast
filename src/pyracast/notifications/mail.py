@@ -9,9 +9,9 @@ from django.utils import translation
 
 from pyracast.notifications.models import NotificationDelivery, PreparedMessageFormat
 from pyracast.notifications.reminder_notice import (
-    reminder_footer,
+    forecast_mail,
+    reminder_headers,
     unavailable_text,
-    unsubscribe_header,
 )
 from pyracast.notifications.rendering import render_forecast
 
@@ -24,7 +24,7 @@ def message_id(delivery: NotificationDelivery) -> str:
 
 
 def _headers(delivery: NotificationDelivery) -> dict[str, str]:
-    return {"Message-ID": message_id(delivery), **unsubscribe_header()}
+    return {"Message-ID": message_id(delivery), **reminder_headers(delivery.language)}
 
 
 def build_message(
@@ -46,7 +46,7 @@ def build_message(
                 results,
                 prepared_at=prepared_at or delivery.scheduled_for,
                 report_context=report_context,
-                footer=reminder_footer(delivery),
+                mail=forecast_mail(delivery),
             ),
         )
 
@@ -79,20 +79,23 @@ def _restore_message(
         headers=_headers(delivery),
     )
     message.attach_alternative(payload["html"], "text/html")
-    message.attach(
-        payload["attachment_name"],
-        b64decode(payload["attachment_base64"], validate=True),
-        XLSX_MIME,
-    )
+    if "attachment_base64" in payload:
+        message.attach(
+            payload["attachment_name"],
+            b64decode(payload["attachment_base64"], validate=True),
+            XLSX_MIME,
+        )
     return message
 
 
 def message_payload(message: EmailMultiAlternatives) -> dict[str, str]:
-    return {
+    payload = {
         "subject": str(message.subject),
         "body": str(message.body),
         "html": cast(str, message.alternatives[0][0]),
         "format": PreparedMessageFormat.XLSX,
-        "attachment_name": cast(str, message.attachments[0][0]),
-        "attachment_base64": b64encode(cast(bytes, message.attachments[0][1])).decode("ascii"),
     }
+    for name, content, _mimetype in message.attachments:
+        payload["attachment_name"] = cast(str, name)
+        payload["attachment_base64"] = b64encode(cast(bytes, content)).decode("ascii")
+    return payload

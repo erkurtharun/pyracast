@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from django.contrib.auth.models import User
 from django.core import mail
+from django.core.mail import EmailMultiAlternatives
 from django.db import IntegrityError, transaction
 from django.utils import translation
 
@@ -52,14 +53,24 @@ def test_schedule_pins_explicit_language_for_every_recipient_and_defaults_to_eng
 
 
 @pytest.mark.parametrize(
-    ("language", "missing"),
+    ("language", "subject", "missing"),
     [
-        ("en", "Tomorrow's forecast is unavailable."),
-        ("tr", "Yar\u0131n\u0131n tahmini mevcut değil."),
+        (
+            "en",
+            "no forecast for Wed 11 Nov",
+            "The forecast for Wednesday 11 November 2026 could not be prepared. This email "
+            "contains no figures.",
+        ),
+        (
+            "tr",
+            "11 Kas\u0131m Çarşamba tahmini haz\u0131rlanamad\u0131",
+            "11 Kas\u0131m 2026 Çarşamba için üretim tahmini haz\u0131rlanamad\u0131. Bu "
+            "e-postada rakam yoktur.",
+        ),
     ],
 )
 def test_missing_saved_data_is_reported_in_the_pinned_language_without_inventing_zero(
-    language: str, missing: str
+    language: str, subject: str, missing: str
 ) -> None:
     _system, schedule = configured()
     schedule.language = language
@@ -67,15 +78,14 @@ def test_missing_saved_data_is_reported_in_the_pinned_language_without_inventing
     requests = RequestAttempt.objects.count()
     (delivery_id,) = enqueue_due(SLOT)
     assert process_notification(delivery_id, SLOT)
-    messages = mail.outbox
-    assert missing in messages[0].body
-    assert "0.000 kWh/m²" not in messages[0].body
-    assert "0,000 kWh/m²" not in messages[0].body
-    sheet = attached_sheet(messages[0])
-    for day in (10, 11):
-        row = next(cell.row for cell in sheet["A"] if cell.value == datetime(2026, 11, day))
-        assert sheet.cell(row, 3).value is None
-    assert not any(isinstance(cell.value, int | float) for row in sheet for cell in row)
+    (message,) = mail.outbox
+    assert isinstance(message, EmailMultiAlternatives)
+    assert message.subject.endswith(subject)
+    assert missing in message.body
+    assert missing in str(message.alternatives[0][0])
+    assert "kWh/m²" not in message.body
+    assert not message.attachments
+    assert message.extra_headers["Content-Language"] == language
     assert RequestAttempt.objects.count() == requests
 
 
@@ -88,13 +98,15 @@ def test_mail_rendering_restores_the_caller_language_and_preserves_typed_workboo
     with translation.override("en"):
         message = build_message(delivery)
         assert translation.get_language() == "en"
-    assert "Iş\u0131n\u0131m tahminidir" in message.body
-    assert "3,299 kWh/m²" in message.body
+    assert (
+        "güneş \u0131ş\u0131n\u0131m\u0131 tahmini (GHI); elektrik üretimi değildir" in message.body
+    )
+    assert "Yar\u0131n (11 Kas\u0131m 2026 Çarşamba): 3,30 kWh/m²" in message.body
     sheet = attached_sheet(message)
-    assert sheet.title == "Tahmin"
-    assert sheet["A5"].value == datetime(2026, 11, 10)
-    assert sheet["A5"].number_format == "dd.mm.yyyy"
-    assert isinstance(sheet["C5"].value, float)
+    assert sheet.title == "Özet"
+    assert sheet["A9"].value == datetime(2026, 11, 10)
+    assert sheet["A9"].number_format == "dd.mm.yyyy"
+    assert isinstance(sheet["B9"].value, float)
 
 
 def test_delivery_language_is_database_constrained() -> None:
@@ -114,15 +126,19 @@ def test_delivery_language_is_database_constrained() -> None:
 
 
 @pytest.mark.parametrize("days", [1, 2])
-def test_saved_forecast_updated_date_and_stale_warning_are_localized(days: int) -> None:
+def test_an_old_forecast_shows_its_localized_time_under_the_unavailable_sentence(
+    days: int,
+) -> None:
     system, _ = configured()
     snapshot = complete_saved(system, NOW - timedelta(days=days))
     (delivery_id,) = enqueue_due(SLOT)
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     delivery.language = "tr"
     message = build_message(delivery)
-    assert "Tahmin verisi 24 saatten eski." in message.body
-    assert f"{9 - days} Kas 2026 16:00" in message.body
-    assert attached_sheet(message)["A2"].value == (
+    assert (
+        "Daha yeni tahmin verisi al\u0131namad\u0131.\n"
+        f"Tahmin verisi: {9 - days} Kas\u0131m 2026, 16:00 (UTC+3)\n"
+    ) in message.body
+    assert attached_sheet(message)["B4"].value == (
         snapshot.collected_at.astimezone(ZoneInfo(system.region.timezone)).replace(tzinfo=None)
     )
