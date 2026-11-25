@@ -362,7 +362,7 @@ test("plant settings whose save was answered while their follow-up reads run ask
     await page.getByLabel("Plant name").fill("New name");
     await markDocument(page);
     reads.hold();
-    await page.getByRole("button", { name: "Save configuration" }).click();
+    await page.getByRole("button", { name: "Save technical details" }).click();
     await expect(
         page.getByRole("heading", { name: "New name", level: 1 }),
     ).toBeVisible();
