@@ -357,6 +357,15 @@ async function holdReads(page: Page, url: string) {
 
 const holdWorkspaceReads = (page: Page) => holdReads(page, "**/api/tenants/");
 
+const answeredWorkspaceRead = (page: Page) =>
+    page
+        .waitForResponse(
+            (response) =>
+                new URL(response.url()).pathname === "/api/tenants/" &&
+                response.request().method() === "GET",
+        )
+        .then((response) => response.finished());
+
 async function chooseHalfHours(page: Page) {
     await page.getByLabel("Interval", { exact: true }).selectOption("30");
 }
@@ -584,9 +593,11 @@ test("a resolution repeated after its lost answer asks until the repeat is answe
     const reads = await holdWorkspaceReads(page);
     await openPlant(page, "Outages");
     await enterResolution(page);
+    const lossRead = answeredWorkspaceRead(page);
     await saveResolution(page);
     await expect(page.getByText("Outcome unknown")).toBeVisible();
     expect(await asks(page)).toBe(true);
+    await lossRead;
     const releaseRepeat = await holdRequests(page, "**/outages/51/resolve/");
     reads.arm();
     const repeated = page.waitForRequest("**/outages/51/resolve/");
@@ -622,8 +633,10 @@ test("an outage report whose answer was lost keeps asking while another report i
     const title = form.getByLabel("Title", { exact: true });
     await title.fill("Grid fault");
     const save = form.getByRole("button", { name: "Save", exact: true });
+    const lossRead = answeredWorkspaceRead(page);
     await save.click();
     await expect(form.getByText("Outcome unknown")).toBeVisible();
+    await lossRead;
     await title.fill("Inverter fault");
     reads.arm();
     await save.click();
@@ -652,9 +665,11 @@ test("an outage edit repeated after its lost answer, whose conflict shows the ed
         .click();
     await page.getByLabel("Title").fill("Inverter replaced");
     const save = page.getByRole("button", { name: "Save", exact: true });
+    const lossRead = answeredWorkspaceRead(page);
     await save.click();
     await expect(page.getByText("Outcome unknown")).toBeVisible();
     expect(await asks(page)).toBe(true);
+    await lossRead;
     reads.arm();
     const settled = await asksOnce(page, { gone: "Outcome unknown" });
     await save.click();
@@ -823,10 +838,14 @@ test("a removed collection time asks until the schedule is saved, without typing
     await page.clock.setFixedTime(now);
     await signIn(page);
     let saved = schedule;
-    await page.route("**/collection-schedule/", (route) => {
+    let holding = false;
+    let release = () => {};
+    const released = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/collection-schedule/", async (route) => {
         if (route.request().method() === "PUT")
             saved = { ...saved, ...route.request().postDataJSON() };
-        return route.fulfill({ json: saved });
+        else if (holding) await released;
+        await route.fulfill({ json: saved });
     });
     await openPlant(page, "Settings");
     await page
@@ -836,8 +855,10 @@ test("a removed collection time asks until the schedule is saved, without typing
     await page.getByRole("button", { name: "Remove update time 2" }).click();
     expect(await asks(page)).toBe(true);
     const shown = await asksOnce(page, { shown: "Saved." });
+    holding = true;
     await page.getByRole("button", { name: "Save", exact: true }).click();
     expect(await shown()).toBe(false);
+    release();
     await expect(
         page.getByRole("button", { name: "Remove update time 2" }),
     ).toHaveCount(0);
@@ -931,7 +952,13 @@ test("a first time added to an empty saved schedule asks", async ({ page }) => {
 async function saveReminders(page: Page) {
     const saved = page.getByText("Saved.", { exact: true });
     await expect(saved).toHaveCount(0);
+    const sent = page.waitForResponse(
+        (response) =>
+            response.request().method() === "PUT" &&
+            response.url().endsWith("/reminders/"),
+    );
     await page.getByRole("button", { name: "Save", exact: true }).click();
+    await sent;
     await expect(saved).toBeVisible();
 }
 
