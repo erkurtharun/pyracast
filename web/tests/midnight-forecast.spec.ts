@@ -16,7 +16,17 @@ async function pollOnce(page: Page) {
     await polled;
 }
 
-test("automatic forecast survives midnight until historical estimates arrive", async ({
+const liveAt = "2026-11-14T03:00:00Z";
+const savedAt = "2026-11-14T09:00:00Z";
+const satelliteAt = "2026-11-15T02:00:00Z";
+const plantTime = (value: string) =>
+    new Intl.DateTimeFormat("en", {
+        dateStyle: "medium",
+        timeStyle: "short",
+        timeZone: region.timezone,
+    }).format(new Date(value));
+
+test("the forecast survives midnight and the data choice names satellite data once it arrives", async ({
     page,
 }) => {
     const beforeMidnight = new Date("2026-11-14T20:59:40Z");
@@ -42,8 +52,11 @@ test("automatic forecast survives midnight until historical estimates arrive", a
                     coverage_fraction: 1,
                     quality_flags: fallback ? ["forecast_fallback"] : [],
                     provenance: fallback
-                        ? { fallback_reason: "estimated_actuals_unavailable" }
-                        : {},
+                        ? {
+                              fallback_reason: "estimated_actuals_unavailable",
+                              collected_at: savedAt,
+                          }
+                        : { collected_at: actual ? satelliteAt : liveAt },
                     intervals: [
                         {
                             start: "2026-11-14T09:00:00Z",
@@ -67,49 +80,50 @@ test("automatic forecast survives midnight until historical estimates arrive", a
     const requested = forecastRead(page);
     await page.getByLabel("Forecast date").fill("2026-11-14");
     await requested;
-    const generation = page.locator(".stat", { hasText: "Estimated energy" });
-    const pending = page.getByText(
-        "Saved forecast · Historical estimates pending",
-        { exact: true },
+    const generation = page.locator(".stat", { hasText: "Daily total" });
+    const choice = page.getByLabel("Data", { exact: true });
+    const panel = page.locator("section.panel");
+    await expect(generation).toContainText("237.77 MWh");
+    await expect(choice).toHaveValue("forecast");
+    await expect(panel.getByText(/^Forecast data: /)).toHaveText(
+        `Forecast data: ${plantTime(liveAt)}`,
     );
-    const actualLabel = page.getByText(
-        "Satellite/model estimates, not meter readings.",
-        { exact: true },
-    );
-    await expect(generation).toContainText("237.773");
-    await expect(pending).toHaveCount(0);
     await page.clock.pauseAt(new Date("2026-11-14T20:59:50Z"));
     completedDay = true;
     await pollOnce(page);
     // The query layer hands an answer to the screen on a zero-delay timer, which a paused clock holds;
     // flowing time releases it but cannot reach the next 30 s poll before the assertion times out.
     await page.clock.resume();
-    await expect(pending).toBeVisible();
+    await expect(panel.getByText(/^Forecast data: /)).toHaveText(
+        `Forecast data: ${plantTime(savedAt)}`,
+    );
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-14");
-    await expect(page.getByLabel("Data source")).toHaveValue("auto");
-    await expect(generation).toContainText("237.773");
-    await expect(actualLabel).toHaveCount(0);
+    await expect(choice).toHaveValue("forecast");
+    await expect(generation).toContainText("237.77 MWh");
     await expect(
-        page.getByText("Production comparison is out of date.", {
-            exact: true,
-        }),
+        panel.getByRole("heading", { name: "Generation forecast" }),
     ).toBeVisible();
-    await page.getByText("View interval data (1 interval)").click();
+    await expect(panel.getByText(/^Satellite data: /)).toHaveCount(0);
+    await page.getByText("Show table", { exact: true }).click();
     await expect(
-        page.getByRole("table", {
-            name: "Forecast intervals",
-        }),
+        page.getByRole("table", { name: "Hourly values" }),
     ).toBeVisible();
 
     historicalEstimatesAvailable = true;
     await pollOnce(page);
-    await expect(actualLabel).toBeVisible();
-    await expect(pending).toHaveCount(0);
+    await expect(choice).toHaveValue("estimated_actuals");
+    await expect(
+        panel.getByRole("heading", {
+            name: "Production calculated from satellite data",
+        }),
+    ).toBeVisible();
+    await expect(panel.getByText(/^Satellite data: /)).toHaveText(
+        `Satellite data: ${plantTime(satelliteAt)}`,
+    );
+    await expect(panel.getByText(/^Forecast data: /)).toHaveCount(0);
     await expect(generation).toContainText("230");
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-14");
     await expect(
-        page.getByRole("table", {
-            name: "Estimated actual intervals",
-        }),
+        page.getByRole("table", { name: "Hourly values" }),
     ).toBeVisible();
 });
