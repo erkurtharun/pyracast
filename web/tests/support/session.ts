@@ -189,20 +189,20 @@ export function outstandingSessionReads(page: Page) {
     });
 }
 
-// Counts each document's GET reads of one path from its start; call before the page loads.
+// Settles once each GET of `path` since the document started failed, answered 204 or had json() read; install before load.
 export function trackReads(page: Page, path: string) {
     return page.addInitScript((path) => {
         let outstanding = 0;
         let waiting: (() => void)[] = [];
         // A message task runs after the answer's reactions, and a page clock does not hold it.
+        const task = new MessageChannel();
+        task.port1.onmessage = () => {
+            if (outstanding > 0) return;
+            for (const resolve of waiting) resolve();
+            waiting = [];
+        };
         const settle = () => {
             outstanding--;
-            const task = new MessageChannel();
-            task.port1.onmessage = () => {
-                if (outstanding > 0) return;
-                for (const resolve of waiting) resolve();
-                waiting = [];
-            };
             task.port2.postMessage(null);
         };
         const applied = () =>

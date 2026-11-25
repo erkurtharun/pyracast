@@ -7,6 +7,7 @@ import {
     openReminders,
     paged,
     plain,
+    region,
     reminderApi,
     sessionIdentity,
     tenantRow,
@@ -103,6 +104,7 @@ const isRead = (method: string, url: string) =>
     method === "GET" && url.endsWith("/reminders/");
 const isTenants = (method: string, url: string) =>
     method === "GET" && url.endsWith("/api/tenants/");
+const reminders = `/api/tenants/1/regions/${region.id}/reminders/`;
 
 function sent(page: Page, matches: (method: string, url: string) => boolean) {
     const bodies: Record<string, unknown>[] = [];
@@ -321,6 +323,7 @@ test("address data stays hidden after administration moves, through two language
         deliveries: [SENT_TO_TEAM],
     });
     await asRole(page, () => role);
+    await trackReads(page, reminders);
     await speaking(page);
     await openReminders(page);
     await expect(typedFields(page)).toHaveValue(OUTSIDE);
@@ -371,6 +374,7 @@ test("address data stays hidden after administration moves, through two language
     role = "admin";
     answersViewer = false;
     await readsApplied(page, "/api/tenants/");
+    await readsApplied(page, reminders);
     const tenants = nextRequest(page, isTenants);
     await refetch(page);
     await (await tenants).response();
@@ -396,12 +400,7 @@ test("losing administration while the review is open closes it, sends nothing an
     await time(page, 1).fill("09:00");
     await review(page);
     role = "viewer";
-    const tenants = nextRequest(page, isTenants);
-    await page.clock.fastForward("00:10");
-    await page.evaluate(() =>
-        window.dispatchEvent(new Event("visibilitychange")),
-    );
-    await (await tenants).response();
+    await tenantsAgain(page);
     await expect(dialog(page)).toHaveCount(0);
     await expect(typedFields(page)).toHaveCount(0);
     await expect(line(page, COUNT_ONLY(3))).toBeVisible();

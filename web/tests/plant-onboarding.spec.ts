@@ -78,19 +78,25 @@ test("an older pending submission cannot replace a saved technical update", asyn
     await page.goto("/app/");
     await page.getByRole("button", { name: /East array/ }).click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByLabel("Panel capacity (MWp)").fill("6.25");
+    const capacity = page.getByLabel("Panel capacity (MWp)");
+    await capacity.fill("6.250");
     hold = true;
     await page.clock.fastForward(120_000);
     await observed;
-    await page.getByRole("button", { name: "Save technical details" }).click();
-    const capacity = page.getByLabel("Panel capacity (MWp)");
-    const refreshed = page.waitForResponse("**/sites/");
+    const reread = page.waitForRequest(
+        (request) =>
+            request.method() === "GET" &&
+            new URL(request.url()).pathname === sites,
+    );
     try {
+        await page
+            .getByRole("button", { name: "Save technical details" })
+            .click();
+        await reread;
         await expect(capacity).toHaveValue("6.25");
     } finally {
         release();
     }
-    await (await refreshed).finished();
     await readsApplied(page, sites);
     await page.getByRole("button", { name: "Location", exact: true }).click();
     await page
