@@ -427,7 +427,7 @@ async function saveReminders(page: Page) {
     await saved;
 }
 
-for (const removed of ["Remove email address 2", "Remove delivery time 1"])
+for (const removed of ["Remove email address 2", "Remove send time 1"])
     test(`a reminder edit made by "${removed}" asks until the reminders are saved`, async ({
         page,
     }) => {
@@ -1095,7 +1095,7 @@ async function serveConfiguration(page: Page) {
 }
 
 const discardedNotice =
-    "The plant's configuration changed; your unsent entries were discarded.";
+    "The plant details changed; your unsent entries were discarded.";
 
 async function stageEight(page: Page) {
     await page

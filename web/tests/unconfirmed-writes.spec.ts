@@ -1679,7 +1679,7 @@ test("an edit of a resolved outage lost after it was applied is advised and save
             .locator("article", {
                 has: page.getByRole("heading", { name: "Grid fault" }),
             })
-            .getByText(/^Configuration changed./),
+            .getByText(/^Technical details changed./),
     ).toBeVisible();
     await expectUnconfirmed(form, true);
     await save.click();
@@ -2072,7 +2072,7 @@ test("a lost resolution whose outage list is then refused is told beside the ref
     await page.route(outageReads, refusing);
     await readAgainOnFocus(page);
     const section = page.locator("section", {
-        has: page.getByRole("heading", { name: "Plant outages" }),
+        has: page.getByRole("heading", { name: "Outages" }),
     });
     await expect(section.getByText("Not found.")).toBeVisible();
     await expect(card).toHaveCount(0);
