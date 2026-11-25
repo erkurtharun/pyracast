@@ -8,14 +8,13 @@ from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJob,
     CollectionJobStatus,
-    CollectionSchedule,
     ForecastSnapshot,
 )
 from pyracast.forecasts.projections import saved_day_payload
-from pyracast.forecasts.timing import forecast_timing, latest_forecast_slot
 from pyracast.notifications.mail import build_message, message_payload
 from pyracast.notifications.models import NotificationDelivery, PreparedMessageKind
 from pyracast.notifications.presentation import report_summary
+from pyracast.notifications.reminder_slot import collection_slot
 from pyracast.notifications.report_data import saved_report_context
 from pyracast.notifications.sources import eligible_saved_forecasts, saved_report_results
 
@@ -37,16 +36,6 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
         (candidate for candidate in jobs if candidate.endpoint == CollectionEndpoint.FORECASTS),
         None,
     )
-    timing = forecast_timing(
-        binding, CollectionSchedule.objects.filter(region_id=binding.region_id).first()
-    )
-    due = (
-        timing is not None
-        and latest_forecast_slot(
-            delivery.scheduled_for, binding.timezone, timing.times, timing.effective_from
-        )
-        == delivery.scheduled_for
-    )
     if now < deadline and (
         any(
             candidate.status
@@ -54,7 +43,7 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
             and (candidate.status != CollectionJobStatus.RETRY or candidate.available_at < deadline)
             for candidate in jobs
         )
-        or (job is None and due)
+        or (job is None and collection_slot(delivery))
     ):
         delivery.available_at = min(now + timedelta(seconds=30), deadline)
         delivery.save(update_fields=("available_at",))

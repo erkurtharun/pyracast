@@ -38,7 +38,7 @@ def test_delivery_completeness_matches_the_electrical_total(
         assert normal["daylight"]["energy_mwh"] is not None
     else:
         assert normal is None
-        assert "Unavailable" in str(delivery.prepared_message["body"])
+        assert "This email contains no figures." in str(delivery.prepared_message["body"])
 
 
 def test_region_delivery_completeness_uses_delivered_daylight_coverage() -> None:
