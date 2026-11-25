@@ -256,6 +256,14 @@ function fileSlug(name: string): string {
         .replace(/^-|-$/g, "");
 }
 
+// csvFilename cuts its joined parts at 150 characters, so only the plant slug gives way.
+function forecastFilename(plant: string, date: string, kind: string) {
+    const tail = [date, kind].filter(Boolean).join("-");
+    const room = 150 - `pyracast--${tail}`.length;
+    const slug = fileSlug(plant).slice(0, room).replace(/-$/, "") || "plant";
+    return csvFilename("pyracast", slug, date, kind);
+}
+
 export type ForecastFileNames = {
     file: string;
     forecast: string;
@@ -284,12 +292,7 @@ export function forecastExport(
             ? [["interval_source", (row) => kind(row.source_kinds)]]
             : [];
     return table(
-        csvFilename(
-            "pyracast",
-            fileSlug(plant.name),
-            forecast.date ?? "",
-            names.file,
-        ),
+        forecastFilename(plant.name, forecast.date ?? "", names.file),
         [
             ...plantColumns<ForecastRow>(plant),
             ["date", () => forecast.date ?? null],

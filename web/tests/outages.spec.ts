@@ -270,7 +270,7 @@ async function workspace(
     };
 }
 
-async function create(page: Page, impact = "Total outage") {
+async function create(page: Page, impact = "Total outage", panels?: string) {
     await page.getByRole("button", { name: "Outages", exact: true }).click();
     await page
         .getByRole("button", { name: "Report outage", exact: true })
@@ -280,6 +280,8 @@ async function create(page: Page, impact = "Total outage") {
         .getByLabel("Started at", { exact: true })
         .fill("2026-11-11T11:00");
     await page.getByLabel("Capacity impact").selectOption({ label: impact });
+    if (panels)
+        await page.getByLabel("Available panel DC capacity (MW)").fill(panels);
     await page
         .getByRole("button", { name: "Save outage", exact: true })
         .click();
@@ -643,17 +645,9 @@ test("unknown impact remains missing and stale edits show a conflict", async ({
         page.getByText(/Configuration changed. Edit this report/),
     ).toBeVisible();
     await page.getByRole("button", { name: "Forecast", exact: true }).click();
-    await expect(
-        page
-            .getByRole("status")
-            .filter({ hasText: /^Outage impact is unknown\./ }),
-    ).toBeVisible();
-    await expect(
-        page.getByText(
-            "Technical details changed. Check the capacity in the outage record.",
-            { exact: true },
-        ),
-    ).toBeVisible();
+    await expect(page.locator("section.panel").getByRole("status")).toHaveText(
+        "Outage impact is unknown. Enter the capacity still in service in the outage record.",
+    );
     await page.getByText("Show table", { exact: true }).click();
     await expect(
         page.getByRole("columnheader", {
@@ -666,6 +660,18 @@ test("unknown impact remains missing and stale edits show a conflict", async ({
     await expect(
         page.getByRole("table").getByRole("cell", { name: /No value\./ }),
     ).toHaveCount(1);
+});
+
+test("changed technical details under an outage with entered capacity ask for a check of that capacity", async ({
+    page,
+}) => {
+    const state = await workspace(page, true, true);
+    await create(page, "Reduced capacity", "2");
+    expect(state.incident()).toMatchObject({ available_dc_mw: 2 });
+    await page.getByRole("button", { name: "Forecast", exact: true }).click();
+    await expect(page.locator("section.panel").getByRole("status")).toHaveText(
+        "Outage impact is unknown. Technical details changed. Check the capacity in the outage record.",
+    );
 });
 
 test("a stale edit keeps what was typed, shows what changed and saves only when asked", async ({

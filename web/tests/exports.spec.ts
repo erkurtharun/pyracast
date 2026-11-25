@@ -396,6 +396,34 @@ test("the forecast export names satellite rows and writes a day of both kinds as
     expect(lines(mixed)[1]).toContain('"2026-11-12","Forecast"');
 });
 
+test("forecast file names keep the date and kind for the longest plant name and name a plant without ASCII letters", () => {
+    const longest = "Güneş ".repeat(34).slice(0, 200);
+    const file = (name: string, kind: string) =>
+        forecastExport(
+            { ...plant, name },
+            { date: "2026-11-14", source_kind: "forecast" },
+            [],
+            {
+                electrical: kind === "generation",
+                scenario: false,
+                names: { file: kind, forecast: "Forecast", satellite: "" },
+            },
+        ).filename;
+    const generation = file(longest, "generation");
+    const irradiance = file(longest, "irradiance");
+    expect(generation).not.toBe(irradiance);
+    expect(generation).toMatch(
+        /^pyracast-gunes[a-z-]*[a-z]-2026-11-14-generation\.csv$/,
+    );
+    expect(irradiance).toMatch(
+        /^pyracast-gunes[a-z-]*[a-z]-2026-11-14-irradiance\.csv$/,
+    );
+    expect(generation).toHaveLength(154);
+    expect(file("東京", "generation")).toBe(
+        "pyracast-plant-2026-11-14-generation.csv",
+    );
+});
+
 test("the plant export lists the configuration and location", () => {
     const file = plantExport(
         plant,

@@ -83,7 +83,7 @@ test("the forecast survives midnight and the data choice names satellite data on
     const generation = page.locator(".stat", { hasText: "Daily total" });
     const choice = page.getByLabel("Data", { exact: true });
     const panel = page.locator("section.panel");
-    await expect(generation).toContainText("237.773");
+    await expect(generation).toContainText("237.77 MWh");
     await expect(choice).toHaveValue("forecast");
     await expect(panel.getByText(/^Forecast data: /)).toHaveText(
         `Forecast data: ${plantTime(liveAt)}`,
@@ -99,7 +99,7 @@ test("the forecast survives midnight and the data choice names satellite data on
     );
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-14");
     await expect(choice).toHaveValue("forecast");
-    await expect(generation).toContainText("237.773");
+    await expect(generation).toContainText("237.77 MWh");
     await expect(
         panel.getByRole("heading", { name: "Generation forecast" }),
     ).toBeVisible();

@@ -43,7 +43,7 @@ function IntervalValue({
                     {power == null
                         ? t("_average_power_unavailable")
                         : t("average_power", {
-                              power: format.number(power),
+                              power: format.number(power, 2),
                           })}
                 </span>
             )}

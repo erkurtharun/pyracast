@@ -22,6 +22,7 @@ export function ForecastChart({
 }) {
     const t = useTranslations("Forecast");
     const { number } = useFormat();
+    const digits = electrical ? 2 : 0;
     const [firstRow] = rows;
     const lastRow = rows.at(-1);
     const title = electrical
@@ -63,15 +64,16 @@ export function ForecastChart({
                             scenario
                                 ? t("scenario_tooltip", {
                                       time: time(row.start),
-                                      normal: number(row[metric]),
+                                      normal: number(row[metric], digits),
                                       affected: number(
                                           row.affected_mean_power_mw,
+                                          digits,
                                       ),
                                       unit,
                                   })
                                 : t("interval_tooltip", {
                                       time: time(row.start),
-                                      value: number(row[metric]),
+                                      value: number(row[metric], digits),
                                       unit,
                                   })
                         }

@@ -46,7 +46,9 @@ export function collectedAt(
     );
 }
 
-export function hourly(rows: Interval[]): boolean {
+export function hourly(result: ForecastResult, rows: Interval[]): boolean {
+    if ("resolution_minutes" in result && result.resolution_minutes)
+        return result.resolution_minutes >= 60;
     const steps = rows.map(
         (row) => Date.parse(row.end) - Date.parse(row.start),
     );

@@ -5,7 +5,7 @@ import { forecastExport } from "@/lib/exports";
 import { contactEmail } from "@/lib/public-metadata";
 import { CsvDownload } from "@/ui/csv-download";
 import { useExportPlant } from "@/ui/export-plant";
-import { Notice, Stat } from "@/ui/ui";
+import { Notice } from "@/ui/ui";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import type { ForecastInterval as Interval } from "../forecast-intervals";
 import { useFormat } from "@/lib/format/use-format";
@@ -128,24 +128,13 @@ export function ForecastSummary({
                         : t("earlier_below_model")}
                 </Notice>
             ) : null}
-            {scenario?.status === "unknown_impact" && (
-                <Notice>
-                    {t("outage_impact_is_unknown_for_some_intervals")}
-                    {canManage &&
-                        ` ${t("enter_capacity_in_the_outage_record")}`}
-                </Notice>
+            {scenario && (
+                <OutageNotice
+                    scenario={scenario}
+                    affectedRows={affectedRows}
+                    canManage={canManage}
+                />
             )}
-            {scenario &&
-                (hasFlag(scenario.result, "outage_configuration_changed") ||
-                    affectedRows.some((row) =>
-                        row.quality_flags?.includes(
-                            "outage_configuration_changed",
-                        ),
-                    )) && (
-                    <Notice>
-                        {t("update_remaining_capacity_in_outages_after_this")}
-                    </Notice>
-                )}
             {electrical &&
                 hasFlag(result, "historical_configuration_assumed") && (
                     <Notice>
@@ -158,7 +147,7 @@ export function ForecastSummary({
                 partial && <Notice>{t("some_forecast_data_is_missing")}</Notice>
             )}
             <div className="stats forecast-stats">
-                <Stat
+                <DayTotal
                     label={
                         scenario ? t("normal_capacity") : t("estimated_energy")
                     }
@@ -166,7 +155,7 @@ export function ForecastSummary({
                     unit={unit}
                 />
                 {scenario && (
-                    <Stat
+                    <DayTotal
                         label={t("with_outages_title")}
                         value={
                             affectedPartial
@@ -178,5 +167,66 @@ export function ForecastSummary({
                 )}
             </div>
         </>
+    );
+}
+
+const CAPACITIES = [
+    "available_dc_mw",
+    "available_inverter_mw",
+    "available_export_mw",
+] as const;
+
+function OutageNotice({
+    scenario,
+    affectedRows,
+    canManage,
+}: {
+    scenario: OutageScenario;
+    affectedRows: Interval[];
+    canManage: boolean;
+}) {
+    const t = useTranslations("Forecast");
+    const changed =
+        hasFlag(scenario.result, "outage_configuration_changed") ||
+        affectedRows.some((row) =>
+            row.quality_flags?.includes("outage_configuration_changed"),
+        );
+    if (scenario.status !== "unknown_impact" && !changed) return null;
+    const withoutCapacity =
+        !changed ||
+        scenario.incidents.some((incident) =>
+            CAPACITIES.every((field) => incident[field] == null),
+        );
+    const action = withoutCapacity
+        ? canManage && t("enter_capacity_in_the_outage_record")
+        : t("update_remaining_capacity_in_outages_after_this");
+    return (
+        <Notice>
+            {[t("outage_impact_is_unknown_for_some_intervals"), action]
+                .filter(Boolean)
+                .join(" ")}
+        </Notice>
+    );
+}
+
+function DayTotal({
+    label,
+    value,
+    unit,
+}: {
+    label: string;
+    value: number | null | undefined;
+    unit: string;
+}) {
+    const format = useFormat();
+    return (
+        <div className="stat">
+            <span>{label}</span>
+            <strong>
+                {format.number(value, 2)}
+                {"\u00a0"}
+                <small>{unit}</small>
+            </strong>
+        </div>
     );
 }

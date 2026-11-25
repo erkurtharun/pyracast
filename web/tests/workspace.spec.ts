@@ -624,26 +624,48 @@ test("a forecast view chosen while another section loads applies to the forecast
 });
 
 for (const source of ["estimated_actuals", "archived_forecast"] as const)
-    test(`${source} chosen while a later date loads keeps the date being navigated to`, async ({
-        page,
-    }) => {
-        await openPlant(page, "forecast/?date=2026-03-27");
-        const day = page.getByLabel("Forecast date");
-        const choice = page.getByLabel("Data", { exact: true });
-        await expect(day).toHaveValue("2026-03-27");
-        const forecast = await holdNavigation(page, "forecast");
-        await day.fill("2026-03-29");
-        await forecast.requested;
-        await choice.selectOption(source);
-        await forecast.release();
-        await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-29$/);
-        await expect(day).toHaveValue("2026-03-29");
-        await expect(day).toHaveAttribute("max", "2026-03-28");
-        await expect(choice).toHaveValue(source);
-        await day.fill("2026-03-26");
-        await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-26$/);
-        await expect(choice).toHaveValue(source);
-    });
+    for (const picked of ["2026-03-29", ""] as const)
+        test(`${source} chosen while ${picked ? "a later date" : "a cleared date"} loads keeps the date being navigated to`, async ({
+            page,
+        }) => {
+            const reads: URL[] = [];
+            page.on("request", (request) => {
+                const url = new URL(request.url());
+                if (url.pathname.endsWith("/plants/21/forecast/"))
+                    reads.push(url);
+            });
+            await openPlant(page, "forecast/?date=2026-03-27");
+            const day = page.getByLabel("Forecast date");
+            const choice = page.getByLabel("Data", { exact: true });
+            await expect(day).toHaveValue("2026-03-27");
+            const forecast = await holdNavigation(page, "forecast");
+            await day.fill(picked);
+            await forecast.requested;
+            await choice.selectOption(source);
+            await forecast.release();
+            await expect(page).toHaveURL(
+                picked ? /\/forecast\/\?date=2026-03-29$/ : /\/forecast\/$/,
+            );
+            await expect(day).toHaveValue("2026-03-29");
+            await expect(day).toHaveAttribute("max", "2026-03-28");
+            await expect(choice).toHaveValue(source);
+            await expect(
+                page.getByText(
+                    "Choose a local day from 2025-03-27 to 2026-03-28 for this data source.",
+                    { exact: true },
+                ),
+            ).toBeVisible();
+            expect(
+                reads.filter(
+                    (url) =>
+                        url.searchParams.get("data_source") === source &&
+                        (url.searchParams.get("date") ?? "") > "2026-03-28",
+                ),
+            ).toEqual([]);
+            await day.fill("2026-03-26");
+            await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-26$/);
+            await expect(choice).toHaveValue(source);
+        });
 
 test("a second day step taken while the first loads continues from the day being navigated to", async ({
     page,
@@ -986,6 +1008,64 @@ test("region collection schedule validates and saves distinct local times", asyn
     await expect(
         page.getByText(/do not request new provider data/),
     ).toBeVisible();
+});
+
+test("on a past day the data choice names satellite data only once satellite figures are shown", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(new Date("2026-03-28T12:00:00Z"));
+    await mockApi(page);
+    let answer: "failure" | "empty" | "satellite" = "failure";
+    await page.route("**/plants/21/forecast/**", (route) => {
+        if (answer === "failure")
+            return route.fulfill({
+                status: 503,
+                json: errorBody("busy", "Forecast service is busy."),
+            });
+        return route.fulfill({
+            json: {
+                date: "2026-03-27",
+                timezone: region.timezone,
+                freshness: "archived",
+                source_kind: "estimated_actuals",
+                ...(answer === "empty"
+                    ? {
+                          result: null,
+                          unavailable_reason: "estimated_actuals_unavailable",
+                      }
+                    : {
+                          unavailable_reason: null,
+                          result: {
+                              complete: true,
+                              energy_mwh: 7,
+                              coverage_fraction: 1,
+                              intervals: [],
+                          },
+                      }),
+            },
+        });
+    });
+    await page.goto("/app/w/1/plants/11/forecast/?date=2026-03-27");
+    const choice = page.getByLabel("Data", { exact: true });
+    const panel = page.locator("section.panel");
+    await expect(panel.getByRole("alert")).toContainText(
+        "Forecast service is busy.",
+    );
+    await expect(choice).toHaveValue("forecast");
+    answer = "empty";
+    await panel.getByRole("button", { name: "Try again" }).click();
+    await expect(
+        panel.getByRole("heading", { name: "No satellite data for this day." }),
+    ).toBeVisible();
+    await expect(choice).toHaveValue("forecast");
+    answer = "satellite";
+    await page.clock.fastForward(30_000);
+    await expect(
+        panel.getByRole("heading", {
+            name: "Production calculated from satellite data",
+        }),
+    ).toBeVisible();
+    await expect(choice).toHaveValue("estimated_actuals");
 });
 
 test("the data choice names what each view shows and keeps the date", async ({

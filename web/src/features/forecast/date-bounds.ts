@@ -32,10 +32,10 @@ export function sourceOf(choice: DataChoice): DataSource {
 
 export function shownChoice(
     source: DataSource,
-    shownKind: string | null | undefined,
-    pastDay: boolean,
+    shown: { source_kind?: string | null; result?: unknown } | undefined,
 ): DataChoice {
     if (source !== "auto") return source;
-    const kind = shownKind ?? (pastDay ? "estimated_actuals" : "forecast");
-    return kind === "estimated_actuals" ? "estimated_actuals" : "forecast";
+    return shown?.result && shown.source_kind === "estimated_actuals"
+        ? "estimated_actuals"
+        : "forecast";
 }

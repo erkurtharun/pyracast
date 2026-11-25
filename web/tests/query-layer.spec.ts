@@ -49,12 +49,12 @@ const generation = (page: Page) =>
     page.locator(".stat", { hasText: "Daily total" });
 
 async function expectChart(page: Page) {
-    await expect(generation(page)).toContainText("237.773");
+    await expect(generation(page)).toContainText("237.77 MWh");
     const columns = page
         .getByRole("img", { name: "Average power (MW)", exact: true })
         .locator(".chart-column");
     await expect(columns).toHaveCount(1);
-    await expect(columns.first()).toHaveAttribute("title", /237\.773\sMW/);
+    await expect(columns.first()).toHaveAttribute("title", /237\.77\sMW$/);
 }
 
 test("a failing second forecast poll keeps the chart on screen", async ({

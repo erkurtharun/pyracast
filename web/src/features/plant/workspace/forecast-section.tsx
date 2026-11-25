@@ -83,11 +83,7 @@ export function ForecastSection({
                     />
                 </ControlField>
                 <DataSourceControl
-                    value={shownChoice(
-                        source,
-                        shown?.source_kind,
-                        date < today,
-                    )}
+                    value={shownChoice(source, shown)}
                     electrical={query.electrical}
                     onChange={(next) =>
                         onOptions({ ...options, source: sourceOf(next) })

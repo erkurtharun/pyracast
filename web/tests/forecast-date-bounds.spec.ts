@@ -41,19 +41,35 @@ test("the forecast choice reads the forecast, or satellite data for a past day o
 });
 
 test("the data choice names what the screen shows", () => {
-    expect(shownChoice("auto", "estimated_actuals", true)).toBe(
-        "estimated_actuals",
+    const result = { complete: true };
+    expect(
+        shownChoice("auto", { source_kind: "estimated_actuals", result }),
+    ).toBe("estimated_actuals");
+    expect(shownChoice("auto", { source_kind: "forecast", result })).toBe(
+        "forecast",
     );
-    expect(shownChoice("auto", "forecast", true)).toBe("forecast");
-    expect(shownChoice("auto", "mixed", false)).toBe("forecast");
-    expect(shownChoice("auto", undefined, true)).toBe("estimated_actuals");
-    expect(shownChoice("auto", undefined, false)).toBe("forecast");
-    expect(shownChoice("archived_forecast", "forecast", true)).toBe(
-        "archived_forecast",
+    expect(shownChoice("auto", { source_kind: "mixed", result })).toBe(
+        "forecast",
     );
-    expect(shownChoice("estimated_actuals", undefined, false)).toBe(
-        "estimated_actuals",
-    );
+    expect(
+        shownChoice("archived_forecast", { source_kind: "forecast", result }),
+    ).toBe("archived_forecast");
+});
+
+test("the automatic choice names satellite data only while a satellite result is shown", () => {
+    expect(shownChoice("auto", undefined)).toBe("forecast");
+    expect(
+        shownChoice("auto", { source_kind: "estimated_actuals", result: null }),
+    ).toBe("forecast");
+});
+
+test("a chosen source keeps its name while its read is empty or failed", () => {
+    for (const source of ["estimated_actuals", "archived_forecast"] as const) {
+        expect(shownChoice(source, undefined)).toBe(source);
+        expect(
+            shownChoice(source, { source_kind: "forecast", result: null }),
+        ).toBe(source);
+    }
 });
 
 test("days shift across month and year boundaries", () => {

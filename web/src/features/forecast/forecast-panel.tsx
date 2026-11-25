@@ -64,13 +64,7 @@ export function ForecastPanel({
                 checked={showFullDay}
                 onChange={setShowFullDay}
             />
-            {rows.length === 0 ? (
-                <p>
-                    {satellite
-                        ? t("no_estimated_actuals_for_this_day")
-                        : t("no_forecast_for_this_day_yet")}
-                </p>
-            ) : (
+            {rows.length > 0 && (
                 <>
                     <ForecastChart
                         rows={rows}
@@ -87,7 +81,7 @@ export function ForecastPanel({
                         satellite={satellite}
                         scenarioLabel={scenario ? scenarioLabel : undefined}
                         label={
-                            hourly(intervals)
+                            hourly(result, intervals)
                                 ? t("hourly_values")
                                 : t("half_hourly_values")
                         }
