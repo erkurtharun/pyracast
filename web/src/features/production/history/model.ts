@@ -46,21 +46,24 @@ export type Editor =
           error?: unknown;
       } & Draft);
 
-type Window = Pick<Interval, "starts_at" | "ends_at">;
+type Bounds = Pick<Interval, "starts_at" | "ends_at">;
+
+function overlaps(a: Bounds, b: Bounds) {
+    return (
+        Date.parse(a.starts_at) < Date.parse(b.ends_at) &&
+        Date.parse(a.ends_at) > Date.parse(b.starts_at)
+    );
+}
 
 // The default view: intervals that overlap daylight, and every interval from the first to the last one with production.
-export function daylightRows(rows: Interval[], windows: readonly Window[]) {
+export function daylightRows(rows: Interval[], windows: readonly Bounds[]) {
     const producing = (row: Interval) => (row.effective?.energy_mwh ?? 0) > 0;
     const first = rows.findIndex(producing);
     const last = rows.findLastIndex(producing);
     return rows.filter(
         (row, index) =>
             (first !== -1 && index >= first && index <= last) ||
-            windows.some(
-                (window) =>
-                    Date.parse(row.starts_at) < Date.parse(window.ends_at) &&
-                    Date.parse(row.ends_at) > Date.parse(window.starts_at),
-            ),
+            windows.some((window) => overlaps(row, window)),
     );
 }
 
@@ -98,8 +101,6 @@ export function mostFrequentReason(rows: Interval[]) {
     return best;
 }
 
-type Bounds = Pick<Interval, "starts_at" | "ends_at">;
-
 export function sameInterval(a: Bounds, b: Bounds) {
     return (
         Date.parse(a.starts_at) === Date.parse(b.starts_at) &&
@@ -108,18 +109,22 @@ export function sameInterval(a: Bounds, b: Bounds) {
 }
 
 export type RevertOutcome =
-    | { kind: "restore"; energy: number }
-    | { kind: "overlap" }
-    | { kind: "none" };
+    { kind: "restore"; energy: number } | { kind: "remove" } | { kind: "none" };
 
+// The EPİAŞ value is named only for an exact reading no other entry overlaps; `rows` are the day's, this one included.
 export function revertOutcome(
     row: Pick<Interval, "starts_at" | "ends_at" | "provider_originals">,
+    rows: readonly Pick<Interval, "observation">[],
 ): RevertOutcome {
     const [only, ...others] = row.provider_originals;
     if (!only) return { kind: "none" };
-    return !others.length && sameInterval(only, row)
+    return !others.length &&
+        sameInterval(only, row) &&
+        rows.filter(
+            ({ observation }) => observation && overlaps(observation, only),
+        ).length < 2
         ? { kind: "restore", energy: only.energy_mwh }
-        : { kind: "overlap" };
+        : { kind: "remove" };
 }
 
 export function saveFailure(error: unknown) {

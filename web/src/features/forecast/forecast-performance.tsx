@@ -231,10 +231,6 @@ function PerformanceResults({
                                 )}
                                 <div className="stats">
                                     <Stat
-                                        label={t("missing_days")}
-                                        value={notCompared}
-                                    />
-                                    <Stat
                                         label={t("daylight_energy_error")}
                                         value={data.metrics?.daily_mae_mwh}
                                         unit="MWh"

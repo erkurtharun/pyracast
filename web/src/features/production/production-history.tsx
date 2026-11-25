@@ -243,7 +243,7 @@ export function ProductionHistory({
     }
     function stage(row: Interval, action: "set" | "revert") {
         const key = intervalKey(row);
-        const next = request({ type: "stage", row, action });
+        const next = request({ type: "stage", row, action, rows });
         if (next?.editor.status !== "closed") return;
         pendingFocus.current = key;
         setMessage(
@@ -530,6 +530,7 @@ export function ProductionHistory({
                                 editor.status !== "closed" && (
                                     <IntervalEditor
                                         row={row}
+                                        rows={rows}
                                         editor={editor}
                                         interval={intervalLabel(row)}
                                         canManage={canManage}

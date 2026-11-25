@@ -14,6 +14,7 @@ export type DraftChange = Partial<Pick<Draft, "energy" | "quality">>;
 
 export function IntervalEditor({
     row,
+    rows,
     editor,
     interval,
     canManage,
@@ -25,6 +26,7 @@ export function IntervalEditor({
     onReload,
 }: {
     row: Interval;
+    rows: readonly Interval[];
     editor: Exclude<Editor, { status: "closed" }>;
     interval: string;
     canManage: boolean;
@@ -44,7 +46,7 @@ export function IntervalEditor({
     const blocked =
         saving || (canManage && editor.status === "failed" && !editor.attempt);
     const format = useFormat();
-    const outcome = revertOutcome(row);
+    const outcome = revertOutcome(row, rows);
     const consequenceId = useId();
     return (
         <form
@@ -132,7 +134,7 @@ export function IntervalEditor({
                         <p className="fine" id={consequenceId}>
                             {outcome.kind === "none"
                                 ? t("remove_consequence")
-                                : t("overlap_consequence")}
+                                : t("entered_removed_consequence")}
                         </p>
                     )}
                 </>

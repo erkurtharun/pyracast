@@ -1061,7 +1061,7 @@ test("activating a candidate states its effect before it is confirmed", async ({
     expect(activations).toHaveLength(1);
 });
 
-test("activating a candidate without its calibration days names no date", async ({
+test("activating a candidate without its calibration days says its factor applies to new forecasts and leaves made forecasts as they are", async ({
     page,
 }) => {
     await mockApi(page);
@@ -1072,7 +1072,7 @@ test("activating a candidate without its calibration days names no date", async 
         page
             .getByRole("region", { name: "Use calibration No. 40?" })
             .getByText(
-                "Factor 1.1 applies to new forecasts and to production calculated from satellite data from its first calibration day. Forecasts already made keep their calibration.",
+                "Factor 1.1 applies to new forecasts. Forecasts already made stay as they are.",
                 { exact: true },
             ),
     ).toBeVisible();

@@ -309,7 +309,7 @@ test("member submits a native production correction, sent again after a refusal 
     expect(direct).toEqual([]);
 });
 
-test("a member's staged revert reads as using the EPİAŞ value only where one covers the interval exactly", async ({
+test("a member's staged revert names the EPİAŞ value only where one covers the interval exactly, and otherwise says the entered value is removed", async ({
     page,
 }) => {
     await member(page);
@@ -361,7 +361,12 @@ test("a member's staged revert reads as using the EPİAŞ value only where one c
             json: nativeProductionHistory(date, "Europe/Istanbul", [
                 entered("08:00", "09:00", 4, [["08:00", "09:00", 2]]),
                 entered("09:00", "09:30", 5, [["09:00", "10:00", 3]]),
-                entered("10:00", "10:30", 6, []),
+                entered("09:30", "10:00", 6, [["09:00", "10:00", 3]]),
+                entered("10:30", "11:30", 7, [
+                    ["10:00", "11:00", 4],
+                    ["11:00", "12:00", 5],
+                ]),
+                entered("12:00", "12:30", 8, []),
             ]),
         });
     });
@@ -371,32 +376,53 @@ test("a member's staged revert reads as using the EPİAŞ value only where one c
     });
     await openPlant(page, "Production");
     const outcomes = [
-        ["08:00", "Use EPİAŞ value (2 MWh)", null],
         [
-            "09:00",
-            "Remove entered value",
-            "EPİAŞ values for the overlapping hours are used again.",
+            "08:00–09:00",
+            "Use EPİAŞ value (2 MWh)",
+            "Use EPİAŞ value (2 MWh) for 08:00–09:00",
+            null,
         ],
-        ["10:00", "Remove entered value", "This interval will have no value."],
+        [
+            "09:00–09:30",
+            "Remove entered value",
+            "Remove entered value for 09:00–09:30",
+            "The entered value is removed.",
+        ],
+        [
+            "10:30–11:30",
+            "Remove entered value",
+            "Remove entered value for 10:30–11:30",
+            "The entered value is removed.",
+        ],
+        [
+            "12:00–12:30",
+            "Remove entered value",
+            "Remove entered value for 12:00–12:30",
+            "This interval will have no value.",
+        ],
     ] as const;
-    for (const [start, action, consequence] of outcomes) {
-        await page.getByRole("button", { name: `Edit ${start}` }).click();
+    for (const [interval, action, name, consequence] of outcomes) {
+        await page
+            .getByRole("button", { name: `Edit ${interval}`, exact: true })
+            .click();
         const revert = page
             .locator(".production-row-editor")
-            .getByRole("button", { name: action });
+            .getByRole("button", { name, exact: true });
         await expect(revert).toHaveText(action);
-        if (consequence)
+        if (consequence) {
             await expect(revert).toHaveAccessibleDescription(consequence);
-        else await expect(revert).not.toHaveAttribute("aria-describedby");
+            await expect(
+                page.getByText(consequence, { exact: true }),
+            ).toBeVisible();
+        } else await expect(revert).not.toHaveAttribute("aria-describedby");
         await revert.click();
     }
     const items = draft(page).getByRole("listitem");
-    await expect(items).toHaveCount(3);
-    for (const [index, [start, action]] of outcomes.entries()) {
-        await expect(items.nth(index).locator("strong")).toContainText(start);
-        await expect(items.nth(index)).toContainText(action);
-    }
-    await expect(draft(page)).not.toContainText("Provider reading");
+    await expect(items).toHaveCount(4);
+    for (const [index, [interval, action]] of outcomes.entries())
+        await expect(items.nth(index).locator("span").first()).toHaveText(
+            `${interval} ${action}`,
+        );
     await draft(page).getByLabel("Reason for correction").fill("Checked meter");
     await draft(page)
         .getByRole("button", { name: "Send for approval", exact: true })
@@ -406,7 +432,8 @@ test("a member's staged revert reads as using the EPİAŞ value only where one c
         changes: [
             { action: "revert", expected_revision_id: 4 },
             { action: "revert", expected_revision_id: 5 },
-            { action: "revert", expected_revision_id: 6 },
+            { action: "revert", expected_revision_id: 7 },
+            { action: "revert", expected_revision_id: 8 },
         ],
     });
 });

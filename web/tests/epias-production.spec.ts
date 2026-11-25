@@ -1222,7 +1222,9 @@ test("native timeline preserves half-hour and offset-hour corrections with their
                     manual("08:00", "08:30", 0.5, 1, [
                         provider("08:00", "09:00", 2, 2),
                     ]),
-                    gap("08:30", "09:00"),
+                    manual("08:30", "09:00", 0.25, 3, [
+                        provider("08:00", "09:00", 2, 2),
+                    ]),
                     gap("09:00", "09:30"),
                     manual("09:30", "10:30", 0.75, 2, [
                         provider("09:00", "10:00", 3, 3),
@@ -1241,7 +1243,9 @@ test("native timeline preserves half-hour and offset-hour corrections with their
     await expect(row(page, "08:00\u201308:30")).toContainText(
         "EPİAŞ value, 08:00\u201309:00: 2 MWh",
     );
-    await expect(row(page, "08:30\u201309:00")).toContainText("\u2014");
+    await expect(row(page, "08:30\u201309:00")).toContainText(
+        "EP\u0130A\u015e value, 08:00\u201309:00: 2 MWh",
+    );
     await expect(row(page, "09:30\u201310:30")).toContainText(
         "EPİAŞ value, 09:00\u201310:00: 3 MWh",
     );
@@ -1258,8 +1262,11 @@ test("native timeline preserves half-hour and offset-hour corrections with their
         });
         await expect(remove).toHaveText("Remove entered value");
         await expect(remove).toHaveAccessibleDescription(
-            "EP\u0130A\u015e values for the overlapping hours are used again.",
+            "The entered value is removed.",
         );
+        await expect(
+            page.getByText("The entered value is removed.", { exact: true }),
+        ).toBeVisible();
         await expect(
             page.getByRole("button", { name: /Use EP\u0130A\u015e value/ }),
         ).toHaveCount(0);

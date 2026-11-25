@@ -99,9 +99,9 @@ test("available historical model days appear without empty grid rows", async ({
             "The improvement uses 3 days outside the calibration days.",
         ),
     ).toBeVisible();
-    await expect(
-        comparison.locator(".stat").filter({ hasText: "Days not compared" }),
-    ).toContainText("22");
+    await expect(comparison.getByText(/Days not compared/)).toHaveText([
+        "Days not compared (22)",
+    ]);
     await expect(
         comparison.locator(".stat").filter({ hasText: "Excluded days" }),
     ).toHaveCount(0);
@@ -129,7 +129,7 @@ test("available historical model days appear without empty grid rows", async ({
     ).toBeVisible();
     await expect(
         comparison.getByRole("cell", {
-            name: "Includes EPİAŞ real-time production",
+            name: "Real-time (EPİAŞ)",
             exact: true,
         }),
     ).toHaveCount(8);
@@ -294,10 +294,8 @@ test("a failed refresh on return keeps the comparison until a retry loads it", a
         .click();
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await page.getByRole("button", { name: "Comparison", exact: true }).click();
-    const missing = page
-        .locator(".stat")
-        .filter({ hasText: "Days not compared" });
-    await expect(missing).toContainText("1");
+    const missing = page.getByText("Days not compared (1)", { exact: true });
+    await expect(missing).toBeVisible();
     await page.clock.runFor(5_000);
     unavailable = true;
     const failed = page.waitForResponse(
@@ -315,13 +313,13 @@ test("a failed refresh on return keeps the comparison until a retry loads it", a
         .getByRole("alert")
         .filter({ hasText: "Could not refresh" });
     await expect(notice).toContainText("Comparison service is busy.");
-    await expect(missing).toContainText("1");
+    await expect(missing).toBeVisible();
     unavailable = false;
     await notice
         .getByRole("button", { name: "Try again", exact: true })
         .click();
     await expect(notice).toHaveCount(0);
-    await expect(missing).toContainText("1");
+    await expect(missing).toBeVisible();
 });
 
 test("a forecast accuracy comparison signs the daily difference, and an entered day whose source names real-time production is not marked real-time", async ({
@@ -394,7 +392,7 @@ test("a forecast accuracy comparison signs the daily difference, and an entered 
         comparison.getByRole("cell", { name: "Compared", exact: true }),
     ).toHaveCount(2);
     await expect(
-        comparison.getByText(/Includes EPİAŞ real-time production/),
+        comparison.getByText(/Includes EPİAŞ real-time production|Real-time/),
     ).toHaveCount(0);
     await expect(
         comparison.getByRole("img", { name: "Absolute error by day" }),
