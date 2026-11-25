@@ -27,6 +27,9 @@ test("a sign-out in another tab hides this tab's workspace without waiting for i
         page.getByRole("heading", { name: "Plants", exact: true }),
     ).toBeVisible();
     await other.goto("/app/w/");
+    await expect(
+        other.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
     await other.getByRole("button", { name: "Sign out" }).click();
     await expect(
         other.getByRole("heading", { name: "Welcome back" }),
@@ -74,6 +77,9 @@ test("a failed read after another tab's sign-out offers the same retry as a fail
         page.getByRole("heading", { name: "Plants", exact: true }),
     ).toBeVisible();
     await other.goto("/app/w/");
+    await expect(
+        other.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
     await other.getByRole("button", { name: "Sign out" }).click();
     await expect(
         other.getByRole("heading", { name: "Welcome back" }),
