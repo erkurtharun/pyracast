@@ -46,7 +46,7 @@ const screen = [
 test("type-aware rules hold in every authored TypeScript folder", async () => {
     for (const file of [
         "src/lib/routes.ts",
-        "tests/support/test.ts",
+        "tests/support/errors.ts",
         "integration/support/console.ts",
         "testing/coverage-options.ts",
         "next.config.ts",
@@ -86,7 +86,7 @@ test("code generated from strings is refused in every source kind", async () => 
     for (const file of [
         "src/lib/routes.ts",
         "src/ui/ui.tsx",
-        "tests/support/test.ts",
+        "tests/support/errors.ts",
     ]) {
         expect(await rules(file, typed), file).toEqual([
             "@typescript-eslint/no-implied-eval",
@@ -153,12 +153,7 @@ test("configuration scripts are linted as JavaScript modules", async () => {
     ).toEqual(["no-unused-vars"]);
 });
 
-const fixture = "tests/support/test.ts";
 const clockRule = async (source: string[]) => {
-    // Earlier probes lint other text as the shared fixture, and the type checker keeps the last text it saw.
-    await eslint.lintText(readFileSync(fixture, "utf8"), {
-        filePath: path.join(web, fixture),
-    });
     const [result] = await eslint.lintText(source.join("\n") + "\n", {
         filePath: path.join(web, "tests/browser-workers.spec.ts"),
     });
