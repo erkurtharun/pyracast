@@ -436,6 +436,7 @@ export type ReminderOptions = {
     hidden?: boolean;
     hiddenByDeparture?: boolean;
     typed?: Record<string, Role | (TypedChoice & { ties?: number[] })>;
+    state?: Schemas["ReminderStateEnum"];
 };
 type Refusal = {
     status: number;
@@ -1187,14 +1188,16 @@ export async function reminderApi(page: Page, options: ReminderOptions = {}) {
     const viewer = options.viewer ?? (() => false);
     const later: Held[] = [];
     const failing: Failure[] = [];
-    const answer = (value: ReminderStore, route: Route) =>
-        reminderAnswer(value, persons, {
+    const answer = (value: ReminderStore, route: Route) => {
+        const found = reminderAnswer(value, persons, {
             limit,
             dailyLimit,
             deliveries,
             administrator: !viewer(route.request().method()),
             requested: requestLanguage(route),
         });
+        return options.state ? { ...found, state: options.state } : found;
+    };
     const refuse = (route: Route, refusal: Refusal) =>
         route.fulfill({ status: refusal.status, json: refusalBody(refusal) });
     const write = async (route: Route) => {
@@ -1339,9 +1342,11 @@ export async function openReminders(page: Page) {
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Irradiance forecast", exact: true })
+        .click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page
-        .getByRole("button", { name: "Email reminders", exact: true })
+        .getByRole("button", { name: "Forecast email", exact: true })
         .click();
 }

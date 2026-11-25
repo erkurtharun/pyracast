@@ -17,7 +17,8 @@ import { useFormat } from "@/lib/format/use-format";
 import { useApiQuery, useRefresh } from "@/lib/api/query";
 import { ActionForm } from "@/ui/form";
 import { Resource } from "@/ui/resource";
-import { Empty } from "@/ui/ui";
+import { contactEmail } from "@/lib/public-metadata";
+import { Notice } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import { sectionUnavailable } from "@/lib/on-demand";
@@ -58,21 +59,12 @@ const READ_ONLY: Change = {
 function RecipientCount({ answer }: { answer: Answer }) {
     const t = useTranslations("Reminders");
     return (
-        <>
-            <p className="recipient-count">
-                {t("recipientCountOnly", {
-                    count: answer.recipient_count,
-                    limit: answer.recipient_limit,
-                })}
-            </p>
-            <p className="fine">
-                {t(
-                    answer.hide_recipients
-                        ? "recipientsHidden"
-                        : "recipientsVisible",
-                )}
-            </p>
-        </>
+        <p className="recipient-count">
+            {t("recipientCountOnly", {
+                count: answer.recipient_count,
+                limit: answer.recipient_limit,
+            })}
+        </p>
     );
 }
 
@@ -160,7 +152,6 @@ function DeliveryHistory({
                                 <th>{t("emailRecipients")}</th>
                                 <th>{t("status")}</th>
                                 <th>{t("collected")}</th>
-                                <th>{t("dataAge")}</th>
                                 <th>{t("sent")}</th>
                                 <th>{t("details")}</th>
                             </tr>
@@ -189,21 +180,8 @@ function DeliveryHistory({
                                             </div>
                                         )}
                                     </td>
-                                    <td>{time(row.collected_at)}</td>
                                     <td>
-                                        {row.source_age_seconds == null
-                                            ? MISSING
-                                            : t("sourceAge", {
-                                                  hours: Math.floor(
-                                                      row.source_age_seconds /
-                                                          3600,
-                                                  ),
-                                                  minutes: Math.floor(
-                                                      (row.source_age_seconds %
-                                                          3600) /
-                                                          60,
-                                                  ),
-                                              })}
+                                        {time(row.collected_at)}
                                         {row.stale && (
                                             <StatusTag
                                                 group="Freshness"
@@ -213,7 +191,6 @@ function DeliveryHistory({
                                     </td>
                                     <td>{time(row.sent_at)}</td>
                                     <td>
-                                        {row.late ? t("lateDelivery") : ""}
                                         {row.last_error
                                             ? label(
                                                   "NotificationDeliveryError",
@@ -227,9 +204,7 @@ function DeliveryHistory({
                     </table>
                 </ScrollRegion>
             ) : (
-                <Empty title={t("noDeliveriesYet")}>
-                    {t("scheduledDeliveriesAppearHere")}
-                </Empty>
+                <p>{t("noDeliveriesYet")}</p>
             )}
         </details>
     );
@@ -418,6 +393,14 @@ function ReminderPanel({
                     t("noEmailYet")
                 )}
             </p>
+            {answer.state === "provider_attention" && (
+                <Notice>
+                    <p>
+                        <strong>{t("emailPaused")}</strong>
+                    </p>
+                    <p>{t("noNewForecastData", { contact: contactEmail })}</p>
+                </Notice>
+            )}
             {addresses ? (
                 <ReminderEditor
                     answer={answer}

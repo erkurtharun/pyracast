@@ -11,7 +11,7 @@ import {
 import { flushSync } from "react-dom";
 import type { Region, RegionScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
-import { ApiError, answerLost } from "@/lib/api/errors";
+import { ApiError, DisplayError, answerLost } from "@/lib/api/errors";
 import { ActionForm, CheckboxField, useErrorMessage } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import {
@@ -160,7 +160,7 @@ function SavedView({
             <p className="recipient-count fine">
                 {t("quotaCount", { count, limit: answer.recipient_limit })}
             </p>
-            {count > answer.recipient_limit && (
+            {answer.state === "over_recipient_limit" && (
                 <Notice>
                     {t("recipientLimitExceeded", {
                         limit: answer.recipient_limit,
@@ -179,7 +179,6 @@ function SavedView({
             {visible && (
                 <>
                     <Groups answer={answer} />
-                    <p>{t("summarySentence")}</p>
                     {!shown.to.length && !shown.cc.length && (
                         <p className={styles.warning}>
                             {t("allHiddenWarning")}
@@ -246,7 +245,6 @@ function ReviewDialog({
             <p id={`${id}-sentence`}>{t("reviewSentence")}</p>
             <Groups answer={review.answer} />
             {!to.length && !cc.length && <p>{t("noAddressShown")}</p>}
-            <p>{t("reviewLater")}</p>
             {review.status === "failed" && (
                 <div
                     className="notice error"
@@ -362,31 +360,21 @@ function RecipientSection({
     return (
         <fieldset className="reminder-recipients">
             <legend>{t("emailRecipients")}</legend>
-            <p className="fine">{t("groupPrivacy")}</p>
             <CheckboxField
                 label={t("hideRecipients")}
                 name="hide_recipients"
                 checked={form.hide}
                 onChange={(hide) => update((now) => ({ ...now, hide }))}
             />
-            {visible ? (
-                <>
-                    <p className="fine">{t("addressingRule")}</p>
-                    <p className="fine">{t("roleKey")}</p>
-                </>
-            ) : (
-                <p className="fine">{t("hiddenHelper")}</p>
-            )}
+            {visible && <p className="fine">{t("addressingRule")}</p>}
             <CheckboxField
                 label={t("includeWorkspaceMembers")}
                 name="include_workspace_members"
                 checked={form.include}
                 onChange={(include) => update((now) => ({ ...now, include }))}
             />
-            <p className="fine">{t("membershipSync")}</p>
             {shownMembers ? (
                 <>
-                    <p className="fine">{t("newMembersDefault")}</p>
                     <h3 className={styles.listHeading}>
                         {t("workspaceMembers", {
                             count: addresses.members.length,
@@ -589,6 +577,12 @@ export function ReminderEditor({
 }) {
     const t = useTranslations("Reminders");
     const errorMessage = useErrorMessage();
+    const tooMany = (error: unknown) =>
+        error instanceof ApiError && error.code === "recipient_limit_exceeded"
+            ? new DisplayError(
+                  t("chooseAtMost", { limit: answer.recipient_limit }),
+              )
+            : error;
     const [review, setReview] = useState(CLOSED);
     const wrapper = useRef<HTMLDivElement>(null);
     const { draft } = desk.panel;
@@ -661,7 +655,7 @@ export function ReminderEditor({
             const ending = endingOf(error, hidden);
             if (!ending) {
                 setReview(CLOSED);
-                throw error;
+                throw tooMany(error);
             }
             return desk.finish(ending, draft);
         }
@@ -689,7 +683,7 @@ export function ReminderEditor({
             return setReview({
                 status: "failed",
                 ...reviewed,
-                message: errorMessage(error),
+                message: errorMessage(tooMany(error)),
             });
         }
         desk.finish(SAVED, reviewed.draft);

@@ -167,7 +167,7 @@ for (const screen of [
             if (screen.name === "plant settings")
                 await page
                     .getByRole("button", {
-                        name: "Data collection",
+                        name: "Forecast update times",
                         exact: true,
                     })
                     .click();

@@ -417,15 +417,15 @@ def test_a_second_clock_of_the_day_names_its_edition_in_subject_and_file(
             "unknown",
             "en",
             "2.50",
-            "The recorded outage is not included in this figure. Enter the available capacity "
-            "in the outage record to include it.",
+            "The recorded outage is not included in this figure. Enter the capacity still in "
+            "service in the outage record to include it.",
         ),
         (
             "unknown",
             "tr",
             "2,50",
             "Kay\u0131tl\u0131 kesinti bu rakama dahil değildir. Dahil edilmesi için "
-            "kesinti kayd\u0131na kullan\u0131labilir kapasiteyi girin.",
+            "kesinti kayd\u0131na devrede kalan gücü girin.",
         ),
         ("excluded", "en", "2.50", "The recorded outage is not included in this figure.</p>"),
         ("excluded", "tr", "2,50", "Kay\u0131tl\u0131 kesinti bu rakama dahil değildir.</p>"),
@@ -652,7 +652,7 @@ def test_a_half_cent_rounds_up_in_the_mail_as_the_file_displays_it(
     tomorrow, outage = (nextafter(value, 0) if below else value for value in (24.125, 30.125))
     source = context(payload(total=outage), payload(total=tomorrow), status="estimated")
     message = rendered(source, language)
-    assert stored_cells(message, ("B10", "C10")) == ["24.125", "30.125"]
+    assert stored_cells(message, ("B11", "C11")) == ["24.125", "30.125"]
     assert f">{figure}&nbsp;<span" in message["html"]
     assert f"{figure} MWh" in message["body"]
     assert f"{without}\u00a0MWh." in message["html"]
@@ -660,5 +660,5 @@ def test_a_half_cent_rounds_up_in_the_mail_as_the_file_displays_it(
     assert f">{preheader}&#847;" in message["html"]
     book = load_workbook(BytesIO(b64decode(message["attachment_base64"])))
     summary = book.worksheets[0]
-    assert [summary.cell(10, column).value for column in (2, 3)] == [24.125, 30.125]
-    assert {summary.cell(10, column).number_format for column in (2, 3)} == {"#,##0.00"}
+    assert [summary.cell(11, column).value for column in (2, 3)] == [24.125, 30.125]
+    assert {summary.cell(11, column).number_format for column in (2, 3)} == {"#,##0.00"}

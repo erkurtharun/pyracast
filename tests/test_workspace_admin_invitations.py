@@ -273,8 +273,7 @@ def test_invitation_mail_names_the_offered_role_in_the_requested_language(
     deliver_mail()
     message = mail.outbox[-1]
     assert message.subject == "Pyracast workspace invitation"
-    assert "makes you the workspace administrator" in str(message.body)
-    assert "read-only" not in str(message.body)
+    assert "Invited role: Workspace administrator\n" in str(message.body)
     invite_workspace_member(
         platform,
         tenant.pk,
@@ -284,10 +283,12 @@ def test_invitation_mail_names_the_offered_role_in_the_requested_language(
         platform=True,
     )
     deliver_mail()
-    assert "çal\u0131şma alan\u0131n\u0131n yöneticisi yapar" in str(mail.outbox[-1].body)
+    assert "Davet edildiğiniz rol: Çal\u0131şma alan\u0131 yöneticisi\n" in str(
+        mail.outbox[-1].body
+    )
     invite_workspace_member(platform, tenant.pk, "izleyici@example.com", platform=True)
     deliver_mail()
-    assert "salt okunur erişim" in str(mail.outbox[-1].body)
+    assert "Davet edildiğiniz rol: Üye\n" in str(mail.outbox[-1].body)
 
 
 def test_accepting_an_administrator_invitation_records_the_administrator_grant(

@@ -1,9 +1,12 @@
 {% load i18n %}{% autoescape off %}Pyracast
 
+{% translate "Workspace invitation" %}
+
 {% blocktranslate %}You are invited to {{ workspace }}.{% endblocktranslate %}
+
+{% translate "Invited role" %}: {{ role }}
+{% translate "Invitation expires" %}: {{ expires }}
 
 {% blocktranslate %}Sign in or create an account with {{ email }}, then verify your email to accept the invitation.{% endblocktranslate %}
 
-{{ action_url }}
-
-{% if administrator %}{% translate "This invitation expires in seven days and makes you the workspace administrator." %}{% else %}{% translate "This invitation expires in seven days and grants read-only workspace access." %}{% endif %}{% endautoescape %}
+{% translate "Review invitation" %}: {{ action_url }}{% endautoescape %}

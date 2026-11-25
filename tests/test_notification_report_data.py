@@ -1,8 +1,12 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from io import BytesIO
 from typing import Any, cast
+from zoneinfo import ZoneInfo
 
 import pytest
+from django.core import mail
 from django.utils import timezone
+from openpyxl import load_workbook
 
 from pyracast.accounts.models import Tenant
 from pyracast.connections.models import SiteBinding
@@ -13,10 +17,12 @@ from pyracast.forecasts.models import (
     RequestAttempt,
 )
 from pyracast.metering.models import EpiasConnection
+from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.preparation import prepare_delivery
 from pyracast.notifications.report_data import saved_report_context
 from pyracast.plants.models import CalibrationActivation, Plant, PlantConfiguration
 from pyracast.regions.models import Region
+from pyracast.solar import daylight_window
 from tests.support.domain import NOW
 from tests.support.historical_production_identity import record_identity
 from tests.support.incident_calibration import incident
@@ -265,3 +271,43 @@ def test_frozen_report_survives_later_input_changes_and_retry(
     assert delivery.prepared_message == prepared
     assert cast(dict[str, Any], original)["plant_name"] == "Electrical plant"
     assert system.binding.pk == delivery.binding_id
+
+
+def test_the_sent_workbook_lists_the_daylight_hours_of_both_days_under_the_totals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, _, delivery = report_delivery(monkeypatch)
+    assert prepare_delivery(delivery, SLOT)
+    assert process_notification(delivery.pk, SLOT)
+    (message,) = mail.outbox
+    book = load_workbook(BytesIO(cast(bytes, message.attachments[0][1])))
+    (sheet,) = book.worksheets
+    cells = [[cell.value for cell in row] for row in sheet.iter_rows()]
+    header = next(row for row, values in enumerate(cells) if values[:3] == ["Date", "From", "To"])
+    zone = ZoneInfo(system.binding.timezone)
+    today = SLOT.astimezone(zone).date()
+    tomorrow = today + timedelta(days=1)
+    totals = {row[0].date(): row[1] for row in cells[:header] if isinstance(row[0], datetime)}
+    hours: dict[date, list[tuple[datetime, datetime, float]]] = {today: [], tomorrow: []}
+    for stamp, start, end, value, *_ in cells[header + 1 :]:
+        assert isinstance(stamp, datetime)
+        assert isinstance(start, datetime)
+        assert isinstance(end, datetime)
+        assert isinstance(value, int | float)
+        hours[stamp.date()].append((start, end, value))
+    assert hours[today]
+    assert hours[tomorrow]
+    assert sum(value for *_, value in hours[tomorrow]) == pytest.approx(totals[tomorrow], abs=0.005)
+    for day, rows in hours.items():
+        light = daylight_window(
+            day, system.binding.timezone, system.binding.latitude, system.binding.longitude
+        )
+        assert light.sunrise is not None
+        assert light.sunset is not None
+        sunrise = light.sunrise.astimezone(zone).replace(tzinfo=None)
+        sunset = light.sunset.astimezone(zone).replace(tzinfo=None)
+        assert rows == sorted(rows)
+        for start, end, _ in rows:
+            assert start < end
+            assert start < sunset
+            assert end > sunrise

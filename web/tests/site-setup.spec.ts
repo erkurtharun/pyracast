@@ -1,7 +1,16 @@
 import type { Locator } from "@playwright/test";
 import { test, expect, type Page } from "./support/test";
 import { errorBody } from "./support/errors";
-import { mockApi, paged, plant, region, tenantRow } from "./support/workspace";
+import {
+    accountWith,
+    answer,
+    mockApi,
+    paged,
+    plant,
+    region,
+    sessionIdentity,
+    tenantRow,
+} from "./support/workspace";
 import { coordinatePastes } from "./support/coordinate-pastes";
 
 const site = { ...region, plant, reminder: null };
@@ -30,6 +39,40 @@ async function asViewer(page: Page) {
             json: paged([
                 tenantRow({ id: 1, name: "Sunfield Energy", role: "viewer" }),
             ]),
+        }),
+    );
+}
+
+type Language = "en" | "tr";
+
+const roleWords = {
+    en: {
+        unfinished:
+            "The workspace administrator needs to finish adding this plant.",
+        refused: "Pyracast did not approve this plant.",
+        correct: "send the plant for approval again",
+        decided: "Decision of",
+    },
+    tr: {
+        unfinished:
+            "Santral kaydını çalışma alanı yöneticisinin tamamlaması gerekiyor.",
+        refused: "Pyracast bu santrali onaylamadı.",
+        correct: "yeniden onaya gönderin",
+        decided: "tarihli karar",
+    },
+} as const;
+
+async function asMember(page: Page, language: Language) {
+    const account = await mockApi(page);
+    await asViewer(page);
+    if (language === "en") return;
+    account.current = accountWith({ language_preference: "tr" });
+    await page.route("**/api/session/", (route) =>
+        route.fulfill({
+            json: answer("SessionOutput", {
+                ...sessionIdentity(account.current),
+                language: "tr",
+            }),
         }),
     );
 }
@@ -100,9 +143,215 @@ test("a member sees that an administrator finishes the setup", async ({
     await expect(card).not.toContainText("Complete setup");
     await card.click();
     await expect(
-        page.getByText("Waiting for an administrator to finish setup"),
+        page.getByText(
+            "The workspace administrator needs to finish adding this plant.",
+        ),
     ).toBeVisible();
-    await expect(page.getByLabel("DC nameplate capacity (MW)")).toHaveCount(0);
+    await expect(page.getByLabel("Panel capacity (MWp)")).toHaveCount(0);
+});
+
+test("a member opening an unfinished plant in Turkish reads that the administrator finishes adding it", async ({
+    page,
+}) => {
+    await asMember(page, "tr");
+    await sites(page, [location]);
+    await page.goto("/app/w/1/plants/13/forecast/");
+    await expect(
+        page.getByText(roleWords.tr.unfinished, { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Panel kurulu gücü (MWp)")).toHaveCount(0);
+});
+
+for (const language of ["en", "tr"] as const)
+    test(`a member sees why Pyracast did not approve a plant whose adding is unfinished (${language})`, async ({
+        page,
+    }) => {
+        const words = roleWords[language];
+        await asMember(page, language);
+        await sites(page, [
+            {
+                ...location,
+                status: "rejected",
+                attention: "review_rejected",
+                reviewed_at: "2026-01-02T09:00:00Z",
+                review_reason: "The coordinates point to the sea.",
+            },
+        ]);
+        await page.goto("/app/w/1/plants/13/forecast/");
+        const notice = page.locator(".notice").filter({
+            hasText: words.refused,
+        });
+        await expect(notice).toContainText("The coordinates point to the sea.");
+        await expect(notice).not.toContainText(words.correct);
+        await expect(notice).not.toContainText(words.decided);
+        await expect(notice.getByRole("button")).toHaveCount(0);
+        await expect(page.getByText(words.unfinished)).toHaveCount(0);
+    });
+
+for (const language of ["en", "tr"] as const)
+    test(`a member sees why Pyracast did not approve a plant without the action to send it again (${language})`, async ({
+        page,
+    }) => {
+        const words = roleWords[language];
+        await asMember(page, language);
+        await sites(page, [
+            {
+                ...site,
+                status: "rejected",
+                attention: "review_rejected",
+                edit_blocked_reason: null,
+                reviewed_at: "2026-01-02T09:00:00Z",
+                review_reason:
+                    "The declared capacity does not match the licence.",
+            },
+        ]);
+        await page.goto("/app/w/1/plants/11/forecast/");
+        const notice = page.locator(".notice").filter({
+            hasText: words.refused,
+        });
+        await expect(notice).toContainText(
+            "The declared capacity does not match the licence.",
+        );
+        await expect(notice).not.toContainText(words.correct);
+        await expect(notice).not.toContainText(words.decided);
+        await expect(notice.getByRole("button")).toHaveCount(0);
+    });
+
+test("finishing a plant that Pyracast did not approve shows the reason and asks to send it again", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await sites(page, [
+        {
+            ...location,
+            status: "rejected",
+            attention: "review_rejected",
+            reviewed_at: "2026-01-02T09:00:00Z",
+            review_reason: "The coordinates point to the sea.",
+        },
+    ]);
+    await page.goto("/app/w/1/plants/13/forecast/");
+    const section = page.locator("section.onboarding");
+    await expect(
+        section.getByText("Pyracast did not approve this plant.", {
+            exact: true,
+        }),
+    ).toBeVisible();
+    await expect(
+        section.getByText("The coordinates point to the sea.", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        section.getByText(
+            "Correct the details and send the plant for approval again.",
+            { exact: true },
+        ),
+    ).toBeVisible();
+});
+
+test("finishing a plant Pyracast did not approve saves its technical details and the plant page sends it again", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const refused = {
+        ...location,
+        status: "rejected",
+        attention: "review_rejected",
+        reviewed_at: "2026-01-02T09:00:00Z",
+        review_reason: "The declared capacity does not match the licence.",
+    };
+    const added = { ...plant, region_id: 13 };
+    let current: Record<string, unknown> = refused;
+    const writes: string[] = [];
+    page.on("request", (request) => {
+        const path = new URL(request.url()).pathname;
+        if (path.startsWith("/api/") && request.method() !== "GET")
+            writes.push(`${request.method()} ${path}`);
+    });
+    await page.route("**/api/tenants/1/sites/", (route) =>
+        route.request().method() === "GET"
+            ? route.fulfill({ json: paged([current]) })
+            : route.fallback(),
+    );
+    await page.route("**/api/tenants/1/regions/13/plants/", (route) => {
+        current = { ...refused, plant: added };
+        return route.fulfill({ json: added });
+    });
+    await page.route("**/api/tenants/1/regions/13/resubmit/", (route) => {
+        expect(route.request().postDataJSON()).toEqual({
+            expected_revision: 1,
+        });
+        current = { ...current, status: "pending", attention: null };
+        return route.fulfill({
+            json: answer("RegionOutput", {
+                ...region,
+                id: 13,
+                name: "North location",
+                status: "pending",
+            }),
+        });
+    });
+    await page.goto("/app/w/1/plants/13/forecast/");
+    const wizard = page.locator("section.onboarding");
+    await wizard.getByLabel("Panel capacity (MWp)").fill("5");
+    await wizard.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(
+        wizard.getByText(
+            "After saving, choose Send for approval again on the plant page.",
+            { exact: true },
+        ),
+    ).toBeVisible();
+    await expect(
+        wizard.getByText(
+            "Pyracast checks the plant; forecasts start after approval.",
+        ),
+    ).toHaveCount(0);
+    await expect(
+        wizard.getByRole("button", { name: "Send for approval", exact: true }),
+    ).toHaveCount(0);
+    await wizard
+        .getByRole("button", { name: "Save technical details" })
+        .click();
+
+    const notice = page.getByRole("status").filter({
+        hasText: "Pyracast did not approve this plant.",
+    });
+    await expect(notice).toContainText(
+        "The declared capacity does not match the licence.",
+    );
+    await expect(page.locator("section.onboarding")).toHaveCount(0);
+    expect(writes).toEqual(["POST /api/tenants/1/regions/13/plants/"]);
+    await notice
+        .getByRole("button", { name: "Send for approval again" })
+        .click();
+
+    await expect(
+        page.getByText("Waiting for approval by Pyracast.", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByText("Pyracast did not approve this plant."),
+    ).toHaveCount(0);
+    expect(writes).toEqual([
+        "POST /api/tenants/1/regions/13/plants/",
+        "POST /api/tenants/1/regions/13/resubmit/",
+    ]);
+});
+
+test("the review of a fixed mounting shows a missing panel angle as missing, without its unit", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await sites(page, [location]);
+    await page.goto("/app/w/1/plants/13/forecast/");
+    const wizard = page.locator("section.onboarding");
+    await wizard.getByLabel("Panel capacity (MWp)").fill("5");
+    await wizard.getByLabel("Mounting", { exact: true }).selectOption("fixed");
+    await wizard.getByLabel("Panel azimuth (°, optional)").fill("180");
+    await wizard.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(
+        wizard.getByText("Fixed · panel tilt — · panel azimuth 180°", {
+            exact: true,
+        }),
+    ).toBeVisible();
 });
 
 test("complete setup asks only for the technical details and shows the location it keeps", async ({
@@ -113,11 +362,11 @@ test("complete setup asks only for the technical details and shows the location 
     await page.goto("/app/");
     await page.getByRole("button", { name: /Complete setup/ }).click();
     await expect(
-        page.getByRole("heading", { name: "Complete plant setup" }),
+        page.getByRole("heading", { name: "Finish adding plant" }),
     ).toBeVisible();
     await expect(
         page
-            .getByRole("list", { name: "Plant setup progress" })
+            .getByRole("list", { name: "Steps of adding a plant" })
             .getByRole("listitem"),
     ).toHaveText(["Technical details", "Review"]);
     await expect(
@@ -168,18 +417,16 @@ test("a server time-zone refusal reopens the location step with focus on the zon
     );
     await openWizard(page);
     await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.getByLabel("DC nameplate capacity (MW)").fill("5");
+    await page.getByLabel("Panel capacity (MWp)").fill("5");
     await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page
-        .getByRole("button", { name: "Submit plant for approval" })
-        .click();
+    await page.getByRole("button", { name: "Send for approval" }).click();
     const zone = page.getByLabel("Time zone");
     await expect(zone).toBeFocused();
     await expect(zone).toHaveAttribute("aria-invalid", "true");
     await expect(page.getByText("An IANA timezone is required.")).toBeVisible();
     await expect(
         page
-            .getByRole("list", { name: "Plant setup progress" })
+            .getByRole("list", { name: "Steps of adding a plant" })
             .getByRole("listitem")
             .first(),
     ).toHaveAttribute("aria-current", "step");
@@ -224,11 +471,9 @@ test("Cancel waits while the plant is submitted", async ({ page }) => {
     });
     await openWizard(page);
     await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.getByLabel("DC nameplate capacity (MW)").fill("5");
+    await page.getByLabel("Panel capacity (MWp)").fill("5");
     await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page
-        .getByRole("button", { name: "Submit plant for approval" })
-        .click();
+    await page.getByRole("button", { name: "Send for approval" }).click();
     await expect(
         page.getByRole("button", { name: "Cancel", exact: true }),
     ).toBeDisabled();
@@ -321,8 +566,8 @@ test("a plant in the recycle bin at the entered location is offered for restore 
     await expect(
         offer.getByRole("button", { name: "Restore Old plant" }),
     ).toBeFocused();
-    await offer.getByRole("button", { name: "Add a new plant" }).click();
-    await expect(page.getByLabel("DC nameplate capacity (MW)")).toBeVisible();
+    await offer.getByRole("button", { name: "Add plant" }).click();
+    await expect(page.getByLabel("Panel capacity (MWp)")).toBeVisible();
     await page.getByRole("button", { name: "Back", exact: true }).click();
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page
@@ -345,7 +590,7 @@ test("a refused duplicate location offers to open the plant that holds it", asyn
                   json: {
                       ...errorBody(
                           "location_already_exists",
-                          "This location is already in your company's portfolio. Open the existing plant.",
+                          "This location is already in your company's portfolio. Open existing plant.",
                       ),
                       region_id: 11,
                   },
@@ -354,12 +599,10 @@ test("a refused duplicate location offers to open the plant that holds it", asyn
     );
     await openWizard(page);
     await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.getByLabel("DC nameplate capacity (MW)").fill("5");
+    await page.getByLabel("Panel capacity (MWp)").fill("5");
     await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page
-        .getByRole("button", { name: "Submit plant for approval" })
-        .click();
-    await page.getByRole("button", { name: "Open the existing plant" }).click();
+    await page.getByRole("button", { name: "Send for approval" }).click();
+    await page.getByRole("button", { name: "Open existing plant" }).click();
     await expect(page).toHaveURL("/app/w/1/plants/11/forecast/");
 });
 
@@ -382,9 +625,9 @@ test("a suspended plant shows its technical details read-only with the reason", 
         ),
     ).toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Save configuration" }),
+        page.getByRole("button", { name: "Save technical details" }),
     ).toHaveCount(0);
-    await expect(page.getByLabel("DC nameplate capacity (MW)")).toBeDisabled();
+    await expect(page.getByLabel("Panel capacity (MWp)")).toBeDisabled();
 });
 
 test("the plant CSV is offered with the technical details", async ({
@@ -393,40 +636,50 @@ test("the plant CSV is offered with the technical details", async ({
     await mockApi(page);
     await page.goto("/app/w/1/plants/11/settings/");
     await expect(
-        page.getByRole("button", { name: "Download plant CSV" }),
+        page.getByRole("button", { name: "Download technical details (CSV)" }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Location", exact: true }).click();
     await expect(page.getByText("Current location:")).toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Download plant CSV" }),
+        page.getByRole("button", { name: "Download technical details (CSV)" }),
     ).toHaveCount(0);
 });
 
-test("a pending plant lists its next steps instead of an empty forecast", async ({
-    page,
-}) => {
-    await mockApi(page);
-    await sites(page, [
-        {
-            ...site,
-            status: "pending",
-            plant: { ...plant, current_configuration: null },
-        },
-    ]);
-    await page.goto("/app/w/1/plants/11/forecast/");
-    const steps = page.getByRole("list", { name: "Next steps" });
-    await expect(steps.getByRole("listitem")).toHaveCount(3);
-    await expect(page.getByText("No forecast data for this day.")).toHaveCount(
-        0,
-    );
-});
+for (const role of ["admin", "viewer"] as const)
+    test(`a pending plant says it waits for Pyracast instead of an empty forecast: ${role}`, async ({
+        page,
+    }) => {
+        await mockApi(page);
+        if (role === "viewer") await asViewer(page);
+        await sites(page, [
+            {
+                ...site,
+                status: "pending",
+                plant: { ...plant, current_configuration: null },
+            },
+        ]);
+        await page.goto("/app/w/1/plants/11/forecast/");
+        await expect(
+            page.getByText("Waiting for approval by Pyracast.", {
+                exact: true,
+            }),
+        ).toBeVisible();
+        await expect(
+            page.getByText(
+                "You can still change the technical details and the location.",
+            ),
+        ).toHaveCount(role === "admin" ? 1 : 0);
+        await expect(
+            page.getByText("No forecast data for this day."),
+        ).toHaveCount(0);
+    });
 
 test("a location request offers the available zones with the current one chosen", async ({
     page,
 }) => {
     await mockApi(page);
     await page.goto("/app/w/1/plants/11/settings/?view=location");
-    await page.getByText("Request location change").click();
+    await page.getByText("Change location").click();
     const zone = page.getByLabel("Time zone");
     await expect(zone).toHaveValue("Europe/Istanbul");
     await zone.selectOption("Asia/Tokyo");
@@ -435,7 +688,7 @@ test("a location request offers the available zones with the current one chosen"
 
 async function toReview(page: Page) {
     await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.getByLabel("DC nameplate capacity (MW)").fill("5");
+    await page.getByLabel("Panel capacity (MWp)").fill("5");
     await page.getByRole("button", { name: "Continue", exact: true }).click();
 }
 
@@ -497,9 +750,7 @@ test("a refusal of fields on two steps opens the earlier step on its refused fie
     });
     await openWizard(page);
     await toReview(page);
-    await page
-        .getByRole("button", { name: "Submit plant for approval" })
-        .click();
+    await page.getByRole("button", { name: "Send for approval" }).click();
     await expect(page.getByLabel("Time zone")).toBeFocused();
 });
 
@@ -510,9 +761,7 @@ test("a refused field no step holds stays on the review with its message", async
     await refuse(page, { "plant.serial": "The serial number is unknown." });
     await openWizard(page);
     await toReview(page);
-    await page
-        .getByRole("button", { name: "Submit plant for approval" })
-        .click();
+    await page.getByRole("button", { name: "Send for approval" }).click();
     await expect(
         page
             .getByRole("alert")
@@ -520,7 +769,7 @@ test("a refused field no step holds stays on the review with its message", async
     ).toBeVisible();
     await expect(
         page
-            .getByRole("list", { name: "Plant setup progress" })
+            .getByRole("list", { name: "Steps of adding a plant" })
             .getByRole("listitem")
             .last(),
     ).toHaveAttribute("aria-current", "step");
@@ -543,7 +792,7 @@ test("a second submit before the first answer sends one request", async ({
     await toReview(page);
     const form = page
         .locator("form")
-        .filter({ has: page.getByLabel("DC nameplate capacity (MW)") });
+        .filter({ has: page.getByLabel("Panel capacity (MWp)") });
     await form.evaluate((form: HTMLFormElement) => {
         form.requestSubmit();
         form.requestSubmit();
@@ -670,7 +919,7 @@ test("a location request without a browser zone list asks for the zone as text",
     });
     await mockApi(page);
     await page.goto("/app/w/1/plants/11/settings/?view=location");
-    await page.getByText("Request location change").click();
+    await page.getByText("Change location").click();
     await expect(page.getByRole("textbox", { name: "Time zone" })).toHaveValue(
         "Europe/Istanbul",
     );
@@ -732,11 +981,11 @@ const labels = {
         latitude: "Latitude (°)",
         longitude: "Longitude (°)",
         continue: "Continue",
-        capacity: "DC nameplate capacity (MW)",
-        submit: "Submit plant for approval",
+        capacity: "Panel capacity (MWp)",
+        submit: "Send for approval",
         review: "41.0082°, 17.5°",
-        requestChange: "Request location change",
-        submitRequest: "Submit location request",
+        requestChange: "Change location",
+        submitRequest: "Send location change to Pyracast",
     },
     tr: {
         addPlant: "Santral ekle",
@@ -744,11 +993,11 @@ const labels = {
         latitude: "Enlem (°)",
         longitude: "Boylam (°)",
         continue: "Devam et",
-        capacity: "DC kurulu güç (MW)",
-        submit: "Santrali onaya gönder",
+        capacity: "Panel kurulu gücü (MWp)",
+        submit: "Onaya gönder",
         review: "41,0082°, 17,5°",
-        requestChange: "Konum değişikliği iste",
-        submitRequest: "Konum talebini gönder",
+        requestChange: "Konumu değiştir",
+        submitRequest: "Konum değişikliğini Pyracast'e gönder",
     },
 } as const;
 
@@ -954,7 +1203,7 @@ test("a text pasted into a location request's latitude fills both fields only wh
 }) => {
     await mockApi(page);
     await page.goto("/app/w/1/plants/11/settings/?view=location");
-    await page.getByText("Request location change").click();
+    await page.getByText("Change location").click();
     await expectPastedPairKept(page);
     await expectPastedCoordinates(page);
 });
@@ -973,7 +1222,7 @@ test("a pasted thousands-formatted number stays in latitude and is refused there
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await expect(latitude).toBeFocused();
     await expect(latitude).toHaveValue("1,234.5");
-    await expect(page.getByLabel("DC nameplate capacity (MW)")).toBeHidden();
+    await expect(page.getByLabel("Panel capacity (MWp)")).toBeHidden();
 });
 
 test("a submit refused without a field to go to moves focus to its message", async ({
@@ -993,9 +1242,7 @@ test("a submit refused without a field to go to moves focus to its message", asy
     );
     await openWizard(page);
     await toReview(page);
-    await page
-        .getByRole("button", { name: "Submit plant for approval" })
-        .click();
+    await page.getByRole("button", { name: "Send for approval" }).click();
     await expect(
         page.getByRole("alert").filter({ hasText: "The workspace is busy." }),
     ).toBeFocused();
@@ -1023,9 +1270,7 @@ test("a refused field whose message repeats the general message shows it once", 
     );
     await openWizard(page);
     await toReview(page);
-    await page
-        .getByRole("button", { name: "Submit plant for approval" })
-        .click();
+    await page.getByRole("button", { name: "Send for approval" }).click();
     const alert = page
         .getByRole("alert")
         .filter({ hasText: "The serial number is unknown." });
@@ -1087,7 +1332,9 @@ test("a viewer opening a blocked location without a plant sees why it cannot be 
         ),
     ).toBeVisible();
     await expect(
-        page.getByText("Waiting for an administrator to finish setup"),
+        page.getByText(
+            "The workspace administrator needs to finish adding this plant.",
+        ),
     ).toHaveCount(0);
 });
 
@@ -1107,7 +1354,7 @@ test("a coordinate with both a comma and a point stays on the location step and 
     ).toBe(true);
     await expect(latitude).toHaveAttribute(
         "title",
-        "A latitude from -90 to 90, such as 41.0082 or 41,0082.",
+        "Enter a latitude from -90 to 90, such as 41.0082 or 41,0082.",
     );
-    await expect(page.getByLabel("DC nameplate capacity (MW)")).toBeHidden();
+    await expect(page.getByLabel("Panel capacity (MWp)")).toBeHidden();
 });

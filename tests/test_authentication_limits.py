@@ -704,7 +704,7 @@ def test_a_full_day_of_failed_passwords_mails_the_account_owner_once(clock: Cloc
     assert deliver_mail() == 1
     (notice,) = mail.outbox
     assert notice.to == ["owner@example.com"]
-    assert notice.subject == "Parolayla oturum açma duraklat\u0131ld\u0131"
+    assert notice.subject == "Şifreyle giriş duraklat\u0131ld\u0131"
     assert lock_notices() == [("alias@example.com", "sent")]
 
 
