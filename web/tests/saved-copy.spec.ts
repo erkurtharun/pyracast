@@ -965,8 +965,10 @@ test("a language answer whose hand-over another window's session change overtake
     answer();
     await expect.poll(writes).toBe(1);
     await observer("tag-z");
+    const reloaded = page.waitForEvent("load");
     await release();
     await page.clock.resume();
+    await reloaded;
     await expect(page.locator("html")).toHaveAttribute("lang", "tr");
     await expect.poll(() => new URL(page.url()).search).toBe("");
     expect(await observedTag(page)).toBe(firstAccount.tag);
