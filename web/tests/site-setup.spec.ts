@@ -410,7 +410,7 @@ test("a server time-zone refusal reopens the location step with focus on the zon
                   json: errorBody(
                       "invalid_request",
                       "Check the highlighted values and try again.",
-                      { fields: { timezone: "An IANA timezone is required." } },
+                      { fields: { timezone: "Choose a time zone." } },
                   ),
               })
             : route.fallback(),
@@ -423,7 +423,7 @@ test("a server time-zone refusal reopens the location step with focus on the zon
     const zone = page.getByLabel("Time zone");
     await expect(zone).toBeFocused();
     await expect(zone).toHaveAttribute("aria-invalid", "true");
-    await expect(page.getByText("An IANA timezone is required.")).toBeVisible();
+    await expect(page.getByText("Choose a time zone.")).toBeVisible();
     await expect(
         page
             .getByRole("list", { name: "Steps of adding a plant" })
@@ -590,7 +590,7 @@ test("a refused duplicate location offers to open the plant that holds it", asyn
                   json: {
                       ...errorBody(
                           "location_already_exists",
-                          "This location is already in your company's portfolio. Open existing plant.",
+                          "This workspace already has a plant at this location. Open the existing plant.",
                       ),
                       region_id: 11,
                   },
@@ -746,7 +746,7 @@ test("a refusal of fields on two steps opens the earlier step on its refused fie
     await mockApi(page, { empty: true });
     await refuse(page, {
         dc_capacity_mw: "Enter a positive capacity.",
-        timezone: "An IANA timezone is required.",
+        timezone: "Choose a time zone.",
     });
     await openWizard(page);
     await toReview(page);
@@ -1235,7 +1235,7 @@ test("a submit refused without a field to go to moves focus to its message", asy
                   status: 503,
                   json: errorBody(
                       "busy",
-                      "The workspace is busy. Try again in a moment.",
+                      "This could not be saved right now. Try again in a moment.",
                   ),
               })
             : route.fallback(),
@@ -1244,7 +1244,9 @@ test("a submit refused without a field to go to moves focus to its message", asy
     await toReview(page);
     await page.getByRole("button", { name: "Send for approval" }).click();
     await expect(
-        page.getByRole("alert").filter({ hasText: "The workspace is busy." }),
+        page
+            .getByRole("alert")
+            .filter({ hasText: "This could not be saved right now." }),
     ).toBeFocused();
 });
 
@@ -1294,7 +1296,7 @@ test("a failed restore in the wizard returns focus to the restore button", async
             status: 503,
             json: errorBody(
                 "busy",
-                "The workspace is busy. Try again in a moment.",
+                "This could not be saved right now. Try again in a moment.",
             ),
         }),
     );
@@ -1306,7 +1308,7 @@ test("a failed restore in the wizard returns focus to the restore button", async
     const restore = offer.getByRole("button", { name: "Restore Old plant" });
     await restore.click();
     await expect(offer.getByRole("alert")).toContainText(
-        "The workspace is busy.",
+        "This could not be saved right now.",
     );
     await expect(restore).toBeFocused();
 });

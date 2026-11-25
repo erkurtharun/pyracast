@@ -245,7 +245,7 @@ def test_a_refused_plant_value_names_its_field(arguments: dict[str, Any], field:
 
 def test_the_plant_command_reports_why_a_value_was_refused() -> None:
     system = make_system(approved=True)
-    with pytest.raises(CommandError, match="Capacities must be finite and positive"):
+    with pytest.raises(CommandError, match="Enter a number greater than zero"):
         call_command(
             "configure_plant",
             username="member",
@@ -580,7 +580,7 @@ def test_a_zone_outside_the_available_zones_is_refused_naming_the_field(zone: st
     )
     assert response.status_code == 400, response.content
     assert response.json()["code"] == "invalid_request"
-    assert response.json()["fields"] == {"timezone": "Geçerli bir IANA saat dilimi girin."}
+    assert response.json()["fields"] == {"timezone": "Bir saat dilimi seçin."}
     with pytest.raises(DomainError) as error:
         request_location_change(
             system.member,

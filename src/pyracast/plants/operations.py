@@ -13,9 +13,15 @@ from django.utils.translation import gettext, gettext_lazy
 
 from pyracast.accounts.authorization import authorize_workspace_admin, tenant_membership
 from pyracast.accounts.models import WorkspaceRole
-from pyracast.connections.currency import binding_is_current
+from pyracast.connections.currency import binding_is_current, connection_is_authorized
 from pyracast.connections.models import SiteBinding
-from pyracast.errors import ConflictError, DomainError, ErrorCode
+from pyracast.errors import (
+    NO_NEW_FORECAST_DATA,
+    TECHNICAL_DETAILS_CHANGED,
+    ConflictError,
+    DomainError,
+    ErrorCode,
+)
 from pyracast.plants.automation_state import AutomationCause, set_automation_state
 from pyracast.plants.calibration_runs import (
     OPEN_STATUSES,
@@ -63,12 +69,11 @@ class PlantEditBlock(models.TextChoices):
 
 EDIT_BLOCK_MESSAGES: Mapping[PlantEditBlock, StrPromise] = {
     PlantEditBlock.SUSPENDED: gettext_lazy(
-        "The plant is suspended, so its technical details cannot change. "
-        "Contact Pyracast support to resume it."
+        "Pyracast suspended this plant, so its technical details cannot be changed."
     ),
     PlantEditBlock.CONNECTION_UNAVAILABLE: gettext_lazy(
-        "The plant's data connection needs attention from Pyracast support, "
-        "so its technical details cannot change yet."
+        "No new forecast data is arriving for this plant. "
+        "The plant's technical details cannot be changed yet."
     ),
 }
 
@@ -101,7 +106,10 @@ def current_configuration(plant: Plant) -> PlantConfiguration:
         pk=plant.current_configuration_id, plant=plant
     )
     if not configuration_is_current(configuration):
-        raise DomainError(ErrorCode.CONFIGURATION_CHANGED)
+        blocked = not connection_is_authorized(configuration.binding)
+        raise DomainError(
+            ErrorCode.CONFIGURATION_CHANGED, NO_NEW_FORECAST_DATA if blocked else None
+        )
     return configuration
 
 
@@ -305,12 +313,14 @@ def request_calibration(
         configuration = current_configuration(plant)
         now = timezone.now()
         if configuration_id != configuration.pk:
-            raise ValidationError(gettext("Calibration requires the current configuration."))
+            raise ValidationError(TECHNICAL_DETAILS_CHANGED)
         if (
             not 7 <= (end_date - start_date).days + 1 <= 90
             or end_date >= now.astimezone(ZoneInfo(configuration.binding.timezone)).date()
         ):
-            raise ValidationError(gettext("Use 7 to 90 completed local days."))
+            raise ValidationError(
+                gettext("Choose a period of 7 to 90 days that ends before today.")
+            )
         pending = CalibrationRun.objects.filter(plant=plant, status__in=OPEN_STATUSES).first()
         if pending is not None:
             if (pending.configuration_id, pending.window_start, pending.window_end) == (
@@ -319,7 +329,7 @@ def request_calibration(
                 end_date,
             ):
                 return pending
-            raise ValidationError(gettext("A calibration is already pending."))
+            raise ValidationError(gettext("A calibration is already queued or being calculated."))
         watermark = (
             ProductionObservation.objects.filter(
                 configuration=configuration, created_at__lte=now

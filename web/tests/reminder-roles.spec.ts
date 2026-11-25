@@ -1826,8 +1826,8 @@ for (const code of ["csrf_failed", "workspace_admin_required"] as const)
             code,
             message:
                 code === "csrf_failed"
-                    ? "The page expired. Reload it and try again."
-                    : "Workspace administrator required.",
+                    ? "This form is out of date. Copy what you typed, reload the page and try again."
+                    : "Only the workspace administrator can do this.",
         });
         const shown = code === "csrf_failed" ? REFUSED : LOST;
         await expect(line(page, shown)).toBeFocused();
@@ -2420,7 +2420,7 @@ test("the mock refuses a preview and a save by a member who is not the administr
                 403,
                 {
                     code: "workspace_admin_required",
-                    message: "Workspace administrator required.",
+                    message: "Only the workspace administrator can do this.",
                 },
             ]);
         }

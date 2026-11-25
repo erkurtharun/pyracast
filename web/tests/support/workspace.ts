@@ -1070,17 +1070,17 @@ function refused(
 const messages: Partial<Record<ErrorCode, string>> = {
     invalid_request: "The request input was refused.",
     reminder_schedule_changed:
-        "The email reminders changed. Reload before saving.",
+        "The forecast email settings changed in the meantime. Check them and save again.",
     reminder_disclosure_changed:
         "The addresses this save would show changed. Review them before saving.",
-    duplicate_recipients:
-        "Recipient addresses must be distinct (case-insensitive).",
-    recipient_required: "Add a recipient or include the workspace members.",
-    duplicate_reminder_times: "Use each delivery time once.",
+    duplicate_recipients: "Use each address once.",
+    recipient_required: "Add a recipient or turn on All members.",
+    duplicate_reminder_times: "Use each send time once.",
     reminder_time_required:
-        "Add at least one delivery time to turn reminders on.",
-    workspace_admin_required: "Workspace administrator required.",
-    csrf_failed: "The page expired. Reload it and try again.",
+        "Add at least one send time to turn on the forecast email.",
+    workspace_admin_required: "Only the workspace administrator can do this.",
+    csrf_failed:
+        "This form is out of date. Copy what you typed, reload the page and try again.",
 };
 
 function refusalBody(refusal: Refusal) {

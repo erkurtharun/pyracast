@@ -3,6 +3,7 @@ from typing import Any
 
 from django.db import models
 from django.utils.dateparse import parse_datetime
+from django.utils.formats import number_format
 from django.utils.translation import gettext
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
@@ -14,9 +15,10 @@ from pyracast.api.serializers import (
     ForecastProvenanceOutput,
     InputSerializer,
     IrradianceSummaryOutput,
+    PlantName,
 )
 from pyracast.change_requests.models import ProductionChangeAction
-from pyracast.errors import ErrorCode
+from pyracast.errors import ENTER_A_VALUE, UNEXPECTED, ErrorCode
 from pyracast.plants.activation import ActivationBlocker, SelectionState, selection_state
 from pyracast.plants.automation_state import AutomationCause
 from pyracast.plants.models import (
@@ -34,32 +36,31 @@ from pyracast.plants.models import (
 )
 from pyracast.plants.parameters import (
     AZIMUTH_LIMIT_DEGREES,
+    AZIMUTH_REFUSED,
     TILT_MAX_DEGREES,
+    TILT_REFUSED,
     PlantParameters,
     declaration,
 )
 from pyracast.plants.performance import DayReason, SelectionPolicy
-from pyracast.plants.production_changes import PRODUCTION_BATCH_LIMIT
-from pyracast.regions.models import NAME_MAX_LENGTH
+from pyracast.plants.production_changes import PRODUCTION_BATCH_LIMIT, ROW_TIME_INVALID
 
 
 class AwareDateTime(serializers.DateTimeField):
     def to_internal_value(self, value: Any) -> Any:
         if not isinstance(value, str):
-            self.fail("invalid", format="ISO 8601")
+            raise serializers.ValidationError(UNEXPECTED)
         try:
             parsed = parse_datetime(value)
         except ValueError:
             parsed = None
         if parsed is None or parsed.utcoffset() is None:
-            raise serializers.ValidationError(
-                gettext("A timezone-aware ISO 8601 timestamp is required.")
-            )
+            raise serializers.ValidationError(UNEXPECTED)
         return super().to_internal_value(value)
 
 
 class PlantInput(InputSerializer):
-    name = serializers.CharField(max_length=NAME_MAX_LENGTH)
+    name = PlantName()
     dc_capacity_mw = FiniteFloat(min_value=0, above=0)
     inverter_capacity_mw = FiniteFloat(
         min_value=0, above=0, allow_null=True, required=False, default=None
@@ -74,10 +75,20 @@ class PlantInput(InputSerializer):
         choices=MountingType.choices, default=MountingType.UNKNOWN
     )
     surface_tilt_degrees = FiniteFloat(
-        min_value=0, max_value=TILT_MAX_DEGREES, allow_null=True, required=False, default=None
+        min_value=0,
+        max_value=TILT_MAX_DEGREES,
+        allow_null=True,
+        required=False,
+        default=None,
+        error_messages=dict.fromkeys(("invalid", "min_value", "max_value"), TILT_REFUSED),
     )
     surface_azimuth_degrees = FiniteFloat(
-        min_value=0, below=AZIMUTH_LIMIT_DEGREES, allow_null=True, required=False, default=None
+        min_value=0,
+        below=AZIMUTH_LIMIT_DEGREES,
+        allow_null=True,
+        required=False,
+        default=None,
+        error_messages=dict.fromkeys(("invalid", "min_value", "below"), AZIMUTH_REFUSED),
     )
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
@@ -87,7 +98,7 @@ class PlantInput(InputSerializer):
         )
         if angles and attrs.get("mounting_type") != "fixed":
             raise serializers.ValidationError(
-                {"mounting_type": [gettext("Only fixed mounting permits surface angles.")]}
+                {"mounting_type": [gettext("Enter panel angles only for fixed mounting.")]}
             )
         return attrs
 
@@ -183,6 +194,37 @@ class ObservationImport(InputSerializer):
         child=ObservationRow(), allow_empty=False, max_length=PRODUCTION_BATCH_LIMIT
     )
 
+    def to_internal_value(self, data: Any) -> dict[str, Any]:
+        try:
+            return super().to_internal_value(data)
+        except serializers.ValidationError as error:
+            raise serializers.ValidationError(_with_row_times(error.detail)) from error
+
+
+TIME_FIELDS = frozenset(("starts_at", "ends_at"))
+
+
+def _with_row_times(detail: Any) -> Any:
+    rows = detail.get("observations") if isinstance(detail, dict) else None
+    if not isinstance(rows, dict):
+        return detail
+    named: dict[object, object] = {}
+    sentences: list[str] = []
+    for index, row in rows.items():
+        if isinstance(index, int) and isinstance(row, dict) and row.keys() & TIME_FIELDS:
+            # Rows are numbered as lines of the uploaded file, whose first line is the header.
+            sentence = str(
+                ROW_TIME_INVALID % {"row": number_format(index + 2, force_grouping=True)}
+            )
+            sentences.append(sentence)
+            row = {
+                field: [sentence] if field in TIME_FIELDS else text for field, text in row.items()
+            }
+        named[index] = row
+    if not sentences:
+        return detail
+    return detail | {"observations": named, "non_field_errors": sentences[:1]}
+
 
 class ObservationImportOutput(serializers.Serializer[dict[str, Any]]):
     created = serializers.IntegerField()
@@ -204,7 +246,7 @@ class ProductionChangeRow(InputSerializer):
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         if attrs["action"] == ProductionChangeAction.SET and "energy" not in attrs:
-            raise serializers.ValidationError({"energy": gettext("This field is required.")})
+            raise serializers.ValidationError({"energy": ENTER_A_VALUE})
         return attrs
 
 

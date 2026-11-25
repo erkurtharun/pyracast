@@ -429,7 +429,7 @@ test("plant submission errors preserve review and every field for retry", async 
                 status: 400,
                 json: errorBody(
                     "location_already_exists",
-                    "This location is already in your company's portfolio. Open existing plant.",
+                    "This workspace already has a plant at this location. Open the existing plant.",
                 ),
             });
         return route.fallback();
@@ -444,7 +444,7 @@ test("plant submission errors preserve review and every field for retry", async 
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.getByRole("button", { name: "Send for approval" }).click();
     await expect(page.locator("main").getByRole("alert")).toContainText(
-        "already in your company's portfolio",
+        "already has a plant at this location",
     );
     await expect(
         page.getByRole("heading", { name: "Check the details" }),

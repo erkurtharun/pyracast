@@ -10,6 +10,7 @@ from django.utils import timezone
 from django.utils.translation import gettext
 
 from pyracast.accounts.models import Membership, WorkspaceRole
+from pyracast.errors import UNEXPECTED
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasSnapshot
 from pyracast.plants.availability import (
@@ -241,7 +242,7 @@ def production_history(
     now = timezone.now()
     first, last = available_date_bounds(configuration, now) if configuration else (None, None)
     if (start_date is None) != (end_date is None):
-        raise ValidationError(gettext("Both start_date and end_date are required."))
+        raise ValidationError(gettext("Enter both the start and the end date."))
     if start_date is None or end_date is None:
         end_date = last or now.astimezone(ZoneInfo(zone)).date() - timedelta(days=1)
         start_date = (
@@ -249,10 +250,10 @@ def production_history(
             if daylight_only
             else max(first or end_date - timedelta(days=6), end_date - timedelta(days=6))
         )
-    if resolution_minutes not in {30, 60} or not 1 <= (end_date - start_date).days + 1 <= 31:
-        raise ValidationError(
-            gettext("Use a range of 1 to 31 days and 30 or 60 minute resolution.")
-        )
+    if resolution_minutes not in {30, 60}:
+        raise ValidationError(UNEXPECTED)
+    if not 1 <= (end_date - start_date).days + 1 <= 31:
+        raise ValidationError(gettext("Choose a date range of 1 to 31 days."))
     range_start, _ = local_day_bounds(start_date, zone)
     _, range_end = local_day_bounds(end_date, zone)
     selected = select_production_measurements(plant, configuration, range_start, range_end, now)

@@ -6,9 +6,24 @@ from typing import Any
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, ValidationError
 from django.core.management.base import BaseCommand, CommandError, CommandParser
+from django.utils.formats import number_format
 
 from pyracast.plants.models import Plant
-from pyracast.plants.production_changes import ObservationInput, import_observations
+from pyracast.plants.production_changes import (
+    ROW_TIME_INVALID,
+    ObservationInput,
+    import_observations,
+)
+
+
+def _moment(value: str, line: int) -> datetime:
+    try:
+        moment = datetime.fromisoformat(value)
+    except ValueError:
+        moment = None
+    if moment is None or moment.utcoffset() is None:
+        raise ValidationError(ROW_TIME_INVALID % {"row": number_format(line, force_grouping=True)})
+    return moment
 
 
 class Command(BaseCommand):
@@ -52,8 +67,8 @@ class Command(BaseCommand):
                         raise ValueError("Invalid row")
                     rows.append(
                         ObservationInput(
-                            starts_at=datetime.fromisoformat(row["starts_at"]),
-                            ends_at=datetime.fromisoformat(row["ends_at"]),
+                            starts_at=_moment(row["starts_at"], reader.line_num),
+                            ends_at=_moment(row["ends_at"], reader.line_num),
                             energy=float(row["energy"]),
                             quality=row.get("quality") or "valid",
                             source=row.get("source") or "operator",

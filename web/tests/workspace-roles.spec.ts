@@ -431,7 +431,11 @@ for (const [status, code, detail] of [
         "invitation_email_unverified",
         "Verify the invited email address before accepting.",
     ],
-    [400, "invitation_unavailable", "The invitation is invalid or expired."],
+    [
+        400,
+        "invitation_unavailable",
+        "This invitation is no longer valid. Ask the workspace administrator for a new one.",
+    ],
 ] as const) {
     test(`invitation can be dismissed after: ${detail}`, async ({
         page,

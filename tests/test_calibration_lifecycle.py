@@ -176,7 +176,7 @@ def calibrate(plant: Plant, **options: object) -> None:
     [
         (
             {"start_date": "2026-11-07"},
-            r"^Calibration refused: Use 7 to 90 completed local days\.$",
+            r"^Calibration refused: Choose a period of 7 to 90 days that ends before today\.$",
         ),
         ({"end_date": "11/08/2026"}, r"^Use ISO dates \(YYYY-MM-DD\)\.$"),
         ({"plant_id": 0}, r"^Plant 0 not found\.$"),

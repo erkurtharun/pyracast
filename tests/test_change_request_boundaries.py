@@ -188,7 +188,7 @@ def test_submission_key_replays_terminal_result_and_rejects_changed_payload(
         withdraw_request(case.proposer, case.system.tenant.pk, proposal.pk)
     replay = production_request(case, key=key)
     assert (replay.pk, replay.status) == (proposal.pk, terminal)
-    with pytest.raises(ConflictError, match="new request key"):
+    with pytest.raises(ConflictError, match="Something went wrong"):
         production_request(case, key=key, energy=1000)
     assert ChangeRequest.objects.count() == 1
     assert ProductionObservation.objects.count() == int(terminal == "approved")

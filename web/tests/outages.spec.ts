@@ -132,7 +132,7 @@ async function workspace(
                     json: answer("IncidentConflict", {
                         ...errorBody(
                             "incident_revision_changed",
-                            "The outage changed. Review its current values and save again.",
+                            "The outage changed in the meantime. Check its current values and save again.",
                         ),
                         current: { ...incident, pending_request_id: null },
                     }),
@@ -1377,7 +1377,7 @@ test("a conflict answer that already carries the member's own request holds the 
             json: answer("IncidentConflict", {
                 ...errorBody(
                     "incident_revision_changed",
-                    "The outage changed. Review its current values and save again.",
+                    "The outage changed in the meantime. Check its current values and save again.",
                 ),
                 current,
             }),
@@ -1662,7 +1662,7 @@ test("a conflict whose current version is cancelled keeps its messages in view a
             json: answer("IncidentConflict", {
                 ...errorBody(
                     "incident_revision_changed",
-                    "The outage changed. Review its current values and save again.",
+                    "The outage changed in the meantime. Check its current values and save again.",
                 ),
                 current,
             }),
@@ -1943,7 +1943,7 @@ test("a conflict whose reload repeats the limit already listed while the change 
             json: answer("IncidentConflict", {
                 ...errorBody(
                     "incident_revision_changed",
-                    "The outage changed. Review its current values and save again.",
+                    "The outage changed in the meantime. Check its current values and save again.",
                 ),
                 current,
             }),

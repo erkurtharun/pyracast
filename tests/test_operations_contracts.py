@@ -1622,7 +1622,7 @@ def test_the_smoke_spends_each_routers_own_budget_and_finds_the_next_router_unto
 def test_a_body_over_the_api_limit_is_refused_with_the_api_error_body() -> None:
     errors = middleware("api-refusals")["errors"]
     smoke = text(DEPLOY / "smoke.sh")
-    body = '{"code": "request_too_large", "message": "The request is too large to be accepted."}'
+    body = '{"code": "request_too_large", "message": "Something went wrong. Try again."}'
 
     assert errors == {"status": ["413"], "service": "maintenance", "query": "/api/413"}
     for path in ("/api/session/", "/api/auth/browser/v1/config"):

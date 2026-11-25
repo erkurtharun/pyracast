@@ -198,7 +198,7 @@ test("a sign-in server error shows its reference", async ({ page }) => {
             status: 500,
             json: errorBody(
                 "server_error",
-                "The server could not complete this request.",
+                "Something went wrong. Try again.",
                 { request_id: "0123456789abcdef0123456789abcdef" },
             ),
         }),
@@ -210,7 +210,7 @@ test("a sign-in server error shows its reference", async ({ page }) => {
         .fill("Test-only-cobalt-79!");
     await page.locator("form").getByRole("button", { name: "Sign in" }).click();
     await expect(page.locator("form").getByRole("alert")).toContainText(
-        "The server could not complete this request. Reference: 0123456789abcdef0123456789abcdef",
+        "Something went wrong. Try again. Reference: 0123456789abcdef0123456789abcdef",
     );
 });
 
@@ -219,10 +219,7 @@ test("an ended session asks to sign in again", async ({ page }) => {
     await page.route("**/api/auth/browser/v1/auth/login", (route) =>
         route.fulfill({
             status: 400,
-            json: errorBody(
-                "session_ended",
-                "Your session ended. Sign in again.",
-            ),
+            json: errorBody("session_ended", "Sign in again."),
         }),
     );
     await page.goto("/app/");
@@ -232,7 +229,7 @@ test("an ended session asks to sign in again", async ({ page }) => {
         .fill("Test-only-cobalt-79!");
     await page.locator("form").getByRole("button", { name: "Sign in" }).click();
     await expect(page.locator("form").getByRole("alert")).toContainText(
-        "Your session ended. Sign in again.",
+        "Sign in again.",
     );
 });
 

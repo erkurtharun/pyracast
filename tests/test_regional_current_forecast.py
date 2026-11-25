@@ -211,8 +211,5 @@ def test_region_current_forecast_maps_invalid_saved_inputs_to_validation_error(
     assert response.status_code == 400
     assert response.json() == {
         "code": "calculation_out_of_range",
-        "message": (
-            "This forecast could not be calculated. "
-            "Choose another day or contact your administrator."
-        ),
+        "message": "The forecast for this day could not be calculated.",
     }

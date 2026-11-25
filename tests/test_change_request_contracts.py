@@ -44,8 +44,12 @@ pytestmark = pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize(
     ("language", "expected"),
     [
-        ("en", "Outage periods must not overlap."),
-        ("tr", "Kesinti d\u00f6nemleri birbiriyle \u00e7ak\u0131\u015fmamal\u0131d\u0131r."),
+        ("en", "Another outage already covers part of this time. Change the start or the end."),
+        (
+            "tr",
+            "Bu zaman\u0131n bir k\u0131sm\u0131nda başka bir kesinti kay\u0131tl\u0131. "
+            "Başlang\u0131c\u0131 veya bitişi değiştirin.",
+        ),
     ],
 )
 def test_approval_validation_detail_is_plain_localized_text(
@@ -94,7 +98,7 @@ def test_request_reason_limits_leave_no_pending_request(
     case = make_request_case(monkeypatch)
     kwargs = production_kwargs(case)
     kwargs["reason"] = reason
-    with pytest.raises(ValidationError, match="1 to 500"):
+    with pytest.raises(ValidationError, match="at most 500 characters"):
         submit_production(*case.scope(case.proposer), **kwargs)
     assert not ChangeRequest.objects.exists()
 
@@ -256,7 +260,8 @@ def test_compiled_turkish_review_conflict_text_is_exact(monkeypatch: pytest.Monk
     assert response.json() == {
         "code": "review_context_changed",
         "message": (
-            "\u0130nceleme verileri de\u011fi\u015fti. Sayfay\u0131 yenileyip yeniden inceleyin."
+            "Bu değişiklik talebi veya santral siz açt\u0131ktan sonra değişti. "
+            "Sayfay\u0131 yenileyip yeniden kontrol edin."
         ),
     }
 

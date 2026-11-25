@@ -6,9 +6,8 @@ from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
-from django.utils.translation import gettext
 
-from pyracast.errors import DomainError, ErrorCode
+from pyracast.errors import UNEXPECTED, DomainError, ErrorCode
 from pyracast.forecasts.capacity_normalization import normalization_provenance
 from pyracast.forecasts.faults import FROZEN_PAYLOAD_FAULTS, stored_data
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
@@ -279,12 +278,12 @@ def forecast_payload(
 
 def require_resolution(resolution_minutes: int) -> None:
     if isinstance(resolution_minutes, bool) or resolution_minutes not in (30, 60):
-        raise ValidationError(gettext("Resolution must be 30 or 60 minutes."))
+        raise ValidationError(UNEXPECTED)
 
 
 def require_known_cutoff(as_of: datetime | None, now: datetime) -> None:
     if as_of is not None and (as_of.utcoffset() is None or as_of > now):
-        raise ValidationError(gettext("as_of must be aware and no later than now."))
+        raise ValidationError(UNEXPECTED)
 
 
 def archived_forecast(

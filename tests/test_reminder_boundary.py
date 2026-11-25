@@ -221,15 +221,28 @@ def test_reminder_refusals_name_their_code_and_field(
     assert (response.json()["code"], list(response.json()["fields"])) == (code, [field])
 
 
-def test_more_times_than_the_provider_quota_name_the_limit() -> None:
+@pytest.mark.parametrize(
+    ("accept", "text"),
+    [
+        ("en", "This plant allows at most 2 delivery times a day."),
+        ("tr", "Bu santral günde en fazla 2 gönderim saatine izin verir."),
+    ],
+)
+def test_more_times_than_the_provider_quota_name_the_limit(accept: str, text: str) -> None:
     system = approved()
     ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=2)
 
-    response = put(system, times=["07:00", "12:00", "17:00"])
+    response = client_for(system.member).put(
+        url(system),
+        submission(times=["07:00", "12:00", "17:00"]),
+        content_type="application/json",
+        headers={"Accept-Language": accept},
+    )
 
-    assert (response.status_code, response.json()["code"]) == (400, "too_many_reminder_times")
-    assert list(response.json()["fields"]) == ["times"]
-    assert "2" in response.json()["message"]
+    assert (response.status_code, response.json()) == (
+        400,
+        {"code": "too_many_reminder_times", "message": text, "fields": {"times": text}},
+    )
 
 
 def test_turning_reminders_on_needs_an_approved_plant_and_an_enabled_provider() -> None:

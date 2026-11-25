@@ -651,7 +651,7 @@ INPUT_VOCABULARIES = (
         "language",
         _save_language,
         accepted="tr",
-        error="Choose a supported language.",
+        error="Something went wrong. Try again.",
     ),
     InputVocabulary(
         "incident_change_action",
@@ -660,7 +660,7 @@ INPUT_VOCABULARIES = (
         "action",
         _submit_incident,
         accepted="create",
-        error="Unknown incident request action.",
+        error="Something went wrong. Try again.",
     ),
     InputVocabulary(
         "production_change_action",
@@ -675,7 +675,7 @@ INPUT_VOCABULARIES = (
         "action",
         _submit_production,
         accepted="set",
-        error="Unknown production action.",
+        error="Something went wrong. Try again.",
     ),
     InputVocabulary(
         "production_change_quality",
@@ -691,7 +691,7 @@ INPUT_VOCABULARIES = (
         "quality",
         _submit_production_quality,
         accepted="outage",
-        error="Unsupported observation quality.",
+        error="Something went wrong. Try again.",
     ),
     InputVocabulary(
         "incident_change_kind",
@@ -700,7 +700,7 @@ INPUT_VOCABULARIES = (
         "kind",
         _submit_incident_kind,
         accepted="grid",
-        error="Unsupported outage kind.",
+        error="Something went wrong. Try again.",
     ),
     InputVocabulary(
         "measurement_basis",
@@ -709,7 +709,7 @@ INPUT_VOCABULARIES = (
         "measurement_basis",
         _measurement_basis,
         accepted="ac_generation",
-        error="Unsupported meter basis.",
+        error="Choose a meter point.",
     ),
     InputVocabulary(
         "mounting_type",
@@ -718,7 +718,7 @@ INPUT_VOCABULARIES = (
         "mounting_type",
         _mounting_type,
         accepted="tracking",
-        error="Unsupported mounting type.",
+        error="Choose a mounting.",
     ),
     InputVocabulary(
         "observation_quality",
@@ -727,7 +727,7 @@ INPUT_VOCABULARIES = (
         "quality",
         _import_observation,
         accepted="outage",
-        error="Unsupported observation quality.",
+        error="Something went wrong. Try again.",
     ),
     InputVocabulary(
         "incident_kind",
@@ -736,7 +736,7 @@ INPUT_VOCABULARIES = (
         "kind",
         _save_incident,
         accepted="grid",
-        error="Unsupported outage kind.",
+        error="Something went wrong. Try again.",
     ),
     InputVocabulary(
         "reminder_language",

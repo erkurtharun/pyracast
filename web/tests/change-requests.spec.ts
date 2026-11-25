@@ -227,7 +227,7 @@ test("member submits a native production correction, sent again after a refusal 
                   status: 503,
                   json: errorBody(
                       "busy",
-                      "The workspace is busy. Try again in a moment.",
+                      "This could not be saved right now. Try again in a moment.",
                       { retry_after: 1 },
                   ),
               })
@@ -249,7 +249,9 @@ test("member submits a native production correction, sent again after a refusal 
         .getByRole("button", { name: "Send for approval", exact: true })
         .click();
     await expect(
-        staged.getByText("The workspace is busy. Try again in a moment."),
+        staged.getByText(
+            "This could not be saved right now. Try again in a moment.",
+        ),
     ).toBeVisible();
     await expect(staged.getByLabel("Reason for correction")).toHaveValue(
         "Checked meter",
@@ -337,7 +339,7 @@ test("a server error shows its reference", async ({ page }) => {
             status: 500,
             json: errorBody(
                 "server_error",
-                "The server could not complete this request.",
+                "Something went wrong. Try again.",
                 { request_id: "0123456789abcdef0123456789abcdef" },
             ),
         }),
@@ -351,7 +353,7 @@ test("a server error shows its reference", async ({ page }) => {
         .click();
     await expect(
         staged.getByText(
-            "The server could not complete this request. Reference: 0123456789abcdef0123456789abcdef",
+            "Something went wrong. Try again. Reference: 0123456789abcdef0123456789abcdef",
             { exact: true },
         ),
     ).toBeVisible();
@@ -850,7 +852,8 @@ test("inbox loads bounded pages and requires an explicit rejection reason", asyn
         decision_reason: rejected ? "Please verify the start time" : "",
         conflict: {
             code: "request_conflict",
-            message: "The plant configuration changed. Submit a new request.",
+            message:
+                "The plant's technical details changed after this change request was sent, so it cannot be approved.",
         },
         incident: {
             action: "create",
@@ -1490,7 +1493,7 @@ test("a refused request keeps the draft and names the concerned interval", async
             status: 409,
             json: errorBody(
                 "production_revision_changed",
-                "Production changed. Reload the latest values before saving.",
+                "These production values changed in the meantime. Check the current values and save again.",
             ),
         },
         {
@@ -1907,7 +1910,7 @@ test("a reason of only spaces is refused at its field and a refused reason is sh
                 {
                     fields: {
                         reason: "This field may not be blank.",
-                        changes: "Submit 1 to 100 production intervals.",
+                        changes: "Send 1 to 100 values in one change request.",
                     },
                 },
             ),
@@ -1935,7 +1938,7 @@ test("a reason of only spaces is refused at its field and a refused reason is sh
     await expect(reason).not.toHaveAttribute("aria-invalid", "true");
     await send.click();
     await expect(staged.getByRole("alert")).toContainText(
-        "Submit 1 to 100 production intervals.",
+        "Send 1 to 100 values in one change request.",
     );
     await expect(reason).toHaveAttribute("aria-invalid", "true");
     await expect(reason).toHaveAccessibleDescription(

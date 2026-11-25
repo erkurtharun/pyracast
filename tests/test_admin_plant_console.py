@@ -100,14 +100,14 @@ def test_adding_a_plant_lands_on_its_page_with_the_next_step() -> None:
         (
             {"surface_azimuth_degrees": "360"},
             "surface_azimuth_degrees",
-            "Enter a number less than 360.",
+            "Enter a panel azimuth of at least 0° and less than 360°.",
         ),
         (
             {"mounting_type": "tracking"},
             "mounting_type",
-            "Only fixed mounting permits surface angles.",
+            "Enter panel angles only for fixed mounting.",
         ),
-        ({"timezone": "Mars/Base"}, "timezone", "An IANA timezone is required."),
+        ({"timezone": "Mars/Base"}, "timezone", "Choose a time zone."),
     ],
 )
 def test_plant_values_are_judged_by_the_site_input_and_the_operation(

@@ -810,7 +810,8 @@ test("a provider connection that needs a confirmation asks for the factor it nam
             errors: [
                 {
                     code: "mfa_reauthentication_required",
-                    message: "Confirm with your authenticator to continue.",
+                    message:
+                        "Enter your authenticator code or a recovery code.",
                 },
             ],
         },
