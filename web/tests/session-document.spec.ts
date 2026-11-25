@@ -92,6 +92,7 @@ test("a sign-out in another window ends in a fresh document", async ({
     await expect(plants(page)).toBeVisible();
     await markDocument(page);
     await other.goto("/app/w/");
+    await expect(plants(other)).toBeVisible();
     await other.getByRole("button", { name: "Sign out", exact: true }).click();
     await expect(welcome(other)).toBeVisible();
     await expect(welcome(page)).toBeVisible();

@@ -11,8 +11,10 @@ import {
     markDocument,
     outstandingAnswers,
     outstandingSessionReads,
+    readsApplied,
     resentNotice,
     sessionAnswer,
+    trackReads,
 } from "./support/session";
 
 const start = new Date("2026-11-20T09:00:00Z");
@@ -115,6 +117,7 @@ test("a window whose workspace list answers reads no session and stays uncovered
     page,
 }) => {
     const server = await signedInOnClock(page);
+    await trackReads(page, "/api/tenants/");
     await page.goto("/app/w/1/");
     await expect(
         page.getByRole("heading", { name: "Plants", exact: true }),
@@ -125,6 +128,7 @@ test("a window whose workspace list answers reads no session and stays uncovered
         const listed = page.waitForResponse("**/api/tenants/");
         await page.clock.runFor(listPoll);
         expect((await listed).ok()).toBe(true);
+        await readsApplied(page, "/api/tenants/");
     }
     expect(server.reads).toBe(reads);
     await expect(cover(page)).toHaveCount(0);
