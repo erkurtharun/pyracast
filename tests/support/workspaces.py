@@ -13,7 +13,7 @@ ACCEPT = "/api/invitations/accept/"
 PREVIEW = "/api/invitations/preview/"
 UNAVAILABLE = {
     "code": "invitation_unavailable",
-    "message": "The invitation is invalid or expired.",
+    "message": "This invitation is no longer valid. Ask the workspace administrator for a new one.",
 }
 
 

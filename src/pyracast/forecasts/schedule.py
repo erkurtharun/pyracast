@@ -19,6 +19,7 @@ from pyracast.collection_window import (
     next_nightly_start,
 )
 from pyracast.connections.models import MAX_DAILY_QUOTA
+from pyracast.errors import UNEXPECTED
 from pyracast.forecasts.jobs.claim import claimable_from, ended_at_claim, open_at_claim
 from pyracast.forecasts.jobs.ready import WAITING
 from pyracast.forecasts.models import (
@@ -84,17 +85,16 @@ def configure_schedule(
         )
         if len(times) != len(set(times)) or (enabled and len(times) > limit):
             raise ValidationError(
-                gettext(
-                    "Provide at most %(limit)s distinct local times; "
-                    "history uses one daily request."
-                ),
+                gettext("Choose at most %(limit)s different update times."),
                 params={"limit": limit},
             )
         if any(CLOCK_PATTERN.fullmatch(clock) is None for clock in times):
-            raise ValidationError(gettext("Collection times must use HH:MM."))
+            raise ValidationError(UNEXPECTED)
         # The intent is kept in every approval state; readers gate collection on the binding.
         if enabled and not times:
-            raise ValidationError(gettext("At least one time is required."))
+            raise ValidationError(
+                gettext("Add at least one update time to update forecasts automatically.")
+            )
         times = sorted(times)
         existing = CollectionSchedule.objects.filter(region=region).first()
         if existing is not None and existing.enabled == enabled and existing.times == times:

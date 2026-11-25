@@ -16,8 +16,8 @@ MESSAGES: dict[Language, str] = {
 }
 # The gateway's refusal of a body over its limit, catalogued as ErrorCode.REQUEST_TOO_LARGE.
 TOO_LARGE_MESSAGES: dict[Language, str] = {
-    "en": "The request is too large to be accepted.",
-    "tr": "İstek kabul edilemeyecek kadar büyük.",
+    "en": "Something went wrong. Try again.",
+    "tr": "Bir sorun oluştu. Tekrar deneyin.",
 }
 PAGE = f"""<!doctype html>
 <html lang="en">

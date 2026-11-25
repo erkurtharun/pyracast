@@ -37,7 +37,7 @@ def test_tenant_membership_returns_the_active_row_with_the_required_role() -> No
     assert tenant_membership(administrator, tenant.pk, role=WorkspaceRole.ADMIN, lock=True)
     with pytest.raises(PermissionDenied, match="administrator"):
         tenant_membership(viewer, tenant.pk, role=WorkspaceRole.ADMIN)
-    with pytest.raises(PermissionDenied, match="submit requests"):
+    with pytest.raises(PermissionDenied, match="make this change directly"):
         tenant_membership(administrator, tenant.pk, role=WorkspaceRole.VIEWER)
     with pytest.raises(PermissionDenied, match="not a member"):
         tenant_membership(outsider, tenant.pk)
@@ -58,7 +58,7 @@ def test_platform_administrator_is_an_active_staff_superuser(
     if active and staff and superuser:
         require_platform_admin(user)
     else:
-        with pytest.raises(PermissionDenied, match="Platform administrator"):
+        with pytest.raises(PermissionDenied, match="Only Pyracast can do this"):
             require_platform_admin(user)
 
 

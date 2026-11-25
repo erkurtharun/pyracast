@@ -90,13 +90,13 @@ def require_name(name: str) -> str:
     if not name or len(name) > NAME_MAX_LENGTH:
         raise DomainError(
             ErrorCode.INVALID_REQUEST,
-            _("A plant name of at most 200 characters is required."),
+            _("Enter a plant name of at most 200 characters."),
             field="name",
         )
     if "\x00" in name:
         raise DomainError(
             ErrorCode.INVALID_REQUEST,
-            _("A plant name cannot contain a null character."),
+            _("The plant name contains an invisible character. Type the name again."),
             field="name",
         )
     return name
@@ -106,19 +106,17 @@ def validate_location(latitude: float, longitude: float, timezone: str) -> None:
     if not math.isfinite(latitude) or not -90 <= latitude <= 90:
         raise DomainError(
             ErrorCode.INVALID_REQUEST,
-            _("Latitude must be between -90 and 90 degrees."),
+            _("Enter a latitude between -90 and 90 degrees."),
             field="latitude",
         )
     if not math.isfinite(longitude) or not -180 <= longitude <= 180:
         raise DomainError(
             ErrorCode.INVALID_REQUEST,
-            _("Longitude must be between -180 and 180 degrees."),
+            _("Enter a longitude between -180 and 180 degrees."),
             field="longitude",
         )
     if timezone not in available_zones():
-        raise DomainError(
-            ErrorCode.INVALID_REQUEST, _("An IANA timezone is required."), field="timezone"
-        )
+        raise DomainError(ErrorCode.INVALID_REQUEST, _("Choose a time zone."), field="timezone")
 
 
 def submit_region(
@@ -200,7 +198,7 @@ def request_location_change(
     validate_location(latitude, longitude, timezone)
     latitude, longitude = canonical_coordinate(latitude), canonical_coordinate(longitude)
     if len(reason) > 1000:
-        raise ValidationError(gettext("A reason of at most 1000 characters is required."))
+        raise ValidationError(gettext("Enter a reason of at most 1000 characters."))
     with transaction.atomic():
         authorize_workspace_admin(actor, tenant_id, platform=platform)
         region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)

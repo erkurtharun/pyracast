@@ -18,6 +18,7 @@ from pyracast.change_requests.models import (
     IncidentChangeAction,
     ProductionChangeAction,
 )
+from pyracast.errors import UNEXPECTED
 from pyracast.incidents.models import PlantIncident
 from pyracast.incidents.operations import prepare_incident, prepare_incident_finish
 from pyracast.plants.measurements import select_measurements, select_provider_measurements
@@ -49,7 +50,7 @@ def digest(value: object) -> str:
             value, sort_keys=True, separators=(",", ":"), default=str, allow_nan=False
         )
     except ValueError as error:
-        raise ValidationError(gettext("Request numbers must be finite.")) from error
+        raise ValidationError(UNEXPECTED) from error
     return hashlib.sha256(encoded.encode()).hexdigest()
 
 
@@ -84,19 +85,17 @@ def prepare_incident_change(
     lock: bool = True,
 ) -> PlantIncident:
     if action not in IncidentChangeAction.values:
-        raise ValidationError(gettext("Unknown incident request action."))
+        raise ValidationError(UNEXPECTED)
     if (
         action == IncidentChangeAction.CREATE
         and (incident_id is not None or expected_revision is not None)
     ) or (
         action != IncidentChangeAction.CREATE and (incident_id is None or expected_revision is None)
     ):
-        raise ValidationError(
-            gettext("Incident identity and expected revision are required for existing incidents.")
-        )
+        raise ValidationError(UNEXPECTED)
     if action in INCIDENT_EDITS:
         if values is None or ends_at is not None:
-            raise ValidationError(gettext("Incident values are required for create and update."))
+            raise ValidationError(UNEXPECTED)
         return prepare_incident(
             actor,
             plant,
@@ -111,7 +110,7 @@ def prepare_incident_change(
         or expected_revision is None
         or (action == IncidentChangeAction.CANCEL and ends_at is not None)
     ):
-        raise ValidationError(gettext("Unsupported incident request fields."))
+        raise ValidationError(UNEXPECTED)
     return prepare_incident_finish(
         actor,
         plant,
@@ -145,7 +144,12 @@ def validate_request(
             else plant.current_configuration_id
         )
         if configuration_id != request.configuration_id:
-            raise ValidationError(gettext("The plant configuration changed. Submit a new request."))
+            raise ValidationError(
+                gettext(
+                    "The plant's technical details changed after this change request was "
+                    "sent, so it cannot be approved."
+                )
+            )
     prepare_incident_change(
         actor,
         plant,

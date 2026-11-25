@@ -651,7 +651,7 @@ function proposalStore(
                     status: 409,
                     json: errorBody(
                         "idempotency_key_reused",
-                        "Use a new request key for changed input.",
+                        "Something went wrong. Try again.",
                     ),
                 });
             const request = earlier ?? {
@@ -758,7 +758,7 @@ export async function serveOutageWrites(
                         status: 409,
                         json: errorBody(
                             "idempotency_key_reused",
-                            "Use a new request key for changed input.",
+                            "Something went wrong. Try again.",
                         ),
                     });
                 const now = outages.find((row) => row.id === earlier.id)!;
@@ -782,7 +782,7 @@ export async function serveOutageWrites(
                 json: answer("IncidentConflict", {
                     ...errorBody(
                         "incident_revision_changed",
-                        "The outage changed. Review its current values and save again.",
+                        "The outage changed in the meantime. Check its current values and save again.",
                     ),
                     current: target,
                 }),

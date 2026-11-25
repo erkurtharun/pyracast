@@ -6,6 +6,7 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from pyracast.accounts.models import Tenant, WorkspaceRole
+from pyracast.errors import UNEXPECTED
 from pyracast.forecasts.models import SnapshotSourceKind
 from pyracast.regions.models import (
     NAME_MAX_LENGTH,
@@ -18,16 +19,12 @@ class InputSerializer(serializers.Serializer[dict[str, Any]]):
     def run_validation(self, data: Any = serializers.empty) -> Any:
         if data is None:
             # DRF's own refusal of a null body is an untranslated literal.
-            raise serializers.ValidationError(
-                {"non_field_errors": [gettext("Send the request body as a JSON object.")]}
-            )
+            raise serializers.ValidationError({"non_field_errors": [UNEXPECTED]})
         return super().run_validation(data)
 
     def to_internal_value(self, data: Any) -> dict[str, Any]:
         if isinstance(data, dict) and data.keys() - self.fields.keys():
-            raise serializers.ValidationError(
-                {"non_field_errors": [gettext("Unknown fields are not accepted.")]}
-            )
+            raise serializers.ValidationError({"non_field_errors": [UNEXPECTED]})
         return cast(dict[str, Any], super().to_internal_value(data))
 
 

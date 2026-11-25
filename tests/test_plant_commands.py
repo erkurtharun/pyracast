@@ -204,13 +204,13 @@ def test_production_import_reports_the_specific_refusal(
     viewer = User.objects.create_user(username="viewer")
     Membership.objects.create(user=viewer, tenant=system.tenant)
     params = dict(plant_id=plant.pk, configuration_id=plant.current_configuration_id, file=path)
-    with pytest.raises(CommandError, match="Workspace administrator required"):
+    with pytest.raises(CommandError, match="Only the workspace administrator can do this"):
         call_command("import_production", username="viewer", unit="MWh", **params)
     call_command("import_production", username="member", unit="MWh", stdout=StringIO(), **params)
     path.write_text(
         "starts_at,ends_at,energy\n2020-01-01T09:00:00Z,2020-01-01T09:30:00Z,2\n",
         encoding="utf-8",
     )
-    with pytest.raises(CommandError, match="Conflicting or overlapping observation"):
+    with pytest.raises(CommandError, match="Some values overlap in time"):
         call_command("import_production", username="member", unit="MWh", **params)
     assert ProductionObservation.objects.get().energy_mwh == 1

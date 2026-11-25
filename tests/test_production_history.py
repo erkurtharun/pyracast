@@ -163,7 +163,7 @@ def test_mixed_resolution_preserves_observations_after_revision_and_reference_lo
     assert first["edit_unavailable_reason"] == "configuration_mismatch"
     assert [row["id"] for row in first["previous_configuration_observations"]] == [saved]
     assert original_id is not None
-    with pytest.raises(ValidationError, match="current approved configuration"):
+    with pytest.raises(ValidationError, match="changed after these values were entered"):
         import_observations(
             system.member,
             system.tenant.pk,

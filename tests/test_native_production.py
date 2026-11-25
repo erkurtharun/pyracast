@@ -174,11 +174,11 @@ def test_native_earlier_configuration_correction_is_shown_apart_and_reentry_afte
 @pytest.mark.parametrize(
     ("unit", "changes", "message"),
     [
-        ("W", "valid", "Use MWh"),
-        ("MWh", "empty", "batch"),
-        ("MWh", "action", "Unknown production action"),
-        ("MWh", "revert", "no manual production"),
-        ("MWh", "range", "within 31 local days"),
+        ("W", "valid", "Save 1 to 2000 values"),
+        ("MWh", "empty", "Save 1 to 2000 values"),
+        ("MWh", "action", "Something went wrong"),
+        ("MWh", "revert", "no entered value to remove"),
+        ("MWh", "range", "at most 31 days at a time"),
     ],
 )
 def test_invalid_batches_fail_at_application_boundary(
@@ -306,8 +306,8 @@ def test_legacy_import_reads_only_live_head_and_rejects_withdrawal_cleanly(
         )
 
     assert legacy(3)["ids"] == [replacement]
-    with pytest.raises(ValidationError, match="Conflicting"):
+    with pytest.raises(ValidationError, match="overlap in time"):
         legacy(2)
     write(system, plant, [edit(start, revision_id=replacement, action="revert")])
-    with pytest.raises(ValidationError, match="Conflicting"):
+    with pytest.raises(ValidationError, match="overlap in time"):
         legacy(3)

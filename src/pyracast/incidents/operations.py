@@ -11,7 +11,7 @@ from django.utils.translation import gettext_lazy as _
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import WorkspaceRole
-from pyracast.errors import ConflictError, DomainError, ErrorCode
+from pyracast.errors import UNEXPECTED, ConflictError, DomainError, ErrorCode
 from pyracast.incidents.models import (
     CREATE_KEY_FIELDS,
     IncidentKind,
@@ -21,8 +21,6 @@ from pyracast.incidents.models import (
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.plants.preparation import incidents_changed
 from pyracast.regions.models import Region
-
-UNZONED = _("Outage times must include a time zone.")
 
 
 class StaleIncidentError(ConflictError):
@@ -69,28 +67,26 @@ def _validate(values: dict[str, Any], configuration: PlantConfiguration, now: da
         "available_inverter_mw",
         "available_export_mw",
     }:
-        raise DomainError(
-            ErrorCode.INVALID_REQUEST, _("Outage fields are incomplete or unsupported.")
-        )
+        raise DomainError(ErrorCode.INVALID_REQUEST, UNEXPECTED)
     start, end = values["starts_at"], values["ends_at"]
     if start.utcoffset() is None:
-        raise DomainError(ErrorCode.INVALID_REQUEST, UNZONED, field="starts_at")
+        raise DomainError(ErrorCode.INVALID_REQUEST, UNEXPECTED, field="starts_at")
     if start > now:
         raise DomainError(ErrorCode.INCIDENT_STARTS_IN_FUTURE, field="starts_at")
     if end is not None:
         _validate_end(start, end, now)
     if values["kind"] not in IncidentKind.values:
-        raise DomainError(ErrorCode.INVALID_REQUEST, _("Unsupported outage kind."), field="kind")
+        raise DomainError(ErrorCode.INVALID_REQUEST, UNEXPECTED, field="kind")
     title, notes = values["title"], values["notes"]
     if not isinstance(title, str) or not title.strip() or len(title) > 200:
         raise DomainError(
             ErrorCode.INVALID_REQUEST,
-            _("A title of at most 200 characters is required."),
+            _("Enter a title of at most 200 characters."),
             field="title",
         )
     if not isinstance(notes, str) or len(notes) > 2000:
         raise DomainError(
-            ErrorCode.INVALID_REQUEST, _("Notes must stay within 2000 characters."), field="notes"
+            ErrorCode.INVALID_REQUEST, _("Enter notes of at most 2000 characters."), field="notes"
         )
     for field, baseline in (
         ("available_dc_mw", configuration.dc_capacity_mw),
@@ -108,7 +104,7 @@ def _validate(values: dict[str, Any], configuration: PlantConfiguration, now: da
         ):
             raise DomainError(
                 ErrorCode.INVALID_REQUEST,
-                _("Available capacity must be a finite, nonnegative number."),
+                _("Enter zero or a positive number."),
                 field=field,
             )
         if baseline is not None and value > baseline:
@@ -117,7 +113,7 @@ def _validate(values: dict[str, Any], configuration: PlantConfiguration, now: da
 
 def _validate_end(start: datetime, end: datetime, now: datetime) -> None:
     if end.utcoffset() is None:
-        raise DomainError(ErrorCode.INVALID_REQUEST, UNZONED, field="ends_at")
+        raise DomainError(ErrorCode.INVALID_REQUEST, UNEXPECTED, field="ends_at")
     if end <= start:
         raise DomainError(ErrorCode.INCIDENT_ENDS_BEFORE_START, field="ends_at")
     if end > now:
@@ -269,7 +265,7 @@ def prepare_incident_finish(
         row.cancelled_at = now
     elif ends_at is None:
         raise DomainError(
-            ErrorCode.INVALID_REQUEST, _("An outage end time is required."), field="ends_at"
+            ErrorCode.INVALID_REQUEST, _("Enter when the outage ended."), field="ends_at"
         )
     else:
         _validate_end(row.starts_at, ends_at, now)

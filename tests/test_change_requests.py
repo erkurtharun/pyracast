@@ -89,7 +89,7 @@ def test_provider_review_tracks_semantic_values_and_freezes_approval(
     identical = request_detail(case.system.member, case.system.tenant.pk, request.pk)
     assert identical["review_fingerprint"] == before["review_fingerprint"]
     acquisition(source, minute=2, values=["30"] * 24)
-    with pytest.raises(ConflictError, match="review context changed"):
+    with pytest.raises(ConflictError, match="changed after you opened it"):
         approve_request(
             case.system.member,
             case.system.tenant.pk,
@@ -166,7 +166,7 @@ def test_half_hour_review_preserves_native_provider_evidence_and_coverage_warnin
         }
     ]
     acquisition(source, minute=1, values=["27"] * 24)
-    with pytest.raises(ConflictError, match="review context changed"):
+    with pytest.raises(ConflictError, match="changed after you opened it"):
         approve_request(
             case.system.member,
             case.system.tenant.pk,
@@ -320,7 +320,7 @@ def test_incident_overlap_and_configuration_change_are_derived_conflicts(
         is not None
     )
     revise_plant(*case.scope(case.system.member), PlantParameters(name="Plant", dc_capacity_mw=150))
-    with pytest.raises(ConflictError, match="configuration changed"):
+    with pytest.raises(ConflictError, match="changed after this change request was sent"):
         approve(case, request)
     detail = request_detail(case.system.member, case.system.tenant.pk, request.pk)
     assert detail["can_review"]
@@ -510,6 +510,9 @@ def test_stale_production_proposal_answers_409_and_stores_nothing(
     assert response.status_code == 409, response.content
     assert response.json() == {
         "code": "production_revision_changed",
-        "message": "Production changed. Reload the latest values before saving.",
+        "message": (
+            "These production values changed in the meantime. "
+            "Check the current values and save again."
+        ),
     }
     assert list(ChangeRequest.objects.values_list("pk", flat=True)) == stored

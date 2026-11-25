@@ -105,9 +105,9 @@ def test_adding_a_plant_lands_on_its_page_with_the_next_step() -> None:
         (
             {"mounting_type": "tracking"},
             "mounting_type",
-            "Only fixed mounting permits surface angles.",
+            "Enter panel angles only for fixed mounting.",
         ),
-        ({"timezone": "Mars/Base"}, "timezone", "An IANA timezone is required."),
+        ({"timezone": "Mars/Base"}, "timezone", "Choose a time zone."),
     ],
 )
 def test_plant_values_are_judged_by_the_site_input_and_the_operation(

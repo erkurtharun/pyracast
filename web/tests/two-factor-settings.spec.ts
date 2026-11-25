@@ -25,7 +25,7 @@ const askAuthenticator = {
         errors: [
             {
                 code: "mfa_reauthentication_required",
-                message: "Confirm with your authenticator to continue.",
+                message: "Confirm with your authenticator app to continue.",
             },
         ],
     },

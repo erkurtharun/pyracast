@@ -141,7 +141,7 @@ test("a suspended location without a plant says why its setup cannot be complete
     await page.getByRole("button", { name: /North location/ }).click();
     await expect(
         page.getByText(
-            "The plant is suspended, so its technical details cannot change. Contact Pyracast support to resume it.",
+            "Pyracast suspended this plant, so its technical details cannot be changed.",
         ),
     ).toBeVisible();
     await expect(
@@ -161,7 +161,7 @@ test("a server time-zone refusal reopens the location step with focus on the zon
                   json: errorBody(
                       "invalid_request",
                       "Check the highlighted values and try again.",
-                      { fields: { timezone: "An IANA timezone is required." } },
+                      { fields: { timezone: "Choose a time zone." } },
                   ),
               })
             : route.fallback(),
@@ -176,7 +176,7 @@ test("a server time-zone refusal reopens the location step with focus on the zon
     const zone = page.getByLabel("Time zone");
     await expect(zone).toBeFocused();
     await expect(zone).toHaveAttribute("aria-invalid", "true");
-    await expect(page.getByText("An IANA timezone is required.")).toBeVisible();
+    await expect(page.getByText("Choose a time zone.")).toBeVisible();
     await expect(
         page
             .getByRole("list", { name: "Plant setup progress" })
@@ -345,7 +345,7 @@ test("a refused duplicate location offers to open the plant that holds it", asyn
                   json: {
                       ...errorBody(
                           "location_already_exists",
-                          "This location is already in your company's portfolio. Open the existing plant.",
+                          "This workspace already has a plant at this location. Open the existing plant.",
                       ),
                       region_id: 11,
                   },
@@ -378,7 +378,7 @@ test("a suspended plant shows its technical details read-only with the reason", 
     await page.goto("/app/w/1/plants/11/settings/");
     await expect(
         page.getByText(
-            "The plant is suspended, so its technical details cannot change. Contact Pyracast support to resume it.",
+            "Pyracast suspended this plant, so its technical details cannot be changed.",
         ),
     ).toBeVisible();
     await expect(
@@ -491,7 +491,7 @@ test("a refusal of fields on two steps opens the earlier step on its refused fie
     await mockApi(page, { empty: true });
     await refuse(page, {
         dc_capacity_mw: "Enter a positive capacity.",
-        timezone: "An IANA timezone is required.",
+        timezone: "Choose a time zone.",
     });
     await openWizard(page);
     await toReview(page);
@@ -951,7 +951,7 @@ test("a submit refused without a field to go to moves focus to its message", asy
                   status: 503,
                   json: errorBody(
                       "busy",
-                      "The workspace is busy. Try again in a moment.",
+                      "Another change is being saved. Try again in a moment.",
                   ),
               })
             : route.fallback(),
@@ -1014,7 +1014,7 @@ test("a failed restore in the wizard returns focus to the restore button", async
             status: 503,
             json: errorBody(
                 "busy",
-                "The workspace is busy. Try again in a moment.",
+                "Another change is being saved. Try again in a moment.",
             ),
         }),
     );
@@ -1048,7 +1048,7 @@ test("a viewer opening a blocked location without a plant sees why it cannot be 
     await page.getByRole("button", { name: /North location/ }).click();
     await expect(
         page.getByText(
-            "The plant is suspended, so its technical details cannot change. Contact Pyracast support to resume it.",
+            "Pyracast suspended this plant, so its technical details cannot be changed.",
         ),
     ).toBeVisible();
     await expect(

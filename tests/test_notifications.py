@@ -1293,5 +1293,5 @@ def test_reminder_api_requires_an_explicit_recipient_list() -> None:
     assert response.status_code == 400
     assert response.json() == {
         "code": "invalid_request",
-        "message": "Unknown fields are not accepted.",
+        "message": "Something went wrong. Try again.",
     }

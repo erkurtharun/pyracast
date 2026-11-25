@@ -12,8 +12,8 @@ test("reminder times are sent as entered and a repeated time is refused by the s
                   status: 400,
                   json: errorBody(
                       "duplicate_reminder_times",
-                      "Use each delivery time once.",
-                      { fields: { times: "Use each delivery time once." } },
+                      "Use each send time once.",
+                      { fields: { times: "Use each send time once." } },
                   ),
               })
             : route.fallback(),
@@ -52,7 +52,7 @@ test("reminder times are sent as entered and a repeated time is refused by the s
         "09:30",
     ]);
     await expect(page.locator(".notice[role=alert]")).toContainText(
-        "Use each delivery time once.",
+        "Use each send time once.",
     );
     await expect(
         page.getByLabel("Delivery time 4", { exact: true }),

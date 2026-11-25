@@ -16,6 +16,7 @@ from django.contrib.sessions.exceptions import SessionInterrupted
 from django.db import OperationalError
 from django.test import Client, override_settings
 from django.utils import timezone
+from django.utils.translation import gettext
 from psycopg.errors import DeadlockDetected, LockNotAvailable, QueryCanceled
 from rest_framework.exceptions import APIException, Throttled
 
@@ -68,6 +69,16 @@ def domain(kind: str, code: str, **options: Any) -> Trigger:
 
         error_type: type[BaseException] = getattr(errors, kind)
         return error_type(errors.ErrorCode(code), **options)
+
+    return raising(factory)
+
+
+def limit_refusal(code: str, text: str, limit: int, field: str) -> Trigger:
+    def factory() -> BaseException:
+        from pyracast import errors
+
+        message = gettext(text) % {"limit": limit}
+        return errors.DomainError(errors.ErrorCode(code), message, field=field)
 
     return raising(factory)
 
@@ -254,31 +265,34 @@ CASES: dict[str, Case] = {
         fields=("language",),
     ),
     "bad_request": Case(
-        400, "The request could not be processed.", "İstek işlenemedi.", too_many_fields
+        400,
+        "Something went wrong. Try again.",
+        "Bir sorun oluştu. Tekrar deneyin.",
+        too_many_fields,
     ),
     "session_ended": Case(
         400,
-        "Your session ended. Sign in again.",
-        "Oturumunuz sona erdi. Yeniden oturum aç\u0131n.",
+        "You were signed out. Sign in again.",
+        "Ç\u0131k\u0131ş yap\u0131ld\u0131. Yeniden giriş yap\u0131n.",
         interrupted_session,
     ),
     "session_changed": Case(
         409,
-        "The session changed in another tab. The page now shows the current session.",
-        "Oturum başka bir sekmede değişti. Sayfa art\u0131k geçerli oturumu gösteriyor.",
+        "You signed in or out in another tab.",
+        "Başka bir sekmede giriş veya ç\u0131k\u0131ş yapt\u0131n\u0131z.",
         another_session,
     ),
     "not_authenticated": Case(
         401,
         "Sign in to continue.",
-        "Devam etmek için oturum aç\u0131n.",
+        "Devam etmek için giriş yap\u0131n.",
         anonymous_tenants,
         authenticate="Session",
     ),
     "csrf_failed": Case(
         403,
-        "The page expired. Reload it and try again.",
-        "Sayfan\u0131n süresi doldu. Sayfay\u0131 yenileyip tekrar deneyin.",
+        "Something went wrong. Try again.",
+        "Bir sorun oluştu. Tekrar deneyin.",
         missing_csrf_token,
     ),
     "permission_denied": Case(
@@ -288,7 +302,10 @@ CASES: dict[str, Case] = {
         privileged_enrollment,
     ),
     "invalid_proxy_headers": Case(
-        403, "The request could not be verified.", "İstek doğrulanamad\u0131.", forged_proxy_headers
+        403,
+        "Something went wrong. Try again.",
+        "Bir sorun oluştu. Tekrar deneyin.",
+        forged_proxy_headers,
     ),
     "membership_required": Case(
         403,
@@ -298,20 +315,20 @@ CASES: dict[str, Case] = {
     ),
     "workspace_admin_required": Case(
         403,
-        "Workspace administrator required.",
-        "Çal\u0131şma alan\u0131 yöneticisi yetkisi gereklidir.",
+        "Only the workspace administrator can do this.",
+        "Bunu yaln\u0131zca çal\u0131şma alan\u0131 yöneticisi yapabilir.",
         members_page(WorkspaceRole.VIEWER),
     ),
     "admin_edits_directly": Case(
         403,
-        "Workspace members submit requests; administrators edit directly.",
-        "Çal\u0131şma alan\u0131 üyeleri talep gönderir; yöneticiler doğrudan düzenleme yapar.",
+        "As the workspace administrator, make this change directly.",
+        "Çal\u0131şma alan\u0131 yöneticisi olarak bu değişikliği doğrudan yap\u0131n.",
         domain("ForbiddenError", "admin_edits_directly"),
     ),
     "platform_admin_required": Case(
         403,
-        "Platform administrator required.",
-        "Platform yöneticisi yetkisi gereklidir.",
+        "Only Pyracast can do this.",
+        "Bunu yaln\u0131zca Pyracast yapabilir.",
         domain("ForbiddenError", "platform_admin_required"),
     ),
     "invitation_email_unverified": Case(
@@ -325,36 +342,36 @@ CASES: dict[str, Case] = {
     ),
     "method_not_allowed": Case(
         405,
-        "This action is not available here.",
-        "Bu işlem burada kullan\u0131lamaz.",
+        "Something went wrong. Try again.",
+        "Bir sorun oluştu. Tekrar deneyin.",
         unsupported_method,
     ),
     "not_acceptable": Case(
         406,
-        "The requested response format is not available.",
-        "İstenen yan\u0131t biçimi kullan\u0131lam\u0131yor.",
+        "Something went wrong. Try again.",
+        "Bir sorun oluştu. Tekrar deneyin.",
         unsupported_format,
     ),
     "unsupported_media_type": Case(
-        415, "Send the request as JSON.", "İsteği JSON olarak gönderin.", form_encoded
+        415, "Something went wrong. Try again.", "Bir sorun oluştu. Tekrar deneyin.", form_encoded
     ),
     "conflict": Case(
         409,
-        "The request conflicts with the current state. Reload and try again.",
-        "İstek mevcut durumla çak\u0131ş\u0131yor. Sayfay\u0131 yenileyip tekrar deneyin.",
+        "Something changed in the meantime. Check the current values and try again.",
+        "Bu arada bir değişiklik oldu. Güncel değerleri kontrol edip tekrar deneyin.",
         raising(status_only(409)),
     ),
     "throttled": Case(
         429,
-        "Too many requests. Wait a moment and try again.",
-        "Çok fazla istek gönderildi. Biraz bekleyip tekrar deneyin.",
+        "Too many attempts in a short time. Wait a moment and try again.",
+        "K\u0131sa sürede çok fazla deneme yap\u0131ld\u0131. Biraz bekleyip tekrar deneyin.",
         raising(lambda: Throttled(wait=7)),
         retry_after=7,
     ),
     "session_busy": Case(
         429,
-        "Another request from this session is still running. Try again.",
-        "Bu oturumdan gönderilen başka bir istek hâlâ sürüyor. Tekrar deneyin.",
+        "Your previous action is still in progress. Try again.",
+        "Önceki işleminiz hâlâ sürüyor. Tekrar deneyin.",
         busy_session,
         retry_after=1,
     ),
@@ -367,58 +384,55 @@ CASES: dict[str, Case] = {
     ),
     "provider_throttled": Case(
         429,
-        "The forecast provider is limiting requests. Try again later.",
-        "Tahmin sağlay\u0131c\u0131s\u0131 istekleri s\u0131n\u0131rl\u0131yor. Daha sonra "
-        "tekrar deneyin.",
+        "Forecast update delayed. Pyracast will try again.",
+        "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek.",
         raising(deferred_provider),
         retry_after=31,
     ),
     "quota_exhausted": Case(
         429,
-        "The forecast provider's daily quota is used up. Try again tomorrow.",
-        "Tahmin sağlay\u0131c\u0131s\u0131n\u0131n günlük kotas\u0131 doldu. Yar\u0131n tekrar "
-        "deneyin.",
+        "Forecast update delayed. Pyracast will try again.",
+        "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek.",
         raising(QuotaExceededError),
     ),
     "server_error": Case(
         500,
-        "The server could not complete this request.",
-        "Sunucu bu isteği tamamlayamad\u0131.",
+        "Something went wrong. Try again.",
+        "Bir sorun oluştu. Tekrar deneyin.",
         raising(lambda: RuntimeError("private failure detail")),
         request_id=True,
     ),
     "provider_unavailable": Case(
         503,
-        "The forecast provider is unavailable. Try again later.",
-        "Tahmin sağlay\u0131c\u0131s\u0131na ulaş\u0131lam\u0131yor. Daha sonra tekrar deneyin.",
+        "Forecast update delayed. Pyracast will try again.",
+        "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek.",
         raising(lambda: ProviderError("timeout")),
     ),
     "busy": Case(
         503,
-        "The workspace is busy. Try again in a moment.",
-        "Çal\u0131şma alan\u0131 meşgul. Biraz sonra tekrar deneyin.",
+        "Another change is being saved. Try again in a moment.",
+        "Başka bir değişiklik kaydediliyor. Biraz sonra tekrar deneyin.",
         database(LockNotAvailable),
         retry_after=1,
     ),
     "database_conflict": Case(
         503,
-        "The change collided with another change. Try again.",
-        "Değişiklik başka bir değişiklikle çak\u0131şt\u0131. Tekrar deneyin.",
+        "Another change was saved at the same time. Try again.",
+        "Ayn\u0131 anda başka bir değişiklik kaydedildi. Tekrar deneyin.",
         database(DeadlockDetected),
         retry_after=1,
     ),
     "request_timeout": Case(
         503,
-        "The request took too long. Try again later.",
-        "İstek çok uzun sürdü. Daha sonra tekrar deneyin.",
+        "This took too long. Try again later.",
+        "\u0130şlem çok uzun sürdü. Daha sonra tekrar deneyin.",
         database(QueryCanceled),
         request_id=True,
     ),
     "provider_authentication_failed": Case(
         503,
-        "The forecast provider rejected the stored credentials. Contact your administrator.",
-        "Tahmin sağlay\u0131c\u0131s\u0131 kay\u0131tl\u0131 kimlik bilgilerini reddetti. "
-        "Yöneticinize başvurun.",
+        "No new forecast data is arriving for this plant.",
+        "Bu santral için yeni tahmin verisi gelmiyor.",
         raising(lambda: RequestDeferredError(None)),
     ),
     "maintenance": Case(
@@ -430,22 +444,21 @@ CASES: dict[str, Case] = {
     ),
     "request_too_large": Case(
         413,
-        "The request is too large to be accepted.",
-        "İstek kabul edilemeyecek kadar büyük.",
+        "Something went wrong. Try again.",
+        "Bir sorun oluştu. Tekrar deneyin.",
         oversized_body_refusal,
     ),
     "forecast_sources_changed": Case(
         503,
-        "The forecast sources changed while loading. Try again.",
-        "Tahmin kaynaklar\u0131 yüklenirken değişti. Tekrar deneyin.",
+        "New forecast data arrived while this was loading. Try again.",
+        "Yükleme s\u0131ras\u0131nda yeni tahmin verisi geldi. Tekrar deneyin.",
         domain("BusyError", "forecast_sources_changed"),
         retry_after=1,
     ),
     "configuration_unavailable": Case(
         400,
-        "Plant configuration is unavailable. Complete setup and wait for administrator approval.",
-        "Santral yap\u0131land\u0131rmas\u0131 kullan\u0131lam\u0131yor. Kurulumu "
-        "tamamlay\u0131p yönetici onay\u0131n\u0131 bekleyin.",
+        "This plant has no current technical details.",
+        "Bu santralin geçerli teknik bilgileri yok.",
         domain("DomainError", "configuration_unavailable"),
     ),
     "location_already_has_plant": Case(
@@ -456,14 +469,14 @@ CASES: dict[str, Case] = {
     ),
     "plant_submission_required": Case(
         400,
-        "Complete the plant's technical details before requesting approval.",
-        "Onay istemeden önce santralin teknik bilgilerini tamamlay\u0131n.",
+        "Complete the plant's technical details before sending it for approval.",
+        "Santrali onaya göndermeden önce teknik bilgilerini tamamlay\u0131n.",
         domain("DomainError", "plant_submission_required"),
     ),
     "estimated_actuals_unavailable": Case(
         400,
-        "Matching historical estimates are unavailable. Choose a day with collected data.",
-        "Eşleşen geçmiş tahminleri yok. Veri toplanm\u0131ş bir gün seçin.",
+        "No satellite data for this day.",
+        "Bu gün için uydu verisi yok.",
         domain("DomainError", "estimated_actuals_unavailable"),
     ),
     "location_unchanged": Case(
@@ -474,14 +487,15 @@ CASES: dict[str, Case] = {
     ),
     "location_already_exists": Case(
         400,
-        "This location is already in your company's portfolio. Open the existing plant.",
-        "Bu konum şirketinizin portföyünde zaten var. Mevcut santrali aç\u0131n.",
+        "This workspace already has a plant at this location. Open the existing plant.",
+        "Bu konumdaki santral çal\u0131şma alan\u0131n\u0131zda zaten var. Mevcut santrali "
+        "aç\u0131n.",
         domain("DomainError", "location_already_exists"),
     ),
     "calculation_out_of_range": Case(
         400,
-        "This forecast could not be calculated. Choose another day or contact your administrator.",
-        "Bu tahmin hesaplanamad\u0131. Başka bir gün seçin veya yöneticinizle iletişime geçin.",
+        "The forecast for this day could not be calculated.",
+        "Bu günün tahmini hesaplanamad\u0131.",
         domain("DomainError", "calculation_out_of_range"),
     ),
     "trash_retention_expired": Case(
@@ -492,14 +506,14 @@ CASES: dict[str, Case] = {
     ),
     "date_out_of_range": Case(
         400,
-        "Choose a date within the available forecast range.",
-        "Kullan\u0131labilir tahmin aral\u0131ğ\u0131nda bir tarih seçin.",
+        "The selected data is not available for this date. Choose another date.",
+        "Seçilen veri bu tarih için yok. Başka bir tarih seçin.",
         domain("DomainError", "date_out_of_range"),
     ),
     "completed_day_required": Case(
         400,
-        "Choose a completed local day for historical estimates.",
-        "Geçmiş tahminleri için tamamlanm\u0131ş bir yerel gün seçin.",
+        "Choose today or an earlier day.",
+        "Bugünü veya daha önceki bir günü seçin.",
         domain("DomainError", "completed_day_required"),
     ),
     "invalid_epias_plant": Case(
@@ -516,21 +530,22 @@ CASES: dict[str, Case] = {
     ),
     "incident_closed": Case(
         400,
-        "This outage is already closed.",
-        "Bu kesinti zaten kapat\u0131lm\u0131ş.",
+        "This outage is no longer ongoing.",
+        "Bu kesinti art\u0131k devam etmiyor.",
         domain("DomainError", "incident_closed"),
     ),
     "incident_overlap": Case(
         400,
-        "Outage periods must not overlap.",
-        "Kesinti dönemleri birbiriyle çak\u0131şmamal\u0131d\u0131r.",
+        "Another outage already covers part of this time. Change the start or the end.",
+        "Bu zaman\u0131n bir k\u0131sm\u0131nda başka bir kesinti kay\u0131tl\u0131. "
+        "Başlang\u0131c\u0131 veya bitişi değiştirin.",
         domain("DomainError", "incident_overlap", field="starts_at"),
         fields=("starts_at",),
     ),
     "incident_starts_in_future": Case(
         400,
-        "The outage start must not be in the future.",
-        "Kesinti başlang\u0131c\u0131 gelecekte olamaz.",
+        "Choose now or an earlier time.",
+        "Şimdiki saati veya daha önceki bir saati seçin.",
         domain("DomainError", "incident_starts_in_future", field="starts_at"),
         fields=("starts_at",),
     ),
@@ -543,23 +558,23 @@ CASES: dict[str, Case] = {
     ),
     "incident_ends_in_future": Case(
         400,
-        "The outage end must not be in the future.",
-        "Kesinti bitişi gelecekte olamaz.",
+        "Choose now or an earlier time.",
+        "Şimdiki saati veya daha önceki bir saati seçin.",
         domain("DomainError", "incident_ends_in_future", field="ends_at"),
         fields=("ends_at",),
     ),
     "incident_capacity_exceeded": Case(
         400,
-        "Available capacity must not exceed the configured capacity.",
-        "Kullan\u0131labilir kapasite yap\u0131land\u0131r\u0131lm\u0131ş kapasiteyi "
-        "aşmamal\u0131d\u0131r.",
+        "Enter a value no greater than the one in the plant's technical details.",
+        "Santralin teknik bilgilerindeki değerden büyük olmayan bir değer girin.",
         domain("DomainError", "incident_capacity_exceeded", field="available_dc_mw"),
         fields=("available_dc_mw",),
     ),
     "invitation_unavailable": Case(
         400,
-        "The invitation is invalid or expired.",
-        "Davet geçersiz veya süresi dolmuş.",
+        "This invitation is no longer valid. Ask the workspace administrator for a new one.",
+        "Bu davet art\u0131k geçerli değil. Çal\u0131şma alan\u0131 yöneticisinden yeni bir davet "
+        "isteyin.",
         domain("DomainError", "invitation_unavailable"),
     ),
     "invitation_member_exists": Case(
@@ -582,38 +597,42 @@ CASES: dict[str, Case] = {
     ),
     "region_revision_changed": Case(
         409,
-        "The plant location changed. Reopen the plant and try again.",
-        "Santral konumu değişti. Santrali yeniden aç\u0131p tekrar deneyin.",
+        "The plant's location changed in the meantime. Check the current location and try again.",
+        "Santralin konumu bu arada değişti. Güncel konumu kontrol edip tekrar deneyin.",
         domain("ConflictError", "region_revision_changed"),
     ),
     "location_change_already_pending": Case(
         409,
-        "Another location request is pending. Reopen the editor to see it.",
-        "Bekleyen başka bir konum talebi var. Görmek için düzenleyiciyi yeniden aç\u0131n.",
+        "A location change request is already in review by Pyracast.",
+        "Pyracast'in incelediği bir konum değişikliği talebi zaten var.",
         domain("ConflictError", "location_change_already_pending"),
     ),
     "location_change_already_reviewed": Case(
         409,
-        "This location request has already been reviewed. Refresh the page.",
-        "Bu konum talebi zaten değerlendirilmiş. Sayfay\u0131 yenileyin.",
+        "This location change request was already approved, rejected or withdrawn. Reload the "
+        "page to see it.",
+        "Bu konum değişikliği talebi zaten onayland\u0131, reddedildi veya geri çekildi. Görmek "
+        "için sayfay\u0131 yenileyin.",
         domain("ConflictError", "location_change_already_reviewed"),
     ),
     "incident_revision_changed": Case(
         409,
-        "The outage changed. Review its current values and save again.",
-        "Kesinti kayd\u0131 değişti. Güncel değerleri inceleyip yeniden kaydedin.",
+        "The outage changed in the meantime. Check its current values and save again.",
+        "Kesinti kayd\u0131 bu arada değişti. Güncel değerleri kontrol edip yeniden kaydedin.",
         domain("ConflictError", "incident_revision_changed"),
     ),
     "idempotency_key_reused": Case(
         409,
-        "Use a new request key for changed input.",
-        "Değiştirilen bilgiler için yeni bir talep anahtar\u0131 kullan\u0131n.",
+        "Something went wrong. Try again.",
+        "Bir sorun oluştu. Tekrar deneyin.",
         domain("ConflictError", "idempotency_key_reused"),
     ),
     "pending_request_limit": Case(
         409,
-        "Resolve or withdraw pending requests before submitting more.",
-        "Yeni talep göndermeden önce bekleyen talepleri sonuçland\u0131r\u0131n veya geri çekin.",
+        "Too many of your change requests are waiting for approval. Withdraw one or wait for a "
+        "decision before sending another.",
+        "Onay bekleyen değişiklik talebiniz çok fazla. Yenisini göndermeden önce birini geri "
+        "çekin veya karar verilmesini bekleyin.",
         domain("ConflictError", "pending_request_limit"),
     ),
     "production_implausible": Case(
@@ -626,135 +645,151 @@ CASES: dict[str, Case] = {
     ),
     "production_revision_changed": Case(
         409,
-        "Production changed. Reload the latest values before saving.",
-        "Üretim verileri değişti. Kaydetmeden önce güncel değerleri yeniden yükleyin.",
+        "These production values changed in the meantime. Check the current values and save again.",
+        "Bu üretim değerleri bu arada değişti. Güncel değerleri kontrol edip yeniden kaydedin.",
         domain("ConflictError", "production_revision_changed"),
     ),
     "request_already_closed": Case(
         409,
-        "The request already has a different outcome.",
-        "Talep zaten farkl\u0131 bir sonuçla kapat\u0131ld\u0131.",
+        "This change request was already approved, rejected or withdrawn.",
+        "Bu değişiklik talebi zaten onayland\u0131, reddedildi veya geri çekildi.",
         domain("ConflictError", "request_already_closed"),
     ),
     "request_conflict": Case(
         409,
-        "This request no longer matches the plant. Review it again.",
-        "Bu talep art\u0131k santralle uyuşmuyor. Yeniden inceleyin.",
+        "This change request no longer matches the plant and cannot be approved.",
+        "Bu değişiklik talebi art\u0131k santralle uyuşmuyor ve onaylanamaz.",
         domain("ConflictError", "request_conflict"),
     ),
     "review_context_changed": Case(
         409,
-        "The review context changed. Refresh and review again.",
-        "İnceleme verileri değişti. Sayfay\u0131 yenileyip yeniden inceleyin.",
+        "This change request or the plant changed after you opened it. Reload the page and check "
+        "it again.",
+        "Bu değişiklik talebi veya santral siz açt\u0131ktan sonra değişti. Sayfay\u0131 "
+        "yenileyip yeniden kontrol edin.",
         domain("ConflictError", "review_context_changed"),
     ),
     "workspace_admin_changed": Case(
         409,
-        "The workspace administrator changed. Reload before saving.",
-        "Çal\u0131şma alan\u0131 yöneticisi değişti. Kaydetmeden önce sayfay\u0131 yenileyin.",
+        "The workspace administrator changed. Reload the page and try again.",
+        "Çal\u0131şma alan\u0131 yöneticisi değişti. Sayfay\u0131 yenileyip tekrar deneyin.",
         domain("ConflictError", "workspace_admin_changed"),
     ),
     "reminder_time_required": Case(
         400,
-        "Add at least one delivery time to turn reminders on.",
-        "Hat\u0131rlatmalar\u0131 açmak için en az bir gönderim saati ekleyin.",
+        "Add at least one send time to turn on the forecast email.",
+        "Tahmin e-postas\u0131n\u0131 açmak için en az bir gönderim saati ekleyin.",
         domain("DomainError", "reminder_time_required", field="times"),
         fields=("times",),
     ),
     "duplicate_reminder_times": Case(
         400,
-        "Use each delivery time once.",
+        "Use each send time once.",
         "Her gönderim saatini bir kez kullan\u0131n.",
         domain("DomainError", "duplicate_reminder_times", field="times"),
         fields=("times",),
     ),
     "too_many_reminder_times": Case(
         400,
-        "This plant allows fewer delivery times a day.",
-        "Bu santral günde daha az gönderim saatine izin verir.",
-        domain("DomainError", "too_many_reminder_times", field="times"),
+        "This plant allows at most 3 delivery times a day.",
+        "Bu santral günde en fazla 3 gönderim saatine izin verir.",
+        limit_refusal(
+            "too_many_reminder_times",
+            "This plant allows at most %(limit)s delivery times a day.",
+            3,
+            "times",
+        ),
         fields=("times",),
     ),
     "recipient_required": Case(
         400,
-        "Add a recipient or include the workspace members.",
-        "Bir al\u0131c\u0131 ekleyin veya çal\u0131şma alan\u0131 üyelerini dahil edin.",
+        "Add a recipient or turn on All members.",
+        "Bir al\u0131c\u0131 ekleyin veya Tüm üyeler seçeneğini aç\u0131n.",
         domain("DomainError", "recipient_required", field="recipients"),
         fields=("recipients",),
     ),
     "duplicate_recipients": Case(
         400,
-        "Recipient addresses must be distinct (case-insensitive).",
-        "Al\u0131c\u0131 adresleri büyük/küçük harf ayr\u0131m\u0131 olmadan "
-        "birbirinden farkl\u0131 olmal\u0131d\u0131r.",
+        "Use each address once.",
+        "Her adresi bir kez kullan\u0131n.",
         domain("DomainError", "duplicate_recipients", field="recipients"),
         fields=("recipients",),
     ),
     "recipient_limit_exceeded": Case(
         400,
-        "This plant allows fewer recipient addresses.",
-        "Bu santral daha az al\u0131c\u0131 adresine izin verir.",
-        domain("DomainError", "recipient_limit_exceeded", field="recipients"),
+        "This plant allows at most 4 distinct recipient addresses in total.",
+        "Bu santral toplam en fazla 4 farkl\u0131 al\u0131c\u0131 adresine izin verir.",
+        limit_refusal(
+            "recipient_limit_exceeded",
+            "This plant allows at most %(limit)s distinct recipient addresses in total.",
+            4,
+            "recipients",
+        ),
         fields=("recipients",),
     ),
     "reminder_schedule_changed": Case(
         409,
-        "The email reminders changed. Reload before saving.",
-        "E-posta hat\u0131rlat\u0131c\u0131lar\u0131 değişti. Kaydetmeden önce yeniden yükleyin.",
+        "The forecast email settings changed in the meantime. Check them and save again.",
+        "Tahmin e-postas\u0131 ayarlar\u0131 bu arada değişti. Kontrol edip yeniden kaydedin.",
         domain("ConflictError", "reminder_schedule_changed"),
     ),
     "reminder_disclosure_changed": Case(
         409,
-        "The visible recipients changed. Review them again before saving.",
-        "Görünür al\u0131c\u0131lar değişti. Kaydetmeden önce yeniden gözden geçirin.",
+        "The recipients changed in the meantime. Check them and save again.",
+        "Al\u0131c\u0131lar bu arada değişti. Kontrol edip yeniden kaydedin.",
         domain("ConflictError", "reminder_disclosure_changed"),
     ),
     "plant_not_approved": Case(
         400,
-        "Reminders can be turned on once the plant is approved.",
-        "Hat\u0131rlatmalar santral onayland\u0131ktan sonra aç\u0131labilir.",
+        "The forecast email can be turned on once Pyracast approves the plant.",
+        "Tahmin e-postas\u0131, Pyracast santrali onaylad\u0131ktan sonra aç\u0131labilir.",
         domain("DomainError", "plant_not_approved", field="enabled"),
         fields=("enabled",),
     ),
     "provider_account_unavailable": Case(
         400,
-        "Reminders can be turned on once the plant's forecast provider account is enabled.",
-        "Hat\u0131rlatmalar santralin tahmin sağlay\u0131c\u0131 hesab\u0131 "
-        "etkinleştirildikten sonra aç\u0131labilir.",
+        "No new forecast data is arriving for this plant, so the forecast email cannot be turned "
+        "on.",
+        "Bu santral için yeni tahmin verisi gelmiyor; bu nedenle tahmin e-postas\u0131 "
+        "aç\u0131lam\u0131yor.",
         domain("DomainError", "provider_account_unavailable", field="enabled"),
         fields=("enabled",),
     ),
     "configuration_changed": Case(
         400,
-        "The plant configuration is no longer current.",
-        "Santral yap\u0131land\u0131rmas\u0131 art\u0131k g\u00fcncel de\u011fil. "
-        "Santrali yeniden a\u00e7\u0131n.",
+        "The plant's technical details changed. Reload the page and try again.",
+        "Santralin teknik bilgileri değişti. Sayfay\u0131 yenileyip tekrar deneyin.",
         domain("DomainError", "configuration_changed"),
     ),
     "production_source_changed": Case(
         400,
-        "The production source changed; request a new calibration.",
-        "\u00dcretim kayna\u011f\u0131 de\u011fi\u015fti; yeni bir kalibrasyon isteyin.",
+        "The source of the actual production changed after this calibration was calculated. "
+        "Calculate a new calibration.",
+        "Bu kalibrasyon hesapland\u0131ktan sonra gerçekleşen üretimin kaynağ\u0131 değişti. Yeni "
+        "kalibrasyon hesaplay\u0131n.",
         domain("DomainError", "production_source_changed"),
     ),
     "outage_history_changed": Case(
         400,
-        "The outage history changed; request a new calibration.",
-        "Kesinti ge\u00e7mi\u015fi de\u011fi\u015fti; yeni bir kalibrasyon isteyin.",
+        "Outages in its period changed after this calibration was calculated. Calculate a new "
+        "calibration.",
+        "Bu kalibrasyon hesapland\u0131ktan sonra dönemindeki kesinti kay\u0131tlar\u0131 "
+        "değişti. Yeni kalibrasyon hesaplay\u0131n.",
         domain("DomainError", "outage_history_changed"),
     ),
     "incumbent_changed": Case(
         400,
-        "The active calibration changed; request a new comparison.",
-        "Etkin kalibrasyon de\u011fi\u015fti; yeni bir kar\u015f\u0131la\u015ft\u0131rma isteyin.",
+        "The calibration in use changed after this one was calculated. Calculate a new "
+        "calibration.",
+        "Bu kalibrasyon hesapland\u0131ktan sonra kullan\u0131mdaki kalibrasyon değişti. Yeni "
+        "kalibrasyon hesaplay\u0131n.",
         domain("DomainError", "incumbent_changed"),
     ),
     "calibration_not_activatable": Case(
         400,
-        "Only a completed, held-out evaluated calibration can be activated.",
-        "Yaln\u0131zca tamamlanm\u0131\u015f ve ayr\u0131 do\u011frulama verileriyle "
-        "de\u011ferlendirilmi\u015f bir "
-        "kalibrasyon etkinle\u015ftirilebilir.",
+        "Only a calculated calibration that was checked on test days can be used.",
+        "Yaln\u0131zca hesaplanm\u0131ş ve test günlerinde denenmiş bir kalibrasyon "
+        "kullan\u0131labilir.",
         domain("DomainError", "calibration_not_activatable"),
     ),
     "review_reason_required": Case(
@@ -772,8 +807,8 @@ CASES: dict[str, Case] = {
     ),
     "plant_edit_blocked": Case(
         400,
-        "The plant's technical details cannot change in its current state.",
-        "Santralin teknik bilgileri mevcut durumunda değiştirilemez.",
+        "The plant's technical details cannot be changed now.",
+        "Santralin teknik bilgileri şu anda değiştirilemez.",
         domain("DomainError", "plant_edit_blocked"),
     ),
 }
@@ -821,7 +856,8 @@ def test_every_error_reaches_the_client_as_one_localized_body(
 def test_domain_error_fields_carry_the_localized_message(monkeypatch: pytest.MonkeyPatch) -> None:
     response = domain("DomainError", "incident_overlap", field="starts_at")(monkeypatch, "tr")
     assert json.loads(response.content)["fields"] == {
-        "starts_at": "Kesinti dönemleri birbiriyle çak\u0131şmamal\u0131d\u0131r."
+        "starts_at": "Bu zaman\u0131n bir k\u0131sm\u0131nda başka bir kesinti kay\u0131tl\u0131. "
+        "Başlang\u0131c\u0131 veya bitişi değiştirin."
     }
 
 
@@ -841,7 +877,7 @@ def test_serializer_field_and_form_errors_keep_their_places() -> None:
     assert unknown.status_code == 400
     assert unknown.json() == {
         "code": "invalid_request",
-        "message": "Unknown fields are not accepted.",
+        "message": "Something went wrong. Try again.",
     }
 
 
@@ -896,19 +932,19 @@ def test_django_validation_errors_keep_their_field_keys_and_translated_text(lazy
 
     from pyracast.api.errors import api_error
 
-    text = "An IANA timezone is required."
+    text = "Choose a time zone."
     required = gettext_lazy(text) if lazy else text
     with translation.override("tr"):
         error = api_error(ValidationError({"timezone": [required]}), None, "-")
         assert error.body() == {
             "code": "invalid_request",
             "message": "İşaretli değerleri kontrol edip tekrar deneyin.",
-            "fields": {"timezone": "Geçerli bir IANA saat dilimi girin."},
+            "fields": {"timezone": "Bir saat dilimi seçin."},
         }
         sentence = api_error(ValidationError(required), None, "-")
         assert sentence.body() == {
             "code": "invalid_request",
-            "message": "Geçerli bir IANA saat dilimi girin.",
+            "message": "Bir saat dilimi seçin.",
         }
 
 
@@ -927,7 +963,7 @@ def test_drf_session_csrf_refusal_is_coded() -> None:
     assert response.status_code == 403
     assert response.json() == {
         "code": "csrf_failed",
-        "message": "Sayfan\u0131n süresi doldu. Sayfay\u0131 yenileyip tekrar deneyin.",
+        "message": "Bir sorun oluştu. Tekrar deneyin.",
     }
 
 
@@ -1273,7 +1309,7 @@ def test_malformed_json_is_a_bad_request() -> None:
     assert response.status_code == 400
     assert response.json() == {
         "code": "bad_request",
-        "message": "The request could not be processed.",
+        "message": "Something went wrong. Try again.",
     }
 
 
@@ -1298,8 +1334,8 @@ def test_django_form_errors_become_the_message() -> None:
     error = api_error(
         ValidationError(
             {
-                NON_FIELD_ERRORS: [gettext_lazy("Unsupported outage kind.")],
-                "title": [gettext_lazy("A title of at most 200 characters is required.")],
+                NON_FIELD_ERRORS: [gettext_lazy("Something went wrong. Try again.")],
+                "title": [gettext_lazy("Enter a title of at most 200 characters.")],
             }
         ),
         None,
@@ -1307,8 +1343,8 @@ def test_django_form_errors_become_the_message() -> None:
     )
     assert error.body() == {
         "code": "invalid_request",
-        "message": "Unsupported outage kind.",
-        "fields": {"title": "A title of at most 200 characters is required."},
+        "message": "Something went wrong. Try again.",
+        "fields": {"title": "Enter a title of at most 200 characters."},
     }
 
 

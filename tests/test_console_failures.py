@@ -545,7 +545,7 @@ def test_a_busy_session_answers_a_console_request_with_a_page(method: str) -> No
     assert response.status_code == 503
     assert response["Content-Type"].startswith("text/html")
     assert response["Retry-After"] == "1"
-    assert "Another request from this session is still running." in response.content.decode()
+    assert "Your previous action is still in progress." in response.content.decode()
     assert "Refresh" not in response
 
 

@@ -82,7 +82,7 @@ for (const anonymous of [true, false])
                 status: 400,
                 json: errorBody(
                     "invitation_unavailable",
-                    "The invitation is invalid or expired.",
+                    "This invitation is no longer valid. Ask the workspace administrator for a new one.",
                 ),
             }),
         );
@@ -131,7 +131,7 @@ test("a preview that cannot be loaded still lets the invitee accept", async ({
             headers: { "Retry-After": "1" },
             json: errorBody(
                 "busy",
-                "The workspace is busy. Try again in a moment.",
+                "Another change is being saved. Try again in a moment.",
                 { retry_after: 1 },
             ),
         }),
@@ -146,7 +146,7 @@ test("a preview that cannot be loaded still lets the invitee accept", async ({
     );
     await page.goto("/app/invitation/#token=invite-secret");
     await expect(
-        page.getByText("The workspace is busy. Try again in a moment."),
+        page.getByText("Another change is being saved. Try again in a moment."),
     ).toBeVisible();
     await page.getByRole("button", { name: "Accept invitation" }).click();
     await expect(page).toHaveURL("/app/w/1/");

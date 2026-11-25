@@ -831,9 +831,7 @@ test("leaving a sign-in stage after which the browser holds a signed-in session 
     );
     const error = await signOut().catch((failure) => failure);
     expect(error).toBeInstanceOf(ApiError);
-    expect(error.message).toBe(
-        "The session changed in another tab. The page now shows the current session.",
-    );
+    expect(error.message).toBe("You signed in or out in another tab.");
     expect(sessionState()).toMatchObject({
         ended: false,
         session: { csrf_token: "other" },

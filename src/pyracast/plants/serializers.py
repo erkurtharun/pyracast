@@ -16,7 +16,7 @@ from pyracast.api.serializers import (
     IrradianceSummaryOutput,
 )
 from pyracast.change_requests.models import ProductionChangeAction
-from pyracast.errors import ErrorCode
+from pyracast.errors import UNEXPECTED, ErrorCode
 from pyracast.plants.activation import ActivationBlocker, SelectionState, selection_state
 from pyracast.plants.automation_state import AutomationCause
 from pyracast.plants.models import (
@@ -46,15 +46,13 @@ from pyracast.regions.models import NAME_MAX_LENGTH
 class AwareDateTime(serializers.DateTimeField):
     def to_internal_value(self, value: Any) -> Any:
         if not isinstance(value, str):
-            self.fail("invalid", format="ISO 8601")
+            raise serializers.ValidationError(UNEXPECTED)
         try:
             parsed = parse_datetime(value)
         except ValueError:
             parsed = None
         if parsed is None or parsed.utcoffset() is None:
-            raise serializers.ValidationError(
-                gettext("A timezone-aware ISO 8601 timestamp is required.")
-            )
+            raise serializers.ValidationError(UNEXPECTED)
         return super().to_internal_value(value)
 
 
@@ -87,7 +85,7 @@ class PlantInput(InputSerializer):
         )
         if angles and attrs.get("mounting_type") != "fixed":
             raise serializers.ValidationError(
-                {"mounting_type": [gettext("Only fixed mounting permits surface angles.")]}
+                {"mounting_type": [gettext("Enter panel angles only for fixed mounting.")]}
             )
         return attrs
 
@@ -204,7 +202,7 @@ class ProductionChangeRow(InputSerializer):
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         if attrs["action"] == ProductionChangeAction.SET and "energy" not in attrs:
-            raise serializers.ValidationError({"energy": gettext("This field is required.")})
+            raise serializers.ValidationError({"energy": gettext("Enter a value.")})
         return attrs
 
 

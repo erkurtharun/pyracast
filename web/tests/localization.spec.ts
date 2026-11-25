@@ -482,8 +482,8 @@ test("coded forecast errors are explained in the selected language", async ({
             json: errorBody(
                 "completed_day_required",
                 cookie.includes("pyracast_language=en")
-                    ? "Choose a completed local day for historical estimates."
-                    : "Geçmiş tahminleri için tamamlanmış bir yerel gün seçin.",
+                    ? "Choose today or an earlier day."
+                    : "Bugünü veya daha önceki bir günü seçin.",
             ),
         });
     });
@@ -491,12 +491,12 @@ test("coded forecast errors are explained in the selected language", async ({
     await page.getByRole("button", { name: /East array/ }).click();
     const failure = page.getByRole("main").getByRole("alert");
     await expect(failure.locator("p")).toHaveText(
-        "Geçmiş tahminleri için tamamlanmış bir yerel gün seçin.",
+        "Bugünü veya daha önceki bir günü seçin.",
     );
     await expect(failure.getByRole("button")).toHaveText("Tekrar dene");
     await page.getByLabel("Dil", { exact: true }).selectOption("en");
     await expect(failure.locator("p")).toHaveText(
-        "Choose a completed local day for historical estimates.",
+        "Choose today or an earlier day.",
     );
     await expect(failure.getByRole("button")).toHaveText("Try again");
 });

@@ -329,7 +329,7 @@ def test_the_scan_recognises_status_constants_and_keyword_codes() -> None:
         "    Response(body, status=status.HTTP_400_BAD_REQUEST)\n"
         "    Response(body, status=status.HTTP_200_OK)\n"
         "    raise ValidationError(message='unsupported_language')\n"
-        "    raise ValidationError(message='Choose a supported language.')\n"
+        "    raise ValidationError(message='Something went wrong. Try again.')\n"
     )
     assert handmade_error_bodies(sample) == [2]
     assert coded_validation_errors(sample) == [4]

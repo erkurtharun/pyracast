@@ -54,8 +54,8 @@ def test_outage_rules_answer_their_own_codes_and_fields() -> None:
     assert future.status_code == 400
     assert future.json() == {
         "code": "incident_starts_in_future",
-        "message": "The outage start must not be in the future.",
-        "fields": {"starts_at": "The outage start must not be in the future."},
+        "message": "Choose now or an earlier time.",
+        "fields": {"starts_at": "Choose now or an earlier time."},
     }
     backwards = post(client, path, {**outage, "ends_at": (now - timedelta(hours=3)).isoformat()})
     assert backwards.json()["code"] == "incident_ends_before_start"
@@ -66,14 +66,10 @@ def test_outage_rules_answer_their_own_codes_and_fields() -> None:
     assert capacity.status_code == 400
     assert capacity.json() == {
         "code": "incident_capacity_exceeded",
-        "message": (
-            "Kullan\u0131labilir kapasite yap\u0131land\u0131r\u0131lm\u0131ş "
-            "kapasiteyi aşmamal\u0131d\u0131r."
-        ),
+        "message": "Santralin teknik bilgilerindeki değerden büyük olmayan bir değer girin.",
         "fields": {
             "available_dc_mw": (
-                "Kullan\u0131labilir kapasite "
-                "yap\u0131land\u0131r\u0131lm\u0131ş kapasiteyi aşmamal\u0131d\u0131r."
+                "Santralin teknik bilgilerindeki değerden büyük olmayan bir değer girin."
             ),
         },
     }
@@ -90,13 +86,16 @@ def test_outage_rules_answer_their_own_codes_and_fields() -> None:
     assert (listed["id"], listed["revision"]) == (created.json()["id"], 1)
     assert stale.json() == {
         "code": "incident_revision_changed",
-        "message": "The outage changed. Review its current values and save again.",
+        "message": "The outage changed in the meantime. Check its current values and save again.",
         "current": listed,
     }
     assert post(client, item + "cancel/", {"expected_revision": 1}).status_code == 200
     closed = post(client, item + "cancel/", {"expected_revision": 2})
     assert closed.status_code == 400
-    assert closed.json() == {"code": "incident_closed", "message": "This outage is already closed."}
+    assert closed.json() == {
+        "code": "incident_closed",
+        "message": "This outage is no longer ongoing.",
+    }
 
 
 def test_location_change_refusals_answer_their_own_codes() -> None:
@@ -109,7 +108,10 @@ def test_location_change_refusals_answer_their_own_codes() -> None:
     assert stale.status_code == 409
     assert stale.json() == {
         "code": "region_revision_changed",
-        "message": "The plant location changed. Reopen the plant and try again.",
+        "message": (
+            "The plant's location changed in the meantime. "
+            "Check the current location and try again."
+        ),
     }
     unchanged = post(client, path, {**current, "expected_revision": revision})
     assert unchanged.status_code == 400
@@ -162,7 +164,7 @@ def test_regional_forecast_outside_its_range_is_coded() -> None:
     assert response.status_code == 400
     assert response.json() == {
         "code": "date_out_of_range",
-        "message": "Kullan\u0131labilir tahmin aral\u0131ğ\u0131nda bir tarih seçin.",
+        "message": "Seçilen veri bu tarih için yok. Başka bir tarih seçin.",
     }
 
 
@@ -195,7 +197,10 @@ def test_stale_production_correction_is_a_coded_conflict(monkeypatch: pytest.Mon
     assert stale.status_code == 409
     assert stale.json() == {
         "code": "production_revision_changed",
-        "message": "Production changed. Reload the latest values before saving.",
+        "message": (
+            "These production values changed in the meantime. "
+            "Check the current values and save again."
+        ),
     }
 
 
@@ -235,7 +240,9 @@ def test_workspace_refusals_answer_their_own_codes() -> None:
     assert unknown.status_code == 400
     assert unknown.json() == {
         "code": "invitation_unavailable",
-        "message": "The invitation is invalid or expired.",
+        "message": (
+            "This invitation is no longer valid. Ask the workspace administrator for a new one."
+        ),
     }
 
 

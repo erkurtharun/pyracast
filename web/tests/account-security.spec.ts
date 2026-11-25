@@ -93,7 +93,7 @@ test("administrator recovery codes request a fresh authenticator confirmation", 
                         {
                             code: "mfa_reauthentication_required",
                             message:
-                                "Confirm with your authenticator to continue.",
+                                "Confirm with your authenticator app to continue.",
                         },
                     ],
                 },

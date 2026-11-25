@@ -432,7 +432,7 @@ test("plant submission errors preserve review and every field for retry", async 
                 status: 400,
                 json: errorBody(
                     "location_already_exists",
-                    "This location is already in your company's portfolio. Open the existing plant.",
+                    "This workspace already has a plant at this location. Open the existing plant.",
                 ),
             });
         return route.fallback();

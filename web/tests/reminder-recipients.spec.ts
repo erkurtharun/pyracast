@@ -581,7 +581,7 @@ test("duplicate recipient addresses are refused by the server and kept on screen
         "first@example.test",
     ]);
     await expect(page.locator(".notice[role=alert]")).toContainText(
-        "Recipient addresses must be distinct (case-insensitive).",
+        "Use each address once.",
     );
     await expect(
         page.getByLabel("Email address 2", { exact: true }),
@@ -829,7 +829,7 @@ test("native delivery time controls require a schedule only when enabled", async
     await page.getByLabel("Enable forecast emails for this plant").check();
     await page.getByRole("button", { name: "Save reminders" }).click();
     await expect(page.locator(".notice[role=alert]")).toContainText(
-        "Add at least one delivery time to turn reminders on.",
+        "Add at least one send time to turn on the forecast email.",
     );
     await page.getByLabel("Enable forecast emails for this plant").uncheck();
     const outgoing = page.waitForRequest(

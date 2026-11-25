@@ -364,7 +364,9 @@ def test_the_console_refuses_to_cancel_an_accepted_invitation() -> None:
 
     assert response["Location"] == f"{base}#invitations-title"
     page = client.get(base).content.decode()
-    assert "The invitation is invalid or expired." in page
+    assert (
+        "This invitation is no longer valid. Ask the workspace administrator for a new one." in page
+    )
     assert f"Invitation to {GUEST} revoked." not in page
     assert WorkspaceInvitation.objects.values_list("expires_at", "revoked_at").get() == (
         accepted.expires_at,

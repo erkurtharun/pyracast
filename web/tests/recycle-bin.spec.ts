@@ -51,7 +51,10 @@ test("bin rows are titled with the plant name and a restored plant opens from th
     await expect(page).toHaveURL("/app/w/1/plants/11/forecast/");
 });
 
-const busy = errorBody("busy", "The workspace is busy. Try again in a moment.");
+const busy = errorBody(
+    "busy",
+    "Another change is being saved. Try again in a moment.",
+);
 
 test("a failed restore moves the focus to its reason", async ({ page }) => {
     await mockApi(page);
@@ -137,7 +140,7 @@ test("a failed delete keeps the confirmation open with the reason and lets the p
             status: 503,
             json: errorBody(
                 "busy",
-                "The workspace is busy. Try again in a moment.",
+                "Another change is being saved. Try again in a moment.",
             ),
         });
     });
@@ -211,7 +214,7 @@ test("a failed undo shows its alert outside the deletion's status", async ({
             status: 503,
             json: errorBody(
                 "busy",
-                "The workspace is busy. Try again in a moment.",
+                "Another change is being saved. Try again in a moment.",
             ),
         }),
     );

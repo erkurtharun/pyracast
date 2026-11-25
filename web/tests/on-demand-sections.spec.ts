@@ -580,10 +580,7 @@ test("a language another tab saved clears this tab's failed save of it for good"
     await page.route("**/api/session/language/", (route) =>
         route.fulfill({
             status: 500,
-            json: errorBody(
-                "server_error",
-                "The server could not complete this request.",
-            ),
+            json: errorBody("server_error", "Something went wrong. Try again."),
         }),
     );
     await page.goto("/app/");
@@ -717,10 +714,7 @@ test("a language save refused after the session ended reports nothing on the scr
         await refused;
         await route.fulfill({
             status: 500,
-            json: errorBody(
-                "server_error",
-                "The server could not complete this request.",
-            ),
+            json: errorBody("server_error", "Something went wrong. Try again."),
         });
     });
     await page.goto("/app/");

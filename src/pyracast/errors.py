@@ -97,145 +97,167 @@ class ErrorCode(models.TextChoices):
     PLANT_EDIT_BLOCKED = "plant_edit_blocked"
 
 
+UNEXPECTED = _("Something went wrong. Try again.")
+FORECAST_UPDATE_DELAYED = _("Forecast update delayed. Pyracast will try again.")
+FUTURE_TIME = _("Choose now or an earlier time.")
+TECHNICAL_DETAILS_CHANGED = _(
+    "The plant's technical details changed. Reload the page and try again."
+)
+
+# No default for the two limit refusals: their raise sites must pass the text with the limit.
 MESSAGES: Mapping[ErrorCode, StrPromise] = {
     ErrorCode.INVALID_REQUEST: _("Check the highlighted values and try again."),
-    ErrorCode.BAD_REQUEST: _("The request could not be processed."),
-    ErrorCode.SESSION_ENDED: _("Your session ended. Sign in again."),
-    ErrorCode.SESSION_CHANGED: _(
-        "The session changed in another tab. The page now shows the current session."
-    ),
+    ErrorCode.BAD_REQUEST: UNEXPECTED,
+    ErrorCode.SESSION_ENDED: _("You were signed out. Sign in again."),
+    ErrorCode.SESSION_CHANGED: _("You signed in or out in another tab."),
     ErrorCode.NOT_AUTHENTICATED: _("Sign in to continue."),
-    ErrorCode.CSRF_FAILED: _("The page expired. Reload it and try again."),
+    ErrorCode.CSRF_FAILED: UNEXPECTED,
     ErrorCode.PERMISSION_DENIED: _("You do not have permission for this action."),
-    ErrorCode.INVALID_PROXY_HEADERS: _("The request could not be verified."),
+    ErrorCode.INVALID_PROXY_HEADERS: UNEXPECTED,
     ErrorCode.MEMBERSHIP_REQUIRED: _("You are not a member of this workspace."),
-    ErrorCode.WORKSPACE_ADMIN_REQUIRED: _("Workspace administrator required."),
-    ErrorCode.ADMIN_EDITS_DIRECTLY: _(
-        "Workspace members submit requests; administrators edit directly."
-    ),
-    ErrorCode.PLATFORM_ADMIN_REQUIRED: _("Platform administrator required."),
+    ErrorCode.WORKSPACE_ADMIN_REQUIRED: _("Only the workspace administrator can do this."),
+    ErrorCode.ADMIN_EDITS_DIRECTLY: _("As the workspace administrator, make this change directly."),
+    ErrorCode.PLATFORM_ADMIN_REQUIRED: _("Only Pyracast can do this."),
     ErrorCode.INVITATION_EMAIL_UNVERIFIED: _("Verify the invited email address before accepting."),
     ErrorCode.NOT_FOUND: _("The requested item was not found."),
-    ErrorCode.METHOD_NOT_ALLOWED: _("This action is not available here."),
-    ErrorCode.NOT_ACCEPTABLE: _("The requested response format is not available."),
-    ErrorCode.UNSUPPORTED_MEDIA_TYPE: _("Send the request as JSON."),
-    ErrorCode.CONFLICT: _("The request conflicts with the current state. Reload and try again."),
-    ErrorCode.THROTTLED: _("Too many requests. Wait a moment and try again."),
-    ErrorCode.SESSION_BUSY: _("Another request from this session is still running. Try again."),
+    ErrorCode.METHOD_NOT_ALLOWED: UNEXPECTED,
+    ErrorCode.NOT_ACCEPTABLE: UNEXPECTED,
+    ErrorCode.UNSUPPORTED_MEDIA_TYPE: UNEXPECTED,
+    ErrorCode.CONFLICT: _(
+        "Something changed in the meantime. Check the current values and try again."
+    ),
+    ErrorCode.THROTTLED: _("Too many attempts in a short time. Wait a moment and try again."),
+    ErrorCode.SESSION_BUSY: _("Your previous action is still in progress. Try again."),
     ErrorCode.INVITATION_RATE_LIMITED: _("Too many invitations were sent. Try again later."),
-    ErrorCode.PROVIDER_THROTTLED: _("The forecast provider is limiting requests. Try again later."),
-    ErrorCode.QUOTA_EXHAUSTED: _(
-        "The forecast provider's daily quota is used up. Try again tomorrow."
-    ),
-    ErrorCode.SERVER_ERROR: _("The server could not complete this request."),
-    ErrorCode.PROVIDER_UNAVAILABLE: _("The forecast provider is unavailable. Try again later."),
-    ErrorCode.BUSY: _("The workspace is busy. Try again in a moment."),
-    ErrorCode.DATABASE_CONFLICT: _("The change collided with another change. Try again."),
-    ErrorCode.REQUEST_TIMEOUT: _("The request took too long. Try again later."),
-    ErrorCode.PROVIDER_AUTHENTICATION_FAILED: _(
-        "The forecast provider rejected the stored credentials. Contact your administrator."
-    ),
+    ErrorCode.PROVIDER_THROTTLED: FORECAST_UPDATE_DELAYED,
+    ErrorCode.QUOTA_EXHAUSTED: FORECAST_UPDATE_DELAYED,
+    ErrorCode.SERVER_ERROR: UNEXPECTED,
+    ErrorCode.PROVIDER_UNAVAILABLE: FORECAST_UPDATE_DELAYED,
+    ErrorCode.BUSY: _("Another change is being saved. Try again in a moment."),
+    ErrorCode.DATABASE_CONFLICT: _("Another change was saved at the same time. Try again."),
+    ErrorCode.REQUEST_TIMEOUT: _("This took too long. Try again later."),
+    ErrorCode.PROVIDER_AUTHENTICATION_FAILED: _("No new forecast data is arriving for this plant."),
     ErrorCode.MAINTENANCE: _(
         "Pyracast is being updated. Try again in a minute; your data is safe."
     ),
-    ErrorCode.REQUEST_TOO_LARGE: _("The request is too large to be accepted."),
-    ErrorCode.FORECAST_SOURCES_CHANGED: _("The forecast sources changed while loading. Try again."),
-    ErrorCode.CONFIGURATION_UNAVAILABLE: _(
-        "Plant configuration is unavailable. Complete setup and wait for administrator approval."
+    ErrorCode.REQUEST_TOO_LARGE: UNEXPECTED,
+    ErrorCode.FORECAST_SOURCES_CHANGED: _(
+        "New forecast data arrived while this was loading. Try again."
     ),
+    ErrorCode.CONFIGURATION_UNAVAILABLE: _("This plant has no current technical details."),
     ErrorCode.LOCATION_ALREADY_HAS_PLANT: _(
         "This location already has an active plant. Open the existing plant."
     ),
     ErrorCode.PLANT_SUBMISSION_REQUIRED: _(
-        "Complete the plant's technical details before requesting approval."
+        "Complete the plant's technical details before sending it for approval."
     ),
-    ErrorCode.ESTIMATED_ACTUALS_UNAVAILABLE: _(
-        "Matching historical estimates are unavailable. Choose a day with collected data."
-    ),
+    ErrorCode.ESTIMATED_ACTUALS_UNAVAILABLE: _("No satellite data for this day."),
     ErrorCode.LOCATION_UNCHANGED: _("Enter a location different from the current location."),
     ErrorCode.LOCATION_ALREADY_EXISTS: _(
-        "This location is already in your company's portfolio. Open the existing plant."
+        "This workspace already has a plant at this location. Open the existing plant."
     ),
-    ErrorCode.CALCULATION_OUT_OF_RANGE: _(
-        "This forecast could not be calculated. Choose another day or contact your administrator."
-    ),
+    ErrorCode.CALCULATION_OUT_OF_RANGE: _("The forecast for this day could not be calculated."),
     ErrorCode.TRASH_RETENTION_EXPIRED: _("The 30-day restore period has ended."),
-    ErrorCode.DATE_OUT_OF_RANGE: _("Choose a date within the available forecast range."),
-    ErrorCode.COMPLETED_DAY_REQUIRED: _("Choose a completed local day for historical estimates."),
+    ErrorCode.DATE_OUT_OF_RANGE: _(
+        "The selected data is not available for this date. Choose another date."
+    ),
+    ErrorCode.COMPLETED_DAY_REQUIRED: _("Choose today or an earlier day."),
     ErrorCode.INVALID_EPIAS_PLANT: _("Enter a positive EPİAŞ plant ID and the plant's EIC."),
     ErrorCode.EPIAS_PLANT_IDENTITY_MISMATCH: _(
         "The EPİAŞ plant ID and EIC did not match. Check both identifiers."
     ),
-    ErrorCode.INCIDENT_CLOSED: _("This outage is already closed."),
-    ErrorCode.INCIDENT_OVERLAP: _("Outage periods must not overlap."),
-    ErrorCode.INCIDENT_STARTS_IN_FUTURE: _("The outage start must not be in the future."),
+    ErrorCode.INCIDENT_CLOSED: _("This outage is no longer ongoing."),
+    ErrorCode.INCIDENT_OVERLAP: _(
+        "Another outage already covers part of this time. Change the start or the end."
+    ),
+    ErrorCode.INCIDENT_STARTS_IN_FUTURE: FUTURE_TIME,
     ErrorCode.INCIDENT_ENDS_BEFORE_START: _("The outage end must be after its start."),
-    ErrorCode.INCIDENT_ENDS_IN_FUTURE: _("The outage end must not be in the future."),
+    ErrorCode.INCIDENT_ENDS_IN_FUTURE: FUTURE_TIME,
     ErrorCode.INCIDENT_CAPACITY_EXCEEDED: _(
-        "Available capacity must not exceed the configured capacity."
+        "Enter a value no greater than the one in the plant's technical details."
     ),
     ErrorCode.PRODUCTION_IMPLAUSIBLE: _(
         "Some values exceed what the plant can produce. Check the unit, then confirm to save."
     ),
-    ErrorCode.INVITATION_UNAVAILABLE: _("The invitation is invalid or expired."),
+    ErrorCode.INVITATION_UNAVAILABLE: _(
+        "This invitation is no longer valid. Ask the workspace administrator for a new one."
+    ),
     ErrorCode.INVITATION_MEMBER_EXISTS: _("This account already belongs to the workspace."),
     ErrorCode.WORKSPACE_ADMIN_NOT_REMOVABLE: _("The workspace administrator cannot be removed."),
     ErrorCode.MEMBER_UNAVAILABLE: _("Choose an active member of this workspace."),
     ErrorCode.REGION_REVISION_CHANGED: _(
-        "The plant location changed. Reopen the plant and try again."
+        "The plant's location changed in the meantime. Check the current location and try again."
     ),
     ErrorCode.LOCATION_CHANGE_ALREADY_PENDING: _(
-        "Another location request is pending. Reopen the editor to see it."
+        "A location change request is already in review by Pyracast."
     ),
     ErrorCode.LOCATION_CHANGE_ALREADY_REVIEWED: _(
-        "This location request has already been reviewed. Refresh the page."
+        "This location change request was already approved, rejected or withdrawn. "
+        "Reload the page to see it."
     ),
     ErrorCode.INCIDENT_REVISION_CHANGED: _(
-        "The outage changed. Review its current values and save again."
+        "The outage changed in the meantime. Check its current values and save again."
     ),
-    ErrorCode.IDEMPOTENCY_KEY_REUSED: _("Use a new request key for changed input."),
+    ErrorCode.IDEMPOTENCY_KEY_REUSED: UNEXPECTED,
     ErrorCode.PENDING_REQUEST_LIMIT: _(
-        "Resolve or withdraw pending requests before submitting more."
+        "Too many of your change requests are waiting for approval. "
+        "Withdraw one or wait for a decision before sending another."
     ),
     ErrorCode.PRODUCTION_REVISION_CHANGED: _(
-        "Production changed. Reload the latest values before saving."
+        "These production values changed in the meantime. Check the current values and save again."
     ),
-    ErrorCode.REQUEST_ALREADY_CLOSED: _("The request already has a different outcome."),
-    ErrorCode.REQUEST_CONFLICT: _("This request no longer matches the plant. Review it again."),
-    ErrorCode.REVIEW_CONTEXT_CHANGED: _("The review context changed. Refresh and review again."),
+    ErrorCode.REQUEST_ALREADY_CLOSED: _(
+        "This change request was already approved, rejected or withdrawn."
+    ),
+    ErrorCode.REQUEST_CONFLICT: _(
+        "This change request no longer matches the plant and cannot be approved."
+    ),
+    ErrorCode.REVIEW_CONTEXT_CHANGED: _(
+        "This change request or the plant changed after you opened it. "
+        "Reload the page and check it again."
+    ),
     ErrorCode.WORKSPACE_ADMIN_CHANGED: _(
-        "The workspace administrator changed. Reload before saving."
+        "The workspace administrator changed. Reload the page and try again."
     ),
-    ErrorCode.REMINDER_TIME_REQUIRED: _("Add at least one delivery time to turn reminders on."),
-    ErrorCode.DUPLICATE_REMINDER_TIMES: _("Use each delivery time once."),
-    ErrorCode.TOO_MANY_REMINDER_TIMES: _("This plant allows fewer delivery times a day."),
-    ErrorCode.RECIPIENT_REQUIRED: _("Add a recipient or include the workspace members."),
-    ErrorCode.DUPLICATE_RECIPIENTS: _("Recipient addresses must be distinct (case-insensitive)."),
-    ErrorCode.RECIPIENT_LIMIT_EXCEEDED: _("This plant allows fewer recipient addresses."),
-    ErrorCode.REMINDER_SCHEDULE_CHANGED: _("The email reminders changed. Reload before saving."),
+    ErrorCode.REMINDER_TIME_REQUIRED: _(
+        "Add at least one send time to turn on the forecast email."
+    ),
+    ErrorCode.DUPLICATE_REMINDER_TIMES: _("Use each send time once."),
+    ErrorCode.RECIPIENT_REQUIRED: _("Add a recipient or turn on All members."),
+    ErrorCode.DUPLICATE_RECIPIENTS: _("Use each address once."),
+    ErrorCode.REMINDER_SCHEDULE_CHANGED: _(
+        "The forecast email settings changed in the meantime. Check them and save again."
+    ),
     ErrorCode.REMINDER_DISCLOSURE_CHANGED: _(
-        "The visible recipients changed. Review them again before saving."
+        "The recipients changed in the meantime. Check them and save again."
     ),
-    ErrorCode.PLANT_NOT_APPROVED: _("Reminders can be turned on once the plant is approved."),
+    ErrorCode.PLANT_NOT_APPROVED: _(
+        "The forecast email can be turned on once Pyracast approves the plant."
+    ),
     ErrorCode.PROVIDER_ACCOUNT_UNAVAILABLE: _(
-        "Reminders can be turned on once the plant's forecast provider account is enabled."
+        "No new forecast data is arriving for this plant, so the forecast email cannot be "
+        "turned on."
     ),
-    ErrorCode.CONFIGURATION_CHANGED: _("The plant configuration is no longer current."),
+    ErrorCode.CONFIGURATION_CHANGED: TECHNICAL_DETAILS_CHANGED,
     ErrorCode.PRODUCTION_SOURCE_CHANGED: _(
-        "The production source changed; request a new calibration."
+        "The source of the actual production changed after this calibration was calculated. "
+        "Calculate a new calibration."
     ),
-    ErrorCode.OUTAGE_HISTORY_CHANGED: _("The outage history changed; request a new calibration."),
-    ErrorCode.INCUMBENT_CHANGED: _("The active calibration changed; request a new comparison."),
+    ErrorCode.OUTAGE_HISTORY_CHANGED: _(
+        "Outages in its period changed after this calibration was calculated. "
+        "Calculate a new calibration."
+    ),
+    ErrorCode.INCUMBENT_CHANGED: _(
+        "The calibration in use changed after this one was calculated. Calculate a new calibration."
+    ),
     ErrorCode.CALIBRATION_NOT_ACTIVATABLE: _(
-        "Only a completed, held-out evaluated calibration can be activated."
+        "Only a calculated calibration that was checked on test days can be used."
     ),
     ErrorCode.REVIEW_REASON_REQUIRED: _("Enter the reason the customer will read."),
     ErrorCode.PLANT_PARAMETERS_CHANGED: _(
         "The technical details changed after you opened them. Check the values and save again."
     ),
-    ErrorCode.PLANT_EDIT_BLOCKED: _(
-        "The plant's technical details cannot change in its current state."
-    ),
+    ErrorCode.PLANT_EDIT_BLOCKED: _("The plant's technical details cannot be changed now."),
 }
 
 
