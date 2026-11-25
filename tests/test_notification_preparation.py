@@ -1,12 +1,14 @@
 import uuid
 from collections.abc import Sequence
 from datetime import datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 from django.core import mail
 from django.core.mail import EmailMessage
 from django.db.models.fetch_modes import FetchMode
+from django.utils import timezone
 from openpyxl.worksheet.worksheet import Worksheet
 
 from pyracast.connections.models import ProviderAccount
@@ -15,7 +17,6 @@ from pyracast.forecasts.models import (
     CollectionSchedule,
     ForecastResult,
     ForecastSnapshot,
-    HistoricalReferenceImport,
 )
 from pyracast.mail.errors import NotSentError
 from pyracast.notifications.jobs import process_notification
@@ -24,7 +25,8 @@ from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.scheduler import PREPARATION_GRACE, enqueue_due
 from pyracast.notifications.sources import eligible_saved_forecasts
 from pyracast.regions.models import Region
-from tests.support.domain import NOW
+from tests.support.domain import NOW, System
+from tests.support.historical_reference_import import allow_import, archive, power_file
 from tests.support.invariants import stored_again
 from tests.support.notification_preparation import complete_saved
 from tests.support.notification_transmission import replying
@@ -563,6 +565,52 @@ def test_two_clocks_a_day_send_two_editions_each_naming_its_own_clock() -> None:
     assert morning.extra_headers["Message-ID"] != noon.extra_headers["Message-ID"]
 
 
+def _schedule(system: System, recipients: list[str], times: list[str], now: datetime) -> None:
+    configure_reminders(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        language="en",
+        enabled=True,
+        recipients=recipients,
+        times=times,
+        now=now,
+    )
+
+
+@pytest.mark.parametrize(
+    ("recipients", "times", "subjects", "files"),
+    [
+        (
+            ["default@example.com", "second@example.com"],
+            ["10:00", "12:00"],
+            ["Wed 11 Nov (10:00 edition)", "Wed 11 Nov (12:00 edition)"],
+            ["-2026-11-11-1000.xlsx", "-2026-11-11-1200.xlsx"],
+        ),
+        (["default@example.com"], ["12:00"], ["Wed 11 Nov"], ["-2026-11-11.xlsx"]),
+    ],
+    ids=["recipient added", "morning clock removed"],
+)
+def test_a_send_queued_before_an_edit_counts_among_the_days_sends_while_it_can_be_sent(
+    recipients: list[str], times: list[str], subjects: list[str], files: list[str]
+) -> None:
+    system, _ = configured()
+    complete_saved(system)
+    _schedule(system, ["default@example.com"], ["10:00", "12:00"], NOW)
+    (morning_id,) = enqueue_due(SLOT)
+    _schedule(system, recipients, times, SLOT + timedelta(minutes=1))
+    process_notification(morning_id, SLOT + timedelta(minutes=2))
+    noon = SLOT + timedelta(hours=2)
+    (noon_id,) = enqueue_due(noon)
+    assert process_notification(noon_id, noon)
+    assert [message.subject for message in mail.outbox] == [
+        f"Site: irradiance forecast for {day}" for day in subjects
+    ]
+    assert [message.attachments[0][0] for message in mail.outbox] == [
+        f"pyracast-site{end}" for end in files
+    ]
+
+
 def test_a_clock_before_the_schedule_took_effect_does_not_make_the_only_send_an_edition() -> None:
     system, _ = configured()
     complete_saved(system)
@@ -584,48 +632,50 @@ def test_a_clock_before_the_schedule_took_effect_does_not_make_the_only_send_an_
     assert message.attachments[0][0].endswith("-2026-11-11.xlsx")
 
 
-@pytest.mark.parametrize("source", ["own partial", "reference import"])
-def test_at_a_collection_clock_only_a_snapshot_of_another_source_is_not_current(
-    source: str,
-) -> None:
+def test_at_a_collection_clock_the_slots_own_partial_snapshot_is_current() -> None:
     system, _ = configured()
     CollectionSchedule.objects.create(
         region=system.region, times=["10:00"], enabled=True, effective_from=NOW
     )
-    collected = (
-        SLOT + timedelta(minutes=1) if source == "own partial" else SLOT - timedelta(hours=2)
-    )
-    snapshot = saved(system, collected)
-    if source == "reference import":
-        job = snapshot.job
-        job.reference_import = HistoricalReferenceImport.objects.create(
-            binding=system.binding,
-            content_sha256="a" * 64,
-            source_name="authorized-export.json",
-            source_settings={"product": "historical_rooftop_pv"},
-            imported_by=system.admin,
-            created_at=collected,
-            interval_count=48,
-        )
-        job.endpoint, job.scheduled_for = "historical_import", SLOT
-        job.save()
-        CollectionJob.objects.create(
-            binding=system.binding,
-            scheduled_for=SLOT,
-            target_date=(SLOT + timedelta(days=1)).date(),
-            available_at=SLOT,
-            status="failed",
-        )
+    snapshot = saved(system, SLOT + timedelta(minutes=1))
     delivery_id = enqueue_due(SLOT)[0]
     assert process_notification(delivery_id, SLOT + timedelta(minutes=2))
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     assert delivery.snapshot_id == snapshot.pk
+    assert delivery.forecast_kind == "saved_partial"
     body = mail.outbox[0].body
-    local = collected.astimezone(ZoneInfo(system.region.timezone))
-    line = f"Forecast data: 10 Nov 2026, {local:%H:%M} (UTC+3)\n"
-    if source == "own partial":
-        assert delivery.forecast_kind == "saved_partial"
-        assert "\n\n" + line in body
-        assert "Newer forecast data" not in body
-    else:
-        assert "\nNewer forecast data was not available.\n" + line in body
+    assert "\n\nForecast data: 10 Nov 2026, 10:01 (UTC+3)\n" in body
+    assert "Newer forecast data" not in body
+
+
+def test_a_plant_import_at_a_failed_collection_clock_leaves_the_older_forecast_not_current(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    system, _ = configured()
+    allow_import(system)
+    CollectionSchedule.objects.create(
+        region=system.region, times=["10:00"], enabled=True, effective_from=NOW
+    )
+    older = saved(system, SLOT - timedelta(hours=2))
+    CollectionJob.objects.create(
+        binding=system.binding,
+        scheduled_for=SLOT,
+        target_date=(SLOT + timedelta(days=1)).date(),
+        available_at=SLOT,
+        status="failed",
+    )
+    monkeypatch.setattr(timezone, "now", lambda: SLOT)
+    rows = [
+        {"period_end": f"2026-11-10T{clock}:00+03:00", "period": "PT30M", "pv_power_rooftop": 0.5}
+        for clock in ("08:00", "08:30", "09:00")
+    ]
+    record = archive(system, power_file(tmp_path, rows))
+    imported = ForecastSnapshot.objects.select_related("job").get(job__reference_import=record)
+    assert (imported.source_kind, imported.job.scheduled_for) == ("estimated_actuals", SLOT)
+    delivery_id = enqueue_due(SLOT)[0]
+    assert process_notification(delivery_id, SLOT + timedelta(minutes=2))
+    assert NotificationDelivery.objects.get(pk=delivery_id).snapshot_id == older.pk
+    assert (
+        "\nNewer forecast data was not available.\nForecast data: 10 Nov 2026, 08:00 (UTC+3)\n"
+        in mail.outbox[0].body
+    )
