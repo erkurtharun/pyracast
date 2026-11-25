@@ -37,8 +37,8 @@ CONFLICT = {
     "tr": "Bu arada bir değişiklik oldu. Güncel değerleri kontrol edip tekrar deneyin.",
 }
 BUSY = {
-    "en": "Another change is being saved. Try again in a moment.",
-    "tr": "Başka bir değişiklik kaydediliyor. Biraz sonra tekrar deneyin.",
+    "en": "This could not be saved right now. Try again in a moment.",
+    "tr": "Şu anda kaydedilemedi. Biraz sonra tekrar deneyin.",
 }
 THROTTLED = {
     "en": "Too many attempts in a short time. Wait a moment and try again.",

@@ -6,6 +6,7 @@ from typing import Any
 from django.contrib.auth.models import User
 from django.db import models, transaction
 from django.utils import timezone
+from django.utils.translation import gettext_lazy
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import WorkspaceRole
@@ -42,6 +43,11 @@ class ActivationBlocker(models.TextChoices):
     OUTAGE_HISTORY_CHANGED = ErrorCode.OUTAGE_HISTORY_CHANGED.value
     INCUMBENT_CHANGED = ErrorCode.INCUMBENT_CHANGED.value
     CALIBRATION_NOT_ACTIVATABLE = ErrorCode.CALIBRATION_NOT_ACTIVATABLE.value
+
+
+OBSOLETE_CALIBRATION = gettext_lazy(
+    "This calibration was calculated for earlier technical details. Calculate a new calibration."
+)
 
 
 class SelectionState(models.TextChoices):
@@ -146,7 +152,9 @@ def activate_calibration(
         now = timezone.now()
         blocker = activation_blocker(plant, configuration, run, now)
         if blocker is not None:
-            raise DomainError(ErrorCode(blocker))
+            # The configuration is current here: this blocker means the run is of earlier details.
+            obsolete = blocker == ActivationBlocker.CONFIGURATION_CHANGED
+            raise DomainError(ErrorCode(blocker), OBSOLETE_CALIBRATION if obsolete else None)
         set_automation_state(
             plant, actor, enabled=True, cause=AutomationCause.MANUAL_ACTIVATION, now=now
         )

@@ -53,7 +53,7 @@ test("bin rows are titled with the plant name and a restored plant opens from th
 
 const busy = errorBody(
     "busy",
-    "Another change is being saved. Try again in a moment.",
+    "This could not be saved right now. Try again in a moment.",
 );
 
 test("a failed restore moves the focus to its reason", async ({ page }) => {
@@ -69,7 +69,7 @@ test("a failed restore moves the focus to its reason", async ({ page }) => {
     await expect(
         page
             .getByRole("alert")
-            .filter({ hasText: "Another change is being saved." }),
+            .filter({ hasText: "This could not be saved right now." }),
     ).toBeFocused();
 });
 
@@ -142,7 +142,7 @@ test("a failed delete keeps the confirmation open with the reason and lets the p
             status: 503,
             json: errorBody(
                 "busy",
-                "Another change is being saved. Try again in a moment.",
+                "This could not be saved right now. Try again in a moment.",
             ),
         });
     });
@@ -158,7 +158,7 @@ test("a failed delete keeps the confirmation open with the reason and lets the p
     });
     await move.click();
     await expect(confirmation.getByRole("alert")).toContainText(
-        "Another change is being saved.",
+        "This could not be saved right now.",
     );
     await expect(move).toBeEnabled();
     await move.click();
@@ -216,7 +216,7 @@ test("a failed undo shows its alert outside the deletion's status", async ({
             status: 503,
             json: errorBody(
                 "busy",
-                "Another change is being saved. Try again in a moment.",
+                "This could not be saved right now. Try again in a moment.",
             ),
         }),
     );
@@ -226,7 +226,7 @@ test("a failed undo shows its alert outside the deletion's status", async ({
     await expect(
         page
             .getByRole("alert")
-            .filter({ hasText: "Another change is being saved." }),
+            .filter({ hasText: "This could not be saved right now." }),
     ).toBeVisible();
     await expect(page.getByRole("status").getByRole("alert")).toHaveCount(0);
     await expect(deletionNotice(page)).toBeVisible();

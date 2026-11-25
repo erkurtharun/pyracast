@@ -86,7 +86,7 @@ def _validate(values: dict[str, Any], configuration: PlantConfiguration, now: da
         )
     if not isinstance(notes, str) or len(notes) > 2000:
         raise DomainError(
-            ErrorCode.INVALID_REQUEST, _("Enter notes of at most 2000 characters."), field="notes"
+            ErrorCode.INVALID_REQUEST, _("Enter notes of at most 2,000 characters."), field="notes"
         )
     for field, baseline in (
         ("available_dc_mw", configuration.dc_capacity_mw),

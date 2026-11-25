@@ -174,8 +174,8 @@ def test_native_earlier_configuration_correction_is_shown_apart_and_reentry_afte
 @pytest.mark.parametrize(
     ("unit", "changes", "message"),
     [
-        ("W", "valid", "Save 1 to 2000 values"),
-        ("MWh", "empty", "Save 1 to 2000 values"),
+        ("W", "valid", "Something went wrong"),
+        ("MWh", "empty", "Save 1 to 2,000 values"),
         ("MWh", "action", "Something went wrong"),
         ("MWh", "revert", "no entered value to remove"),
         ("MWh", "range", "at most 31 days at a time"),

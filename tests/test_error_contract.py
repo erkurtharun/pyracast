@@ -272,14 +272,14 @@ CASES: dict[str, Case] = {
     ),
     "session_ended": Case(
         400,
-        "You were signed out. Sign in again.",
-        "Ç\u0131k\u0131ş yap\u0131ld\u0131. Yeniden giriş yap\u0131n.",
+        "Sign in again.",
+        "Yeniden giriş yap\u0131n.",
         interrupted_session,
     ),
     "session_changed": Case(
         409,
-        "You signed in or out in another tab.",
-        "Başka bir sekmede giriş veya ç\u0131k\u0131ş yapt\u0131n\u0131z.",
+        "Sign in again.",
+        "Yeniden giriş yap\u0131n.",
         another_session,
     ),
     "not_authenticated": Case(
@@ -291,8 +291,9 @@ CASES: dict[str, Case] = {
     ),
     "csrf_failed": Case(
         403,
-        "Something went wrong. Try again.",
-        "Bir sorun oluştu. Tekrar deneyin.",
+        "This form is out of date. Copy what you typed, reload the page and try again.",
+        "Bu form güncel değil. Yazd\u0131klar\u0131n\u0131z\u0131 kopyalay\u0131n, sayfay\u0131 "
+        "yenileyin ve tekrar deneyin.",
         missing_csrf_token,
     ),
     "permission_denied": Case(
@@ -370,8 +371,8 @@ CASES: dict[str, Case] = {
     ),
     "session_busy": Case(
         429,
-        "Your previous action is still in progress. Try again.",
-        "Önceki işleminiz hâlâ sürüyor. Tekrar deneyin.",
+        "This could not be done right now. Try again in a moment.",
+        "Şu anda yap\u0131lamad\u0131. Biraz sonra tekrar deneyin.",
         busy_session,
         retry_after=1,
     ),
@@ -410,15 +411,15 @@ CASES: dict[str, Case] = {
     ),
     "busy": Case(
         503,
-        "Another change is being saved. Try again in a moment.",
-        "Başka bir değişiklik kaydediliyor. Biraz sonra tekrar deneyin.",
+        "This could not be saved right now. Try again in a moment.",
+        "Şu anda kaydedilemedi. Biraz sonra tekrar deneyin.",
         database(LockNotAvailable),
         retry_after=1,
     ),
     "database_conflict": Case(
         503,
-        "Another change was saved at the same time. Try again.",
-        "Ayn\u0131 anda başka bir değişiklik kaydedildi. Tekrar deneyin.",
+        "This could not be saved right now. Try again in a moment.",
+        "Şu anda kaydedilemedi. Biraz sonra tekrar deneyin.",
         database(DeadlockDetected),
         retry_after=1,
     ),
@@ -450,8 +451,8 @@ CASES: dict[str, Case] = {
     ),
     "forecast_sources_changed": Case(
         503,
-        "New forecast data arrived while this was loading. Try again.",
-        "Yükleme s\u0131ras\u0131nda yeni tahmin verisi geldi. Tekrar deneyin.",
+        "The forecast data changed while loading. Try again.",
+        "Tahmin verisi yüklenirken değişti. Tekrar deneyin.",
         domain("BusyError", "forecast_sources_changed"),
         retry_after=1,
     ),
@@ -475,8 +476,8 @@ CASES: dict[str, Case] = {
     ),
     "estimated_actuals_unavailable": Case(
         400,
-        "No satellite data for this day.",
-        "Bu gün için uydu verisi yok.",
+        "No satellite data for the selected time range.",
+        "Seçilen zaman aral\u0131ğ\u0131 için uydu verisi yok.",
         domain("DomainError", "estimated_actuals_unavailable"),
     ),
     "location_unchanged": Case(
@@ -748,10 +749,8 @@ CASES: dict[str, Case] = {
     ),
     "provider_account_unavailable": Case(
         400,
-        "No new forecast data is arriving for this plant, so the forecast email cannot be turned "
-        "on.",
-        "Bu santral için yeni tahmin verisi gelmiyor; bu nedenle tahmin e-postas\u0131 "
-        "aç\u0131lam\u0131yor.",
+        "No new forecast data is arriving for this plant. The forecast email cannot be turned on.",
+        "Bu santral için yeni tahmin verisi gelmiyor. Tahmin e-postas\u0131 aç\u0131lam\u0131yor.",
         domain("DomainError", "provider_account_unavailable", field="enabled"),
         fields=("enabled",),
     ),
@@ -963,7 +962,7 @@ def test_drf_session_csrf_refusal_is_coded() -> None:
     assert response.status_code == 403
     assert response.json() == {
         "code": "csrf_failed",
-        "message": "Bir sorun oluştu. Tekrar deneyin.",
+        "message": CASES["csrf_failed"].tr,
     }
 
 

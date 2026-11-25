@@ -21,6 +21,7 @@ from tests.support.company_registration import signup
 from tests.support.outbox import deliver_mail
 from tests.support.workspaces import (
     ACCEPT,
+    ALREADY_ACCEPTED,
     PREVIEW,
     UNAVAILABLE,
     administered_workspace,
@@ -132,7 +133,7 @@ def test_cancelling_an_accepted_invitation_is_refused_and_changes_nothing(
 
     response = signed_in(administrator).delete(invitation_url(tenant, accepted.pk))
 
-    assert (response.status_code, response.json()) == (400, UNAVAILABLE)
+    assert (response.status_code, response.json()) == (400, ALREADY_ACCEPTED)
     assert WorkspaceInvitation.objects.values_list("expires_at", "revoked_at").get() == (
         accepted.expires_at,
         None,
@@ -337,7 +338,7 @@ def test_send_again_refuses_closed_and_foreign_invitations_and_honours_the_limit
     at_once = client.post(f"{invitation_url(tenant, fresh.pk)}resend/")
 
     assert {name: (answer.status_code, answer.json()) for name, answer in answers.items()} == {
-        "accepted": (400, UNAVAILABLE),
+        "accepted": (400, ALREADY_ACCEPTED),
         "cancelled": (400, UNAVAILABLE),
         "foreign_id": (400, UNAVAILABLE),
         "foreign_workspace": (
@@ -364,9 +365,7 @@ def test_the_console_refuses_to_cancel_an_accepted_invitation() -> None:
 
     assert response["Location"] == f"{base}#invitations-title"
     page = client.get(base).content.decode()
-    assert (
-        "This invitation is no longer valid. Ask the workspace administrator for a new one." in page
-    )
+    assert "This invitation was already accepted. Reload the list." in page
     assert f"Invitation to {GUEST} revoked." not in page
     assert WorkspaceInvitation.objects.values_list("expires_at", "revoked_at").get() == (
         accepted.expires_at,

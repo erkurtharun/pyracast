@@ -131,7 +131,7 @@ test("a preview that cannot be loaded still lets the invitee accept", async ({
             headers: { "Retry-After": "1" },
             json: errorBody(
                 "busy",
-                "Another change is being saved. Try again in a moment.",
+                "This could not be saved right now. Try again in a moment.",
                 { retry_after: 1 },
             ),
         }),
@@ -146,7 +146,9 @@ test("a preview that cannot be loaded still lets the invitee accept", async ({
     );
     await page.goto("/app/invitation/#token=invite-secret");
     await expect(
-        page.getByText("Another change is being saved. Try again in a moment."),
+        page.getByText(
+            "This could not be saved right now. Try again in a moment.",
+        ),
     ).toBeVisible();
     await page.getByRole("button", { name: "Accept invitation" }).click();
     await expect(page).toHaveURL("/app/w/1/");

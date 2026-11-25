@@ -20,8 +20,8 @@ msgstr "Santral adında görünmeyen bir karakter var. Adı yeniden yazın."
 msgid "Enter a plant name of at most 200 characters."
 msgstr "En fazla 200 karakterlik bir santral adı girin."
 
-msgid "Enter a reason of at most 1000 characters."
-msgstr "En fazla 1000 karakterlik bir gerekçe girin."
+msgid "Enter a reason of at most 1,000 characters."
+msgstr "En fazla 1.000 karakterlik bir gerekçe girin."
 
 msgid "AC generation"
 msgstr "AC üretimi"
@@ -474,8 +474,8 @@ msgstr "E-posta hazırlanamadı"
 msgid "Mail rejected"
 msgstr "E-posta reddedildi"
 
-msgid "No satellite data for this day."
-msgstr "Bu gün için uydu verisi yok."
+msgid "No satellite data for the selected time range."
+msgstr "Seçilen zaman aralığı için uydu verisi yok."
 
 msgid "Measurement point"
 msgstr "Ölçüm noktası"
@@ -737,8 +737,11 @@ msgstr "Bu alan zorunludur."
 msgid "Enter a value."
 msgstr "Bir değer girin."
 
-msgid "Choose at most %(limit)s different update times."
-msgstr "En fazla %(limit)s farklı güncelleme saati seçin."
+msgid "Choose at most %(limit)s update times."
+msgstr "En fazla %(limit)s güncelleme saati seçin."
+
+msgid "Use each update time once."
+msgstr "Her güncelleme saatini bir kez kullanın."
 
 msgid "Provider authentication failed"
 msgstr "Sağlayıcı kimlik doğrulaması başarısız"
@@ -1278,8 +1281,8 @@ msgstr ""
 msgid "Choose a period of 7 to 90 days that ends before today."
 msgstr "Bugünden önce biten, 7 ile 90 gün arasında bir dönem seçin."
 
-msgid "Save 1 to 2000 values at a time."
-msgstr "Tek seferde 1 ile 2000 arasında değer kaydedin."
+msgid "Save 1 to 2,000 values at a time."
+msgstr "Tek seferde 1 ile 2.000 arasında değer kaydedin."
 
 msgid "Choose a date range of 1 to 31 days."
 msgstr "1 ile 31 gün arasında bir tarih aralığı seçin."
@@ -1802,8 +1805,8 @@ msgstr "En fazla 200 karakterlik bir başlık girin."
 msgid "Enter when the outage ended."
 msgstr "Kesintinin bittiği zamanı girin."
 
-msgid "Your previous action is still in progress. Try again."
-msgstr "Önceki işleminiz hâlâ sürüyor. Tekrar deneyin."
+msgid "This could not be done right now. Try again in a moment."
+msgstr "Şu anda yapılamadı. Biraz sonra tekrar deneyin."
 
 msgid "Enter zero or a positive number."
 msgstr "Sıfır veya pozitif bir sayı girin."
@@ -1819,8 +1822,8 @@ msgstr "İşaretli değerleri kontrol edip tekrar deneyin."
 msgid "Enter a positive EPİAŞ plant ID and the plant's EIC."
 msgstr "Pozitif bir EPİAŞ santral kimliği ve santralin EIC kodunu girin."
 
-msgid "Enter notes of at most 2000 characters."
-msgstr "En fazla 2000 karakterlik bir not girin."
+msgid "Enter notes of at most 2,000 characters."
+msgstr "En fazla 2.000 karakterlik bir not girin."
 
 msgid ""
 "Another outage already covers part of this time. Change the start or the "
@@ -1835,17 +1838,14 @@ msgstr "Bunu yalnızca Pyracast yapabilir."
 msgid "Sign in to continue."
 msgstr "Devam etmek için giriş yapın."
 
-msgid "Another change was saved at the same time. Try again."
-msgstr "Aynı anda başka bir değişiklik kaydedildi. Tekrar deneyin."
-
 msgid "Forecast update delayed. Pyracast will try again."
 msgstr "Tahmin güncellemesi gecikti. Pyracast yeniden deneyecek."
 
 msgid "No new forecast data is arriving for this plant."
 msgstr "Bu santral için yeni tahmin verisi gelmiyor."
 
-msgid "New forecast data arrived while this was loading. Try again."
-msgstr "Yükleme sırasında yeni tahmin verisi geldi. Tekrar deneyin."
+msgid "The forecast data changed while loading. Try again."
+msgstr "Tahmin verisi yüklenirken değişti. Tekrar deneyin."
 
 msgid ""
 "The outage changed in the meantime. Check its current values and save again."
@@ -1873,8 +1873,8 @@ msgstr "İşlem çok uzun sürdü. Daha sonra tekrar deneyin."
 msgid "The requested item was not found."
 msgstr "İstenen öğe bulunamadı."
 
-msgid "Another change is being saved. Try again in a moment."
-msgstr "Başka bir değişiklik kaydediliyor. Biraz sonra tekrar deneyin."
+msgid "This could not be saved right now. Try again in a moment."
+msgstr "Şu anda kaydedilemedi. Biraz sonra tekrar deneyin."
 
 msgid "This outage is no longer ongoing."
 msgstr "Bu kesinti artık devam etmiyor."
@@ -1895,8 +1895,8 @@ msgstr "Bu çalışma alanının üyesi değilsiniz."
 msgid "You do not have permission for this action."
 msgstr "Bu işlem için yetkiniz yok."
 
-msgid "You were signed out. Sign in again."
-msgstr "Çıkış yapıldı. Yeniden giriş yapın."
+msgid "Sign in again."
+msgstr "Yeniden giriş yapın."
 
 msgid "Enter a number greater than %(limit)s."
 msgstr "%(limit)s değerinden büyük bir sayı girin."
@@ -2797,9 +2797,6 @@ msgstr "Devre dışı"
 
 msgid "Key rejected"
 msgstr "Anahtar reddedildi"
-msgid "You signed in or out in another tab."
-msgstr "Başka bir sekmede giriş veya çıkış yaptınız."
-
 msgid "Enter the reason the customer will read."
 msgstr "Müşterinin okuyacağı gerekçeyi yazın."
 
@@ -3210,10 +3207,10 @@ msgstr ""
 "değiştirilemez."
 
 msgid ""
-"No new forecast data is arriving for this plant, so its technical details "
-"cannot be changed yet."
+"No new forecast data is arriving for this plant. The plant's technical "
+"details cannot be changed yet."
 msgstr ""
-"Bu santral için yeni tahmin verisi gelmiyor; bu nedenle teknik bilgileri "
+"Bu santral için yeni tahmin verisi gelmiyor. Santralin teknik bilgileri "
 "henüz değiştirilemez."
 
 msgid "Distance of the move"
@@ -3265,3 +3262,19 @@ msgstr "Tahmin kontrolü"
 
 msgid "Provider wait cleared. Queued collection can resume within the remaining quota."
 msgstr "Sağlayıcı beklemesi kaldırıldı. Sıradaki veri toplama kalan kota içinde devam edebilir."
+
+msgid ""
+"This form is out of date. Copy what you typed, reload the page and try again."
+msgstr ""
+"Bu form güncel değil. Yazdıklarınızı kopyalayın, sayfayı yenileyin ve "
+"tekrar deneyin."
+
+msgid "Row %(row)s: the date or time is not valid."
+msgstr "Satır %(row)s: tarih veya saat geçerli değil."
+
+msgid ""
+"This calibration was calculated for earlier technical details. Calculate a "
+"new calibration."
+msgstr ""
+"Bu kalibrasyon önceki teknik bilgilerle hesaplandı. Yeni kalibrasyon "
+"hesaplayın."

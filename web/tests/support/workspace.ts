@@ -1078,7 +1078,8 @@ const messages: Partial<Record<ErrorCode, string>> = {
     reminder_time_required:
         "Add at least one send time to turn on the forecast email.",
     workspace_admin_required: "Only the workspace administrator can do this.",
-    csrf_failed: "Something went wrong. Try again.",
+    csrf_failed:
+        "This form is out of date. Copy what you typed, reload the page and try again.",
 };
 
 function refusalBody(refusal: Refusal) {

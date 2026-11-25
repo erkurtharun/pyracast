@@ -13,9 +13,15 @@ from django.utils.translation import gettext, gettext_lazy
 
 from pyracast.accounts.authorization import authorize_workspace_admin, tenant_membership
 from pyracast.accounts.models import WorkspaceRole
-from pyracast.connections.currency import binding_is_current
+from pyracast.connections.currency import binding_is_current, connection_is_authorized
 from pyracast.connections.models import SiteBinding
-from pyracast.errors import TECHNICAL_DETAILS_CHANGED, ConflictError, DomainError, ErrorCode
+from pyracast.errors import (
+    NO_NEW_FORECAST_DATA,
+    TECHNICAL_DETAILS_CHANGED,
+    ConflictError,
+    DomainError,
+    ErrorCode,
+)
 from pyracast.plants.automation_state import AutomationCause, set_automation_state
 from pyracast.plants.calibration_runs import (
     OPEN_STATUSES,
@@ -66,8 +72,8 @@ EDIT_BLOCK_MESSAGES: Mapping[PlantEditBlock, StrPromise] = {
         "Pyracast suspended this plant, so its technical details cannot be changed."
     ),
     PlantEditBlock.CONNECTION_UNAVAILABLE: gettext_lazy(
-        "No new forecast data is arriving for this plant, "
-        "so its technical details cannot be changed yet."
+        "No new forecast data is arriving for this plant. "
+        "The plant's technical details cannot be changed yet."
     ),
 }
 
@@ -100,7 +106,10 @@ def current_configuration(plant: Plant) -> PlantConfiguration:
         pk=plant.current_configuration_id, plant=plant
     )
     if not configuration_is_current(configuration):
-        raise DomainError(ErrorCode.CONFIGURATION_CHANGED)
+        blocked = not connection_is_authorized(configuration.binding)
+        raise DomainError(
+            ErrorCode.CONFIGURATION_CHANGED, NO_NEW_FORECAST_DATA if blocked else None
+        )
     return configuration
 
 

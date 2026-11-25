@@ -1839,7 +1839,7 @@ for (const code of ["csrf_failed", "workspace_admin_required"] as const)
             code,
             message:
                 code === "csrf_failed"
-                    ? "Something went wrong. Try again."
+                    ? "This form is out of date. Copy what you typed, reload the page and try again."
                     : "Only the workspace administrator can do this.",
         });
         const shown = code === "csrf_failed" ? REFUSED : LOST;

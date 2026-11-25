@@ -103,15 +103,21 @@ FUTURE_TIME = _("Choose now or an earlier time.")
 TECHNICAL_DETAILS_CHANGED = _(
     "The plant's technical details changed. Reload the page and try again."
 )
+NO_NEW_FORECAST_DATA = _("No new forecast data is arriving for this plant.")
+NOT_SAVED_NOW = _("This could not be saved right now. Try again in a moment.")
+SIGN_IN_AGAIN = _("Sign in again.")
+ENTER_A_VALUE = _("Enter a value.")
 
 # No default for the two limit refusals: their raise sites must pass the text with the limit.
 MESSAGES: Mapping[ErrorCode, StrPromise] = {
     ErrorCode.INVALID_REQUEST: _("Check the highlighted values and try again."),
     ErrorCode.BAD_REQUEST: UNEXPECTED,
-    ErrorCode.SESSION_ENDED: _("You were signed out. Sign in again."),
-    ErrorCode.SESSION_CHANGED: _("You signed in or out in another tab."),
+    ErrorCode.SESSION_ENDED: SIGN_IN_AGAIN,
+    ErrorCode.SESSION_CHANGED: SIGN_IN_AGAIN,
     ErrorCode.NOT_AUTHENTICATED: _("Sign in to continue."),
-    ErrorCode.CSRF_FAILED: UNEXPECTED,
+    ErrorCode.CSRF_FAILED: _(
+        "This form is out of date. Copy what you typed, reload the page and try again."
+    ),
     ErrorCode.PERMISSION_DENIED: _("You do not have permission for this action."),
     ErrorCode.INVALID_PROXY_HEADERS: UNEXPECTED,
     ErrorCode.MEMBERSHIP_REQUIRED: _("You are not a member of this workspace."),
@@ -127,23 +133,21 @@ MESSAGES: Mapping[ErrorCode, StrPromise] = {
         "Something changed in the meantime. Check the current values and try again."
     ),
     ErrorCode.THROTTLED: _("Too many attempts in a short time. Wait a moment and try again."),
-    ErrorCode.SESSION_BUSY: _("Your previous action is still in progress. Try again."),
+    ErrorCode.SESSION_BUSY: _("This could not be done right now. Try again in a moment."),
     ErrorCode.INVITATION_RATE_LIMITED: _("Too many invitations were sent. Try again later."),
     ErrorCode.PROVIDER_THROTTLED: FORECAST_UPDATE_DELAYED,
     ErrorCode.QUOTA_EXHAUSTED: FORECAST_UPDATE_DELAYED,
     ErrorCode.SERVER_ERROR: UNEXPECTED,
     ErrorCode.PROVIDER_UNAVAILABLE: FORECAST_UPDATE_DELAYED,
-    ErrorCode.BUSY: _("Another change is being saved. Try again in a moment."),
-    ErrorCode.DATABASE_CONFLICT: _("Another change was saved at the same time. Try again."),
+    ErrorCode.BUSY: NOT_SAVED_NOW,
+    ErrorCode.DATABASE_CONFLICT: NOT_SAVED_NOW,
     ErrorCode.REQUEST_TIMEOUT: _("This took too long. Try again later."),
-    ErrorCode.PROVIDER_AUTHENTICATION_FAILED: _("No new forecast data is arriving for this plant."),
+    ErrorCode.PROVIDER_AUTHENTICATION_FAILED: NO_NEW_FORECAST_DATA,
     ErrorCode.MAINTENANCE: _(
         "Pyracast is being updated. Try again in a minute; your data is safe."
     ),
     ErrorCode.REQUEST_TOO_LARGE: UNEXPECTED,
-    ErrorCode.FORECAST_SOURCES_CHANGED: _(
-        "New forecast data arrived while this was loading. Try again."
-    ),
+    ErrorCode.FORECAST_SOURCES_CHANGED: _("The forecast data changed while loading. Try again."),
     ErrorCode.CONFIGURATION_UNAVAILABLE: _("This plant has no current technical details."),
     ErrorCode.LOCATION_ALREADY_HAS_PLANT: _(
         "This location already has an active plant. Open the existing plant."
@@ -151,7 +155,7 @@ MESSAGES: Mapping[ErrorCode, StrPromise] = {
     ErrorCode.PLANT_SUBMISSION_REQUIRED: _(
         "Complete the plant's technical details before sending it for approval."
     ),
-    ErrorCode.ESTIMATED_ACTUALS_UNAVAILABLE: _("No satellite data for this day."),
+    ErrorCode.ESTIMATED_ACTUALS_UNAVAILABLE: _("No satellite data for the selected time range."),
     ErrorCode.LOCATION_UNCHANGED: _("Enter a location different from the current location."),
     ErrorCode.LOCATION_ALREADY_EXISTS: _(
         "This workspace already has a plant at this location. Open the existing plant."
@@ -235,8 +239,7 @@ MESSAGES: Mapping[ErrorCode, StrPromise] = {
         "The forecast email can be turned on once Pyracast approves the plant."
     ),
     ErrorCode.PROVIDER_ACCOUNT_UNAVAILABLE: _(
-        "No new forecast data is arriving for this plant, so the forecast email cannot be "
-        "turned on."
+        "No new forecast data is arriving for this plant. The forecast email cannot be turned on."
     ),
     ErrorCode.CONFIGURATION_CHANGED: TECHNICAL_DETAILS_CHANGED,
     ErrorCode.PRODUCTION_SOURCE_CHANGED: _(

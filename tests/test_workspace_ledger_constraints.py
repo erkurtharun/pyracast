@@ -113,7 +113,7 @@ def test_an_accepted_invitation_is_never_marked_revoked(
     accept_workspace_invitation(guest, invitation_token())
     invitation = WorkspaceInvitation.objects.get()
 
-    with pytest.raises(ValidationError, match="no longer valid"):
+    with pytest.raises(ValidationError, match="already accepted"):
         revoke_workspace_invitation(administrator, tenant.pk, invitation.pk)
 
     invitation.refresh_from_db()

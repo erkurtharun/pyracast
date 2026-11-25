@@ -1,18 +1,23 @@
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
+from django.core.validators import ProhibitNullCharactersValidator
 from django.db import models
-from django.utils.translation import gettext
+from django.utils.translation import gettext_lazy
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from pyracast.accounts.models import Tenant, WorkspaceRole
-from pyracast.errors import UNEXPECTED
+from pyracast.errors import ENTER_A_VALUE, UNEXPECTED
 from pyracast.forecasts.models import SnapshotSourceKind
 from pyracast.regions.models import (
+    NAME_INVISIBLE_CHARACTER,
     NAME_MAX_LENGTH,
     Region,
     RegionLocationChangeRequest,
 )
+
+if TYPE_CHECKING:
+    from django_stubs_ext import StrOrPromise
 
 
 class InputSerializer(serializers.Serializer[dict[str, Any]]):
@@ -29,6 +34,12 @@ class InputSerializer(serializers.Serializer[dict[str, Any]]):
 
 
 class FiniteFloat(serializers.FloatField):
+    default_error_messages: ClassVar[dict[str, StrOrPromise]] = {
+        "required": ENTER_A_VALUE,
+        "above": gettext_lazy("Enter a number greater than %(limit)s."),
+        "below": gettext_lazy("Enter a number less than %(limit)s."),
+    }
+
     def __init__(
         self, *, above: float | None = None, below: float | None = None, **kwargs: Any
     ) -> None:
@@ -40,14 +51,21 @@ class FiniteFloat(serializers.FloatField):
             self.fail("invalid")
         value = super().to_internal_value(data)
         if self.above is not None and value <= self.above:
-            raise serializers.ValidationError(
-                gettext("Enter a number greater than %(limit)s.") % {"limit": self.above}
-            )
+            raise serializers.ValidationError(self.error_messages["above"] % {"limit": self.above})
         if self.below is not None and value >= self.below:
-            raise serializers.ValidationError(
-                gettext("Enter a number less than %(limit)s.") % {"limit": self.below}
-            )
+            raise serializers.ValidationError(self.error_messages["below"] % {"limit": self.below})
         return value
+
+
+class PlantName(serializers.CharField):
+    def __init__(self) -> None:
+        super().__init__(max_length=NAME_MAX_LENGTH)
+        self.validators = [
+            ProhibitNullCharactersValidator(NAME_INVISIBLE_CHARACTER)
+            if isinstance(validator, ProhibitNullCharactersValidator)
+            else validator
+            for validator in self.validators
+        ]
 
 
 class TenantOutput(serializers.ModelSerializer[Tenant]):
@@ -62,7 +80,7 @@ class TenantOutput(serializers.ModelSerializer[Tenant]):
 
 
 class RegionInput(InputSerializer):
-    name = serializers.CharField(max_length=NAME_MAX_LENGTH)
+    name = PlantName()
     latitude = FiniteFloat(min_value=-90, max_value=90)
     longitude = FiniteFloat(min_value=-180, max_value=180)
     timezone = serializers.CharField(max_length=100)

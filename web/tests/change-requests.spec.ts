@@ -227,7 +227,7 @@ test("member submits a native production correction, sent again after a refusal 
                   status: 503,
                   json: errorBody(
                       "busy",
-                      "Another change is being saved. Try again in a moment.",
+                      "This could not be saved right now. Try again in a moment.",
                       { retry_after: 1 },
                   ),
               })
@@ -250,7 +250,7 @@ test("member submits a native production correction, sent again after a refusal 
         .click();
     await expect(
         staged.getByText(
-            "Another change is being saved. Try again in a moment.",
+            "This could not be saved right now. Try again in a moment.",
         ),
     ).toBeVisible();
     await expect(staged.getByLabel("Reason for correction")).toHaveValue(

@@ -34,7 +34,7 @@ def test_lock_contention_returns_retryable_response_without_exposing_database_de
     assert response.status_code == 503
     assert response.data == {
         "code": "busy",
-        "message": "Another change is being saved. Try again in a moment.",
+        "message": "This could not be saved right now. Try again in a moment.",
         "retry_after": 1,
     }
     assert response["Retry-After"] == "1"
@@ -50,7 +50,7 @@ def test_deadlock_is_retryable_but_not_reported_as_lock_timeout() -> None:
     assert response.status_code == 503
     assert response.data == {
         "code": "database_conflict",
-        "message": "Another change was saved at the same time. Try again.",
+        "message": "This could not be saved right now. Try again in a moment.",
         "retry_after": 1,
     }
     assert response["Retry-After"] == "1"

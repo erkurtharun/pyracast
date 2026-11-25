@@ -34,6 +34,7 @@ from pyracast.plants.preparation import request_preparation
 from pyracast.regions.models import Region
 
 PRODUCTION_BATCH_LIMIT = 2000
+ROW_TIME_INVALID = gettext_lazy("Row %(row)s: the date or time is not valid.")
 OVERLAPPING = gettext_lazy(
     "Some values overlap in time with each other or with saved values. "
     "Enter one value per interval."
@@ -112,8 +113,10 @@ class AuditContext:
 
 
 def validate_batch(unit: str, count: int) -> None:
-    if unit not in {"MWh", "kWh"} or not 1 <= count <= PRODUCTION_BATCH_LIMIT:
-        raise ValidationError(gettext("Save 1 to 2000 values at a time."))
+    if unit not in {"MWh", "kWh"}:
+        raise ValidationError(UNEXPECTED)
+    if not 1 <= count <= PRODUCTION_BATCH_LIMIT:
+        raise ValidationError(gettext("Save 1 to 2,000 values at a time."))
 
 
 def normalize_observation(

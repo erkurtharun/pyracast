@@ -25,6 +25,7 @@ from pyracast.connections.models import (
 from pyracast.errors import ConflictError, DomainError, ErrorCode
 from pyracast.regions.audit import record_audit
 from pyracast.regions.models import (
+    NAME_INVISIBLE_CHARACTER,
     NAME_MAX_LENGTH,
     AuditAction,
     AuditEvent,
@@ -94,11 +95,7 @@ def require_name(name: str) -> str:
             field="name",
         )
     if "\x00" in name:
-        raise DomainError(
-            ErrorCode.INVALID_REQUEST,
-            _("The plant name contains an invisible character. Type the name again."),
-            field="name",
-        )
+        raise DomainError(ErrorCode.INVALID_REQUEST, NAME_INVISIBLE_CHARACTER, field="name")
     return name
 
 
@@ -198,7 +195,7 @@ def request_location_change(
     validate_location(latitude, longitude, timezone)
     latitude, longitude = canonical_coordinate(latitude), canonical_coordinate(longitude)
     if len(reason) > 1000:
-        raise ValidationError(gettext("Enter a reason of at most 1000 characters."))
+        raise ValidationError(gettext("Enter a reason of at most 1,000 characters."))
     with transaction.atomic():
         authorize_workspace_admin(actor, tenant_id, platform=platform)
         region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)

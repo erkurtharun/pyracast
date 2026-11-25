@@ -953,7 +953,7 @@ test("a submit refused without a field to go to moves focus to its message", asy
                   status: 503,
                   json: errorBody(
                       "busy",
-                      "Another change is being saved. Try again in a moment.",
+                      "This could not be saved right now. Try again in a moment.",
                   ),
               })
             : route.fallback(),
@@ -966,7 +966,7 @@ test("a submit refused without a field to go to moves focus to its message", asy
     await expect(
         page
             .getByRole("alert")
-            .filter({ hasText: "Another change is being saved." }),
+            .filter({ hasText: "This could not be saved right now." }),
     ).toBeFocused();
 });
 
@@ -1018,7 +1018,7 @@ test("a failed restore in the wizard returns focus to the restore button", async
             status: 503,
             json: errorBody(
                 "busy",
-                "Another change is being saved. Try again in a moment.",
+                "This could not be saved right now. Try again in a moment.",
             ),
         }),
     );
@@ -1030,7 +1030,7 @@ test("a failed restore in the wizard returns focus to the restore button", async
     const restore = offer.getByRole("button", { name: "Restore Old plant" });
     await restore.click();
     await expect(offer.getByRole("alert")).toContainText(
-        "Another change is being saved.",
+        "This could not be saved right now.",
     );
     await expect(restore).toBeFocused();
 });

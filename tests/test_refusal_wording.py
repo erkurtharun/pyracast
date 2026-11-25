@@ -118,15 +118,15 @@ def test_each_panel_angle_refusal_names_the_range_of_its_own_angle(
         (
             "en",
             "Pyracast suspended this plant, so its technical details cannot be changed.",
-            "No new forecast data is arriving for this plant, "
-            "so its technical details cannot be changed yet.",
+            "No new forecast data is arriving for this plant. "
+            "The plant's technical details cannot be changed yet.",
         ),
         (
             "tr",
             "Pyracast bu santrali ask\u0131ya ald\u0131; bu nedenle teknik bilgileri "
             "değiştirilemez.",
-            "Bu santral için yeni tahmin verisi gelmiyor; "
-            "bu nedenle teknik bilgileri henüz değiştirilemez.",
+            "Bu santral için yeni tahmin verisi gelmiyor. "
+            "Santralin teknik bilgileri henüz değiştirilemez.",
         ),
     ],
 )

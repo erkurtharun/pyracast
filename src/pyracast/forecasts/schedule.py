@@ -83,10 +83,11 @@ def configure_schedule(
         limit = forecast_time_limit(
             binding.provider_account.daily_quota if binding else MAX_DAILY_QUOTA
         )
-        if len(times) != len(set(times)) or (enabled and len(times) > limit):
+        if len(times) != len(set(times)):
+            raise ValidationError(gettext("Use each update time once."))
+        if enabled and len(times) > limit:
             raise ValidationError(
-                gettext("Choose at most %(limit)s different update times."),
-                params={"limit": limit},
+                gettext("Choose at most %(limit)s update times."), params={"limit": limit}
             )
         if any(CLOCK_PATTERN.fullmatch(clock) is None for clock in times):
             raise ValidationError(UNEXPECTED)

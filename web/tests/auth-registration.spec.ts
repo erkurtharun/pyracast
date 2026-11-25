@@ -219,10 +219,7 @@ test("an ended session asks to sign in again", async ({ page }) => {
     await page.route("**/api/auth/browser/v1/auth/login", (route) =>
         route.fulfill({
             status: 400,
-            json: errorBody(
-                "session_ended",
-                "You were signed out. Sign in again.",
-            ),
+            json: errorBody("session_ended", "Sign in again."),
         }),
     );
     await page.goto("/app/");
@@ -232,7 +229,7 @@ test("an ended session asks to sign in again", async ({ page }) => {
         .fill("Test-only-cobalt-79!");
     await page.locator("form").getByRole("button", { name: "Sign in" }).click();
     await expect(page.locator("form").getByRole("alert")).toContainText(
-        "You were signed out. Sign in again.",
+        "Sign in again.",
     );
 });
 
