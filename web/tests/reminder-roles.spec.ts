@@ -413,17 +413,25 @@ test("losing administration while the review is open closes it, sends nothing an
         viewer: (method) => role === "viewer" && method === "GET",
     });
     await asRole(page, () => role);
+    await trackReads(page, reminders);
     const writes = sent(page, isWrite);
     await openReminders(page);
     await radio(page, OUTSIDE, "Cc").check();
     await time(page, 1).fill("09:00");
     await review(page);
+    let reads = 0;
+    // The visibility event reads the reminders once and the role loss reads them again.
+    const replacement = page.waitForRequest(
+        (request) => isRead(request.method(), request.url()) && ++reads === 2,
+    );
     role = "viewer";
     await tenantsAgain(page);
     await expect(dialog(page)).toHaveCount(0);
     await expect(typedFields(page)).toHaveCount(0);
     await expect(line(page, COUNT_ONLY(3))).toBeVisible();
     expect(writes).toEqual([]);
+    await replacement;
+    await readsApplied(page, reminders);
     role = "admin";
     await refetch(page);
     await expect(radio(page, OUTSIDE, "Default")).toBeChecked();
