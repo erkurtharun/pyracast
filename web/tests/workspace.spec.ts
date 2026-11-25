@@ -2159,7 +2159,7 @@ test("a session that ends while the tab is open returns to sign in with a notice
     account.current = null;
     await page.clock.fastForward(120_000);
     await expect(
-        page.getByText("Your session has expired. Please sign in again."),
+        page.getByText("You were signed out. Sign in again."),
     ).toBeVisible();
     await expect(
         page.locator("form").getByRole("button", { name: "Sign in" }),

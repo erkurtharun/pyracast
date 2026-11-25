@@ -51,7 +51,7 @@ test("enabled providers submit a CSRF protected native redirect form on mobile",
         },
     );
     await page.goto("/app/");
-    const google = page.getByRole("button", { name: "Continue with Google" });
+    const google = page.getByRole("button", { name: "Sign in with Google" });
     await expect(google).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Sign in with Microsoft" }),
@@ -80,9 +80,59 @@ test("unconfigured providers stay hidden", async ({ page }) => {
         page.getByRole("heading", { name: "Welcome back" }),
     ).toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Continue with Google" }),
+        page.getByRole("button", { name: "Sign in with Google" }),
     ).toHaveCount(0);
 });
+
+for (const [language, tab, signIn, signUp] of [
+    [
+        "en",
+        "Create account",
+        ["Sign in with Google", "Sign in with Microsoft"],
+        ["Sign up with Google", "Sign up with Microsoft"],
+    ],
+    [
+        "tr",
+        "Hesap oluştur",
+        ["Google ile giriş yap", "Microsoft ile giriş yap"],
+        ["Google ile kaydol", "Microsoft ile kaydol"],
+    ],
+] as const) {
+    test(`the registration screen offers sign-up and the sign-in screen sign-in with each provider in ${language}`, async ({
+        page,
+    }) => {
+        const account = await mockApi(page, { anonymous: true });
+        await page.route("**/api/session/", (route) =>
+            route.fulfill({
+                json: { ...sessionIdentity(account.current), language },
+            }),
+        );
+        await page.route("**/api/auth/browser/v1/config", (route) =>
+            route.fulfill({
+                json: {
+                    status: 200,
+                    data: {
+                        socialaccount: {
+                            providers: [{ id: "google" }, { id: "microsoft" }],
+                        },
+                    },
+                },
+            }),
+        );
+        await page.goto("/app/");
+        const providers = page.locator(".social-provider");
+        await expect(providers).toHaveText([...signIn]);
+        await page.getByRole("button", { name: tab, exact: true }).click();
+        await expect(providers).toHaveText([...signUp]);
+        expect(
+            await page
+                .locator('.social-providers input[name="process"]')
+                .evaluateAll((inputs) =>
+                    inputs.map((input) => (input as HTMLInputElement).value),
+                ),
+        ).toEqual(["login", "login"]);
+    });
+}
 
 test("social signup restores invitation and does not request a password", async ({
     page,
@@ -145,7 +195,7 @@ test("social signup restores invitation and does not request a password", async 
     await expect(page.getByLabel("Password", { exact: true })).toHaveCount(0);
     await expect(page.getByLabel("Company name")).toHaveCount(0);
     await page
-        .getByRole("button", { name: "Complete your account", exact: true })
+        .getByRole("button", { name: "Create account", exact: true })
         .click();
     await expect(
         page.getByRole("heading", { name: "Verify your email" }),
@@ -304,11 +354,20 @@ test("social-only accounts confirm email before disconnecting the selected provi
         path: test.info().outputPath("linked-reauth-mobile.png"),
         fullPage: true,
     });
-    await page.getByRole("button", { name: "Send verification code" }).click();
-    await page
-        .getByRole("region", { name: "Connected accounts" })
-        .getByLabel("Email verification code", { exact: true })
-        .fill("123456");
+    const accounts = page.getByRole("region", { name: "Connected accounts" });
+    await expect(
+        accounts.getByText(`Pyracast sends the email code to ${user.email}.`, {
+            exact: true,
+        }),
+    ).toHaveCount(1);
+    await page.getByRole("button", { name: "Send email code" }).click();
+    await expect(
+        accounts.getByText("Check your email for the code.", { exact: true }),
+    ).toHaveCount(1);
+    await expect(
+        accounts.getByText(/Pyracast sends the email code/),
+    ).toHaveCount(0);
+    await accounts.getByLabel("Email code", { exact: true }).fill("123456");
     await page
         .getByRole("button", { name: "Confirm code", exact: true })
         .click();
@@ -366,11 +425,9 @@ for (const hasPassword of [true, false]) {
             accounts.getByLabel("Current password", { exact: true }),
         ).toHaveCount(0);
         await accounts
-            .getByLabel("Authenticator or recovery code", { exact: true })
+            .getByLabel("Authenticator code or recovery code", { exact: true })
             .fill("123456");
-        await accounts
-            .getByRole("button", { name: "Confirm authenticator" })
-            .click();
+        await accounts.getByRole("button", { name: "Confirm code" }).click();
         await expect(
             accounts.getByRole("button", { name: "Connect Google" }),
         ).toBeVisible();
@@ -386,7 +443,7 @@ test("provider errors explain how to link an existing email safely", async ({
         "/app/?social_callback=1&error=unknown&error_process=login",
     );
     await expect(page.locator(".notice.error")).toContainText(
-        "sign in with your existing method",
+        "sign in another way",
     );
     await expect(page).not.toHaveURL(/error=/);
 });
@@ -456,7 +513,7 @@ test("social-only MFA setup requests email confirmation rather than an unavailab
         page.getByRole("heading", { name: "Confirm with email" }),
     ).toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Send verification code" }),
+        page.getByRole("button", { name: "Send email code" }),
     ).toBeVisible();
     await expect(
         page.getByLabel("Current password", { exact: true }),
@@ -533,10 +590,10 @@ test("Turkish provider buttons fit a 320px screen", async ({
     await page.setViewportSize({ width: 320, height: 812 });
     await page.goto("/app/");
     await expect(
-        page.getByRole("button", { name: "Google ile devam et" }),
+        page.getByRole("button", { name: "Google ile giriş yap" }),
     ).toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Microsoft ile oturum a\u00e7" }),
+        page.getByRole("button", { name: "Microsoft ile giriş yap" }),
     ).toBeVisible();
     expect(
         await page.evaluate(
@@ -596,13 +653,13 @@ test("a rejected social signup email keeps an explicit sign-in and link path", a
     await page.goto("/app/?social_callback=1");
     await page.getByLabel("Company name").fill("Sunfield Energy");
     await page
-        .getByRole("button", { name: "Complete your account", exact: true })
+        .getByRole("button", { name: "Create workspace", exact: true })
         .click();
     await expect(page.locator("form").getByRole("alert")).toContainText(
         "This email is already in use.",
     );
     await expect(
-        page.getByText(/sign in first and connect this provider/),
+        page.getByText(/sign in and connect this one under Account/),
     ).toBeVisible();
     await page
         .getByRole("button", {
@@ -682,7 +739,7 @@ test("a provider sign-in that needs the second factor asks for it", async ({
     );
     await page.goto("/app/?social_callback=1");
     await expect(
-        page.getByRole("heading", { name: "Two-factor authentication" }),
+        page.getByRole("heading", { name: "Two-step verification" }),
     ).toBeVisible();
     await expect(page.locator(".notice.error")).toHaveCount(0);
 });
@@ -759,7 +816,9 @@ test("a provider connection that needs a confirmation asks for the factor it nam
         },
     });
     await expect(
-        accounts.getByLabel("Authenticator or recovery code", { exact: true }),
+        accounts.getByLabel("Authenticator code or recovery code", {
+            exact: true,
+        }),
     ).toBeVisible();
     await expect(
         accounts.getByLabel("Current password", { exact: true }),
@@ -804,7 +863,7 @@ for (const [name, refusal] of [
         );
         await page.goto("/app/?social_callback=1");
         await expect(page.locator(".notice.error")).toContainText(
-            "sign in with your existing method",
+            "sign in another way",
         );
         await expect(page).not.toHaveURL(/social_callback/);
     });
@@ -817,8 +876,8 @@ test("a refused provider connection shows the callback error", async ({
         status: 403,
         json: { status: 403 },
     });
-    await expect(accounts.getByRole("alert")).toContainText(
-        "could not be completed",
+    await expect(accounts.getByRole("alert")).toHaveText(
+        "This account could not be connected. Try again.",
     );
     await expect(
         accounts.getByText("Account connected.", { exact: true }),
@@ -849,9 +908,15 @@ test("a connected account says when it cannot be disconnected or used to sign in
         accounts.getByRole("button", { name: "Disconnect solar@example.test" }),
     ).toBeDisabled();
     await expect(
-        accounts.getByText("Not available for sign-in", { exact: true }),
+        accounts.getByText("Cannot be used to sign in", { exact: true }),
     ).toBeVisible();
-    await expect(accounts.getByText(/Your only way to sign in/)).toBeVisible();
+    await expect(
+        accounts.getByText(
+            "To disconnect it, set a password or connect another account first.",
+            { exact: true },
+        ),
+    ).toBeVisible();
+    await expect(accounts.getByText(/Your only way to sign in/)).toHaveCount(0);
 });
 
 test("a disconnection answered with a refusal that is not allauth's shows an error and keeps the account", async ({
@@ -914,12 +979,12 @@ async function offerGoogleSignIn(page: Page) {
 }
 
 const continueWithGoogle = (page: Page) =>
-    page.getByRole("button", { name: "Continue with Google" }).click();
+    page.getByRole("button", { name: "Sign in with Google" }).click();
 
 async function keepReturn(page: Page, address: string) {
     await page.goto("/app/");
     await expect(
-        page.getByRole("button", { name: "Continue with Google" }),
+        page.getByRole("button", { name: "Sign in with Google" }),
     ).toBeVisible();
     await page.evaluate(
         ({ key, value }) => window.sessionStorage.setItem(key, value),
@@ -1028,7 +1093,7 @@ test("a provider sign-in that needs the second factor opens the forecast it star
     );
     await page.goto(datedForecast);
     await continueWithGoogle(page);
-    await page.getByLabel("Authenticator or recovery code").fill("123456");
+    await page.getByLabel("Authenticator code or recovery code").fill("123456");
     await page.getByRole("button", { name: "Verify code" }).click();
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-25");
     await expect(page).toHaveURL(datedForecast);
@@ -1098,7 +1163,7 @@ test("a failed provider return removes the kept address and shows the callback e
         "/app/?social_callback=1&error=unknown&error_process=login",
     );
     await expect(page.locator(".notice.error")).toContainText(
-        "sign in with your existing method",
+        "sign in another way",
     );
     expect(await storedReturn(page)).toBeNull();
 });
@@ -1161,7 +1226,7 @@ test("a provider return shows the launch card while its sign-in completes", asyn
         page.getByRole("heading", { name: "Welcome back" }),
     ).toHaveCount(0);
     await expect(
-        page.getByRole("button", { name: "Continue with Google" }),
+        page.getByRole("button", { name: "Sign in with Google" }),
     ).toHaveCount(0);
     release.resolve();
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-25");
@@ -1192,7 +1257,7 @@ test("a provider sign-in whose session read fails stays at the start address wit
     await expect(page).toHaveURL("/app/");
     release.resolve();
     await expect(page.locator(".notice.error")).toContainText(
-        "sign in with your existing method",
+        "sign in another way",
     );
     await expect(page).toHaveURL("/app/");
 });
@@ -1251,7 +1316,7 @@ test("a provider sign-in that ends at email verification leaves a later password
     );
     await page.getByLabel("Company name").fill("Sunfield Energy");
     await page
-        .getByRole("button", { name: "Complete your account", exact: true })
+        .getByRole("button", { name: "Create workspace", exact: true })
         .click();
     await page.getByLabel("Email code").fill("123456");
     await page
@@ -1266,7 +1331,10 @@ test("a provider sign-in that ends at email verification leaves a later password
     await page
         .getByLabel("Password", { exact: true })
         .fill("Test-only-cobalt-79!");
-    await page.locator("form").getByRole("button", { name: "Sign in" }).click();
+    await page
+        .locator("form")
+        .getByRole("button", { name: "Sign in", exact: true })
+        .click();
     await expect(portfolio(page)).toBeVisible();
     await expect(page).toHaveURL("/app/w/1/");
 });
@@ -1282,7 +1350,7 @@ async function holdDocumentNavigations(page: Page, path: RegExp) {
 }
 
 const startAddress = (page: Page) =>
-    page.getByRole("button", { name: "Continue with Google" });
+    page.getByRole("button", { name: "Sign in with Google" });
 
 test("starting a provider sign-in keeps the workspace address of the tab", async ({
     page,
@@ -1345,7 +1413,7 @@ test("a failed provider return without session storage shows the callback error"
         "/app/?social_callback=1&error=unknown&error_process=login",
     );
     await expect(page.locator(".notice.error")).toContainText(
-        "sign in with your existing method",
+        "sign in another way",
     );
 });
 

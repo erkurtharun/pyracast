@@ -359,6 +359,9 @@ test("invitation signup preserves token without creating another workspace", asy
     await page
         .getByRole("button", { name: "Create account", exact: true })
         .click();
+    await expect(
+        page.getByRole("heading", { level: 1, name: "Create account" }),
+    ).toBeVisible();
     await expect(page.locator('input[name="company_name"]')).toHaveCount(0);
     await page.getByLabel("Email", { exact: true }).fill("viewer@example.test");
     await page

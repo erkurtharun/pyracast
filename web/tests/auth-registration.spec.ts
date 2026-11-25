@@ -14,7 +14,7 @@ test("signup entry opens registration with public information links", async ({
     await mockApi(page, { anonymous: true });
     await page.goto("/app/?signup=1");
     await expect(
-        page.getByRole("heading", { name: "Create your company account" }),
+        page.getByRole("heading", { name: "Create workspace" }),
     ).toBeVisible();
     await expect(
         page.getByRole("link", { name: "Homepage", exact: true }),
@@ -40,7 +40,7 @@ test("signup entry opens registration with public information links", async ({
 
 for (const [flow, title] of [
     ["verify_email", "Verify your email"],
-    ["mfa_authenticate", "Two-factor authentication"],
+    ["mfa_authenticate", "Two-step verification"],
     ["password_reset_by_code", "Choose a new password"],
     ["provider_signup", "Complete your account"],
 ] as const) {
@@ -68,7 +68,7 @@ for (const [flow, title] of [
             page.getByRole("heading", { name: title, exact: true }),
         ).toBeVisible();
         await expect(
-            page.getByRole("heading", { name: "Create your company account" }),
+            page.getByRole("heading", { name: "Create workspace" }),
         ).not.toBeVisible();
     });
 }
@@ -117,7 +117,7 @@ test("requires email verification after registration", async ({ page }) => {
         .getByRole("button", { name: "Hide password", exact: true })
         .click();
     await page
-        .getByRole("button", { name: "Create company account", exact: true })
+        .getByRole("button", { name: "Create workspace", exact: true })
         .click();
     await expect(
         page.getByRole("heading", { name: "Verify your email", exact: true }),
@@ -152,7 +152,7 @@ test("registration errors identify the field and move keyboard focus to the summ
         .getByLabel("Password", { exact: true })
         .fill("Test-only-cobalt-79!");
     await page
-        .getByRole("button", { name: "Create company account", exact: true })
+        .getByRole("button", { name: "Create workspace", exact: true })
         .click();
     await expect(page.locator("form").getByRole("alert")).toBeFocused();
     await expect(page.getByLabel("Email", { exact: true })).toHaveAttribute(
@@ -356,14 +356,14 @@ test("the code stage names the address and leaving it ends the pending sign-up o
         .getByLabel("Password", { exact: true })
         .fill("Test-only-cobalt-79!");
     await page
-        .getByRole("button", { name: "Create company account", exact: true })
+        .getByRole("button", { name: "Create workspace", exact: true })
         .click();
     await expect(
         page.getByRole("heading", { name: "Verify your email", exact: true }),
     ).toBeVisible();
     await expect(
         page.getByText(
-            "We sent a code to owner@example.test. Enter it here to confirm the address.",
+            "Check your email at owner@example.test and enter the email code.",
         ),
     ).toBeVisible();
     await expect(
@@ -382,25 +382,25 @@ for (const [flow, title, guide, leave] of [
     [
         "verify_email",
         "Verify your email",
-        "We sent a code to the address you entered. Enter it here to confirm the address.",
+        "Check your email and enter the email code.",
         "Use a different address",
     ],
     [
         "mfa_authenticate",
-        "Two-factor authentication",
+        "Two-step verification",
         "Enter the code from your authenticator app, or one of your recovery codes.",
         "Use a different account",
     ],
     [
         "password_reset_by_code",
         "Choose a new password",
-        "If an account uses the address you entered, we sent a code to it. Enter the code and choose a new password.",
+        "If an account uses the address you entered, Pyracast sends an email code to it. Enter the code and choose a new password.",
         "Cancel password reset",
     ],
     [
         "provider_signup",
         "Complete your account",
-        "Confirm your email and company to finish. If you already have an account, sign in first and connect this provider in Account settings.",
+        "If you already have a Pyracast account, sign in and connect this one under Account → Connected accounts.",
         "Use another sign-in method",
     ],
 ] as const) {
@@ -447,7 +447,7 @@ test("a verification the server no longer holds shows an ended stage that starts
     ).toBeFocused();
     await expect(
         page.getByText(
-            "The code can no longer be used here: it expired, it was used, or too many wrong codes were entered. Start again to get a new code.",
+            "This code no longer works. Start again to get a new code.",
             { exact: true },
         ),
     ).toBeVisible();
@@ -483,10 +483,7 @@ test("a rate-limited verification shows a wait stage that returns to the code or
         page.getByRole("heading", { name: "Too many attempts", exact: true }),
     ).toBeFocused();
     await expect(
-        page.getByText(
-            "Wait a few minutes, then try again. The step stays open until then.",
-            { exact: true },
-        ),
+        page.getByText("Wait a few minutes, then try again.", { exact: true }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Try again", exact: true }).click();
     await expect(
@@ -528,11 +525,13 @@ for (const [status, code, title] of [
         await page.goto("/app/");
         await page
             .getByRole("button", {
-                name: "Resend verification code",
+                name: "Send email code again",
                 exact: true,
             })
             .click();
-        await expect(page.getByText("A new code was requested.")).toBeVisible();
+        await expect(
+            page.getByText("Check your email for a new code.", { exact: true }),
+        ).toBeVisible();
         await page.getByLabel("Email code").fill("ABCD-EFGH");
         await page
             .getByRole("button", { name: "Verify email", exact: true })
@@ -540,25 +539,20 @@ for (const [status, code, title] of [
         await expect(
             page.getByRole("heading", { name: title, exact: true }),
         ).toBeFocused();
-        await expect(page.getByText("A new code was requested.")).toHaveCount(
-            0,
-        );
+        await expect(
+            page.getByText("Check your email for a new code.", { exact: true }),
+        ).toHaveCount(0);
     });
 }
 
 for (const [flow, field, value, submit] of [
     [
         "mfa_authenticate",
-        "Authenticator or recovery code",
+        "Authenticator code or recovery code",
         "123456",
         "Verify code",
     ],
-    [
-        "provider_signup",
-        "Company name",
-        "Solar Company",
-        "Complete your account",
-    ],
+    ["provider_signup", "Company name", "Solar Company", "Create workspace"],
 ] as const) {
     test(`an ended ${flow} stage does not speak of an emailed code`, async ({
         page,
@@ -593,9 +587,9 @@ for (const [flow, field, value, submit] of [
                 { exact: true },
             ),
         ).toBeVisible();
-        await expect(
-            page.getByText("The code can no longer be used here"),
-        ).toHaveCount(0);
+        await expect(page.getByText("This code no longer works")).toHaveCount(
+            0,
+        );
     });
 }
 
@@ -628,10 +622,13 @@ test("a resend offered again after a wait stage counts from the code that was se
         .getByLabel("Password", { exact: true })
         .fill("Test-only-cobalt-79!");
     await page
-        .getByRole("button", { name: "Create company account", exact: true })
+        .getByRole("button", { name: "Create workspace", exact: true })
         .click();
     await expect(
-        page.getByRole("button", { name: "Resend code in 60 s", exact: true }),
+        page.getByRole("button", {
+            name: "Send code again in 60 s",
+            exact: true,
+        }),
     ).toBeDisabled();
     await page.clock.runFor(45_000);
     await page.getByLabel("Email code").fill("ABCD-EFGH");
@@ -640,7 +637,10 @@ test("a resend offered again after a wait stage counts from the code that was se
         .click();
     await page.getByRole("button", { name: "Try again", exact: true }).click();
     await expect(
-        page.getByRole("button", { name: "Resend code in 15 s", exact: true }),
+        page.getByRole("button", {
+            name: "Send code again in 15 s",
+            exact: true,
+        }),
     ).toBeDisabled();
     await page.clock.runFor(15_000);
     await page.getByLabel("Email code").fill("ABCD-EFGH");
@@ -650,7 +650,7 @@ test("a resend offered again after a wait stage counts from the code that was se
     await page.getByRole("button", { name: "Try again", exact: true }).click();
     await expect(
         page.getByRole("button", {
-            name: "Resend verification code",
+            name: "Send email code again",
             exact: true,
         }),
     ).toBeEnabled();
@@ -673,11 +673,11 @@ test("a failed exit keeps the stage and says the sign-in was not ended", async (
         .getByRole("button", { name: "Use a different account", exact: true })
         .click();
     const alert = page.getByRole("main").getByRole("alert");
-    await expect(alert).toContainText("The sign-in step was not ended");
+    await expect(alert).toContainText("Could not end this step");
     await expect(alert).toContainText("Try again in a moment.");
     await expect(
         page.getByRole("heading", {
-            name: "Two-factor authentication",
+            name: "Two-step verification",
             exact: true,
         }),
     ).toBeVisible();
@@ -712,32 +712,46 @@ test("resend is disabled with a countdown after a code is sent", async ({
         .getByLabel("Password", { exact: true })
         .fill("Test-only-cobalt-79!");
     await page
-        .getByRole("button", { name: "Create company account", exact: true })
+        .getByRole("button", { name: "Create workspace", exact: true })
         .click();
     await expect(
-        page.getByRole("button", { name: "Resend code in 60 s", exact: true }),
+        page.getByRole("button", {
+            name: "Send code again in 60 s",
+            exact: true,
+        }),
     ).toBeDisabled();
     await page.clock.runFor(30_000);
     await expect(
-        page.getByRole("button", { name: "Resend code in 30 s", exact: true }),
+        page.getByRole("button", {
+            name: "Send code again in 30 s",
+            exact: true,
+        }),
     ).toBeDisabled();
+    await expect(
+        page.getByRole("button", {
+            name: "Send code again in 30 s",
+            exact: true,
+        }),
+    ).toHaveJSProperty("textContent", "Send code again in 30\u00a0s");
     await page.clock.runFor(30_000);
     await page
-        .getByRole("button", { name: "Resend verification code", exact: true })
+        .getByRole("button", { name: "Send email code again", exact: true })
         .click();
-    await expect(page.getByText("A new code was requested.")).toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Resend code in 60 s", exact: true }),
+        page.getByText("Check your email for a new code.", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", {
+            name: "Send code again in 60 s",
+            exact: true,
+        }),
     ).toBeDisabled();
     expect(resends).toBe(1);
 });
 
 for (const [status, text] of [
-    [429, "Wait a minute before requesting another code."],
-    [
-        409,
-        "No more codes can be sent for this sign-in. Sign in again to receive a new code.",
-    ],
+    [429, "Wait a minute before asking for another code."],
+    [409, "No more codes can be sent. Sign in again to get a new code."],
 ] as const) {
     test(`a resend answered with ${status} explains what to do next`, async ({
         page,
@@ -750,7 +764,7 @@ for (const [status, text] of [
         await page.goto("/app/");
         await page
             .getByRole("button", {
-                name: "Resend verification code",
+                name: "Send email code again",
                 exact: true,
             })
             .click();
@@ -778,12 +792,12 @@ test("a resend that ends the pending sign-in asks to sign in again", async ({
     );
     await page.goto("/app/");
     const resend = page.getByRole("button", {
-        name: "Resend verification code",
+        name: "Send email code again",
         exact: true,
     });
     await resend.click();
     await expect(page.locator("form").getByRole("alert")).toContainText(
-        "No more codes can be sent for this sign-in. Sign in again to receive a new code.",
+        "No more codes can be sent. Sign in again to get a new code.",
     );
     await expect(resend).toBeDisabled();
 });
@@ -804,7 +818,7 @@ test("a failed resend shows the server message and can be retried", async ({
     );
     await page.goto("/app/");
     const resend = page.getByRole("button", {
-        name: "Resend verification code",
+        name: "Send email code again",
         exact: true,
     });
     await resend.click();
@@ -831,7 +845,7 @@ test("an unexplained 429 on sign-in offers a password reset", async ({
         "Too many attempts. Wait a few minutes and try again, or reset your password.",
     );
     await page
-        .getByRole("button", { name: "Forgot password?", exact: true })
+        .getByRole("button", { name: "Forgot password", exact: true })
         .click();
     await expect(
         page.getByRole("heading", { name: "Reset your password" }),
@@ -853,10 +867,10 @@ test("an unexplained 429 on sign-up asks to wait", async ({ page }) => {
         .getByLabel("Password", { exact: true })
         .fill("Test-only-cobalt-79!");
     await page
-        .getByRole("button", { name: "Create company account", exact: true })
+        .getByRole("button", { name: "Create workspace", exact: true })
         .click();
     await expect(page.locator("form").getByRole("alert")).toContainText(
-        "Too many requests. Wait a few minutes and try again.",
+        "Too many attempts. Wait a few minutes and try again.",
     );
 });
 
@@ -894,12 +908,12 @@ test("requires the second factor before opening the workspace", async ({
         .last()
         .click();
     await expect(
-        page.getByRole("heading", { name: "Two-factor authentication" }),
+        page.getByRole("heading", { name: "Two-step verification" }),
     ).toBeVisible();
     await expect(
         page.getByRole("heading", { name: "Plants", exact: true }),
     ).not.toBeVisible();
-    await page.getByLabel("Authenticator or recovery code").fill("123456");
+    await page.getByLabel("Authenticator code or recovery code").fill("123456");
     await page.getByRole("button", { name: "Verify code" }).click();
     await expect(
         page.getByRole("heading", { name: "Plants", exact: true }),
@@ -960,7 +974,7 @@ test("a console deep link survives sign in and the second factor", async ({
         .getByRole("button", { name: "Sign in", exact: true })
         .last()
         .click();
-    await page.getByLabel("Authenticator or recovery code").fill("123456");
+    await page.getByLabel("Authenticator code or recovery code").fill("123456");
     await page.getByRole("button", { name: "Verify code" }).click();
     await expect(
         page.getByRole("heading", { name: "Plant review" }),
@@ -1085,15 +1099,15 @@ test("a completed password reset returns to sign in", async ({ page }) => {
         },
     );
     await page.goto("/app/");
-    await page.getByRole("button", { name: "Forgot password?" }).click();
+    await page.getByRole("button", { name: "Forgot password" }).click();
     await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
-    await page.getByRole("button", { name: "Send reset code" }).click();
+    await page.getByRole("button", { name: "Send email code" }).click();
     await expect(
         page.getByRole("heading", { name: "Choose a new password" }),
     ).toBeVisible();
     await expect(
         page.getByText(
-            "If an account uses owner@example.test, we sent a code to it. Enter the code and choose a new password.",
+            "If an account uses owner@example.test, Pyracast sends an email code to it. Enter the code and choose a new password.",
             { exact: true },
         ),
     ).toBeVisible();
@@ -1119,7 +1133,7 @@ test("account access reflows on a narrow screen without accessibility violations
         .getByRole("button", { name: "Create account", exact: true })
         .click();
     await expect(
-        page.getByRole("heading", { name: "Create your company account" }),
+        page.getByRole("heading", { name: "Create workspace" }),
     ).toBeVisible();
     expect(
         await page.evaluate(

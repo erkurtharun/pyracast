@@ -185,7 +185,7 @@ export function LinkedAccounts({
             <h2 id="linked-accounts-title">{t("linkedAccounts")}</h2>
             {callbackError && (
                 <p className="notice error" role="alert">
-                    {t("callbackError")}
+                    {t("connectFailed")}
                 </p>
             )}
             {error && (
@@ -222,7 +222,9 @@ export function LinkedAccounts({
                         )}
                         {!account.can_disconnect && (
                             <span className="fine">
-                                {t("lastSignInMethod")}
+                                {account.sign_in_available
+                                    ? t("lastSignInMethod")
+                                    : t("disconnectNeedsMethod")}
                             </span>
                         )}
                     </span>

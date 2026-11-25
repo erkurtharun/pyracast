@@ -23,7 +23,7 @@ const capacity = "Panel capacity (MWp)";
 
 function cover(page: Page) {
     return page.getByRole("heading", {
-        name: "Could not confirm your session",
+        name: "Pyracast cannot be reached",
     });
 }
 
@@ -170,7 +170,7 @@ test("the ending-soon warning appears at the next tick once the clock passed its
     await expect(
         page.getByRole("heading", { name: "Plants", exact: true }),
     ).toBeVisible();
-    const warning = page.getByText(/^Your session ends at /);
+    const warning = page.getByText(/^Automatic sign-out at /);
     await expect(warning).toHaveCount(0);
     await page.clock.setSystemTime(new Date(start.getTime() + 6 * 60_000));
     await page.clock.runFor(tick);

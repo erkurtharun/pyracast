@@ -22,7 +22,9 @@ test("a customer manages one plant site through the real API", async ({
         .locator("form")
         .getByRole("button", { name: "Sign in", exact: true })
         .click();
-    await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
 
     const forbidden = await page.evaluate(
         async ({ tenant, region }) => {
@@ -651,7 +653,9 @@ test("a customer manages one plant site through the real API", async ({
     );
     await page.getByRole("button", { name: "Delete", exact: true }).click();
     expect((await siteDeleted).status()).toBe(204);
-    await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
     await expect(
         page.getByRole("button", { name: /Browser plant/ }),
     ).toHaveCount(0);
