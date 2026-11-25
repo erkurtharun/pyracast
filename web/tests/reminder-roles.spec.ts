@@ -2,6 +2,7 @@ import type { Locator, Request } from "@playwright/test";
 import { expect, test, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
 import { errorBody } from "./support/errors";
+import { readsApplied, trackReads } from "./support/session";
 import {
     openReminders,
     paged,
@@ -178,12 +179,14 @@ async function refetch(page: Page) {
 }
 
 async function tenantsAgain(page: Page) {
+    await readsApplied(page, "/api/tenants/");
     const tenants = nextRequest(page, isTenants);
     await page.clock.fastForward("00:10");
     await page.evaluate(() =>
         window.dispatchEvent(new Event("visibilitychange")),
     );
     await (await tenants).response();
+    await readsApplied(page, "/api/tenants/");
 }
 
 async function watchFor(page: Page, needles: string[]) {
@@ -269,6 +272,7 @@ async function saveElsewhere(page: Page, body: object) {
 }
 
 async function asRole(page: Page, role: () => "admin" | "viewer") {
+    await trackReads(page, "/api/tenants/");
     await page.route("**/api/tenants/", (route) =>
         route.fulfill({
             json: paged([
@@ -344,6 +348,7 @@ test("address data stays hidden after administration moves, through two language
         const late = answerTo(page, await turkish.request);
         turkish.release();
         await late;
+        await readsApplied(page, "/api/tenants/");
         const tenants = nextRequest(page, isTenants);
         await page.clock.fastForward("00:10");
         await page.evaluate(() =>
@@ -365,6 +370,7 @@ test("address data stays hidden after administration moves, through two language
     }
     role = "admin";
     answersViewer = false;
+    await readsApplied(page, "/api/tenants/");
     const tenants = nextRequest(page, isTenants);
     await refetch(page);
     await (await tenants).response();

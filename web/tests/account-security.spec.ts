@@ -48,6 +48,9 @@ test("an expired account session returns to sign in instead of asking for reauth
         },
     );
     await page.goto("/app/w/");
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByRole("button", { name: "Set up authenticator" }).click();
     await expect(
@@ -100,6 +103,9 @@ test("administrator recovery codes request a fresh authenticator confirmation", 
             }),
     );
     await page.goto("/app/w/");
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByRole("button", { name: "Generate recovery codes" }).click();
     await page.getByRole("button", { name: "Replace codes" }).click();

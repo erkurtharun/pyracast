@@ -189,6 +189,81 @@ export function outstandingSessionReads(page: Page) {
     });
 }
 
+// Counts each document's GET reads of one path from its start; call before the page loads.
+export function trackReads(page: Page, path: string) {
+    return page.addInitScript((path) => {
+        let outstanding = 0;
+        let waiting: (() => void)[] = [];
+        // A message task runs after the answer's reactions, and a page clock does not hold it.
+        const settle = () => {
+            outstanding--;
+            const task = new MessageChannel();
+            task.port1.onmessage = () => {
+                if (outstanding > 0) return;
+                for (const resolve of waiting) resolve();
+                waiting = [];
+            };
+            task.port2.postMessage(null);
+        };
+        const applied = () =>
+            outstanding === 0
+                ? Promise.resolve()
+                : new Promise<void>((resolve) => waiting.push(resolve));
+        const readsApplied =
+            (Reflect.get(window, "readsApplied") as
+                Record<string, () => Promise<void>> | undefined) ?? {};
+        Object.assign(window, {
+            readsApplied: { ...readsApplied, [path]: applied },
+        });
+        const send = window.fetch.bind(window);
+        window.fetch = async (input, init) => {
+            const address = new URL(
+                input instanceof Request ? input.url : String(input),
+                window.location.href,
+            );
+            const method =
+                init?.method ??
+                (input instanceof Request ? input.method : "GET");
+            if (address.pathname !== path || method !== "GET")
+                return send(input, init);
+            outstanding++;
+            let response: Response;
+            try {
+                response = await send(input, init);
+            } catch (error) {
+                settle();
+                throw error;
+            }
+            if (response.status === 204) {
+                settle();
+                return response;
+            }
+            const body = response.json.bind(response);
+            response.json = async () => {
+                try {
+                    return (await body()) as unknown;
+                } finally {
+                    settle();
+                }
+            };
+            return response;
+        };
+    }, path);
+}
+
+export function readsApplied(page: Page, path: string) {
+    return page.evaluate(
+        (path) =>
+            (
+                Reflect.get(window, "readsApplied") as Record<
+                    string,
+                    () => Promise<void>
+                >
+            )[path]!(),
+        path,
+    );
+}
+
 export function isMarked(page: Page) {
     return page.evaluate(() => "documentMarker" in window);
 }

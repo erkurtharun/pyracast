@@ -1,6 +1,9 @@
 import { test, expect } from "./support/test";
 import { mockApi, paged, plant, region } from "./support/workspace";
 import { errorBody } from "./support/errors";
+import { readsApplied, trackReads } from "./support/session";
+
+const sites = "/api/tenants/1/sites/";
 
 test("a temporary site refresh failure preserves an open technical draft", async ({
     page,
@@ -71,6 +74,7 @@ test("an older pending submission cannot replace a saved technical update", asyn
             },
         }),
     );
+    await trackReads(page, sites);
     await page.goto("/app/");
     await page.getByRole("button", { name: /East array/ }).click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -87,14 +91,7 @@ test("an older pending submission cannot replace a saved technical update", asyn
         release();
     }
     await (await refreshed).finished();
-    await page.evaluate(
-        () =>
-            new Promise<void>((resolve) =>
-                requestAnimationFrame(() =>
-                    requestAnimationFrame(() => resolve()),
-                ),
-            ),
-    );
+    await readsApplied(page, sites);
     await page.getByRole("button", { name: "Location", exact: true }).click();
     await page
         .getByRole("button", { name: "Technical details", exact: true })
@@ -106,14 +103,7 @@ test("an older pending submission cannot replace a saved technical update", asyn
     const confirmed = page.waitForResponse("**/sites/");
     await page.clock.fastForward(120_000);
     await (await confirmed).finished();
-    await page.evaluate(
-        () =>
-            new Promise<void>((resolve) =>
-                requestAnimationFrame(() =>
-                    requestAnimationFrame(() => resolve()),
-                ),
-            ),
-    );
+    await readsApplied(page, sites);
     serverCapacity = 7;
     serverRevision = 3;
     const updated = page.waitForResponse("**/sites/");
