@@ -570,10 +570,9 @@ export async function held(owner: Owner, limit: Deadline) {
 }
 
 function evicted(plants: HeldPlant[]) {
-    const unopened = plants.find((plant) => plant.openedAt === null);
-    if (unopened) return unopened;
-    return plants.reduce((oldest, plant) =>
-        (plant.openedAt ?? 0) < (oldest.openedAt ?? 0) ? plant : oldest,
+    return (
+        plants.find((plant) => plant.openedAt === null) ??
+        [...plants].sort((a, b) => (a.openedAt ?? 0) - (b.openedAt ?? 0))[0]
     );
 }
 
@@ -648,8 +647,8 @@ export async function openPlant(
                     ...opened,
                     openedAt: at,
                 });
-                if (others.length >= plantBound)
-                    dropPlant(transaction, evicted(others));
+                const victim = others.length >= plantBound && evicted(others);
+                if (victim) dropPlant(transaction, victim);
                 read.done = true;
             }),
         limit,
