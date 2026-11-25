@@ -10,11 +10,22 @@ async function restricted(file: string, source: string) {
         filePath: path.join(web, file),
     });
     return result!.messages
-        .filter((message) => message.ruleId === "no-restricted-imports")
+        .filter((message) => message.ruleId?.endsWith("no-restricted-imports"))
         .map((message) => message.line);
 }
 
 const imports = (specifier: string) => `import "${specifier}";`;
+
+// Linting needs a file in the TypeScript project, so a path without one is probed through its configuration.
+async function guardedModules(file: string) {
+    const config = (await eslint.calculateConfigForFile(
+        path.join(web, file),
+    )) as { rules: Record<string, [unknown, { paths?: { name: string }[] }?]> };
+    return Object.values(config.rules)
+        .flatMap(([, options]) => options?.paths ?? [])
+        .map((entry) => entry.name)
+        .sort();
+}
 
 test("lib and i18n import neither screens nor routes", async () => {
     for (const file of ["src/lib/routes.ts", "src/i18n/language.ts"]) {
@@ -118,5 +129,61 @@ test("routes use features only through their top-level modules", async () => {
     ).toEqual([]);
     expect(
         await restricted(route, imports("@/features/portfolio/portfolio")),
+    ).toEqual([]);
+});
+
+test("screens change routes only through the navigation helper, and only the application's redirects use the router", async () => {
+    const routers = ["next/navigation", "next/navigation.js"].map(
+        (specifier) => `import { useRouter } from "${specifier}";`,
+    );
+    const links = ["next/link", "next/link.js"].map(
+        (specifier) => `import Link from "${specifier}";`,
+    );
+    const screens = [
+        "src/features/plant/plant-site.tsx",
+        "src/features/plant/workspace/navigation.ts",
+        "src/features/workspace/workspace-shell.tsx",
+        "src/ui/app-link.tsx",
+        "src/app/layout.tsx",
+    ];
+    const redirects = [
+        "src/features/session/entry.tsx",
+        "src/features/workspace/redirect.tsx",
+    ];
+    for (const source of [...routers, ...links])
+        for (const file of screens)
+            expect(await restricted(file, source), `${file} ${source}`).toEqual(
+                [1],
+            );
+    for (const file of redirects) {
+        for (const source of routers)
+            expect(await restricted(file, source), `${file} ${source}`).toEqual(
+                [],
+            );
+        for (const source of links)
+            expect(await restricted(file, source), `${file} ${source}`).toEqual(
+                [1],
+            );
+    }
+    for (const source of [...routers, ...links])
+        expect(await restricted("src/lib/leave-guard.ts", source)).toEqual([]);
+    for (const file of [
+        "src/features/example.tsx",
+        "src/features/plant/example.tsx",
+        "src/features/plant/history/example.tsx",
+        "src/ui/example.tsx",
+        "src/app/example/page.tsx",
+    ])
+        expect(await guardedModules(file), file).toEqual([
+            "next/link",
+            "next/link.js",
+            "next/navigation",
+            "next/navigation.js",
+        ]);
+    expect(
+        await restricted(
+            "src/features/plant/plant-site.tsx",
+            'import { useSearchParams } from "next/navigation.js";',
+        ),
     ).toEqual([]);
 });

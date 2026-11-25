@@ -1,28 +1,14 @@
 "use client";
 import { useTranslations } from "next-intl";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, type ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
+import type { ReactNode } from "react";
+import { useNavigate } from "@/lib/leave-guard";
 import { routeId, routes } from "@/lib/routes";
 import { OperationalInbox } from "@/features/inbox/operational-inbox";
 import { RecycleBin } from "@/features/trash/recycle-bin";
+import { Replace } from "./redirect";
 import { WorkspaceMembers } from "./workspace-members";
-import {
-    useNavigating,
-    useOptionalWorkspace,
-    useWorkspace,
-} from "./workspace-shell";
-
-// A later replace discards a pending push, so a redirect yields to the shell navigation the
-// person started; the transition stays pending until the router commits or drops that push,
-// which holds only while the shell starts the push synchronously inside the transition.
-function Replace({ href }: { href: string }) {
-    const router = useRouter();
-    const navigating = useNavigating();
-    useEffect(() => {
-        if (!navigating) router.replace(href);
-    }, [navigating, router, href]);
-    return null;
-}
+import { useOptionalWorkspace, useWorkspace } from "./workspace-shell";
 
 function AdminOnly({ children }: { children: ReactNode }) {
     const { tenant } = useWorkspace();
@@ -65,13 +51,13 @@ export function InboxPage() {
 
 export function TrashPage() {
     const t = useTranslations("Dashboard");
-    const router = useRouter();
+    const navigate = useNavigate();
     const { tenant } = useWorkspace();
     return (
         <AdminOnly>
             <button
                 className="back-button"
-                onClick={() => router.push(routes.portfolio(tenant.id))}
+                onClick={() => navigate(routes.portfolio(tenant.id))}
             >
                 {t("overview")}
             </button>

@@ -7,11 +7,13 @@ import type { components } from "@/lib/schema";
 import { displayMessage, UnconfirmedError } from "@/lib/api/errors";
 import { useFormat } from "@/lib/format/use-format";
 import { useAttempt } from "@/lib/idempotency";
+import { useLeaveGuard } from "@/lib/leave-guard";
 import { parseProduction, type ProductionFile } from "@/lib/production";
 import {
     ActionForm,
     CheckboxField,
     ControlField,
+    UnconfirmedNotice,
     useErrorMessage,
 } from "@/ui/form";
 import { Notice } from "@/ui/ui";
@@ -20,6 +22,7 @@ import { ScrollRegion } from "@/ui/scroll-region";
 type Preview = components["schemas"]["ProductionPreviewOutput"];
 type Selection =
     | { status: "empty" }
+    | { status: "reading" }
     | { status: "invalid"; error: string }
     | ({ status: "ready"; fileName: string; sha256: string } & ProductionFile)
     | ({
@@ -88,12 +91,21 @@ export function ProductionImport({
     }, [previewRequest]);
     const ready =
         selection.status === "ready" || selection.status === "preview";
+    const previewed =
+        selection.status === "preview" && previewRequest.status === "idle";
+    useLeaveGuard(
+        selection.status === "reading" ||
+            selection.status === "preview" ||
+            (selection.status === "ready" && !result),
+    );
     async function selectFile(file?: File) {
         const current = ++sequence.current;
-        setSelection({ status: "empty" });
         setResult(undefined);
         setPreviewRequest({ status: "idle" });
-        if (!file) return;
+        if (!file) {
+            setSelection({ status: "empty" });
+            return;
+        }
         if (file.size > 2 * 1024 * 1024) {
             setSelection({
                 status: "invalid",
@@ -101,6 +113,7 @@ export function ProductionImport({
             });
             return;
         }
+        setSelection({ status: "reading" });
         try {
             const parsed = parseProduction(await file.text(), csvTexts);
             const sha256 = await fileSha256(file);
@@ -262,138 +275,127 @@ export function ProductionImport({
                     </div>
                 </fieldset>
             </form>
-            {selection.status === "preview" &&
-                previewRequest.status === "idle" && (
-                    <>
-                        {(selection.preview.warnings ?? []).map((warning) => (
-                            <Notice
-                                key={`${warning.code}/${warning.starts_at}`}
-                            >
-                                {t(warning.code, {
-                                    start: format.time(
-                                        warning.starts_at,
-                                        timezone,
-                                    ),
-                                    end: format.time(warning.ends_at, timezone),
-                                })}
-                            </Notice>
-                        ))}
-                        <ScrollRegion label={t("import_preview")}>
-                            <table className="production-preview-table">
-                                <caption>{t("import_preview")}</caption>
-                                <thead>
-                                    <tr>
-                                        <th>{t("interval")}</th>
-                                        <th>{t("current_mwh")}</th>
-                                        <th>{t("new_mwh")}</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {selection.preview.preview.map((row) => (
-                                        <tr
-                                            key={`${row.starts_at}/${row.ends_at}`}
-                                        >
-                                            <th scope="row">
-                                                <span className="production-preview-date">
-                                                    {date(row.starts_at)}
-                                                </span>
-                                                <span className="production-preview-time">
-                                                    {time(row.starts_at)}–
-                                                    {time(row.ends_at)}
-                                                </span>
-                                                <span className="sr-only">
-                                                    {t("exact_interval", {
-                                                        start: row.starts_at,
-                                                        end: row.ends_at,
-                                                    })}
-                                                </span>
-                                            </th>
-                                            <td>
-                                                {row.current_energy_mwh === null
-                                                    ? t("missing")
-                                                    : format.number(
-                                                          row.current_energy_mwh,
-                                                      )}
-                                            </td>
-                                            <td>
-                                                {format.number(
-                                                    row.new_energy_mwh,
-                                                )}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </ScrollRegion>
-                        <ActionForm
-                            submit={t("confirm_import", {
-                                count: selection.preview.changes.length,
+            {attempt.outstanding && !previewed && (
+                <UnconfirmedNotice repeatable={false} />
+            )}
+            {previewed && (
+                <>
+                    {(selection.preview.warnings ?? []).map((warning) => (
+                        <Notice key={`${warning.code}/${warning.starts_at}`}>
+                            {t(warning.code, {
+                                start: format.time(warning.starts_at, timezone),
+                                end: format.time(warning.ends_at, timezone),
                             })}
-                            attempt={
-                                attempt.outstanding && {
-                                    repeats: (data) =>
-                                        attempt.repeats(
-                                            importBody(
-                                                selection,
-                                                configuration,
-                                                data.has("confirm_implausible"),
-                                            ),
+                        </Notice>
+                    ))}
+                    <ScrollRegion label={t("import_preview")}>
+                        <table className="production-preview-table">
+                            <caption>{t("import_preview")}</caption>
+                            <thead>
+                                <tr>
+                                    <th>{t("interval")}</th>
+                                    <th>{t("current_mwh")}</th>
+                                    <th>{t("new_mwh")}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {selection.preview.preview.map((row) => (
+                                    <tr key={`${row.starts_at}/${row.ends_at}`}>
+                                        <th scope="row">
+                                            <span className="production-preview-date">
+                                                {date(row.starts_at)}
+                                            </span>
+                                            <span className="production-preview-time">
+                                                {time(row.starts_at)}–
+                                                {time(row.ends_at)}
+                                            </span>
+                                            <span className="sr-only">
+                                                {t("exact_interval", {
+                                                    start: row.starts_at,
+                                                    end: row.ends_at,
+                                                })}
+                                            </span>
+                                        </th>
+                                        <td>
+                                            {row.current_energy_mwh === null
+                                                ? t("missing")
+                                                : format.number(
+                                                      row.current_energy_mwh,
+                                                  )}
+                                        </td>
+                                        <td>
+                                            {format.number(row.new_energy_mwh)}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </ScrollRegion>
+                    <ActionForm
+                        submit={t("confirm_import", {
+                            count: selection.preview.changes.length,
+                        })}
+                        attempt={
+                            attempt.outstanding && {
+                                repeats: (data) =>
+                                    attempt.repeats(
+                                        importBody(
+                                            selection,
+                                            configuration,
+                                            data.has("confirm_implausible"),
                                         ),
-                                }
+                                    ),
                             }
-                            onSubmit={async (data) => {
-                                if (confirming) return;
-                                const current = ++sequence.current;
-                                const body = importBody(
-                                    selection,
-                                    configuration,
-                                    data.has("confirm_implausible"),
-                                );
-                                const sending = attempt.next(body);
-                                setConfirming(true);
-                                try {
-                                    const response = await api
-                                        .post(
-                                            "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/changes/",
-                                            { path: scope, body },
-                                        )
-                                        .catch((error: unknown) => {
-                                            attempt.settle(sending, error);
-                                            if (
-                                                error instanceof
-                                                UnconfirmedError
-                                            )
-                                                onChanged();
-                                            throw error;
-                                        });
-                                    attempt.settle(sending);
-                                    if (current === sequence.current) {
-                                        setResult(response);
-                                        setSelection({
-                                            status: "ready",
-                                            fileName: selection.fileName,
-                                            sha256: selection.sha256,
-                                            unit: selection.unit,
-                                            observations:
-                                                selection.observations,
-                                        });
-                                        onChanged();
-                                    }
-                                } finally {
-                                    setConfirming(false);
+                        }
+                        onSubmit={async (data) => {
+                            if (confirming) return;
+                            const current = ++sequence.current;
+                            const body = importBody(
+                                selection,
+                                configuration,
+                                data.has("confirm_implausible"),
+                            );
+                            const sending = attempt.next(body);
+                            setConfirming(true);
+                            try {
+                                const response = await api
+                                    .post(
+                                        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/changes/",
+                                        { path: scope, body },
+                                    )
+                                    .catch((error: unknown) => {
+                                        attempt.settle(sending, error);
+                                        if (error instanceof UnconfirmedError)
+                                            onChanged();
+                                        throw error;
+                                    });
+                                attempt.settle(sending);
+                                if (current === sequence.current) {
+                                    setResult(response);
+                                    setSelection({
+                                        status: "ready",
+                                        fileName: selection.fileName,
+                                        sha256: selection.sha256,
+                                        unit: selection.unit,
+                                        observations: selection.observations,
+                                    });
+                                    onChanged();
                                 }
-                            }}
-                        >
-                            {implausible && (
-                                <CheckboxField
-                                    label={t("confirm_implausible")}
-                                    name="confirm_implausible"
-                                    required
-                                />
-                            )}
-                        </ActionForm>
-                    </>
-                )}
+                            } finally {
+                                setConfirming(false);
+                            }
+                        }}
+                    >
+                        {implausible && (
+                            <CheckboxField
+                                label={t("confirm_implausible")}
+                                name="confirm_implausible"
+                                required
+                            />
+                        )}
+                    </ActionForm>
+                </>
+            )}
             {result && (
                 <Notice>
                     {t("import_complete", {

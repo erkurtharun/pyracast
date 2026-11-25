@@ -8,6 +8,21 @@ import css from "@eslint/css";
 import pyracast from "./eslint/design-tokens.mjs";
 import { generatedCode } from "./eslint/generated-code.mjs";
 
+const navigation =
+    "A route change the person starts goes through useNavigate from @/lib/leave-guard.";
+const links = ["next/link", "next/link.js"].map((name) => ({
+    name,
+    message: navigation,
+}));
+const routers = ["next/navigation", "next/navigation.js"].map((name) => ({
+    name,
+    importNames: ["useRouter"],
+    message: navigation,
+}));
+const guardNavigation = (files, paths) => ({
+    files,
+    rules: { "@typescript-eslint/no-restricted-imports": ["error", { paths }] },
+});
 // Imports point down: app -> features -> ui -> lib and i18n. A feature reaches another one only
 // through its top-level modules; nested folders are its internals.
 const restrict = (files, ...group) => ({
@@ -122,6 +137,21 @@ export default defineConfig([
         ["src/app/**/*.{ts,tsx}"],
         "**/components/**",
         "**/features/*/*/**",
+    ),
+    guardNavigation(
+        [
+            "src/ui/**/*.{ts,tsx}",
+            "src/features/**/*.{ts,tsx}",
+            "src/app/**/*.{ts,tsx}",
+        ],
+        [...routers, ...links],
+    ),
+    guardNavigation(
+        [
+            "src/features/session/entry.tsx",
+            "src/features/workspace/redirect.tsx",
+        ],
+        links,
     ),
     {
         files: ["**/*.css"],
