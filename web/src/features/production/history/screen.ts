@@ -1,3 +1,4 @@
+import { UnconfirmedError } from "@/lib/api/errors";
 import { outstandingAfter, serverTrim } from "@/lib/idempotency";
 import type { Quality } from "@/lib/production";
 import { qualityOf } from "@/lib/production";
@@ -126,11 +127,12 @@ function away(screen: Screen) {
 }
 
 function withAttempt(draft: Draft, attempt: Write | null | undefined): Draft {
-    const { key, energy, quality, expectedRevision } = draft;
+    const { key, energy, quality, opened, expectedRevision } = draft;
     return {
         key,
         energy,
         quality,
+        opened,
         expectedRevision,
         ...(attempt && { attempt }),
     };
@@ -188,6 +190,7 @@ export function repeatsAttempt(editor: Draft) {
 function outstandingIssue(editor: Editor) {
     return editor.status === "failed" &&
         editor.issue !== "invalid_energy" &&
+        !editor.issue.read &&
         editor.attempt
         ? editor.issue
         : undefined;
@@ -205,8 +208,7 @@ export function repeatsOrphan(screen: Screen) {
 }
 
 function opened(row: Interval, item: StagedChange | undefined): Draft {
-    return {
-        key: intervalKey(row),
+    const values = {
         energy:
             item?.action === "set"
                 ? item.energy.toString()
@@ -215,8 +217,42 @@ function opened(row: Interval, item: StagedChange | undefined): Draft {
             item?.action === "set"
                 ? item.quality
                 : qualityOf(row.observation?.quality),
+    };
+    return {
+        key: intervalKey(row),
+        ...values,
+        opened: values,
         expectedRevision: row.revision_id,
     };
+}
+
+export function editorUnsaved(editor: Editor) {
+    return (
+        editor.status !== "closed" &&
+        (editor.energy !== editor.opened.energy ||
+            editor.quality !== editor.opened.quality ||
+            writing(editor) ||
+            !!editor.attempt)
+    );
+}
+
+export function unsentInput({ draft, editor }: Screen) {
+    const send = draft?.send;
+    const sent =
+        send?.status === "sending" ||
+        (send?.status === "failed" && send.error instanceof UnconfirmedError);
+    if (draft && !sent) return true;
+    if (
+        editor.status === "closed" ||
+        (editor.energy === editor.opened.energy &&
+            editor.quality === editor.opened.quality)
+    )
+        return false;
+    return ![runningWrite(editor), editor.attempt].some(
+        (write) =>
+            write?.action === "set" &&
+            contentOf(editor, "set") === write.payload,
+    );
 }
 
 function editingOn(editor: Editor, row: Interval) {
@@ -286,6 +322,12 @@ export function reconcileEditor(
             ...(issue && { error: issue.error }),
         };
     }
+    if (
+        editor.status === "failed" &&
+        editor.issue !== "invalid_energy" &&
+        editor.issue.read
+    )
+        return { ...values(editor), status: "editing" };
     if (editor.status !== "reloading") return editor;
     return {
         ...values(editor),
@@ -535,7 +577,11 @@ export function reduceScreen(screen: Screen, event: ScreenEvent): Screen {
                 editor: {
                     ...values(editor),
                     status: "failed",
-                    issue: { error: event.error, implausible: false },
+                    issue: {
+                        error: event.error,
+                        implausible: false,
+                        read: true,
+                    },
                 },
             };
         case "dayShown":

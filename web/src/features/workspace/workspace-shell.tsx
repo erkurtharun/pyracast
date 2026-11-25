@@ -1,7 +1,7 @@
 "use client";
 import { partialMatchKey, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import {
     createContext,
     Suspense,
@@ -13,6 +13,7 @@ import {
 import type { Tenant } from "@/lib/api";
 import { deviceZone } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
+import { useNavigate } from "@/lib/leave-guard";
 import { contactEmail } from "@/lib/public-metadata";
 import { keys } from "@/lib/api/keys";
 import { answerSentAt, cadence, QueryOwner, useApiList } from "@/lib/api/query";
@@ -74,7 +75,7 @@ export function WorkspaceShell({
 }) {
     const t = useTranslations("Dashboard");
     const errors = useTranslations("Errors");
-    const router = useRouter();
+    const navigate = useNavigate();
     const screen = screenOf(usePathname());
     const { session, changed } = useSessionState();
     const user = session?.user;
@@ -111,7 +112,10 @@ export function WorkspaceShell({
         (canManage ? (tenant?.pending_review_count ?? 0) : 0) +
         (tenant?.unread_outcome_count ?? 0);
     const [navigating, startNavigation] = useTransition();
-    const go = (target: string) => startNavigation(() => router.push(target));
+    const go = (target: string) =>
+        startNavigation(() => {
+            navigate(target);
+        });
     const entry = (active: boolean) => ({
         className: active ? "active" : "",
         "aria-current": active ? ("page" as const) : undefined,

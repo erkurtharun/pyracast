@@ -101,7 +101,9 @@ def _summary(
     title = _text(sheet, 1, 1, report.plant_name)
     title.font = Font(bold=True, size=14)
     title.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-    lines = len(wrap(report.plant_name, _TITLE_CHARACTERS)) or 1
+    lines = sum(
+        len(wrap(line, _TITLE_CHARACTERS)) or 1 for line in cast(str, title.value).split("\n")
+    )
     sheet.row_dimensions[1].height = min(409, lines * _TITLE_LINE_POINTS + 4)
     _text(
         sheet,

@@ -1,12 +1,12 @@
 "use client";
 import { useTranslations } from "next-intl";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
 import { Suspense, useState } from "react";
 import type { Plant, PlantScope, Site } from "@/lib/api";
 import { useRefresh } from "@/lib/api/query";
 import { plantDay } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
+import { useNavigate } from "@/lib/leave-guard";
 import { sectionUnavailable } from "@/lib/on-demand";
 import {
     plantView,
@@ -64,7 +64,7 @@ export function PlantWorkspace({
     const t = useTranslations("PlantWorkspace");
     const format = useFormat();
     const canManage = useCanManageWorkspace();
-    const router = useRouter();
+    const navigate = useNavigate();
     const refresh = useRefresh();
     const navigation = usePlantNavigation(scope, tab, address);
     const forecastView = plantView("forecast", address);
@@ -85,10 +85,7 @@ export function PlantWorkspace({
         <ExportPlant
             value={{ id: currentPlant.id, name: currentPlant.name, timezone }}
         >
-            <button
-                className="back-button"
-                onClick={() => router.push(portfolio)}
-            >
+            <button className="back-button" onClick={() => navigate(portfolio)}>
                 {t("allPlants")}
             </button>
             {!canManage && (tab === "production" || tab === "outages") && (
@@ -159,7 +156,7 @@ export function PlantWorkspace({
                         onChanged={changed}
                         onDeleted={async () => {
                             await changed();
-                            router.push(portfolio);
+                            navigate(portfolio);
                         }}
                     />
                 ) : tab === "production" ? (
@@ -172,6 +169,7 @@ export function PlantWorkspace({
                         baseDay={navigation.base.date}
                         leaving={navigation.leaving("production")}
                         show={navigation.show}
+                        keep={navigation.keep}
                         onSaved={changed}
                     />
                 ) : !configuration ? (
