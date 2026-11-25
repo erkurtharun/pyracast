@@ -12,6 +12,16 @@ export function reloadPage() {
     window.location.reload();
 }
 
+export function reloadAfter(settled: Promise<unknown>, reload = reloadPage) {
+    let active = true;
+    void settled.then(() => {
+        if (active) reload();
+    });
+    return () => {
+        active = false;
+    };
+}
+
 export function recovery(error: unknown, retry: () => void) {
     return error instanceof SectionUnavailable ? reloadPage : retry;
 }
