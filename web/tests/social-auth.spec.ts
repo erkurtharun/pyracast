@@ -1197,8 +1197,6 @@ test("a provider return replaces its address with the one the sign-in started at
         /\/app\/w\/1\/plants\/11\/forecast\//,
     );
     await continueWithGoogle(page);
-    await expect
-        .poll(() => sent)
-        .toEqual(["/app/w/1/plants/11/forecast/"]);
+    await expect.poll(() => sent).toEqual(["/app/w/1/plants/11/forecast/"]);
     expect(await storedReturn(page)).toBeNull();
 });
