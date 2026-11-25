@@ -147,6 +147,7 @@ jobs:
       - name: Read Debian's fixed libzstd1 from the backend and web images
         run: |
           set -o pipefail
+          digests=()
           for image in pyracast-backend:ci pyracast-web:ci; do
             files=$(mktemp -d)
             container=$(docker create "$image")
@@ -156,9 +157,10 @@ jobs:
             version=$(sed -n 's/^Version: //p' "$files/var/lib/dpkg/status.d/libzstd1")
             echo "$image carries libzstd1 $version"
             dpkg --compare-versions "$version" ge 1.5.7+dfsg-1+deb13u1
-            (cd "$files" && md5sum --check --strict var/lib/dpkg/status.d/libzstd1.md5sums)
             (cd "$files/usr/lib/x86_64-linux-gnu" && names=(*) && [[ "${names[*]}" == 'libzstd.so.1 libzstd.so.1.5.7' ]])
+            digests+=("$(sha256sum "$files/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.7" | cut -d' ' -f1)")
           done
+          [[ "${digests[0]}" =~ ^[0-9a-f]{64}$ && "${digests[0]}" == "${digests[1]}" ]]
       - name: Scan every image; block every high or critical vulnerability
         run: |
           POSTGRES_IMAGE=$(docker image inspect pyracast-postgres:ci --format '{{.Id}}')
