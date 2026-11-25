@@ -14,6 +14,20 @@ import { CollectionStatus } from "./collection-status";
 
 type Schedule = components["schemas"]["CollectionScheduleOutput"];
 
+function sentTimes(times: readonly string[]) {
+    return [...times].sort(
+        (a, b) => Number(a.replace(":", "")) - Number(b.replace(":", "")),
+    );
+}
+
+function sameTimes(a: readonly string[], b: readonly string[]) {
+    const sorted = sentTimes(b);
+    return (
+        a.length === b.length &&
+        sentTimes(a).every((time, index) => time === sorted[index])
+    );
+}
+
 export function CollectionSchedule({
     scope,
     region,
@@ -60,6 +74,8 @@ function ScheduleEditor({
     const label = useLabel();
 
     const [times, setTimes] = useState(data.times);
+    const [saved, setSaved] =
+        useState<Pick<Schedule, "enabled" | "times">>(data);
     return (
         <>
             <section className="panel">
@@ -67,6 +83,7 @@ function ScheduleEditor({
                 <p>{t("chooseTimes")}</p>
                 <ActionForm
                     submit={t("saveCollectionSchedule")}
+                    unsaved={!sameTimes(times, saved.times)}
                     onSubmit={async (form) => {
                         const enabled = form.get("enabled") === "on";
                         if (
@@ -86,24 +103,19 @@ function ScheduleEditor({
                             throw new DisplayError(
                                 t("addAtLeastOneCollectionTime"),
                             );
-                        const compareTimes = (a: string, b: string) =>
-                            Number(a.replace(":", "")) -
-                            Number(b.replace(":", ""));
-                        const sorted = [...times].sort(compareTimes);
                         if (
-                            enabled === data.enabled &&
-                            JSON.stringify(sorted) ===
-                                JSON.stringify(
-                                    [...data.times].sort(compareTimes),
-                                )
+                            enabled === saved.enabled &&
+                            sameTimes(times, saved.times)
                         )
                             return;
-                        await api.put(
-                            "/api/tenants/{tenant_id}/regions/{region_id}/collection-schedule/",
-                            {
-                                path: scope,
-                                body: { enabled, times: sorted },
-                            },
+                        setSaved(
+                            await api.put(
+                                "/api/tenants/{tenant_id}/regions/{region_id}/collection-schedule/",
+                                {
+                                    path: scope,
+                                    body: { enabled, times: sentTimes(times) },
+                                },
+                            ),
                         );
                         onSaved();
                     }}

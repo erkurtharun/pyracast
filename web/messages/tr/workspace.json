@@ -90,6 +90,7 @@
         "saveConfiguration": "Yapılandırmayı kaydet",
         "productionViews": "Üretim görünümleri",
         "comparison": "Karşılaştırma",
+        "configurationChanged": "Santralin yapılandırması değişti; gönderilmemiş girdileriniz silindi.",
         "approvalStatus": "Santral durumu: {status}. Veri toplamayı sürdürmek için {contact} adresinden Pyracast desteğine yazın.",
         "rejectedNotice": "Pyracast desteği bu santrali onaylamadı.",
         "reviewReason": "{date} tarihli karar (santral saati): {reason}",
