@@ -4383,22 +4383,14 @@
                 "parameters": [
                     {
                         "in": "query",
-                        "name": "comparison",
+                        "name": "data_source",
                         "schema": {
-                            "enum": ["archived_forecast", "historical_model"],
+                            "enum": ["forecast", "satellite"],
                             "type": "string",
-                            "default": "archived_forecast",
+                            "default": "forecast",
                             "minLength": 1
                         },
-                        "description": "* `archived_forecast` - archived_forecast\n* `historical_model` - historical_model"
-                    },
-                    {
-                        "in": "query",
-                        "name": "daylight_only",
-                        "schema": {
-                            "type": "boolean",
-                            "default": false
-                        }
+                        "description": "* `forecast` - forecast\n* `satellite` - satellite"
                     },
                     {
                         "in": "query",
@@ -4406,15 +4398,6 @@
                         "schema": {
                             "type": "string",
                             "format": "date"
-                        }
-                    },
-                    {
-                        "in": "query",
-                        "name": "issuance_cutoff",
-                        "schema": {
-                            "type": "string",
-                            "format": "time",
-                            "nullable": true
                         }
                     },
                     {
@@ -6924,11 +6907,6 @@
                 "type": "string",
                 "description": "* `collecting` - Collecting\n* `waiting_for_approval` - Waiting for approval\n* `paused` - Paused\n* `provider_attention` - Waiting for the provider"
             },
-            "ComparisonEnum": {
-                "enum": ["archived_forecast", "historical_model"],
-                "type": "string",
-                "description": "* `archived_forecast` - archived_forecast\n* `historical_model` - historical_model"
-            },
             "ConfigurationOutput": {
                 "type": "object",
                 "properties": {
@@ -7068,6 +7046,11 @@
                 "enum": ["manual", "automatic"],
                 "type": "string",
                 "description": "* `manual` - manual\n* `automatic` - automatic"
+            },
+            "DataSourceEnum": {
+                "enum": ["forecast", "satellite"],
+                "type": "string",
+                "description": "* `forecast` - forecast\n* `satellite` - satellite"
             },
             "DayUnavailableReasonEnum": {
                 "enum": [
@@ -8964,11 +8947,6 @@
                 },
                 "required": ["address", "memberships", "role"]
             },
-            "MetricScopeEnum": {
-                "enum": ["daylight_intervals", "full_day"],
-                "type": "string",
-                "description": "* `daylight_intervals` - daylight_intervals\n* `full_day` - full_day"
-            },
             "MountingTypeEnum": {
                 "enum": ["unknown", "fixed", "tracking"],
                 "type": "string",
@@ -9425,66 +9403,12 @@
                             }
                         ]
                     },
-                    "selection_policy": {
-                        "nullable": true,
-                        "oneOf": [
-                            {
-                                "$ref": "#/components/schemas/PerformanceSelectionPolicyEnum"
-                            },
-                            {
-                                "$ref": "#/components/schemas/NullEnum"
-                            }
-                        ]
-                    },
-                    "snapshot_id": {
+                    "forecast_id": {
                         "type": "integer",
-                        "nullable": true
-                    },
-                    "issuance_id": {
-                        "type": "integer",
-                        "nullable": true
-                    },
-                    "configuration_id": {
-                        "type": "integer",
-                        "nullable": true
-                    },
-                    "model_version": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "source_snapshot_ids": {
-                        "type": "array",
-                        "items": {
-                            "type": "integer"
-                        }
-                    },
-                    "reference_provenance": {},
-                    "collected_at": {
-                        "type": "string",
-                        "format": "date-time",
-                        "nullable": true
-                    },
-                    "available_at": {
-                        "type": "string",
-                        "format": "date-time",
-                        "nullable": true
-                    },
-                    "selection_cutoff": {
-                        "type": "string",
-                        "format": "date-time",
                         "nullable": true
                     },
                     "calibration_id": {
                         "type": "integer",
-                        "nullable": true
-                    },
-                    "calibration_in_sample": {
-                        "type": "boolean",
-                        "nullable": true
-                    },
-                    "factor": {
-                        "type": "number",
-                        "format": "double",
                         "nullable": true
                     },
                     "measured_energy_mwh": {
@@ -9497,120 +9421,41 @@
                         "format": "double",
                         "nullable": true
                     },
-                    "baseline_energy_mwh": {
-                        "type": "number",
-                        "format": "double",
-                        "nullable": true
-                    },
                     "error_mwh": {
                         "type": "number",
                         "format": "double",
                         "nullable": true
-                    },
-                    "manual_observation_ids": {
-                        "type": "array",
-                        "items": {
-                            "type": "integer"
-                        }
-                    },
-                    "settlement_snapshot_ids": {
-                        "type": "array",
-                        "items": {
-                            "type": "integer"
-                        }
-                    },
-                    "provisional_snapshot_ids": {
-                        "type": "array",
-                        "items": {
-                            "type": "integer"
-                        }
-                    },
-                    "source_kind": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "historical_configuration_assumed": {
-                        "type": "boolean"
                     },
                     "provisional_production": {
                         "type": "boolean"
                     }
                 },
                 "required": [
-                    "available_at",
-                    "baseline_energy_mwh",
                     "calibration_id",
-                    "calibration_in_sample",
-                    "collected_at",
-                    "configuration_id",
                     "date",
                     "error_mwh",
-                    "factor",
-                    "historical_configuration_assumed",
-                    "issuance_id",
-                    "manual_observation_ids",
+                    "forecast_id",
                     "measured_energy_mwh",
-                    "model_version",
                     "predicted_energy_mwh",
                     "provisional_production",
-                    "provisional_snapshot_ids",
                     "reason",
-                    "selection_cutoff",
-                    "selection_policy",
-                    "settlement_snapshot_ids",
-                    "snapshot_id",
-                    "source_kind",
                     "status"
                 ]
             },
             "PerformanceDayReasonEnum": {
                 "enum": [
-                    "configuration_not_comparable",
                     "forecast_not_available",
                     "estimated_actuals_not_available",
                     "invalid_forecast_data",
                     "incomplete_or_invalid_day"
                 ],
                 "type": "string",
-                "description": "* `configuration_not_comparable` - Configuration Not Comparable\n* `forecast_not_available` - Forecast Not Available\n* `estimated_actuals_not_available` - Estimated Actuals Not Available\n* `invalid_forecast_data` - Invalid Forecast Data\n* `incomplete_or_invalid_day` - Incomplete Or Invalid Day"
+                "description": "* `forecast_not_available` - Forecast Not Available\n* `estimated_actuals_not_available` - Estimated Actuals Not Available\n* `invalid_forecast_data` - Invalid Forecast Data\n* `incomplete_or_invalid_day` - Incomplete Or Invalid Day"
             },
             "PerformanceDayStatusEnum": {
                 "enum": ["matched", "missing"],
                 "type": "string",
                 "description": "* `matched` - matched\n* `missing` - missing"
-            },
-            "PerformanceMetrics": {
-                "type": "object",
-                "properties": {
-                    "interval_mae_mw": {
-                        "type": "number",
-                        "format": "double"
-                    },
-                    "source_positive_mae_mw": {
-                        "type": "number",
-                        "format": "double",
-                        "nullable": true
-                    },
-                    "bias_mw": {
-                        "type": "number",
-                        "format": "double"
-                    },
-                    "daily_mae_mwh": {
-                        "type": "number",
-                        "format": "double"
-                    },
-                    "daily_bias_mwh": {
-                        "type": "number",
-                        "format": "double"
-                    }
-                },
-                "required": [
-                    "bias_mw",
-                    "daily_bias_mwh",
-                    "daily_mae_mwh",
-                    "interval_mae_mw",
-                    "source_positive_mae_mw"
-                ]
             },
             "PerformanceOutput": {
                 "type": "object",
@@ -9637,84 +9482,29 @@
                         "type": "string",
                         "format": "date-time"
                     },
-                    "selection_policy": {
-                        "$ref": "#/components/schemas/PerformanceSelectionPolicyEnum"
-                    },
-                    "comparison": {
-                        "$ref": "#/components/schemas/ComparisonEnum"
-                    },
-                    "issuance_cutoff": {
-                        "type": "string",
-                        "format": "time",
-                        "nullable": true
-                    },
-                    "measurement_policy": {
-                        "type": "string"
-                    },
-                    "configuration_created_at": {
-                        "type": "string",
-                        "format": "date-time",
-                        "nullable": true
-                    },
-                    "measurement_basis": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "metric_scope": {
-                        "$ref": "#/components/schemas/MetricScopeEnum"
-                    },
-                    "daylight_policy": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "matched_days": {
-                        "type": "integer"
+                    "data_source": {
+                        "$ref": "#/components/schemas/DataSourceEnum"
                     },
                     "requested_days": {
                         "type": "integer"
                     },
-                    "missing_days": {
+                    "matched_days": {
                         "type": "integer"
-                    },
-                    "excluded_days": {
-                        "type": "integer"
-                    },
-                    "scored_intervals": {
-                        "type": "integer"
-                    },
-                    "scored_hours": {
-                        "type": "number",
-                        "format": "double"
                     },
                     "relative_error": {
                         "type": "number",
                         "format": "double",
                         "nullable": true,
-                        "description": "Sum of absolute daily errors over measured energy."
+                        "description": "Sum of absolute daily errors over actual production."
                     },
-                    "skill_score": {
+                    "daily_mae_mwh": {
                         "type": "number",
                         "format": "double",
-                        "nullable": true,
-                        "description": "One minus the absolute daily error over that of the uncalibrated reference, on days the calibration did not train on."
-                    },
-                    "skill_days": {
-                        "type": "integer"
-                    },
-                    "metrics": {
-                        "allOf": [
-                            {
-                                "$ref": "#/components/schemas/PerformanceMetrics"
-                            }
-                        ],
                         "nullable": true
                     },
-                    "baseline_metrics": {
-                        "allOf": [
-                            {
-                                "$ref": "#/components/schemas/PerformanceMetrics"
-                            }
-                        ],
+                    "daily_bias_mwh": {
+                        "type": "number",
+                        "format": "double",
                         "nullable": true
                     },
                     "days": {
@@ -9722,49 +9512,23 @@
                         "items": {
                             "$ref": "#/components/schemas/PerformanceDay"
                         }
-                    },
-                    "uncertainty": {
-                        "type": "string"
                     }
                 },
                 "required": [
-                    "baseline_metrics",
-                    "comparison",
-                    "configuration_created_at",
                     "configuration_id",
-                    "daylight_policy",
+                    "daily_bias_mwh",
+                    "daily_mae_mwh",
+                    "data_source",
                     "days",
                     "end_date",
                     "evaluated_at",
-                    "excluded_days",
-                    "issuance_cutoff",
                     "matched_days",
-                    "measurement_basis",
-                    "measurement_policy",
-                    "metric_scope",
-                    "metrics",
-                    "missing_days",
                     "plant_id",
                     "relative_error",
                     "requested_days",
-                    "scored_hours",
-                    "scored_intervals",
-                    "selection_policy",
-                    "skill_days",
-                    "skill_score",
                     "start_date",
-                    "timezone",
-                    "uncertainty"
+                    "timezone"
                 ]
-            },
-            "PerformanceSelectionPolicyEnum": {
-                "enum": [
-                    "latest-published-pre-daylight-issuance-v1",
-                    "native-then-authorized-scale-complete-actuals-v4",
-                    "native-estimated-actuals-coverage-v1"
-                ],
-                "type": "string",
-                "description": "* `latest-published-pre-daylight-issuance-v1` - Archived Issuance\n* `native-then-authorized-scale-complete-actuals-v4` - Estimated Actuals\n* `native-estimated-actuals-coverage-v1` - Composed Estimated Actuals"
             },
             "PlantConflict": {
                 "type": "object",

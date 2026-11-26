@@ -10,9 +10,6 @@ from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
-HISTORY = "native-then-authorized-scale-complete-actuals-v4"
-COMPOSED = "native-estimated-actuals-coverage-v1"
-ARCHIVE = "latest-published-pre-daylight-issuance-v1"
 TYPED_BLOBS = {
     "ForecastOutput": {"result": "IrradianceResult"},
     "PlantForecastOutput": {
@@ -24,17 +21,10 @@ TYPED_BLOBS = {
 }
 
 
-def _performance(client: Client, url: str, comparison: str) -> dict[str, object]:
-    response = client.get(
-        url, {"start_date": str(FIRST), "end_date": str(LAST), "comparison": comparison}
-    )
-    assert response.status_code == 200
-    body: dict[str, object] = response.json()
-    assert validate("PerformanceOutput", body) == []
-    return body
-
-
-def test_performance_states_each_days_selection_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("data_source", ["forecast", "satellite"])
+def test_every_comparison_matches_its_schema(
+    monkeypatch: pytest.MonkeyPatch, data_source: str
+) -> None:
     system, plant = make_plant(monkeypatch)
     performance_history(system, plant)
     client = Client()
@@ -42,38 +32,26 @@ def test_performance_states_each_days_selection_policy(monkeypatch: pytest.Monke
     url = (
         f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/performance/"
     )
-    historical = _performance(client, url, "historical_model")
-    assert "evaluation_kind" not in historical
-    days = historical["days"]
-    assert isinstance(days, list)
-    assert {day["date"]: day["selection_policy"] for day in days} == {
-        "2026-11-03": HISTORY,
-        "2026-11-04": COMPOSED,
-        "2026-11-05": HISTORY,
-        "2026-11-06": None,
-        "2026-11-07": COMPOSED,
-        "2026-11-08": HISTORY,
-    }
-    archived = _performance(client, url, "archived_forecast")["days"]
-    assert isinstance(archived, list)
-    assert {day["selection_policy"] for day in archived} == {ARCHIVE}
+    response = client.get(
+        url, {"start_date": str(FIRST), "end_date": str(LAST), "data_source": data_source}
+    )
+    assert response.status_code == 200
+    assert validate("PerformanceOutput", response.json()) == []
 
 
-def test_performance_schema_types_reasons_and_policies_as_choices() -> None:
+def test_the_comparison_schema_types_reasons_and_sources_as_choices() -> None:
     schemas = components()
+    output = schemas["PerformanceOutput"]["properties"]
     day = schemas["PerformanceDay"]["properties"]
-    assert "evaluation_kind" not in schemas["PerformanceOutput"]["properties"]
     reasons = schemas[day["reason"]["oneOf"][0]["$ref"].rsplit("/", 1)[1]]["enum"]
     assert set(reasons) == {
-        "configuration_not_comparable",
         "forecast_not_available",
         "estimated_actuals_not_available",
         "invalid_forecast_data",
         "incomplete_or_invalid_day",
     }
-    policies = schemas[day["selection_policy"]["oneOf"][0]["$ref"].rsplit("/", 1)[1]]["enum"]
-    assert set(policies) == {HISTORY, COMPOSED, ARCHIVE}
-    assert day["calibration_in_sample"]["nullable"] is True
+    sources = schemas[output["data_source"]["$ref"].rsplit("/", 1)[1]]["enum"]
+    assert sources == ["forecast", "satellite"]
 
 
 def test_forecast_schema_declares_freshness_and_typed_payloads() -> None:

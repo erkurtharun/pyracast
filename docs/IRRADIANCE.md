@@ -436,41 +436,29 @@ The latest matched day's status and ratio are reported separately; without enoug
 diagnosis or a capacity estimate; the thresholds are engineering guards.
 
 A plant outlook carries it as `production_diagnostic` only for a `forecast` result without
-a frozen scenario, on a day not yet ended, when the run's configuration, production
+`as_of` or a frozen scenario, on a day not yet ended, when the run's configuration, production
 identity, incidents, factor and transfer model still apply and its latest matched day is before
 today; it is `stale` when that day is more than two days before today. The diagnostic changes
 neither forecast power nor any capacity; only reported operating limits drive the outage scenario.
 
 ## Forecast evaluation
 
-The performance endpoint ([forecast-performance](flows/forecast-performance.md)) scores 1 to 90
-completed local days within the past year. The forecast screen's past-day forecast, chosen by
-closeness to production (`closest_to_production`, [forecast-view](flows/forecast-view.md)), is
-never scored; Forecast accuracy keeps its own selection below.
+The comparison endpoint ([forecast-performance](flows/forecast-performance.md)) compares 1 to 90
+completed local days within the past year. Each day's actual production is the day total the
+forecast screen uses (`manual-over-settlement-over-provisional-hour-v2`, complete daylight
+coverage required; a day resting on real-time readings is marked), and each day's figure is the
+one the forecast screen shows for that day and source in automatic mode, at 60 minutes:
 
-- `archived_forecast` scores the immutable issuance published before the target day's first
-  astronomical daylight (`latest-published-pre-daylight-issuance-v1`; polar day, polar night and
-  midnight-crossing daylight use local midnight). Acquisition and publication precede that cutoff
-  and a known provider issue time does not follow acquisition, so a pre-dawn collection can
-  replace the previous evening's forecast. An optional `issuance_cutoff` (an offset-free local
-  time on the previous day) restricts selection further; the latest eligible issuance wins even
-  when partial. Its frozen calibrated and factor-1 native vectors, original clipping included, are
-  scored without recomputation, against manual measurements over settlement injection
-  (`manual-over-settlement-hour-v1`). A day whose issuance has another measurement basis or
-  timezone is `configuration_not_comparable`. Reported incidents do not remove valid production;
-  invalid or outage readings stay excluded.
-- `historical_model` applies the current configuration to saved estimated actuals, with the newest
-  activated calibration whose training period had begun by that day and factor 1 before; it may
-  have been fitted on the compared days. It uses `manual-over-settlement-over-provisional-hour-v2`
-  and flags provisional production. It compares model output with production; it is neither
-  forecast accuracy nor calibration validation.
-- `daylight_only=true` (what the frontend sends) requires complete daylight coverage and reports
-  `metric_scope: daylight_intervals`; otherwise the whole local day is required. Whole meter
-  boundary intervals are kept, valid zero-production and zero-source days stay scored, missing
-  days never become zero errors, and source-positive MAE is null without such intervals. Results
-  give daily measured, predicted and factor-1 MWh, signed error, identities, cutoffs, excluded-day
-  reasons, aggregate MAE and bias, relative error and a skill score against factor 1. Nothing is
-  trained or activated, and no confidence intervals are produced.
+- `forecast`: among the day's day-ahead saved forecasts, the one whose daylight total is nearest
+  to the actual production (the past-day rule of the forecast screen). A day without one is
+  `forecast_not_available`.
+- `satellite`: the satellite data of the day, calibrated with the activated calibration whose
+  training period had begun by that day (as the forecast screen shows it).
+
+Missing days never become zero errors. Results give daily actual and shown MWh, the signed
+difference, the forecast and calibration used, reasons for days not compared, mean absolute and
+mean signed daily difference, and absolute difference over actual production. Nothing is trained
+or activated, and no confidence intervals are produced.
 
 ## Measured production
 

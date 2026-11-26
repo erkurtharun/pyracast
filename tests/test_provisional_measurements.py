@@ -8,7 +8,6 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasConnection
 from pyracast.plants.measurements import (
     MEASUREMENT_POLICY,
-    SETTLEMENT_ONLY_MEASUREMENT_POLICY,
     latest_measurement_day,
     production_identity_current,
     select_measurements,
@@ -147,7 +146,7 @@ def test_native_hours_and_missingness_are_preserved(
     assert select_measurements(configuration, start, end, start) == ([], [])
 
 
-def test_pinned_sources_replay_and_settlement_only_policy_never_adopts_provisional(
+def test_pinned_sources_replay_their_selection(
     source: tuple[PlantConfiguration, EpiasConnection],
 ) -> None:
     configuration, _ = source
@@ -166,22 +165,6 @@ def test_pinned_sources_replay_and_settlement_only_policy_never_adopts_provision
     assert select_measurements(configuration, start, end, NOW, production_snapshot_ids=[]) == (
         [],
         [],
-    )
-    settled, settled_ids = select_measurements(
-        configuration,
-        start,
-        end,
-        NOW,
-        production_snapshot_ids=ids,
-        policy=SETTLEMENT_ONLY_MEASUREMENT_POLICY,
-    )
-    assert settled_ids == [settlement.pk]
-    assert [row.energy_mwh for row in settled] == [5]
-    assert (
-        selection_fingerprint(configuration, settled, NOW)[0]
-        != selection_fingerprint(
-            configuration, settled, NOW, policy=SETTLEMENT_ONLY_MEASUREMENT_POLICY
-        )[0]
     )
 
 
@@ -224,9 +207,6 @@ def test_provisional_selection_requires_enabled_net_export_connection(
     connection.save(update_fields=("settlement_plant_id",))
     start, end = local_day_bounds(DAY, configuration.binding.timezone)
     assert select_measurements(configuration, start, end, NOW)[1] == [snapshot.pk]
-    assert select_measurements(
-        configuration, start, end, NOW, policy=SETTLEMENT_ONLY_MEASUREMENT_POLICY
-    ) == ([], [])
     configuration.measurement_basis = "ac_generation"
     assert select_measurements(configuration, start, end, NOW) == ([], [])
     configuration.measurement_basis = "net_export"
@@ -256,12 +236,6 @@ def test_latest_day_includes_provisional_but_only_completed_local_dates(
     start, end = local_day_bounds(DAY, configuration.binding.timezone)
     assert latest_measurement_day(configuration, end, NOW, 0) == DAY
     assert latest_measurement_day(configuration, end - timedelta(minutes=1), NOW, 0) is None
-    assert (
-        latest_measurement_day(
-            configuration, end, NOW, 0, policy=SETTLEMENT_ONLY_MEASUREMENT_POLICY
-        )
-        is None
-    )
     assert select_measurements(configuration, start + timedelta(minutes=30), end, NOW)[0][
         0
     ].starts_at == start + timedelta(hours=1)

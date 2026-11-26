@@ -27,7 +27,7 @@ from pyracast.plants.models import (
     CalibrationRun,
     Plant,
 )
-from pyracast.plants.performance import forecast_performance
+from pyracast.plants.performance import production_comparison
 from pyracast.plants.plant_days import plant_days
 from pyracast.plants.production import production_history
 from pyracast.plants.production_changes import (
@@ -191,7 +191,7 @@ class PerformanceView(ScopedView[Plant]):
         plant = self.plant()
         data = PerformanceQuery(data=request.query_params)
         data.is_valid(raise_exception=True)
-        return Response(PerformanceOutput(forecast_performance(plant, **data.validated_data)).data)
+        return Response(PerformanceOutput(production_comparison(plant, **data.validated_data)).data)
 
 
 class CalibrationsView(ScopedView[CalibrationRun]):

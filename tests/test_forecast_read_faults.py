@@ -7,7 +7,7 @@ from django.test import Client
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import ForecastIssuance
-from pyracast.plants.performance import forecast_performance
+from pyracast.plants.performance import production_comparison
 from tests.support.domain import System
 from tests.support.forecast_history import DAY
 from tests.support.forecast_performance import publish
@@ -89,25 +89,23 @@ def test_a_damaged_archived_issuance_fails_cleanly_with_one_warning(
 
 
 @DAMAGES
-def test_one_damaged_day_leaves_the_other_performance_days_scored(
+def test_one_damaged_day_leaves_the_other_compared_days(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, damage: object
 ) -> None:
     from tests.support.performance_history import FIRST, performance_history
 
     system, plant = make_plant(monkeypatch)
     performance_history(system, plant)
-    healthy = forecast_performance(
-        plant, start_date=FIRST, end_date=DAY, comparison="historical_model"
-    )
+    healthy = production_comparison(plant, start_date=FIRST, end_date=DAY, data_source="satellite")
     damaged_day = date(2026, 11, 6)
     _damaged_actuals(system, damaged_day, damage)
     with caplog.at_level(logging.WARNING, logger=FAULTS):
-        result = forecast_performance(
-            plant, start_date=FIRST, end_date=DAY, comparison="historical_model"
+        result = production_comparison(
+            plant, start_date=FIRST, end_date=DAY, data_source="satellite"
         )
     days = {str(day["date"]): day for day in result["days"]}
     assert days[damaged_day.isoformat()]["reason"] == "invalid_forecast_data"
     assert result["matched_days"] == healthy["matched_days"]
-    assert result["metrics"] == healthy["metrics"]
+    assert result["daily_mae_mwh"] == healthy["daily_mae_mwh"]
     [record] = _warnings(caplog)
     assert damaged_day.isoformat() in record.getMessage()

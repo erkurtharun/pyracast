@@ -15,7 +15,6 @@ from pyracast.metering.models import EpiasConnection
 from pyracast.plants.forecast_archive import (
     ARCHIVE_SELECTION_POLICY,
     forecast_cutoff,
-    issuance_power_intervals,
     prepare_forecast_issuances,
     save_forecast_issuances,
     select_forecast_issuance,
@@ -68,7 +67,6 @@ def test_latest_pre_daylight_acquisition_wins_without_actuals_or_job_target(
     latest = freeze(before_sunrise, plant)
     assert select_forecast_issuance(plant, DAY) == latest
     assert latest.payloads["60"]["complete"] is False
-    assert issuance_power_intervals(latest)[0].power_mw is None
     selected = select_forecast_issuance(plant, DAY, as_of=sources[-1].collected_at)
     assert selected is not None
     assert selected.snapshot_id == sources[-1].pk
@@ -82,7 +80,7 @@ def test_latest_pre_daylight_acquisition_wins_without_actuals_or_job_target(
     assert select_forecast_issuance(plant, DAY) == latest
 
 
-def test_calibration_and_native_clipping_are_frozen_at_acquisition(
+def test_calibration_and_clipping_are_frozen_at_acquisition(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
@@ -106,12 +104,6 @@ def test_calibration_and_native_clipping_are_frozen_at_acquisition(
     assert issuance is not None
     assert issuance.calibration_id == run.pk
     assert issuance.factor == 0.5
-    assert [row.power_mw for row in issuance_power_intervals(issuance)[:3]] == [60, 40, None]
-    assert [row.power_mw for row in issuance_power_intervals(issuance, baseline=True)[:3]] == [
-        100,
-        80,
-        None,
-    ]
     assert issuance.payloads["60"]["intervals"][0]["energy_mwh"] == 50
     assert issuance.payloads["30"]["provenance"]["selection_policy"] == ARCHIVE_SELECTION_POLICY
     assert issuance.payloads["30"]["provenance"]["published_at"] == NOW.isoformat()
@@ -190,12 +182,6 @@ def test_covered_days_keep_native_boundaries_without_using_job_target(
     stored_again(source)
     prepared = prepare_forecast_issuances(source)
     assert [item.target_date for item in prepared] == [DAY, DAY + timedelta(days=1)]
-    first = prepared[0].native_intervals
-    assert len(first) == 1
-    assert first[0]["start"] == start.isoformat()
-    assert first[0]["original_start"] == (start - timedelta(minutes=15)).isoformat()
-    assert first[0]["power_mw"] == 52
-    assert prepared[1].native_intervals[0]["power_mw"] == 0
     with transaction.atomic():
         save_forecast_issuances(prepared, source, source.collected_at, plant=plant)
     issuance = select_forecast_issuance(plant, DAY)
@@ -330,47 +316,6 @@ def test_polar_cutoff_is_local_day_start(day: date, latitude: float, expected_ho
     assert expected.astimezone(UTC).hour != expected_hour
 
 
-@pytest.mark.parametrize(
-    "rows",
-    [
-        {},
-        [None],
-        [{"start": None, "end": "2026-11-10T01:00:00+00:00"}],
-        [{"start": "2026-11-10T00:00:00", "end": "2026-11-10T01:00:00+00:00"}],
-        [{"start": "2026-11-10T01:00:00+00:00", "end": "2026-11-10T00:00:00+00:00"}],
-        [
-            {"start": "2026-11-10T00:00:00+00:00", "end": "2026-11-10T01:00:00+00:00"},
-            {"start": "2026-11-10T00:00:00+00:00", "end": "2026-11-10T01:00:00+00:00"},
-        ],
-        [
-            {
-                "start": "2026-11-10T00:00:00+00:00",
-                "end": "2026-11-10T01:00:00+00:00",
-                "power_mw": True,
-            }
-        ],
-        [
-            {
-                "start": "2026-11-10T00:00:00+00:00",
-                "end": "2026-11-10T01:00:00+00:00",
-                "power_mw": -1,
-            }
-        ],
-        [
-            {
-                "start": "2026-11-10T00:00:00+00:00",
-                "end": "2026-11-10T01:00:00+00:00",
-                "power_mw": float("inf"),
-            }
-        ],
-    ],
-)
-def test_saved_native_intervals_reject_invalid_values(rows: object) -> None:
-    issuance = ForecastIssuance(native_intervals=rows)
-    with pytest.raises(ValueError, match=r"Saved|saved"):
-        issuance_power_intervals(issuance)
-
-
 def test_database_rejects_nonfinite_factors_and_invalid_source_lineage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -388,7 +333,6 @@ def test_database_rejects_nonfinite_factors_and_invalid_source_lineage(
         "factor": item.factor,
         "payloads": item.payloads,
         "outage_scenarios": item.outage_scenarios,
-        "native_intervals": item.native_intervals,
     }
     for factor in (float("nan"), float("inf"), -1.0, 0.0, 0.5):
         with pytest.raises(IntegrityError), transaction.atomic():
@@ -418,7 +362,6 @@ def test_database_requires_matching_calibration_and_pre_acquisition_activation(
         "factor": run.factor,
         "payloads": item.payloads,
         "outage_scenarios": item.outage_scenarios,
-        "native_intervals": item.native_intervals,
     }
     with pytest.raises(IntegrityError, match="lineage"), transaction.atomic():
         ForecastIssuance.objects.create(**defaults)

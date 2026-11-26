@@ -13,7 +13,6 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
 from pyracast.plants.forecast_archive import forecast_cutoff
 from pyracast.plants.models import ForecastIssuance, Plant, ProductionObservation
-from pyracast.plants.performance import forecast_performance
 from tests.support.domain import System
 from tests.support.forecast_history import DAY, TODAY
 from tests.support.invariants import stored_again
@@ -445,16 +444,52 @@ def test_the_removed_data_sources_and_as_of_are_refused(monkeypatch: pytest.Monk
             assert (response.status_code, response.json()["code"]) == (400, "invalid_request")
 
 
-def test_forecast_accuracy_keeps_scoring_the_latest_forecast_before_sunrise(
+def _comparison(client: Client, system: System, plant: Plant, **query: str) -> dict[str, Any]:
+    response = client.get(
+        _plant_path(system, plant).removesuffix("forecast/") + "performance/",
+        {"start_date": DAY.isoformat(), "end_date": DAY.isoformat(), **query},
+    )
+    assert response.status_code == 200, response.json()
+    body: dict[str, Any] = response.json()
+    return body
+
+
+def test_the_comparison_matches_real_time_production_with_the_saved_forecast_nearest_to_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
     fetches = _owners_example(system)
     client, path = _client(system), _plant_path(system, plant)
-    _manual_production(system, plant, _total(client, path, fetches["previous 10:00"]))
+    nearest = _total(client, path, fetches["previous 10:00"])
+    _epias_production(system, plant, "realtime_generation", nearest)
 
-    shown = _read(client, path)
-    scored = forecast_performance(plant, start_date=DAY, end_date=DAY)
+    shown = _read(client, path, resolution_minutes=60)
+    compared = _comparison(client, system, plant)
 
-    assert _shown(shown)[2] == fetches["previous 10:00"].pk
-    assert scored["days"][0]["snapshot_id"] == fetches["day 04:00"].pk
+    day = compared["days"][0]
+    assert (day["status"], day["reason"], compared["matched_days"]) == ("matched", None, 1)
+    assert _shown(shown) == ("auto", "closest_to_production", fetches["previous 10:00"].pk)
+    assert day["forecast_id"] == fetches["previous 10:00"].pk
+    assert day["predicted_energy_mwh"] == shown["result"]["daylight"]["energy_mwh"]
+    assert day["measured_energy_mwh"] == pytest.approx(nearest)
+    assert day["error_mwh"] == pytest.approx(0, abs=1e-9)
+    assert day["provisional_production"] is True
+
+
+def test_a_day_without_a_day_ahead_saved_forecast_is_not_compared(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    _fetch(system, _at(PREVIOUS, 4), 0.30)
+    _fetch(system, _at(DAY, 10), 0.20)
+    _manual_production(system, plant, 5)
+
+    compared = _comparison(_client(system), system, plant)
+
+    day = compared["days"][0]
+    assert (day["status"], day["reason"], day["forecast_id"]) == (
+        "missing",
+        "forecast_not_available",
+        None,
+    )
+    assert (compared["matched_days"], compared["relative_error"]) == (0, None)

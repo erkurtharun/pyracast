@@ -1,543 +1,168 @@
-from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
-from typing import Any, cast
+from datetime import date, datetime, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
-from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext
 
-from pyracast.errors import UNEXPECTED
-from pyracast.forecasts.actuals import (
-    ACTUAL_COMPOSITION_POLICY,
-    ArchivedActualSource,
-    actual_candidates,
+from pyracast.forecasts.faults import CALCULATION_FAULTS, log_fault, stored_data
+from pyracast.forecasts.outlook import Source
+from pyracast.plants.day_reason import DayReason
+from pyracast.plants.forecast_choice import (
+    DayForecasts,
+    day_total,
+    past_day_forecast,
+    saved_forecasts,
 )
-from pyracast.forecasts.faults import CALCULATION_FAULTS, log_fault
-from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
-from pyracast.irradiance import local_day_bounds
-from pyracast.plants.forecast_archive import (
-    ARCHIVE_SELECTION_POLICY,
-    issuance_power_intervals,
-    select_forecast_issuances,
+from pyracast.plants.models import Plant
+from pyracast.plants.production import (
+    NativeProductionDay,
+    native_production_days,
+    production_timezone,
 )
-from pyracast.plants.forecasting import (
-    CalibrationTimeline,
-    calibration_timeline,
-    fitted_on,
-    power_intervals,
-    power_limit,
-)
-from pyracast.plants.measurement_policy import (
-    MEASUREMENT_POLICY,
-    SETTLEMENT_ONLY_MEASUREMENT_POLICY,
-)
-from pyracast.plants.measurements import Measurement, select_plant_measurements
-from pyracast.plants.models import CalibrationRun, ForecastIssuance, Plant, PlantConfiguration
-from pyracast.plants.numerics import (
-    CalibrationSample,
-    PowerInterval,
-    RequiredWindows,
-    evaluate_samples,
-)
-from pyracast.plants.transfer import transfer_model
-from pyracast.solar import DAYLIGHT_POLICY, daylight_window
+from pyracast.plants.satellite_data import SatelliteData, satellite_data, satellite_result
 
-
-class DayReason(models.TextChoices):
-    CONFIGURATION_NOT_COMPARABLE = "configuration_not_comparable"
-    FORECAST_NOT_AVAILABLE = "forecast_not_available"
-    ESTIMATED_ACTUALS_NOT_AVAILABLE = "estimated_actuals_not_available"
-    INVALID_FORECAST_DATA = "invalid_forecast_data"
-    INCOMPLETE_OR_INVALID_DAY = "incomplete_or_invalid_day"
-
-
-class SelectionPolicy(models.TextChoices):
-    ARCHIVED_ISSUANCE = ARCHIVE_SELECTION_POLICY
-    ESTIMATED_ACTUALS = HISTORY_SELECTION_POLICY
-    COMPOSED_ESTIMATED_ACTUALS = ACTUAL_COMPOSITION_POLICY
-
-
-MISSING_REASONS = {
-    DayReason.CONFIGURATION_NOT_COMPARABLE,
-    DayReason.FORECAST_NOT_AVAILABLE,
-    DayReason.ESTIMATED_ACTUALS_NOT_AVAILABLE,
-}
-EXCLUDED_REASONS = {DayReason.INVALID_FORECAST_DATA, DayReason.INCOMPLETE_OR_INVALID_DAY}
+# Days are compared at the forecast screen's default resolution, so they compare its figures.
+RESOLUTION_MINUTES = 60
 
 
 @dataclass(frozen=True)
-class DaySource:
-    """What one day is scored with: an archived issuance, or the model run on the day's
-    estimated actuals with the calibration fitted for that period."""
-
-    issuance: ForecastIssuance | None
-    actual: ArchivedActualSource | None
-    calibration: CalibrationRun | None
+class Figure:
+    energy_mwh: float | None
+    reason: DayReason | None = None
+    forecast_id: int | None = None
+    calibration_id: int | None = None
 
 
-def _selection_cutoff(day: date, zone: str, issuance_cutoff: time) -> datetime:
-    local = datetime.combine(day - timedelta(days=1), issuance_cutoff, ZoneInfo(zone))
-    cutoff = local.astimezone(UTC)
-    if (
-        cutoff.astimezone(ZoneInfo(zone)).replace(tzinfo=None) != local.replace(tzinfo=None)
-        or local.replace(fold=0).utcoffset() != local.replace(fold=1).utcoffset()
-    ):
-        raise ValidationError(
-            gettext(
-                "This time does not exist on that day or occurs twice because of a clock "
-                "change. Choose another time."
-            )
-        )
-    return cutoff
-
-
-def _samples(
-    observations: list[Measurement],
-    intervals: tuple[PowerInterval, ...],
-    factor: float,
-    cap: float | None,
-) -> tuple[CalibrationSample, ...]:
-    projected = tuple(
-        PowerInterval(
-            interval.start,
-            interval.end,
-            None
-            if interval.power_mw is None
-            else interval.power_mw * factor
-            if cap is None
-            else min(cap, interval.power_mw * factor),
-        )
-        for interval in intervals
-    )
-    return tuple(
-        CalibrationSample(
-            row.starts_at,
-            row.ends_at,
-            row.energy_mwh,
-            tuple(
-                interval
-                for interval in projected
-                if interval.start < row.ends_at and interval.end > row.starts_at
-            ),
-            row.quality,
-        )
-        for row in observations
-    )
-
-
-def _unscored(
-    configuration: PlantConfiguration,
-    day: date,
-    issuance: ForecastIssuance | None,
-    selection_cutoff: datetime | None,
-) -> dict[str, Any]:
-    return {
-        "date": day,
-        "status": "missing",
-        "reason": None,
-        "selection_policy": ARCHIVE_SELECTION_POLICY if issuance is not None else None,
-        "snapshot_id": None,
-        "issuance_id": issuance.pk if issuance is not None else None,
-        "configuration_id": configuration.pk,
-        "model_version": issuance.model_version if issuance is not None else None,
-        "collected_at": None,
-        "available_at": None,
-        "calibration_id": None,
-        "calibration_in_sample": None,
-        "factor": None,
-        "measured_energy_mwh": None,
-        "predicted_energy_mwh": None,
-        "baseline_energy_mwh": None,
-        "error_mwh": None,
-        "manual_observation_ids": [],
-        "settlement_snapshot_ids": [],
-        "provisional_snapshot_ids": [],
-        "source_kind": None,
-        "historical_configuration_assumed": False,
-        "provisional_production": False,
-        "selection_cutoff": selection_cutoff,
-    }
-
-
-def _readings(
-    observations: list[Measurement],
-    day: date,
-    zone: str,
-    required_windows: RequiredWindows | None,
-) -> list[Measurement]:
-    start, end = local_day_bounds(day, zone)
-    return [
-        row
-        for row in observations
-        if row.starts_at >= start
-        and row.ends_at <= end
-        and (
-            required_windows is None
-            or any(
-                row.starts_at < stop and row.ends_at > begin
-                for begin, stop in required_windows.get(day, ())
-            )
-        )
-    ]
-
-
-def _paired_samples(
-    configuration: PlantConfiguration,
-    source: DaySource,
-    readings: list[Measurement],
-    factor: float,
-    model_version: str,
-) -> tuple[tuple[CalibrationSample, ...], tuple[CalibrationSample, ...]]:
-    if source.issuance is not None:
-        return (
-            _samples(readings, issuance_power_intervals(source.issuance), 1.0, None),
-            _samples(readings, issuance_power_intervals(source.issuance, baseline=True), 1.0, None),
-        )
-    actual = cast(ArchivedActualSource, source.actual)
-    intervals = power_intervals(
-        actual.snapshot,
-        configuration,
-        model_version=model_version,
-        source_intervals=actual.composition.intervals if actual.composition is not None else None,
-    )
-    cap = power_limit(configuration)
-    return _samples(readings, intervals, factor, cap), _samples(readings, intervals, 1.0, cap)
-
-
-def _apply_source(
-    result: dict[str, Any], configuration: PlantConfiguration, day: date, source: DaySource
-) -> float:
-    issuance, actual, calibration = source.issuance, source.actual, source.calibration
-    snapshot = (
-        issuance.snapshot if issuance is not None else cast(ArchivedActualSource, actual).snapshot
-    )
-    factor = (
-        issuance.factor
-        if issuance is not None
-        else cast(float, calibration.factor)
-        if calibration is not None
-        else 1.0
-    )
-    start, _ = local_day_bounds(day, configuration.binding.timezone)
-    result.update(
-        snapshot_id=snapshot.pk,
-        collected_at=snapshot.collected_at,
-        available_at=issuance.published_at if issuance is not None else snapshot.available_at,
-        calibration_id=calibration.pk if calibration else None,
-        # An issuance's calibration was fitted before its publication, so before the day.
-        calibration_in_sample=None
-        if calibration is None
-        else issuance is None and fitted_on(calibration, day),
-        factor=factor,
-        source_kind=snapshot.source_kind,
-        historical_configuration_assumed=issuance is None and configuration.created_at >= start,
-    )
-    if actual is not None:
-        result["model_version"] = transfer_model(configuration, calibration)
-        result["selection_policy"] = (
-            ACTUAL_COMPOSITION_POLICY
-            if actual.composition is not None
-            else HISTORY_SELECTION_POLICY
-        )
-    if actual is not None and actual.composition is not None:
-        result["source_snapshot_ids"] = list(actual.composition.snapshot_ids)
-        result["reference_provenance"] = {
-            "selection_policy": ACTUAL_COMPOSITION_POLICY,
-            "source_snapshot_ids": list(actual.composition.snapshot_ids),
-            "source_segments": actual.composition.segments,
-            "oldest_collected_at": min(row.collected_at for row in actual.snapshots).isoformat(),
-        }
-    return factor
-
-
-def _matched(
-    result: dict[str, Any],
-    readings: list[Measurement],
-    errors: list[dict[str, Any]],
-    reference: list[dict[str, Any]],
-) -> None:
-    result.update(
-        status="matched",
-        measured_energy_mwh=errors[0]["measured_energy_mwh"],
-        predicted_energy_mwh=errors[0]["predicted_energy_mwh"],
-        baseline_energy_mwh=reference[0]["predicted_energy_mwh"],
-        error_mwh=errors[0]["error_mwh"],
-        manual_observation_ids=sorted(
-            {row.pk for row in readings if row.snapshot is None and row.pk is not None}
-        ),
-        settlement_snapshot_ids=sorted(
-            {
-                row.snapshot.pk
-                for row in readings
-                if row.snapshot is not None and row.source == "settlement_injection"
-            }
-        ),
-        provisional_snapshot_ids=sorted(
-            {
-                row.snapshot.pk
-                for row in readings
-                if row.snapshot is not None and row.source == "realtime_generation"
-            }
-        ),
-        provisional_production=any(row.source == "realtime_generation" for row in readings),
-    )
-
-
-def _day(
-    configuration: PlantConfiguration,
-    day: date,
-    observations: list[Measurement],
-    required_windows: RequiredWindows | None,
-    selection_cutoff: datetime | None,
-    issuance: ForecastIssuance | None,
-    comparable: bool,
-    actuals: Callable[[date], DaySource] | None,
-) -> tuple[dict[str, Any], tuple[CalibrationSample, ...], tuple[CalibrationSample, ...]]:
-    result = _unscored(configuration, day, issuance, selection_cutoff)
-    if not comparable:
-        result["reason"] = DayReason.CONFIGURATION_NOT_COMPARABLE
-        return result, (), ()
-    zone = configuration.binding.timezone
-    try:
-        source = (
-            DaySource(issuance, None, issuance.calibration if issuance else None)
-            if actuals is None
-            else actuals(day)
-        )
-        if source.issuance is None and source.actual is None:
-            result["reason"] = (
-                DayReason.FORECAST_NOT_AVAILABLE
-                if actuals is None
-                else DayReason.ESTIMATED_ACTUALS_NOT_AVAILABLE
-            )
-            return result, (), ()
-        factor = _apply_source(result, configuration, day, source)
-        readings = _readings(observations, day, zone, required_windows)
-        selected, baseline = _paired_samples(
-            configuration, source, readings, factor, result["model_version"]
-        )
-        evaluation = evaluate_samples(
-            selected, timezone=zone, limit_mw=None, required_windows=required_windows
-        )
-        reference = evaluate_samples(
-            baseline, timezone=zone, limit_mw=None, required_windows=required_windows
-        )
-    except CALCULATION_FAULTS as error:
-        log_fault("plant", configuration.plant_id, day, "performance", error)
-        result["reason"] = DayReason.INVALID_FORECAST_DATA
-        return result, (), ()
-    if not evaluation["valid_days"] or not reference["valid_days"]:
-        result["reason"] = DayReason.INCOMPLETE_OR_INVALID_DAY
-        return result, (), ()
-    _matched(
-        result,
-        readings,
-        cast(list[dict[str, Any]], evaluation["day_errors"]),
-        cast(list[dict[str, Any]], reference["day_errors"]),
-    )
-    return result, selected, baseline
-
-
-def _validated_range(
-    comparison: str,
-    issuance_cutoff: time | None,
-    start_date: date | None,
-    end_date: date | None,
-    today: date,
-) -> tuple[date, date]:
-    if comparison not in ("archived_forecast", "historical_model"):
-        raise ValidationError(UNEXPECTED)
-    if issuance_cutoff is not None:
-        if issuance_cutoff.tzinfo is not None:
-            raise ValidationError(UNEXPECTED)
-        if comparison != "archived_forecast":
-            raise ValidationError(UNEXPECTED)
-    if (start_date is None) != (end_date is None):
-        raise ValidationError(gettext("Enter both the start and the end date."))
-    if start_date is None or end_date is None:
-        end_date = today - timedelta(days=1)
-        start_date = end_date - timedelta(days=29)
-    if (
-        not 1 <= (end_date - start_date).days + 1 <= 90
-        or start_date < today - timedelta(days=366)
-        or end_date >= today
-    ):
-        raise ValidationError(
-            gettext("Choose a date range of 1 to 90 days, before today and within the past year.")
-        )
-    return start_date, end_date
-
-
-def _historical_actuals(
-    configuration: PlantConfiguration, first: date, last: date, now: datetime
-) -> Callable[[date], DaySource]:
-    candidates = actual_candidates(configuration.binding, first, last, now)
-    timeline: CalibrationTimeline | None = None
-
-    def select(day: date) -> DaySource:
-        nonlocal timeline
-        actual = candidates.select(day)
-        if actual is None:
-            return DaySource(None, None, None)
-        if timeline is None:
-            timeline = calibration_timeline(configuration, now)
-        return DaySource(None, actual, timeline.for_day(day))
-
-    return select
-
-
-def _accuracy(days: list[dict[str, Any]], comparison: str) -> dict[str, Any]:
-    """Relative error over every matched day; skill against the uncalibrated reference only
-    on days the calibration did not train on."""
-    matched = [day for day in days if day["status"] == "matched"]
-    measured = sum(day["measured_energy_mwh"] for day in matched)
-    scored = [
-        day
-        for day in matched
-        if comparison == "archived_forecast" or day["calibration_in_sample"] is False
-    ]
-    reference = sum(abs(day["baseline_energy_mwh"] - day["measured_energy_mwh"]) for day in scored)
-    return {
-        "relative_error": sum(abs(day["error_mwh"]) for day in matched) / measured
-        if measured
-        else None,
-        "skill_score": 1 - sum(abs(day["error_mwh"]) for day in scored) / reference
-        if reference
-        else None,
-        "skill_days": len(scored),
-    }
-
-
-def forecast_performance(
+def production_comparison(
     plant: Plant,
     *,
     start_date: date | None = None,
     end_date: date | None = None,
-    daylight_only: bool = False,
-    comparison: str = "archived_forecast",
-    issuance_cutoff: time | None = None,
+    data_source: Source = "forecast",
 ) -> dict[str, Any]:
-    configuration = (
-        PlantConfiguration.objects.select_related("binding").get(
-            pk=plant.current_configuration_id, plant=plant
-        )
-        if plant.current_configuration_id is not None
-        else None
-    )
-    zone = configuration.binding.timezone if configuration else plant.region.timezone
+    """Each past day's production beside the figure the forecast screen shows for that day and
+    source in automatic mode."""
+    zone = production_timezone(plant)
     now = timezone.now()
-    start_date, end_date = _validated_range(
-        comparison, issuance_cutoff, start_date, end_date, now.astimezone(ZoneInfo(zone)).date()
+    first, last = _validated_range(start_date, end_date, now.astimezone(ZoneInfo(zone)).date())
+    with stored_data("plant", plant.pk, first, "production"):
+        production = native_production_days(plant, first, last, now).days
+    figures = (
+        _forecast_figures(plant, first, last, production, now)
+        if data_source == "forecast"
+        else _satellite_figures(plant, first, last, production, now)
     )
-    targets = [
-        start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1)
-    ]
-    start, _ = local_day_bounds(start_date, zone)
-    _, end = local_day_bounds(end_date, zone)
-    historical = comparison == "historical_model"
-    measurement_policy = MEASUREMENT_POLICY if historical else SETTLEMENT_ONLY_MEASUREMENT_POLICY
-    required_windows = None
-    if daylight_only:
-        location = configuration.binding if configuration else plant.region
-        required_windows = {
-            target: daylight_window(target, zone, location.latitude, location.longitude).windows
-            for target in targets
-        }
-    days: list[dict[str, Any]] = []
-    selected: tuple[CalibrationSample, ...] = ()
-    baseline: tuple[CalibrationSample, ...] = ()
-    if configuration is not None:
-        cutoffs = {
-            target: _selection_cutoff(target, zone, issuance_cutoff)
-            if issuance_cutoff is not None
-            else None
-            for target in targets
-        }
-        issuances = (
-            {} if historical else select_forecast_issuances(plant, cutoffs, native_only=True)
-        )
-        actuals = (
-            _historical_actuals(configuration, start_date, end_date, now) if historical else None
-        )
-        comparable_configurations = {configuration.pk: configuration} | {
-            row.configuration.pk: row.configuration
-            for row in issuances.values()
-            if row.configuration.measurement_basis == configuration.measurement_basis
-            and row.configuration.binding.timezone == zone
-        }
-        measurement_cache = select_plant_measurements(
-            list(comparable_configurations.values()),
-            start,
-            end,
-            now,
-            policy=measurement_policy,
-            incident_revision_ids=None if historical else [],
-        )
-        for target, selection_cutoff in cutoffs.items():
-            issuance = issuances.get(target)
-            selected_configuration = issuance.configuration if issuance else configuration
-            comparable = selected_configuration.pk in comparable_configurations
-            if (
-                required_windows is not None
-                and comparable
-                and selected_configuration.pk != configuration.pk
-            ):
-                location = selected_configuration.binding
-                required_windows[target] = daylight_window(
-                    target, zone, location.latitude, location.longitude
-                ).windows
-            day, chosen, reference = _day(
-                selected_configuration,
-                target,
-                measurement_cache.get(selected_configuration.pk, []),
-                required_windows,
-                selection_cutoff or (issuance.cutoff_at if issuance else None),
-                issuance,
-                comparable,
-                actuals,
-            )
-            days.append(day)
-            selected += chosen
-            baseline += reference
-    evaluation = evaluate_samples(
-        selected, timezone=zone, limit_mw=None, required_windows=required_windows
-    )
-    baseline_evaluation = evaluate_samples(
-        baseline, timezone=zone, limit_mw=None, required_windows=required_windows
-    )
+    days = [_day(row, figures[row.date]) for row in production]
     return {
         "plant_id": plant.pk,
-        "configuration_id": configuration.pk if configuration else None,
+        "configuration_id": plant.current_configuration_id,
         "timezone": zone,
-        "start_date": start_date,
-        "end_date": end_date,
+        "start_date": first,
+        "end_date": last,
         "evaluated_at": now,
-        "comparison": comparison,
-        "selection_policy": ACTUAL_COMPOSITION_POLICY
-        if any(day.get("reference_provenance") for day in days)
-        else HISTORY_SELECTION_POLICY
-        if historical
-        else ARCHIVE_SELECTION_POLICY,
-        "measurement_policy": measurement_policy,
-        "configuration_created_at": configuration.created_at if configuration else None,
-        "measurement_basis": configuration.measurement_basis if configuration else None,
-        "metric_scope": "daylight_intervals" if daylight_only else "full_day",
-        "daylight_policy": DAYLIGHT_POLICY if daylight_only else None,
-        "matched_days": evaluation["valid_days"],
-        "missing_days": sum(day["reason"] in MISSING_REASONS for day in days)
-        if configuration is not None
-        else len(targets),
-        "excluded_days": sum(day["reason"] in EXCLUDED_REASONS for day in days),
-        "scored_intervals": evaluation["samples"],
-        "scored_hours": sum((row.end - row.start).total_seconds() / 3600 for row in selected),
-        "issuance_cutoff": issuance_cutoff,
-        "requested_days": len(targets),
-        "metrics": evaluation["metrics"],
-        "baseline_metrics": baseline_evaluation["metrics"],
-        **_accuracy(days, comparison),
+        "data_source": data_source,
+        "requested_days": len(days),
+        **_accuracy([day for day in days if day["status"] == "matched"]),
         "days": days,
-        "uncertainty": "not_estimated",
+    }
+
+
+def _validated_range(start: date | None, end: date | None, today: date) -> tuple[date, date]:
+    if (start is None) != (end is None):
+        raise ValidationError(gettext("Enter both the start and the end date."))
+    if start is None or end is None:
+        end = today - timedelta(days=1)
+        start = end - timedelta(days=29)
+    if not 1 <= (end - start).days + 1 <= 90 or start < today - timedelta(days=366) or end >= today:
+        raise ValidationError(
+            gettext("Choose a date range of 1 to 90 days, before today and within the past year.")
+        )
+    return start, end
+
+
+def _forecast_figures(
+    plant: Plant,
+    first: date,
+    last: date,
+    production: tuple[NativeProductionDay, ...],
+    now: datetime,
+) -> dict[date, Figure]:
+    saved = saved_forecasts(plant, first, last, RESOLUTION_MINUTES, now)
+    return {row.date: _forecast_figure(saved[row.date], row.total_mwh) for row in production}
+
+
+def _forecast_figure(forecasts: DayForecasts, production_mwh: float | None) -> Figure:
+    selection, chosen = past_day_forecast(forecasts, production_mwh)
+    if chosen is None or selection.rule != "closest_to_production":
+        return Figure(
+            None,
+            DayReason.INVALID_FORECAST_DATA
+            if forecasts.unreadable
+            else DayReason.FORECAST_NOT_AVAILABLE,
+        )
+    total = next(
+        option.total_mwh
+        for option in forecasts.options
+        if option.forecast_id == selection.forecast_id
+    )
+    return Figure(total, forecast_id=chosen.snapshot_id, calibration_id=chosen.calibration_id)
+
+
+def _satellite_figures(
+    plant: Plant,
+    first: date,
+    last: date,
+    production: tuple[NativeProductionDay, ...],
+    now: datetime,
+) -> dict[date, Figure]:
+    satellite = satellite_data(plant, first, last, now)
+    return {row.date: _satellite_figure(plant, row.date, satellite) for row in production}
+
+
+def _satellite_figure(plant: Plant, day: date, satellite: SatelliteData) -> Figure:
+    try:
+        chosen = satellite.day(day)
+        result = satellite_result(chosen, day, RESOLUTION_MINUTES)
+        total = day_total(result) if result is not None else None
+    except CALCULATION_FAULTS as error:
+        log_fault("plant", plant.pk, day, "performance", error)
+        return Figure(None, DayReason.INVALID_FORECAST_DATA)
+    if result is None:
+        return Figure(None, DayReason.ESTIMATED_ACTUALS_NOT_AVAILABLE)
+    calibration = chosen.calibration.pk if chosen.calibration is not None else None
+    if total is None:
+        return Figure(None, DayReason.INVALID_FORECAST_DATA, calibration_id=calibration)
+    return Figure(total, calibration_id=calibration)
+
+
+def _day(production: NativeProductionDay, figure: Figure) -> dict[str, Any]:
+    measured, predicted = production.total_mwh, figure.energy_mwh
+    error = predicted - measured if measured is not None and predicted is not None else None
+    return {
+        "date": production.date,
+        "status": "missing" if error is None else "matched",
+        "reason": DayReason.INCOMPLETE_OR_INVALID_DAY if measured is None else figure.reason,
+        "forecast_id": figure.forecast_id,
+        "calibration_id": figure.calibration_id,
+        "measured_energy_mwh": measured,
+        "predicted_energy_mwh": predicted,
+        "error_mwh": error,
+        "provisional_production": any(
+            slot.effective is not None and slot.effective["provisional"]
+            for slot in production.slots
+        ),
+    }
+
+
+def _accuracy(matched: list[dict[str, Any]]) -> dict[str, Any]:
+    errors = [day["error_mwh"] for day in matched]
+    measured = sum(day["measured_energy_mwh"] for day in matched)
+    return {
+        "matched_days": len(matched),
+        "relative_error": sum(abs(error) for error in errors) / measured if measured else None,
+        "daily_mae_mwh": sum(abs(error) for error in errors) / len(errors) if errors else None,
+        "daily_bias_mwh": sum(errors) / len(errors) if errors else None,
     }
