@@ -645,7 +645,7 @@ export function ReminderEditor({
     const submit = async () => {
         const body = bodyOf(answer, addresses, draft);
         desk.change((now) => ({ ...now, outcome: "none", dropped: [] }));
-        const hidden = body.hide_recipients === true;
+        const hidden = body.hide_recipients;
         setReview({ status: hidden ? "saving" : "previewing" });
         let previewed: Previewed | undefined;
         try {
