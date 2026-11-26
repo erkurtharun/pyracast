@@ -650,7 +650,9 @@ export async function workerClock(page: Page) {
     const worker =
         context.serviceWorkers()[0] ??
         (await context.waitForEvent("serviceworker"));
-    return worker.evaluate(() => performance.timeOrigin + performance.now());
+    return worker.evaluate(() =>
+        Math.floor(performance.timeOrigin + performance.now()),
+    );
 }
 
 export async function supplyRegistration(page: Page) {
