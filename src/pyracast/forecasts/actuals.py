@@ -1,5 +1,5 @@
 import json
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, cast
@@ -30,7 +30,12 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
     SnapshotSourceKind,
 )
-from pyracast.forecasts.sources import covering_ids, snapshot_rows, stored_intervals
+from pyracast.forecasts.sources import (
+    covering_ids,
+    snapshot_rows,
+    stored_intervals,
+    with_normalization,
+)
 from pyracast.irradiance import local_day_bounds
 from pyracast.solar import daylight_window
 
@@ -67,7 +72,7 @@ class ArchivedActualSource:
 
 
 def single_snapshot_actual_queryset(
-    binding: SiteBinding,
+    bindings: Collection[SiteBinding],
     start: datetime,
     end: datetime,
     *,
@@ -75,10 +80,12 @@ def single_snapshot_actual_queryset(
     as_of: datetime,
 ) -> QuerySet[ForecastSnapshot]:
     return (
-        ForecastSnapshot.objects.select_related("job__binding__provider_account")
+        with_normalization(
+            ForecastSnapshot.objects.select_related("job__binding__provider_account")
+        )
         .defer("raw_payload")
         .filter(
-            binding=binding,
+            binding__in=bindings,
             job__status=CollectionJobStatus.SUCCEEDED,
             source_kind=SnapshotSourceKind.ESTIMATED_ACTUALS,
             coverage_start__lt=end,
@@ -182,20 +189,29 @@ def _overlaps(snapshot: ForecastSnapshot, start: datetime, end: datetime) -> boo
 
 
 def actual_candidates(
-    binding: SiteBinding, first: date, last: date, cutoff: datetime
-) -> ActualCandidates:
-    start, first_end = local_day_bounds(first, binding.timezone)
-    _, end = local_day_bounds(last, binding.timezone)
-    return ActualCandidates(
-        binding,
-        cutoff,
-        tuple(
-            single_snapshot_actual_queryset(
-                binding, start, end, collected_from=first_end, as_of=cutoff
-            )
-        ),
-        tuple(native_actual_queryset(binding, start, end, cutoff)),
+    bindings: Collection[SiteBinding], first: date, last: date, cutoff: datetime
+) -> dict[int, ActualCandidates]:
+    """By binding: the candidates of the days from `first` to `last`, one read for all."""
+    if not bindings:
+        return {}
+    firsts = [local_day_bounds(first, binding.timezone) for binding in bindings]
+    start, first_end = min(bounds[0] for bounds in firsts), min(bounds[1] for bounds in firsts)
+    end = max(local_day_bounds(last, binding.timezone)[1] for binding in bindings)
+    single = list(
+        single_snapshot_actual_queryset(
+            bindings, start, end, collected_from=first_end, as_of=cutoff
+        )
     )
+    native = list(native_actual_queryset(bindings, start, end, cutoff))
+    return {
+        binding.pk: ActualCandidates(
+            binding,
+            cutoff,
+            tuple(row for row in single if row.binding_id == binding.pk),
+            tuple(row for row in native if row.binding_id == binding.pk),
+        )
+        for binding in bindings
+    }
 
 
 def _archived_actual_source(

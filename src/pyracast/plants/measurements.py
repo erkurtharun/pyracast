@@ -1,6 +1,6 @@
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from math import isfinite
@@ -504,20 +504,45 @@ def selection_fingerprint(
 
 
 def production_identity_current(run: CalibrationRun) -> bool:
-    if not run.production_snapshot_ids:
-        return True
-    connection = EpiasConnection.objects.filter(plant_id=run.plant_id).first()
-    if connection is None:
-        return False
-    snapshots = list(
-        EpiasSnapshot.objects.filter(
-            pk__in=run.production_snapshot_ids,
-            configuration_id=run.configuration_id,
-            connection=connection,
-            source_kind__in=_source_kinds(run.measurement_selection_policy),
+    return run.pk in current_production_identities((run,))
+
+
+def current_production_identities(runs: Collection[CalibrationRun]) -> set[int]:
+    """The runs whose production evidence still names the plant's EPİAŞ identity, read at once."""
+    bound = [run for run in runs if run.production_snapshot_ids]
+    current = {run.pk for run in runs if not run.production_snapshot_ids}
+    if not bound:
+        return current
+    connections = {
+        row.plant_id: row
+        for row in EpiasConnection.objects.filter(plant_id__in={run.plant_id for run in bound})
+    }
+    snapshots = {
+        row.pk: row
+        for row in EpiasSnapshot.objects.filter(
+            pk__in={pk for run in bound for pk in run.production_snapshot_ids}
         ).select_related("job")
-    )
-    return len(snapshots) == len(run.production_snapshot_ids) and all(
+    }
+    for run in bound:
+        connection = connections.get(run.plant_id)
+        if connection is not None and _evidence_current(run, connection, snapshots):
+            current.add(run.pk)
+    return current
+
+
+def _evidence_current(
+    run: CalibrationRun, connection: EpiasConnection, snapshots: dict[int, EpiasSnapshot]
+) -> bool:
+    kinds = _source_kinds(run.measurement_selection_policy)
+    evidence = {
+        pk: snapshot
+        for pk in run.production_snapshot_ids
+        if (snapshot := snapshots.get(pk)) is not None
+        and snapshot.configuration_id == run.configuration_id
+        and snapshot.connection_id == connection.pk
+        and snapshot.source_kind in kinds
+    }
+    return len(evidence) == len(run.production_snapshot_ids) and all(
         snapshot.provider_plant.get("id") is not None
         and snapshot.provider_plant.get("id")
         == (
@@ -529,7 +554,7 @@ def production_identity_current(run: CalibrationRun) -> bool:
         and snapshot.job.source_kind == snapshot.source_kind
         and snapshot.job.configuration_id == run.configuration_id
         and snapshot.normalization_policy == "hour-start-istanbul-v1"
-        for snapshot in snapshots
+        for snapshot in evidence.values()
     )
 
 

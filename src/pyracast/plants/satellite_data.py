@@ -9,7 +9,7 @@ from pyracast.forecasts.actuals import (
 )
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecasting import CalibrationTimeline, calibration_timeline, forecast_payload
-from pyracast.plants.measurements import production_identity_current
+from pyracast.plants.measurements import current_production_identities
 from pyracast.plants.models import CalibrationRun, Plant, PlantConfiguration
 from pyracast.plants.transfer import transfer_model
 
@@ -32,9 +32,9 @@ class SatelliteData:
     last: date
     cutoff: datetime
     configurations: list[PlantConfiguration]
-    _candidates: dict[int, ActualCandidates] = field(default_factory=dict, init=False)
+    _candidates: dict[int, ActualCandidates] | None = field(default=None, init=False)
     _timeline: CalibrationTimeline | None = field(default=None, init=False)
-    _identities: dict[int, bool] = field(default_factory=dict, init=False)
+    _identities: set[int] = field(default_factory=set, init=False)
 
     def day(self, day: date) -> SatelliteDay:
         current = next(
@@ -50,22 +50,21 @@ class SatelliteData:
         )
 
     def _source(self, configuration: PlantConfiguration, day: date) -> ArchivedActualSource | None:
-        binding = configuration.binding
-        if binding.pk not in self._candidates:
-            self._candidates[binding.pk] = actual_candidates(
-                binding, self.first, self.last, self.cutoff
+        if self._candidates is None:
+            bindings = {row.binding_id: row.binding for row in self.configurations}
+            self._candidates = actual_candidates(
+                tuple(bindings.values()), self.first, self.last, self.cutoff
             )
-        return self._candidates[binding.pk].select(day)
+        return self._candidates[configuration.binding_id].select(day)
 
     def _calibration(self, configuration: PlantConfiguration, day: date) -> CalibrationRun | None:
         if self._timeline is None:
             self._timeline = calibration_timeline(configuration, self.cutoff)
+            self._identities = current_production_identities(
+                [run for _, run in self._timeline.runs]
+            )
         run = self._timeline.for_day(day)
-        if run is None:
-            return None
-        if run.pk not in self._identities:
-            self._identities[run.pk] = production_identity_current(run)
-        return run if self._identities[run.pk] else None
+        return run if run is not None and run.pk in self._identities else None
 
     def _declared(self, day: date) -> PlantConfiguration | None:
         """The declaration valid at the day's start, else one made during it, else the first."""
