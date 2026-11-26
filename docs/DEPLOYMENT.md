@@ -245,9 +245,7 @@ HTTPS readiness check. It keeps the serving and the previous release and prunes 
 
 Image artifacts expire after one day. To retry, re-run the failed Release while its artifact
 exists ("Re-run all jobs" for an early start, which refuses a partial re-run), otherwise run
-**Actions → CI → Run workflow → main**. When a re-run of failed CI jobs ends green for a commit that
-is already released, its Release says so and deploys nothing. To redeploy `main` (for example after
-a key rotation):
+**Actions → CI → Run workflow → main**. To redeploy `main` (for example after a key rotation):
 
 1. Run CI on `main`; its automatic Release deploys.
 2. If that Release run's summary says "Nothing to release" (`main` differs from the deployed
