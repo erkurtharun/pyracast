@@ -269,15 +269,13 @@ for (const electrical of [true, false]) {
             await readFile(await file.path(), "utf8"),
             { header: true, skipEmptyLines: true },
         );
-        expect(records.data[0]?.source_kind).toBe("Forecast");
-        expect(records.data[0]?.interval_source).toBe(
+        expect(records.data[0]?.Data).toBe(
             electrical
                 ? "Production calculated from satellite data"
                 : "Irradiance calculated from satellite data",
         );
-        expect(records.data[1]?.interval_source).toBe("Forecast");
-        if (electrical)
-            expect(records.data[2]?.interval_source).toBe("Forecast");
+        expect(records.data[1]?.Data).toBe("Forecast");
+        if (electrical) expect(records.data[2]?.Data).toBe("Forecast");
         await page.screenshot({
             path: testInfo.outputPath("mixed-sources.png"),
             fullPage: true,
@@ -338,10 +336,10 @@ test("generation intervals show energy without redundant visible power columns",
     );
     expect(records.data).toHaveLength(4);
     expect(records.data[0]).toMatchObject({
-        starts_at: "2026-11-14T12:00:00+03:00",
-        ends_at: "2026-11-14T12:30:00+03:00",
-        mean_power_mw: "2",
-        energy_mwh: "1",
+        Start: "2026-11-14T12:00:00+03:00",
+        End: "2026-11-14T12:30:00+03:00",
+        "Average power (MW)": "2",
+        "Forecast (MWh)": "1",
     });
 });
 
@@ -416,16 +414,22 @@ for (const scenario of ["outage"] as const) {
             await readFile(await (await download).path(), "utf8"),
             { header: true, skipEmptyLines: true },
         );
+        expect(records.meta.fields).toEqual([
+            "Plant",
+            "Data",
+            "Start",
+            "End",
+            "Without outage (MWh)",
+            "With outage (MWh)",
+            "Average power without outage (MW)",
+            "Average power with outage (MW)",
+        ]);
         expect(records.data[0]).toMatchObject({
-            normal_mean_power_mw: "2",
-            normal_energy_mwh: "2",
-            affected_mean_power_mw: "1",
-            affected_energy_mwh: "1",
-            normal_quality_flags: "normal_test_flag",
+            "Without outage (MWh)": "2",
+            "With outage (MWh)": "1",
+            "Average power without outage (MW)": "2",
+            "Average power with outage (MW)": "1",
         });
-        expect(records.data[1]?.affected_quality_flags).toBe(
-            "affected_test_flag",
-        );
     });
 }
 

@@ -128,6 +128,7 @@ export function Calibrations({ scope }: { scope: PlantScope }) {
                                         plant,
                                         runs.data?.results ?? [],
                                         t("file"),
+                                        inUse,
                                     )
                                 }
                             />

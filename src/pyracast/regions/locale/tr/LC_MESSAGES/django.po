@@ -1240,6 +1240,9 @@ msgstr "Bugünden önce biten, 7 ile 90 gün arasında bir dönem seçin."
 msgid "Save 1 to 2,000 values at a time."
 msgstr "Tek seferde 1 ile 2.000 arasında değer kaydedin."
 
+msgid "This file changes no value."
+msgstr "Bu dosya hiçbir değeri değiştirmiyor."
+
 msgid "Choose a date range of 1 to 31 days."
 msgstr "1 ile 31 gün arasında bir tarih aralığı seçin."
 

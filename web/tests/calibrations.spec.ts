@@ -315,8 +315,8 @@ for (const change of selectionChanges)
             await readFile(await (await download).path(), "utf8"),
             { header: true, skipEmptyLines: true },
         ).data;
-        expect(records.map((record) => record.selection_state)).toEqual([
-            change.after,
+        expect(records.map((record) => record["In use"])).toEqual([
+            change.inUse ? "Yes" : "No",
         ]);
     });
 
@@ -395,7 +395,7 @@ test("the calibration exports wait for the runs reloaded after a request", async
         await readFile(await (await download).path(), "utf8"),
         { header: true, skipEmptyLines: true },
     ).data;
-    expect(records.map((record) => record.id)).toEqual(["41", "40"]);
+    expect(records.map((record) => record["No."])).toEqual(["41", "40"]);
 });
 
 test("after a reset the opened run shows and exports its reloaded selection", async ({
@@ -448,10 +448,8 @@ test("after a reset the opened run shows and exports its reloaded selection", as
         await readFile(await (await download).path(), "utf8"),
         { header: true, skipEmptyLines: true },
     ).data;
-    expect(record).toMatchObject({
-        selection_state: "candidate",
-        activation_blocker: "incumbent_changed",
-    });
+    expect(record).toMatchObject({ "No.": "40", "In use": "No" });
+    expect(Object.keys(record!)).not.toContain("activation_blocker");
 });
 
 const resetOffers = [
