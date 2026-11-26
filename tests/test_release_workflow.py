@@ -774,7 +774,7 @@ def test_an_early_start_is_classified_like_the_release_after_the_whole_run() -> 
         "${{ inputs.ci_run_id != '' && 'workflow_run' || github.event_name }}"
     )
     assert classify["run"] == (
-        'python3 deploy/release_scope.py "$RELEASE_EVENT" "$DEPLOYED_SHA" "$RELEASE_SHA"'
+        'python3 deploy/release_scope.py classify "$RELEASE_EVENT" "$DEPLOYED_SHA" "$RELEASE_SHA"'
     )
 
 

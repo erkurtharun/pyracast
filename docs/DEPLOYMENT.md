@@ -252,6 +252,9 @@ exists ("Re-run all jobs" for an early start, which refuses a partial re-run), o
    commit only in unshipped paths, listed in `deploy/release_scope.py`), run
    **Actions → Release → Run workflow → main** while that CI run's artifact is unexpired.
 
+CI builds the images, and Release runs, in a checkout without those unshipped paths, so a build or
+release step that needs one fails in CI; such a path does not belong on the list.
+
 The deploy account can administer the VM; protect repository administration and the production
 environment as a production trust boundary.
 

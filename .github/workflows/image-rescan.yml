@@ -27,6 +27,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Leave the unshipped paths out of the checkout
+        run: python3 deploy/release_scope.py sparse-checkout
       - name: Read the registry reader of the deployed images
         id: reader
         if: env.IMAGE_RESCAN != ''
