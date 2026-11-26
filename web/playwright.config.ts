@@ -8,7 +8,9 @@ export default defineConfig({
     fullyParallel: true,
     forbidOnly: !!process.env.CI,
     retries: process.env.CI ? 2 : 0,
-    failOnFlakyTests: !!process.env.CI,
+    // A run of main accepts a pass on the retry: the pull request run already fails such a case.
+    failOnFlakyTests:
+        !!process.env.CI && !process.env.PLAYWRIGHT_ACCEPT_PASS_ON_RETRY,
     // Within the time limit of each CI job that runs the suite, so a hung run reports its tests.
     globalTimeout: 28 * 60_000,
     globalTeardown: coverage ? "./testing/server-coverage.ts" : undefined,
