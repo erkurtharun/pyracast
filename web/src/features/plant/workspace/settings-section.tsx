@@ -48,6 +48,7 @@ export function SettingsSection({
     onDeleted: () => Promise<void>;
 }) {
     const t = useTranslations("PlantWorkspace");
+    const csvFile = useTranslations("CsvFile");
     const canManage = useCanManageWorkspace();
     return (
         <>
@@ -88,6 +89,7 @@ export function SettingsSection({
                                     region,
                                     plant.current_configuration ??
                                         plant.parameters,
+                                    csvFile("files.technical_details"),
                                 )
                             }
                         />

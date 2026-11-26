@@ -19,6 +19,7 @@ const MEMBER = "member@example.test";
 const OUTSIDE = "outside@example.test";
 const THIRD = "third@example.test";
 const JOINER = "joiner@example.test";
+const DELIVERED = "delivered@example.test";
 const TEAM = [ADMIN, MEMBER];
 const TITLE = "Show these addresses to every recipient?";
 const SENTENCE =
@@ -105,6 +106,8 @@ const isRead = (method: string, url: string) =>
 const isTenants = (method: string, url: string) =>
     method === "GET" && url.endsWith("/api/tenants/");
 const reminders = `/api/tenants/1/regions/${region.id}/reminders/`;
+const isPanelRead = (request: Request) =>
+    request.method() === "GET" && new URL(request.url()).pathname === reminders;
 
 function sent(page: Page, matches: (method: string, url: string) => boolean) {
     const bodies: Record<string, unknown>[] = [];
@@ -191,31 +194,49 @@ async function tenantsAgain(page: Page) {
     await readsApplied(page, "/api/tenants/");
 }
 
+function watchText(needles: string[]) {
+    const seen: string[] = [];
+    const values = (node: Node) =>
+        node instanceof Element || node instanceof Document
+            ? [
+                  ...(node instanceof HTMLInputElement ? [node] : []),
+                  ...node.querySelectorAll("input"),
+              ].map((input) => input.value)
+            : [];
+    const look = (records: MutationRecord[] = []) => {
+        const shown = [document.body?.textContent ?? "", ...values(document)];
+        for (const record of records) {
+            for (const node of [...record.addedNodes, ...record.removedNodes])
+                shown.push(node.textContent ?? "", ...values(node));
+            if (record.oldValue !== null) shown.push(record.oldValue);
+        }
+        const text = shown.join("\n");
+        for (const needle of needles)
+            if (text.includes(needle) && !seen.includes(needle))
+                seen.push(needle);
+    };
+    new MutationObserver(look).observe(document, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        characterDataOldValue: true,
+        attributes: true,
+    });
+    look();
+    (window as unknown as { seen: string[] }).seen = seen;
+}
+
+const seenOn = (page: Page) => () =>
+    page.evaluate(() => (window as unknown as { seen: string[] }).seen);
+
 async function watchFor(page: Page, needles: string[]) {
-    await page.evaluate((needles) => {
-        const seen: string[] = [];
-        const look = () => {
-            const shown = [
-                document.body.textContent ?? "",
-                ...[...document.querySelectorAll("input")].map(
-                    (input) => input.value,
-                ),
-            ].join("\n");
-            for (const needle of needles)
-                if (shown.includes(needle) && !seen.includes(needle))
-                    seen.push(needle);
-        };
-        new MutationObserver(look).observe(document.body, {
-            subtree: true,
-            childList: true,
-            characterData: true,
-            attributes: true,
-        });
-        look();
-        (window as unknown as { seen: string[] }).seen = seen;
-    }, needles);
-    return () =>
-        page.evaluate(() => (window as unknown as { seen: string[] }).seen);
+    await page.evaluate(watchText, needles);
+    return seenOn(page);
+}
+
+async function watchFromStart(page: Page, needles: string[]) {
+    await page.addInitScript(watchText, needles);
+    return seenOn(page);
 }
 
 async function speaking(page: Page) {
@@ -394,17 +415,25 @@ test("losing administration while the review is open closes it, sends nothing an
         viewer: (method) => role === "viewer" && method === "GET",
     });
     await asRole(page, () => role);
+    await trackReads(page, reminders);
     const writes = sent(page, isWrite);
     await openReminders(page);
     await radio(page, OUTSIDE, "Cc").check();
     await time(page, 1).fill("09:00");
     await review(page);
+    await readsApplied(page, "/api/tenants/");
+    const tenants = nextRequest(page, isTenants);
+    const replacement = page.waitForRequest(isPanelRead);
     role = "viewer";
-    await tenantsAgain(page);
+    await page.clock.runFor(120_001);
+    await (await tenants).response();
+    await readsApplied(page, "/api/tenants/");
     await expect(dialog(page)).toHaveCount(0);
     await expect(typedFields(page)).toHaveCount(0);
     await expect(line(page, COUNT_ONLY(3))).toBeVisible();
     expect(writes).toEqual([]);
+    await replacement;
+    await readsApplied(page, reminders);
     role = "admin";
     await refetch(page);
     await expect(radio(page, OUTSIDE, "Default")).toBeChecked();
@@ -1281,6 +1310,7 @@ for (const reviewing of [false, true])
             viewer: (method) => revoked && method === "GET",
         });
         await asRole(page, () => "admin");
+        await trackReads(page, reminders);
         await openReminders(page);
         const enabled = page.getByLabel("Send forecast email for this plant");
         const language = page.getByLabel("Language", { exact: true });
@@ -1291,10 +1321,17 @@ for (const reviewing of [false, true])
             await confirmButton(page).click();
             await write.committed;
             revoked = true;
+            let reads = 0;
+            // refetch waits for a read it starts, so the read that read's answer starts is the second.
+            const replacement = page.waitForRequest(
+                (request) => isPanelRead(request) && ++reads === 2,
+            );
             await refetch(page);
             await expect(line(page, COUNT_ONLY(3))).toBeVisible();
             await expect(typedFields(page)).toHaveCount(0);
             await saveElsewhere(page, { ...SAVED, times: ["10:00"] });
+            await replacement;
+            await readsApplied(page, reminders);
             revoked = false;
             await refetch(page);
             await expect(time(page, 1)).toHaveValue("10:00");
@@ -1516,9 +1553,16 @@ for (const cached of [true, false])
         page,
     }) => {
         let role: "admin" | "viewer" = cached ? "admin" : "viewer";
-        const addresses = [OUTSIDE, THIRD, MEMBER, JOINER];
+        const addresses = [OUTSIDE, THIRD, MEMBER, JOINER, DELIVERED];
         const { persons } = await reminderApi(page, {
             recipients: [OUTSIDE],
+            deliveries: [
+                {
+                    recipients: [DELIVERED],
+                    recipient_roles: [{ address: DELIVERED, role: "bcc" }],
+                    recipient_count: 1,
+                },
+            ],
             members: [
                 ADMIN,
                 { membership: 2, primary: MEMBER, active: !cached },
@@ -1584,8 +1628,8 @@ for (const cached of [true, false])
                 stale.release();
             }
         } else {
+            seen = await watchFromStart(page, addresses);
             await openReminders(page);
-            seen = await watchFor(page, addresses);
             await expect.poll(() => reads.length).toBe(2);
             await reads.at(-1)!.response();
         }

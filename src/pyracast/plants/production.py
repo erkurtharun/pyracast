@@ -92,6 +92,7 @@ def _provider(row: Measurement) -> dict[str, Any]:
         "starts_at": row.starts_at,
         "ends_at": row.ends_at,
         "energy_mwh": row.energy_mwh,
+        "quality": row.quality,
         "source_kind": snapshot.source_kind,
         "snapshot_id": snapshot.pk,
         "collected_at": snapshot.collected_at,

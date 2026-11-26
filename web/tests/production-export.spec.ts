@@ -20,7 +20,7 @@ test("an empty production day downloads the import header and no fabricated row"
     );
     const text = await readFile(await file.path(), "utf8");
     expect(text.replace(/^\uFEFF/, "").split("\r\n")).toEqual([
-        '"starts_at","ends_at","energy_mwh","quality","source","timezone"',
+        '"Start","End","Actual (MWh)","Status","Source"',
         "",
     ]);
 });

@@ -1,5 +1,5 @@
 "use client";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import type { PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
@@ -8,7 +8,11 @@ import { displayMessage, UnconfirmedError } from "@/lib/api/errors";
 import { useFormat } from "@/lib/format/use-format";
 import { useAttempt } from "@/lib/idempotency";
 import { useLeaveGuard } from "@/lib/leave-guard";
-import { parseProduction, type ProductionFile } from "@/lib/production";
+import {
+    importExample,
+    readProduction,
+    type ProductionFile,
+} from "@/lib/production";
 import {
     ActionForm,
     CheckboxField,
@@ -18,6 +22,7 @@ import {
 } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import { ScrollRegion } from "@/ui/scroll-region";
+import { useLabel } from "@/ui/vocabulary";
 
 type Preview = components["schemas"]["ProductionPreviewOutput"];
 type Selection =
@@ -74,6 +79,13 @@ export function ProductionImport({
     const t = useTranslations("ProductionImport");
     const common = useTranslations("Common");
     const csvTexts = useTranslations("ProductionCsv");
+    const csvFile = useTranslations("CsvFile");
+    const locale = useLocale();
+    const label = useLabel();
+    const [header, example] = importExample(
+        csvFile,
+        label("ObservationQuality", "valid"),
+    );
     const format = useFormat();
     const errorMessage = useErrorMessage();
     const attempt = useAttempt<ReturnType<typeof importBody>>();
@@ -115,7 +127,11 @@ export function ProductionImport({
         }
         setSelection({ status: "reading" });
         try {
-            const parsed = parseProduction(await file.text(), csvTexts);
+            const parsed = await readProduction(
+                await file.text(),
+                csvTexts,
+                locale,
+            );
             const sha256 = await fileSha256(file);
             if (current === sequence.current)
                 setSelection({
@@ -160,16 +176,23 @@ export function ProductionImport({
         <section>
             <details>
                 <summary>{t("csv_format_and_import_rules")}</summary>
-                <p>{t("use_a_csv_with_the_exact_header")}</p>
+                <p>
+                    {t("use_a_csv_with_the_exact_header", {
+                        kwh: csvFile("columns.actual_kwh"),
+                    })}
+                </p>
                 <div className="csv-example">
                     <code>
-                        starts_at,ends_at,energy_kwh,quality,source
+                        {header}
                         <br />
-                        2026-01-01T09:00:00+03:00,2026-01-01T10:00:00+03:00,250,valid,meter
+                        {example}
                     </code>
                 </div>
                 <p className="fine">
-                    {t("quality_valid_outage_curtailed_or_invalid_quoted")}
+                    {t("quality_valid_outage_curtailed_or_invalid_quoted", {
+                        status: csvFile("columns.status"),
+                        source: csvFile("columns.source"),
+                    })}
                 </p>
             </details>
             <form

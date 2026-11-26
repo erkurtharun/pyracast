@@ -191,9 +191,6 @@ msgstr "Başlangıç"
 msgid "To"
 msgstr "Bitiş"
 
-msgid "UTC offset"
-msgstr "UTC farkı"
-
 msgid "Estimated actuals"
 msgstr "Gerçekleşen tahmini"
 

@@ -94,7 +94,7 @@ def test_same_clock_collection_waits_without_spending_mail_attempts_then_uses_pu
     assert delivery.forecast_kind == "current"
     assert delivery.prepared_at is not None
     assert when + timedelta(minutes=1) <= delivery.prepared_at < when + timedelta(minutes=2)
-    assert attached_sheet(mail.outbox[0])["B4"].value == when.astimezone(
+    assert attached_sheet(mail.outbox[0])["A4"].value == when.astimezone(
         ZoneInfo(system.region.timezone)
     ).replace(tzinfo=None)
     assert "Wed 11 Nov" in mail.outbox[0].subject
@@ -155,7 +155,7 @@ def test_latest_partial_or_invalid_cache_cannot_hide_complete_saved_tomorrow(
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     assert delivery.snapshot_id == old.pk != partial.pk != bad.pk
     sheet = attached_sheet(mail.outbox[0])
-    assert sheet.cell(_summary_row(sheet, 11), 2).value == pytest.approx(
+    assert sheet.cell(_summary_row(sheet, 11), 3).value == pytest.approx(
         ForecastResult.objects.get(snapshot=old).daily_payloads["2026-11-11"]["daylight"][
             "energy_kwh_m2"
         ]
@@ -265,8 +265,8 @@ def test_partial_tomorrow_survives_missing_today_and_does_not_invent_daily_total
     partial = result.daily_payloads["2026-11-11"]["daylight"]["partial_energy_kwh_m2"]
     assert f"{partial:.2f}" not in body
     sheet = attached_sheet(mail.outbox[0])
-    assert sheet.cell(_summary_row(sheet, 10), 2).value is None
-    assert sheet.cell(_summary_row(sheet, 11), 2).value is None
+    assert sheet.cell(_summary_row(sheet, 10), 3).value is None
+    assert sheet.cell(_summary_row(sheet, 11), 3).value is None
     assert [sheet.cell(row, 1).value for row in (12, 13)] == [
         "Tue 10 Nov 2026: no forecast data.",
         "Wed 11 Nov 2026: data is missing for some hours; no daily total.",
@@ -416,7 +416,7 @@ def test_legacy_exact_day_payload_remains_eligible_without_daily_cache() -> None
     assert process_notification(delivery_id, SLOT)
     assert NotificationDelivery.objects.get(pk=delivery_id).snapshot_id == snapshot.pk
     sheet = attached_sheet(mail.outbox[0])
-    assert sheet.cell(_summary_row(sheet, 11), 2).value == pytest.approx(
+    assert sheet.cell(_summary_row(sheet, 11), 3).value == pytest.approx(
         result.payload["daylight"]["energy_kwh_m2"]
     )
 
