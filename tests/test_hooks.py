@@ -5,7 +5,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from runpy import run_path
 
 import pytest
 
@@ -611,6 +610,12 @@ def test_configured_matchers_cover_reads_through_the_ide_and_shell_tools() -> No
         "git push 2>'log'# pr/K02",
         "git push origin pr/K02 2>&-main",
         "git push origin pr/K02 2>&1main",
+        "git push origin pr/K02 '(' main",
+        'git push origin pr/K02 "\n" main',
+        "echo '|' && git push origin pr/K02",
+        "pwsh -Command git push origin pr/K02 '>' log main",
+        'bash -c "git push -u origin pr/K02 2>&1"',
+        'bash -c "git status # note\ngit push origin main"',
     ],
 )
 @pytest.mark.parametrize(
@@ -647,6 +652,7 @@ def test_shell_commands_that_publish_need_the_orchestrator_marker(
         "git push origin --delete pr/K02",
         "git commit -m 'Describe the change'",
         "git commit -m 'Explain why; git push origin main is refused'",
+        'git commit -m "Title\n\nExplain why; git push origin main is refused"',
         "git status; git log --oneline -5",
         "gh pr create --title Title --body Body",
         "gh pr view 18 --json state",
@@ -679,9 +685,9 @@ def test_shell_commands_that_do_not_publish_are_allowed(repository: Path, comman
         ("Bash", "git push origin pr/K02 2> err.txt"),
         ("Bash", "git push origin pr/K02 >> push.log 2>&1"),
         ("Bash", "git push origin pr/K02 &> all.txt"),
-        ("Bash", 'bash -c "git push -u origin pr/K02 2>&1"'),
+        ("Bash", "git push origin pr/K02 2>&1 | tee push.log"),
         ("PowerShell", "git push -u origin pr/K02 2>&1"),
-        ("PowerShell", "git push origin pr/K02 *> push.log"),
+        ("PowerShell", r"git push origin pr/K02 2>> C:\logs\push.log"),
     ],
 )
 def test_a_push_to_a_pull_request_branch_may_redirect_its_output(
@@ -699,15 +705,6 @@ def test_a_push_to_a_pull_request_branch_may_redirect_its_output(
     assert decision is None
 
 
-@pytest.mark.parametrize("windows", [False, True])
-def test_a_quoted_operator_is_read_as_a_redirection_target_and_not_an_operator(
-    windows: bool,
-) -> None:
-    shell_commands = run_path(str(HOOK_SOURCE))["shell_commands"]
-
-    assert shell_commands("demo > '>' ordinary", windows=windows) == [["demo", "ordinary"]]
-
-
 @pytest.mark.parametrize(
     ("tool_name", "command"),
     [
@@ -717,8 +714,11 @@ def test_a_quoted_operator_is_read_as_a_redirection_target_and_not_an_operator(
         ("Bash", r"git push origin pr/K02 \> main"),
         ("Bash", "git push origin pr/K02 *> out.txt"),
         ("Bash", "git push `>`> echo pr/K02"),
+        ("Bash", "git -C \\\n. push origin main"),
         ("PowerShell", "git push origin pr/K02`> main"),
-        ("PowerShell", "git push origin pr/K02> main"),
+        ("PowerShell", "git push origin pr/K02 *> push.log"),
+        ("PowerShell", "git push origin pr/K02 0>log main"),
+        ("PowerShell", "git push origin pr/K02 2<log main"),
         ("PowerShell", "git push 'origin'# pr/K02"),
         ("PowerShell", "git push origin pr/K02 2>'log'main"),
     ],
