@@ -10,11 +10,12 @@ from typing import TYPE_CHECKING
 from xml.parsers import expat
 
 if TYPE_CHECKING or __package__:
-    from scripts.pytest_shard import DURATIONS
+    from scripts.pytest_shard import DURATIONS, read_durations, usable_seconds
 else:
-    from pytest_shard import DURATIONS
+    from pytest_shard import DURATIONS, read_durations, usable_seconds
 
 SYSTEMS = ("Linux", "Windows")
+TEST_MODULE_PATTERNS = ("test_*.py", "*_test.py")
 JUnitCase = tuple[str, str, float]
 
 
@@ -31,7 +32,7 @@ def junit_cases(path: Path, root: Path) -> list[JUnitCase]:
         if classname is None or test is None or seconds is None:
             raise ValueError(f"{path}: a testcase lacks its class name, name or time")
         duration = float(seconds)
-        if not 0 <= duration < math.inf:
+        if not usable_seconds(duration):
             raise ValueError(f"{path}: invalid time {seconds!r}")
         cases.append((classname, test, duration))
 
@@ -46,18 +47,26 @@ def junit_cases(path: Path, root: Path) -> list[JUnitCase]:
     return cases
 
 
-def module_file(classname: str, root: Path) -> str | None:
+def module_inventory(root: Path) -> frozenset[str]:
+    return frozenset(
+        path.relative_to(root).as_posix()
+        for pattern in TEST_MODULE_PATTERNS
+        for path in (root / "tests").rglob(pattern, case_sensitive=True)
+        if path.is_file()
+    )
+
+
+def module_file(classname: str, modules: frozenset[str]) -> str | None:
     parts = classname.split(".")
-    if not all(part.isidentifier() for part in parts):
-        return None
     for end in range(1, len(parts) + 1):
         candidate = "/".join(parts[:end]) + ".py"
-        if (root / candidate).is_file():
+        if candidate in modules:
             return candidate
     return None
 
 
 def module_durations(results: Iterable[Path], root: Path) -> dict[str, float]:
+    modules = module_inventory(root)
     seen: set[tuple[str, str]] = set()
     times: dict[str, list[float]] = defaultdict(list)
     for path in results:
@@ -65,9 +74,22 @@ def module_durations(results: Iterable[Path], root: Path) -> dict[str, float]:
             if (classname, test) in seen:
                 raise ValueError(f"{classname}::{test} appears in more than one result")
             seen.add((classname, test))
-            if module := module_file(classname, root):
+            if module := module_file(classname, modules):
                 times[module].append(seconds)
-    return {module: round(math.fsum(values), 1) for module, values in sorted(times.items())}
+    durations = {module: round(math.fsum(values), 1) for module, values in sorted(times.items())}
+    for module, seconds in durations.items():
+        if not usable_seconds(seconds):
+            raise ValueError(f"{module}: {seconds} seconds is more than one day")
+    return durations
+
+
+def replace_file(path: Path, text: str) -> None:
+    temporary = path.with_name(f"{path.name}.tmp")
+    try:
+        temporary.write_text(text, encoding="utf-8", newline="\n")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -78,18 +100,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("results", nargs="+", type=Path, help="pytest JUnit XML files")
     args = parser.parse_args(argv)
     try:
-        recorded: object = json.loads(DURATIONS.read_text(encoding="utf-8"))
-        if not isinstance(recorded, dict):
-            raise ValueError(f"{DURATIONS} does not hold durations by system")
+        recorded = read_durations(DURATIONS)
         figures = module_durations(args.results, DURATIONS.parents[1])
         if not figures:
             raise ValueError("no result names a test module of this checkout")
+        recorded[args.system] = figures
+        replace_file(DURATIONS, json.dumps(recorded, indent=2, sort_keys=True) + "\n")
     except (ValueError, OSError, expat.ExpatError) as error:
         print(f"Cannot record test durations: {error}", file=sys.stderr)
         return 2
-    recorded[args.system] = figures
-    text = json.dumps(recorded, indent=2, sort_keys=True) + "\n"
-    DURATIONS.write_text(text, encoding="utf-8", newline="\n")
     print(f"Recorded {len(figures)} {args.system} test modules in {DURATIONS.name}")
     return 0
 

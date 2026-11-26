@@ -6,6 +6,8 @@ import subprocess
 import sys
 from html import unescape
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from hypothesis import given, strategies
@@ -97,6 +99,33 @@ def test_a_module_runs_in_the_shard_its_recorded_duration_assigns() -> None:
     assert selected_nodes(nodes, 2, 2, durations) == sorted(nodes[1:])
 
 
+def test_a_shard_collects_the_tests_its_recorded_durations_assign(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    durations = tmp_path / "durations.json"
+    figures = {"tests/a.py": 100.0, "tests/b.py": 1.0, "tests/c.py": 1.0}
+    durations.write_text(json.dumps({platform.system(): figures}), encoding="utf-8")
+    monkeypatch.setattr(pytest_shard, "DURATIONS", durations)
+    monkeypatch.setenv("PYRACAST_TEST_SHARD", "2/2")
+    monkeypatch.setenv("PYRACAST_TEST_SHARD_OUTPUT", str(tmp_path))
+    monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
+    nodes = ["tests/c.py::test_two", "tests/a.py::test_slow", "tests/b.py::test_one"]
+    items = [SimpleNamespace(nodeid=node) for node in nodes]
+    deselected: list[SimpleNamespace] = []
+    config = SimpleNamespace(
+        hook=SimpleNamespace(pytest_deselected=lambda items: deselected.extend(items))
+    )
+
+    pytest_shard.pytest_collection_modifyitems(
+        cast("pytest.Config", config), cast("list[pytest.Item]", items)
+    )
+
+    assert [item.nodeid for item in items] == ["tests/c.py::test_two", "tests/b.py::test_one"]
+    assert [item.nodeid for item in deselected] == ["tests/a.py::test_slow"]
+    manifest = read_manifest(tmp_path / "collection-main.json")
+    assert manifest["selected"] == ["tests/b.py::test_one", "tests/c.py::test_two"]
+
+
 def test_heavy_modules_spread_until_the_shards_differ_by_at_most_the_heaviest_module() -> None:
     seconds = {"a": 50.0, "b": 40.0, "c": 30.0, "d": 20.0, "e": 10.0, "f": 10.0}
     durations = {f"tests/{name}.py": value for name, value in seconds.items()}
@@ -140,6 +169,15 @@ def test_without_recorded_durations_every_module_weighs_the_same() -> None:
     assert balanced_shards(modules, {}, 2) == [
         ["tests/a.py", "tests/c.py", "tests/e.py"],
         ["tests/b.py", "tests/d.py"],
+    ]
+
+
+def test_modules_recorded_at_zero_seconds_spread_over_the_shards() -> None:
+    durations = {"tests/a.py": 0.0, "tests/b.py": 0.0, "tests/c.py": 0.0}
+
+    assert balanced_shards(durations, durations, 2) == [
+        ["tests/a.py", "tests/c.py"],
+        ["tests/b.py"],
     ]
 
 
@@ -259,6 +297,28 @@ def test_aggregate_rejects_shards_partitioned_with_other_durations(
 
     with pytest.raises(ValueError, match="partition"):
         validate_shards(outputs)
+
+
+@pytest.mark.parametrize(
+    "figures",
+    [{"tests/gone.py": 1e308, "tests/old.py": 1e308}, {"tests/gone.py": 10**309}],
+    ids=["two-figures-beyond-a-day", "integer-beyond-a-float"],
+)
+def test_a_duration_file_with_an_unusable_figure_stops_the_combine(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    figures: dict[str, float],
+) -> None:
+    nodes = ["tests/a.py::test_first", "tests/b.py::test_second"]
+    outputs = [write_shard(tmp_path, index, nodes) for index in (1, 2)]
+    durations = tmp_path / "durations.json"
+    durations.write_text(json.dumps({platform.system(): figures}), encoding="utf-8")
+    monkeypatch.setattr(pytest_shard, "DURATIONS", durations)
+
+    assert check.main(["--combine-shards", *(str(output) for output in outputs)]) == 2
+
+    assert "tests/gone.py" in capsys.readouterr().err
 
 
 def test_shards_from_different_attempts_of_one_run_combine(

@@ -1,15 +1,16 @@
 import json
-import math
 import os
 import platform
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from statistics import fmean
+from typing import TypeIs
 
 import pytest
 
 DURATIONS = Path(__file__).resolve().parents[1] / "tests" / "shard-durations.json"
+ONE_DAY_SECONDS = 86_400
 
 
 def parse_shard(value: str) -> tuple[int, int]:
@@ -19,17 +20,34 @@ def parse_shard(value: str) -> tuple[int, int]:
     return index, count
 
 
-def recorded_durations(system: str) -> dict[str, float]:
-    recorded: object = json.loads(DURATIONS.read_text(encoding="utf-8"))
+def usable_seconds(value: object) -> TypeIs[float]:
+    return (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and 0 <= value <= ONE_DAY_SECONDS
+    )
+
+
+def read_durations(path: Path) -> dict[str, dict[str, float]]:
+    recorded: object = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(recorded, dict):
-        raise ValueError(f"Invalid test durations: {DURATIONS}")
-    figures: object = recorded.get(system, {})
-    if not isinstance(figures, dict) or not all(
-        isinstance(module, str) and type(seconds) in {int, float} and 0 <= seconds < math.inf
-        for module, seconds in figures.items()
-    ):
-        raise ValueError(f"Invalid {system} test durations: {DURATIONS}")
-    return {module: float(seconds) for module, seconds in figures.items()}
+        raise ValueError(f"Invalid test durations: {path}")
+    durations: dict[str, dict[str, float]] = {}
+    for system, figures in recorded.items():
+        if not isinstance(figures, dict):
+            raise ValueError(f"Invalid {system} test durations: {path}")
+        for module, seconds in figures.items():
+            if not usable_seconds(seconds):
+                raise ValueError(
+                    f"Invalid {system} test duration of {module}"
+                    f" (not 0 to {ONE_DAY_SECONDS} seconds): {path}"
+                )
+        durations[system] = {module: float(seconds) for module, seconds in figures.items()}
+    return durations
+
+
+def recorded_durations(system: str) -> dict[str, float]:
+    return read_durations(DURATIONS).get(system, {})
 
 
 def balanced_shards(

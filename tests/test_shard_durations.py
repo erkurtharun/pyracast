@@ -1,3 +1,4 @@
+import errno
 import json
 import subprocess
 import sys
@@ -7,7 +8,7 @@ from xml.sax.saxutils import quoteattr
 import pytest
 
 from scripts import shard_durations
-from scripts.shard_durations import junit_cases, module_durations, module_file
+from scripts.shard_durations import junit_cases, module_durations
 
 
 def junit(path: Path, cases: list[tuple[str, str, str]]) -> Path:
@@ -24,7 +25,12 @@ def junit(path: Path, cases: list[tuple[str, str, str]]) -> Path:
 
 @pytest.fixture
 def checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    for module in ("tests/test_a.py", "tests/test_b.py", "tests/e2e/test_c.py"):
+    for module in (
+        "tests/test_a.py",
+        "tests/test_b.py",
+        "tests/e2e/test_c.py",
+        "tests/conftest.py",
+    ):
         (tmp_path / module).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / module).write_text("", encoding="utf-8")
     durations = tmp_path / "tests" / "shard-durations.json"
@@ -62,13 +68,18 @@ def test_each_module_records_the_rounded_sum_of_its_tests_across_results(checkou
         ("tests.e2e.test_c", "tests/e2e/test_c.py"),
         ("tests.test_gone", None),
         ("tests.test-a", None),
+        ("TESTS.TEST_A", None),
+        ("tests.Test_a", None),
+        ("tests.conftest", None),
         ("", None),
     ],
 )
-def test_a_class_name_resolves_to_the_test_file_of_the_checkout(
+def test_a_class_name_resolves_to_the_exact_spelling_of_a_test_module_of_the_checkout(
     checkout: Path, classname: str, expected: str | None
 ) -> None:
-    assert module_file(classname, checkout) == expected
+    result = junit(checkout / "result.xml", [(classname, "test_one", "1")])
+
+    assert module_durations([result], checkout) == ({expected: 1.0} if expected else {})
 
 
 def test_a_test_recorded_in_two_results_is_refused(checkout: Path) -> None:
@@ -100,6 +111,7 @@ def test_a_result_with_a_document_type_declaration_is_refused(tmp_path: Path) ->
         'classname="tests.test_a" name="test_one" time="-1"',
         'classname="tests.test_a" name="test_one" time="nan"',
         'classname="tests.test_a" name="test_one" time="inf"',
+        'classname="tests.test_a" name="test_one" time="86400.5"',
         'classname="tests.test_a" name="test_one" time="soon"',
     ],
 )
@@ -160,13 +172,67 @@ def test_recording_refuses_results_it_cannot_use_and_keeps_the_file(
     assert durations.read_bytes() == before
 
 
-def test_recording_refuses_a_duration_file_without_systems(checkout: Path) -> None:
+@pytest.mark.parametrize(
+    ("times", "message"),
+    [(("1e308", "1e308"), "invalid time"), (("50000", "50000"), "tests/test_a.py")],
+    ids=["beyond-a-float", "beyond-a-day"],
+)
+def test_recording_refuses_a_module_duration_beyond_one_day(
+    checkout: Path, capsys: pytest.CaptureFixture[str], times: tuple[str, str], message: str
+) -> None:
+    result = junit(
+        checkout / "result.xml",
+        [("tests.test_a", f"test_{index}", time) for index, time in enumerate(times)],
+    )
     durations = checkout / "tests" / "shard-durations.json"
-    durations.write_text(json.dumps([]), encoding="utf-8")
+    before = durations.read_bytes()
+
+    assert shard_durations.main(["Windows", str(result)]) == 2
+
+    assert message in capsys.readouterr().err
+    assert durations.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "content", [json.dumps([]), json.dumps({"Linux": {"tests/test_old.py": 1e308}})]
+)
+def test_recording_refuses_a_duration_file_the_shards_would_refuse(
+    checkout: Path, content: str
+) -> None:
+    durations = checkout / "tests" / "shard-durations.json"
+    durations.write_text(content, encoding="utf-8")
     result = junit(checkout / "result.xml", [("tests.test_a", "test_one", "1")])
 
     assert shard_durations.main(["Windows", str(result)]) == 2
-    assert durations.read_text(encoding="utf-8") == "[]"
+    assert durations.read_text(encoding="utf-8") == content
+
+
+def test_a_write_that_fails_leaves_the_duration_file_as_it_was(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    result = junit(checkout / "result.xml", [("tests.test_a", "test_one", "1")])
+    durations = checkout / "tests" / "shard-durations.json"
+    before = durations.read_bytes()
+    files_before = sorted(durations.parent.iterdir())
+    write_text = Path.write_text
+
+    def fail_midway(
+        path: Path,
+        data: str,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> int:
+        write_text(path, data[: len(data) // 2], encoding, errors, newline)
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(Path, "write_text", fail_midway)
+
+    assert shard_durations.main(["Windows", str(result)]) == 2
+
+    assert "No space left on device" in capsys.readouterr().err
+    assert durations.read_bytes() == before
+    assert sorted(durations.parent.iterdir()) == files_before
 
 
 def test_duration_command_keeps_its_direct_entrypoint() -> None:
