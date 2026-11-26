@@ -18,11 +18,19 @@ export const secondAccount = { user: secondUser, tag: "tag-b" };
 export const expiredNotice = "You were signed out. Sign in again.";
 export const changedNotice = "You signed in or out in another tab.";
 
-export function sessionAnswer(account: Account, expiresAt: string | null) {
+export const idleSeconds = 30 * 60;
+export const memberIdleSeconds = 30 * 24 * 60 * 60;
+
+export function sessionAnswer(
+    account: Account,
+    expiresAt: string | null,
+    idle = idleSeconds,
+) {
     return {
         ...sessionIdentity(account),
         language: "en",
         expires_at: account ? expiresAt : null,
+        idle_seconds: account ? idle : null,
         session_tag: account?.tag ?? null,
     };
 }

@@ -6,9 +6,11 @@ import {
     announceResentInvitation,
     expiredNotice,
     focusWindow,
+    idleSeconds,
     isMarked,
     liveRegion,
     markDocument,
+    memberIdleSeconds,
     outstandingAnswers,
     outstandingSessionReads,
     readsApplied,
@@ -16,9 +18,10 @@ import {
     sessionAnswer,
     trackReads,
 } from "./support/session";
+import { controlVisibility } from "./support/saved-copy";
 
 const start = new Date("2026-11-20T09:00:00Z");
-const idleLimit = 30 * 60_000;
+const idleLimit = idleSeconds * 1000;
 const tick = 30_000;
 const listPoll = 2 * 60_000;
 const capacity = "Panel capacity (MWp)";
@@ -35,7 +38,11 @@ type SessionServer = {
     reads: number;
 };
 
-async function signedInOnClock(page: Page, expiresAt: string | null = null) {
+async function signedInOnClock(
+    page: Page,
+    expiresAt: string | null = null,
+    idle = idleSeconds,
+) {
     await page.clock.install({ time: start });
     const server: SessionServer = {
         account: await mockApi(page),
@@ -50,7 +57,7 @@ async function signedInOnClock(page: Page, expiresAt: string | null = null) {
                   json: errorBody("busy", "The session could not be read."),
               })
             : route.fulfill({
-                  json: sessionAnswer(server.account.current, expiresAt),
+                  json: sessionAnswer(server.account.current, expiresAt, idle),
               });
     });
     return server;
@@ -163,6 +170,52 @@ test("a covered window whose session read finds no user becomes a fresh document
     await page.getByRole("button", { name: "Try again" }).click();
     await expect(page.getByText(expiredNotice)).toBeVisible();
     expect(await isMarked(page)).toBe(false);
+});
+
+// A member's form, then the tab hidden for longer than an administrator's idle limit.
+async function memberWindowHidden(page: Page) {
+    const visibility = await controlVisibility(page);
+    const server = await signedInOnClock(page, null, memberIdleSeconds);
+    await openSettingsForm(page);
+    await visibility.hide();
+    await page.clock.fastForward(idleLimit + tick);
+    return { server, show: visibility.show };
+}
+
+test("a member's window shown again after the administrator idle limit keeps its screens when the session read fails", async ({
+    page,
+}) => {
+    const { server, show } = await memberWindowHidden(page);
+    await page.route(otherApi, abort);
+    server.failing = true;
+    const failed = page.waitForResponse("**/api/session/");
+    await show();
+    expect((await failed).status()).toBe(503);
+    await page.clock.runFor(tick);
+    await expect(cover(page)).toHaveCount(0);
+    await expect(page.getByLabel(capacity)).toHaveValue("6.25");
+});
+
+test("a member's window shown again after the administrator idle limit keeps its screens when the session read answers the user", async ({
+    page,
+}) => {
+    const { show } = await memberWindowHidden(page);
+    const read = page.waitForResponse("**/api/session/");
+    await show();
+    expect((await read).ok()).toBe(true);
+    await page.clock.runFor(tick);
+    await expect(cover(page)).toHaveCount(0);
+    await expect(page.getByText(expiredNotice)).toHaveCount(0);
+    await expect(page.getByLabel(capacity)).toHaveValue("6.25");
+});
+
+test("a member's window shown again whose session read answers no user shows the sign-in screen", async ({
+    page,
+}) => {
+    const { server, show } = await memberWindowHidden(page);
+    server.account.current = null;
+    await show();
+    await expect(page.getByText(expiredNotice)).toBeVisible();
 });
 
 test("the ending-soon warning appears at the next tick once the clock passed its mark", async ({
