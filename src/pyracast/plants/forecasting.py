@@ -293,11 +293,12 @@ def require_resolution(resolution_minutes: int) -> None:
         raise ValidationError(UNEXPECTED)
 
 
-def _issued(
+def decoded_issuance(
     issuance: ForecastIssuance, resolution: str
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """The stored result and outage scenario as the reads answer and project them: objects
-    whose numbers are finite, since the answer is JSON."""
+    whose numbers are finite, since the answer is JSON. They are the stored objects, not
+    copies."""
     with decoding("forecast_issuance", issuance.pk):
         payloads, scenarios = issuance.payloads, issuance.outage_scenarios
         if not isinstance(payloads, dict) or not isinstance(scenarios, dict):
@@ -307,7 +308,7 @@ def _issued(
             _stored_scenario(scenario)
         finite_numbers(result)
         finite_numbers(scenario)
-    return deepcopy(result), deepcopy(scenario)
+    return result, scenario
 
 
 def _stored_scenario(scenario: object) -> None:
@@ -421,7 +422,8 @@ def issuance_outlook(
 ) -> dict[str, object]:
     configuration, snapshot = issuance.configuration, issuance.snapshot
     with stored_data("plant", plant.pk, target_date, "archived_forecast"):
-        result, scenario = _issued(issuance, str(resolution_minutes))
+        stored, stored_scenario = decoded_issuance(issuance, str(resolution_minutes))
+    result, scenario = deepcopy(stored), deepcopy(stored_scenario)
     flags = cast(list[str], result["quality_flags"])
     flags.append("archived_forecast")
     if configuration.pk != plant.current_configuration_id:

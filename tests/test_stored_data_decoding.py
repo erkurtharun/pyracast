@@ -7,7 +7,7 @@ import pytest
 
 from pyracast.forecasts.faults import DamagedStoredDataError, decoding, finite_numbers
 from pyracast.incidents.evidence import _capacity, _moment, _recorded, _text
-from pyracast.plants.forecasting import _issued, _source_row
+from pyracast.plants.forecasting import _source_row, decoded_issuance
 from pyracast.plants.plant_days import _figure
 
 
@@ -105,7 +105,7 @@ GOOD: dict[str, Any] = {"quality_flags": [], "intervals": [], "provenance": {}}
 
 def test_a_stored_issuance_shaped_as_written_is_answered() -> None:
     scenario = {"status": "estimated", "result": GOOD}
-    assert _issued(_issuance({"60": GOOD}, {"60": scenario}), "60") == (GOOD, scenario)
+    assert decoded_issuance(_issuance({"60": GOOD}, {"60": scenario}), "60") == (GOOD, scenario)
 
 
 @pytest.mark.parametrize(
@@ -147,4 +147,4 @@ def test_a_stored_issuance_that_is_not_shaped_as_written_is_refused(
     payloads: Any, scenarios: Any
 ) -> None:
     with pytest.raises(DamagedStoredDataError):
-        _issued(_issuance(payloads, scenarios), "60")
+        decoded_issuance(_issuance(payloads, scenarios), "60")

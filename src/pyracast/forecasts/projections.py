@@ -131,16 +131,24 @@ def _valid_day(value: object, binding: SiteBinding, target_date: date) -> bool:
     return True
 
 
+def usable_day_payload(
+    day_value: object, main_payload: object, binding: SiteBinding, target_date: date
+) -> dict[str, object] | None:
+    """The payload a saved forecast result holds for the day: its value for the day, else its
+    main payload, the first that is a valid projection of that day."""
+    for payload in (day_value, main_payload):
+        if _valid_day(payload, binding, target_date):
+            return cast(dict[str, object], payload)
+    return None
+
+
 def saved_day_payload(snapshot: ForecastSnapshot, target_date: date) -> dict[str, object] | None:
     try:
         result = snapshot.forecastresult
     except ForecastResult.DoesNotExist:
         return None
     daily_payloads = result.daily_payloads
-    candidate = (
+    day_value = (
         daily_payloads.get(target_date.isoformat()) if isinstance(daily_payloads, dict) else None
     )
-    for payload in (candidate, result.payload):
-        if _valid_day(payload, snapshot.binding, target_date):
-            return cast(dict[str, object], payload)
-    return None
+    return usable_day_payload(day_value, result.payload, snapshot.binding, target_date)

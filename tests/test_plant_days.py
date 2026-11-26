@@ -575,9 +575,19 @@ def test_a_damaged_past_day_is_refused_while_every_other_day_is_answered(
         day for day in before["forecast"] if day["date"] != damaged.isoformat()
     ]
     assert after["production"] == before["production"]
-    [warning] = [record for record in caplog.records if record.name == FAULTS]
-    assert damaged.isoformat() in warning.getMessage()
-    assert fault in warning.getMessage()
+    assert damage_steps(
+        caplog.records,
+        f"day={damaged.isoformat()}",
+        f"record=forecast_issuance:{issuance.pk}",
+        fault,
+    ) == ["candidates"]
+
+
+def damage_steps(records: list[logging.LogRecord], *parts: str) -> list[str]:
+    """The steps of the damage warnings, each of which names every part."""
+    warnings = [record.getMessage() for record in records if record.name == FAULTS]
+    assert all(part in warning for warning in warnings for part in parts), warnings
+    return [warning.split(" step=")[1].split()[0] for warning in warnings]
 
 
 def failing_on(monkeypatch: pytest.MonkeyPatch, day: date, error: Exception) -> None:
@@ -653,8 +663,8 @@ def archive_refused_by_both_reads(
         )
     assert refusal.status_code == 400, refusal.content
     assert refusal.json()["code"] == "calculation_out_of_range"
-    [warning] = [record for record in caplog.records if record.name == FAULTS]
-    assert f"record=forecast_issuance:{issuance.pk} error={fault}" in warning.getMessage()
+    damage = f"record=forecast_issuance:{issuance.pk} error={fault}"
+    assert damage_steps(caplog.records, damage) == ["candidates", "archived_forecast"]
     caplog.clear()
     with caplog.at_level(logging.WARNING, logger=FAULTS):
         after = days_of(system, plant)
@@ -818,9 +828,8 @@ def only_the_reference_day_refused(
     ]
     assert by_date(after["forecast"])[REFERENCE_DAY + timedelta(days=1)]["rows"]
     assert after["production"] == before["production"]
-    [warning] = [record for record in records if record.name == FAULTS]
-    assert REFERENCE_DAY.isoformat() in warning.getMessage()
-    assert f"error={fault}" in warning.getMessage()
+    steps = damage_steps(records, f"day={REFERENCE_DAY.isoformat()}", f"error={fault}")
+    assert steps == ["candidates", "archived_forecast"]
 
 
 def test_the_forecast_read_refuses_a_stored_number_without_a_finite_float(
@@ -836,8 +845,8 @@ def test_the_forecast_read_refuses_a_stored_number_without_a_finite_float(
         )
     assert refusal.status_code == 400, refusal.content
     assert refusal.json()["code"] == "calculation_out_of_range"
-    [warning] = [record for record in caplog.records if record.name == FAULTS]
-    assert f"record=forecast_issuance:{issuance.pk} error=ValueError" in warning.getMessage()
+    damage = f"record=forecast_issuance:{issuance.pk} error=ValueError"
+    assert damage_steps(caplog.records, damage) == ["candidates", "archived_forecast"]
 
 
 def test_a_live_snapshot_row_that_is_not_an_object_refuses_only_its_day(

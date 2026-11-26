@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 from typing import Literal, cast
 
 from django.db.models import F, OuterRef, Q
+from django.db.models.fields.json import KeyTransform
 
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
@@ -33,7 +34,7 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
     SnapshotSourceKind,
 )
-from pyracast.forecasts.projections import saved_day_payload
+from pyracast.forecasts.projections import saved_day_payload, usable_day_payload
 from pyracast.forecasts.selection import ForecastOption, is_day_ahead
 from pyracast.forecasts.sources import (
     LaterFetch,
@@ -164,11 +165,11 @@ def _region_zone(region: Region) -> str:
 def saved_region_results(region: Region, target_date: date, now: datetime) -> SavedResults:
     from pyracast.plants.forecast_archive import forecast_cutoff
 
-    bindings = list(SiteBinding.objects.filter(region=region))
-    cutoffs = {binding.pk: forecast_cutoff(target_date, binding) for binding in bindings}
+    bindings = {binding.pk: binding for binding in SiteBinding.objects.filter(region=region)}
+    cutoffs = {pk: forecast_cutoff(target_date, binding) for pk, binding in bindings.items()}
     previous = {
-        binding.pk: forecast_cutoff(target_date - timedelta(days=1), binding)
-        for binding in bindings
+        pk: forecast_cutoff(target_date - timedelta(days=1), binding)
+        for pk, binding in bindings.items()
     }
     start, end = local_day_bounds(target_date, _region_zone(region))
     eligible = Q(pk__in=[])
@@ -197,7 +198,10 @@ def saved_region_results(region: Region, target_date: date, now: datetime) -> Sa
             snapshot__coverage_end__gt=start,
             published_at__lte=now,
         )
-        .annotate(approval_job=approval_job_id(OuterRef("snapshot__binding_id")))
+        .annotate(
+            approval_job=approval_job_id(OuterRef("snapshot__binding_id")),
+            day_value=KeyTransform(target_date.isoformat(), "daily_payloads"),
+        )
         .values_list(
             "pk",
             "snapshot_id",
@@ -205,8 +209,15 @@ def saved_region_results(region: Region, target_date: date, now: datetime) -> Sa
             "snapshot__binding_id",
             "snapshot__job_id",
             "approval_job",
+            "day_value",
+            "payload",
         )
     )
+    usable = [
+        (pk, snapshot_id, collected_at, binding_id, job_id, approval)
+        for pk, snapshot_id, collected_at, binding_id, job_id, approval, day_value, payload in rows
+        if usable_day_payload(day_value, payload, bindings[binding_id], target_date) is not None
+    ]
     return SavedResults(
         tuple(
             ForecastOption(
@@ -214,9 +225,9 @@ def saved_region_results(region: Region, target_date: date, now: datetime) -> Sa
                 collected_at,
                 is_day_ahead(collected_at, previous[binding_id], by_approval=job_id == approval),
             )
-            for _, snapshot_id, collected_at, binding_id, job_id, approval in rows
+            for _, snapshot_id, collected_at, binding_id, job_id, approval in usable
         ),
-        {snapshot_id: pk for pk, snapshot_id, *_ in rows},
+        {snapshot_id: pk for pk, snapshot_id, *_ in usable},
     )
 
 
