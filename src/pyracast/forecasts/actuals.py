@@ -192,8 +192,6 @@ def actual_candidates(
     bindings: Collection[SiteBinding], first: date, last: date, cutoff: datetime
 ) -> dict[int, ActualCandidates]:
     """By binding: the candidates of the days from `first` to `last`, one read for all."""
-    if not bindings:
-        return {}
     firsts = [local_day_bounds(first, binding.timezone) for binding in bindings]
     start, first_end = min(bounds[0] for bounds in firsts), min(bounds[1] for bounds in firsts)
     end = max(local_day_bounds(last, binding.timezone)[1] for binding in bindings)
