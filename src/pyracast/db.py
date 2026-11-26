@@ -108,10 +108,13 @@ class RenameInPlace(Operation):
         old: str,
         new: str,
     ) -> None:
-        table = schema_editor.quote_name(model._meta.db_table)
         # Locked first, so autovacuum cannot hold the table while it waits for this transaction.
-        schema_editor.execute(f"LOCK TABLE {table} IN ACCESS EXCLUSIVE MODE")
+        schema_editor.execute(self.lock_sql(schema_editor, model))
         schema_editor.execute(self.rename_sql(schema_editor, model, old, new))
+
+    def lock_sql(self, schema_editor: BaseDatabaseSchemaEditor, model: type[models.Model]) -> str:
+        table = schema_editor.quote_name(model._meta.db_table)
+        return f"LOCK TABLE {table} IN ACCESS EXCLUSIVE MODE"
 
     def rename_sql(
         self,
