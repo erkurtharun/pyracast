@@ -135,6 +135,7 @@ def test_reference_transition_before_first_new_acquisition_keeps_published_forec
         "no_prior_configuration",
         "not_intraday",
         "unpublished",
+        "source_with_a_gap",
     ],
 )
 def test_automatic_does_not_replace_latest_when_reference_transition_is_not_safe(
@@ -165,6 +166,9 @@ def test_automatic_does_not_replace_latest_when_reference_transition_is_not_safe
         PlantConfiguration.objects.filter(pk=plant.current_configuration_id).update(
             created_at=old.collected_at
         )
+    elif change == "source_with_a_gap":
+        del old.normalized_intervals[len(old.normalized_intervals) // 2]
+        stored_again(old)
     else:
         ForecastIssuance.objects.filter(snapshot=old).delete()
         ForecastResult.objects.filter(snapshot=old).delete()

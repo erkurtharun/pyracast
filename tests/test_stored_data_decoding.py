@@ -5,8 +5,8 @@ from typing import Any, cast
 
 import pytest
 
-from pyracast.forecasts.faults import DamagedStoredDataError, decoding
-from pyracast.incidents.evidence import _capacity, _moment, _recorded
+from pyracast.forecasts.faults import DamagedStoredDataError, decoding, finite_numbers
+from pyracast.incidents.evidence import _capacity, _moment, _recorded, _text
 from pyracast.plants.forecasting import _issued, _source_row
 from pyracast.plants.plant_days import _figure
 
@@ -54,6 +54,32 @@ def test_a_stored_incident_revision_that_is_not_an_object_is_refused() -> None:
 def test_a_source_interval_that_is_not_an_object_is_refused() -> None:
     with pytest.raises(TypeError):
         _source_row(None)
+
+
+@pytest.mark.parametrize("value", [None, 5, [1], True])
+def test_a_stored_text_field_that_is_not_text_is_refused(value: object) -> None:
+    with pytest.raises(TypeError):
+        _text(value)
+
+
+@pytest.mark.parametrize(
+    "row", [{"start": 1, "end": "x"}, {"start": "x", "end": None}, {"start": "x"}]
+)
+def test_a_source_interval_without_text_bounds_is_refused(row: dict[str, object]) -> None:
+    with pytest.raises(ValueError, match="timestamps"):
+        _source_row(row)
+
+
+@pytest.mark.parametrize("value", [True, "5", [5]])
+def test_a_stored_figure_that_is_not_a_number_is_refused(value: object) -> None:
+    with pytest.raises(TypeError):
+        _figure(value)
+
+
+@pytest.mark.parametrize("value", [float("inf"), {"a": [1, float("inf")]}, [{"b": float("nan")}]])
+def test_a_stored_document_with_an_infinite_number_is_refused(value: object) -> None:
+    with pytest.raises(ValueError, match="not finite"):
+        finite_numbers(value)
 
 
 @pytest.mark.parametrize("value", [float("inf"), float("nan")])
