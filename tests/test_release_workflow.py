@@ -561,6 +561,8 @@ def test_deploy_runs_the_authorized_commit_only_after_proving_it_is_on_main() ->
         "ref": "refs/heads/main",
         "fetch-depth": 0,
         "persist-credentials": False,
+        "sparse-checkout-cone-mode": False,
+        "sparse-checkout": checkout["with"]["sparse-checkout"],
     }
     assert move["name"] == "Move to the authorized commit, which must be on main"
     assert move["run"].splitlines() == [

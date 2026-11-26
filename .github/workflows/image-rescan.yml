@@ -27,8 +27,28 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Leave the unshipped paths out of the checkout
-        run: python3 deploy/release_scope.py sparse-checkout
+          sparse-checkout-cone-mode: false
+          # The output of: python3 deploy/release_scope.py sparse-patterns
+          sparse-checkout: |
+            /*
+            !/docs/
+            !/tests/
+            !/scripts/
+            !/web/tests/
+            !/web/integration/
+            !/web/production-tests/
+            !/.agents/
+            !/AGENTS.md
+            !/CLAUDE.md
+            !/.claude/settings.json
+            !/.codex/hooks.json
+            !/.github/dependabot.yml
+            !/qodana.yaml
+            !/qodana-js.yaml
+            !/sonar-project.properties
+            !/.gitignore
+            !/web/.gitignore
+            !/web/.prettierignore
       - name: Read the registry reader of the deployed images
         id: reader
         if: env.IMAGE_RESCAN != ''

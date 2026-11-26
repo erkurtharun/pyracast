@@ -1,16 +1,19 @@
+import functools
 import os
 import posixpath
 import re
 import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from deploy import release_scope
-from tests.support.workflows import WORKFLOWS, workflow
+from tests.support.workflows import WORKFLOWS
 
 ROOT = Path(__file__).resolve().parents[1]
 GIT = shutil.which("git")
@@ -458,7 +461,6 @@ def test_the_shipped_path_check_sees_every_re_include(
     assert _shipped_samples(context, _ignore_rules("\n".join(lines))) != []
 
 
-SPARSE_CHECKOUT = "python3 deploy/release_scope.py sparse-checkout"
 REDUCED_JOBS = {
     "ci.yml deployment",
     "image-rescan.yml rescan",
@@ -466,114 +468,176 @@ REDUCED_JOBS = {
     "release.yml scan",
     "release.yml deploy",
 }
+BUILD_COMMAND = re.compile(
+    r"\bdocker\s+(?:buildx\s+)?build\b|\bdocker(?:\s+|-)compose\b.*\s(?:--)?build\b|\bgit\s+archive\b"
+)
+SCRIPT = re.compile(r"(?<![\w./-])[\w-][\w./-]*\.(?:sh|py|mjs|js|ps1)\b")
 
 
-def _builds_a_release_input(job: dict[str, Any]) -> bool:
-    return any(
+@functools.cache
+def _derived_patterns() -> list[str]:
+    result = subprocess.run(  # noqa: S603 -- The running interpreter on a tracked script.
+        [sys.executable, str(ROOT / "deploy" / "release_scope.py"), "sparse-patterns"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.splitlines()
+
+
+def _is_checkout(step: dict[str, Any]) -> bool:
+    return str(step.get("uses", "")).startswith("actions/checkout@")
+
+
+def _is_reduced_checkout(step: dict[str, Any]) -> bool:
+    options = step.get("with", {})
+    return (
+        _is_checkout(step)
+        and "if" not in step
+        and "continue-on-error" not in step
+        and options.get("sparse-checkout-cone-mode") is False
+        and str(options.get("sparse-checkout", "")).splitlines() == _derived_patterns()
+    )
+
+
+def _builds(step: dict[str, Any], root: Path) -> bool:
+    command = str(step.get("run", ""))
+    scripts = [root / name for name in SCRIPT.findall(command)]
+    return (
         str(step.get("uses", "")).startswith("docker/build-push-action@")
-        or "git archive" in str(step.get("run", ""))
-        for step in job.get("steps", [])
+        or BUILD_COMMAND.search(command) is not None
+        or any(
+            script.is_file()
+            and BUILD_COMMAND.search(script.read_text(encoding="utf-8", errors="replace"))
+            for script in scripts
+        )
     )
 
 
-def _checks_out(step: dict[str, Any]) -> bool:
-    return str(step.get("uses", "")).startswith("actions/checkout@") or "git checkout" in str(
-        step.get("run", "")
+def _works_without_the_unshipped_paths(steps: list[dict[str, Any]], root: Path) -> bool:
+    checkouts = [index for index, step in enumerate(steps) if _is_checkout(step)]
+    builds = [index for index, step in enumerate(steps) if _builds(step, root)]
+    return (
+        len(checkouts) == 1
+        and _is_reduced_checkout(steps[checkouts[0]])
+        and all(checkouts[0] < build for build in builds)
     )
 
 
-def _jobs_without_the_reduced_checkout(name: str, document: dict[str, Any]) -> list[str]:
-    missing = []
-    for identifier, job in document["jobs"].items():
-        steps = job.get("steps", [])
-        checkouts = [index for index, step in enumerate(steps) if _checks_out(step)]
-        if _builds_a_release_input(job) or (name == "release.yml" and checkouts):
-            reduced = [
-                index for index, step in enumerate(steps) if step.get("run") == SPARSE_CHECKOUT
-            ]
-            if not checkouts or reduced != [checkouts[-1] + 1]:
-                missing.append(f"{name} {identifier}")
-    return missing
+def _workflow_files(directory: Path) -> list[Path]:
+    return sorted([*directory.glob("*.yml"), *directory.glob("*.yaml")])
 
 
-def _workflow_names() -> list[str]:
-    return sorted(path.name for path in WORKFLOWS.glob("*.yml"))
-
-
-def test_every_job_that_builds_a_release_input_works_without_the_unshipped_paths() -> None:
-    reduced = {
-        f"{name} {identifier}"
-        for name in _workflow_names()
-        for identifier, job in workflow(name)["jobs"].items()
-        if any(step.get("run") == SPARSE_CHECKOUT for step in job.get("steps", []))
+def _jobs(directory: Path) -> dict[str, list[dict[str, Any]]]:
+    return {
+        f"{path.name} {identifier}": job.get("steps", [])
+        for path in _workflow_files(directory)
+        for identifier, job in yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"].items()
     }
 
-    assert reduced == REDUCED_JOBS
-    assert [
+
+def _unreduced_jobs(directory: Path, root: Path) -> list[str]:
+    return [
         job
-        for name in _workflow_names()
-        for job in _jobs_without_the_reduced_checkout(name, workflow(name))
-    ] == []
-
-
-@pytest.mark.parametrize(
-    ("name", "build"),
-    [
-        ("ci.yml", {"uses": "docker/build-push-action@v7", "with": {"context": "."}}),
-        ("image-rescan.yml", {"uses": "docker/build-push-action@v7", "with": {"context": "web"}}),
-        ("ci.yml", {"run": "git archive --output=bundle.tar HEAD deploy"}),
-        ("release.yml", {"run": "python3 deploy/ci_images.py verify"}),
-    ],
-)
-def test_a_new_build_job_without_the_reduced_checkout_is_reported(
-    name: str, build: dict[str, Any]
-) -> None:
-    document = workflow(name)
-    document["jobs"]["added"] = {"steps": [{"uses": "actions/checkout@v7"}, build]}
-
-    assert _jobs_without_the_reduced_checkout(name, document) == [f"{name} added"]
-
-
-def test_a_reduced_checkout_before_a_later_move_of_the_commit_is_reported() -> None:
-    document = workflow("release.yml")
-    steps = document["jobs"]["deploy"]["steps"]
-    move = next(step for step in steps if "git checkout" in str(step.get("run", "")))
-    steps.remove(move)
-    steps.append(move)
-
-    assert _jobs_without_the_reduced_checkout("release.yml", document) == ["release.yml deploy"]
-
-
-def test_the_sparse_checkout_leaves_out_every_allowlisted_entry() -> None:
-    assert release_scope.sparse_patterns() == [
-        "/*",
-        "!/docs/",
-        "!/tests/",
-        "!/scripts/",
-        "!/web/tests/",
-        "!/web/integration/",
-        "!/web/production-tests/",
-        "!/.agents/",
-        "!/AGENTS.md",
-        "!/CLAUDE.md",
-        "!/.claude/settings.json",
-        "!/.codex/hooks.json",
-        "!/.github/dependabot.yml",
-        "!/qodana.yaml",
-        "!/qodana-js.yaml",
-        "!/sonar-project.properties",
-        "!/.gitignore",
-        "!/web/.gitignore",
-        "!/web/.prettierignore",
+        for job, steps in _jobs(directory).items()
+        if (
+            any(_builds(step, root) for step in steps)
+            or (job.startswith("release.yml ") and any(_is_checkout(step) for step in steps))
+        )
+        and not _works_without_the_unshipped_paths(steps, root)
     ]
 
 
-def test_a_directory_entry_and_an_exact_entry_become_exclusions(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(release_scope, "ALLOWLIST", ("web/tests/**", "AGENTS.md"))
+def test_every_job_that_builds_a_release_input_checks_out_without_the_unshipped_paths() -> None:
+    reduced = {
+        job
+        for job, steps in _jobs(WORKFLOWS).items()
+        if any(_is_reduced_checkout(step) for step in steps)
+    }
 
-    assert release_scope.sparse_patterns() == ["/*", "!/web/tests/", "!/AGENTS.md"]
+    assert reduced == REDUCED_JOBS
+    assert _unreduced_jobs(WORKFLOWS, ROOT) == []
+
+
+def _reduced_checkout_step() -> dict[str, Any]:
+    patterns = "".join(f"{pattern}\n" for pattern in _derived_patterns())
+    return {
+        "uses": "actions/checkout@v7",
+        "with": {"sparse-checkout-cone-mode": False, "sparse-checkout": patterns},
+    }
+
+
+def _write_workflow(directory: Path, name: str, steps: list[dict[str, Any]]) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    document = {"on": "push", "jobs": {"build": {"runs-on": "ubuntu-latest", "steps": steps}}}
+    (directory / name).write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        {"run": "docker build --tag app ."},
+        {"run": "docker buildx build --load web"},
+        {"run": "docker compose -f deploy/compose.yml build"},
+        {"run": "docker compose up --build --detach"},
+        {"run": "bash deploy/build-images.sh"},
+        {"uses": "docker/build-push-action@v7", "with": {"context": "."}},
+        {"run": "git archive --output=bundle.tar HEAD deploy"},
+    ],
+)
+def test_a_build_from_a_checkout_without_the_reduction_is_reported(
+    tmp_path: Path, build: dict[str, Any]
+) -> None:
+    script = tmp_path / "deploy" / "build-images.sh"
+    script.parent.mkdir()
+    script.write_text("docker buildx build --load .\n", encoding="utf-8")
+    _write_workflow(tmp_path / "workflows", "build.yml", [{"uses": "actions/checkout@v7"}, build])
+
+    assert _unreduced_jobs(tmp_path / "workflows", tmp_path) == ["build.yml build"]
+
+
+def test_a_build_after_the_reduced_checkout_passes(tmp_path: Path) -> None:
+    build = {"run": "docker build --tag app ."}
+    _write_workflow(tmp_path, "build.yml", [_reduced_checkout_step(), build])
+
+    assert _unreduced_jobs(tmp_path, tmp_path) == []
+
+
+def test_a_reduction_under_a_condition_is_reported(tmp_path: Path) -> None:
+    checkout = {**_reduced_checkout_step(), "if": "github.event_name == 'push'"}
+    _write_workflow(tmp_path, "build.yml", [checkout, {"run": "docker build ."}])
+
+    assert _unreduced_jobs(tmp_path, tmp_path) == ["build.yml build"]
+
+
+def test_a_second_checkout_after_the_reduced_one_is_reported(tmp_path: Path) -> None:
+    steps = [_reduced_checkout_step(), {"uses": "actions/checkout@v7"}, {"run": "docker build ."}]
+    _write_workflow(tmp_path, "build.yml", steps)
+
+    assert _unreduced_jobs(tmp_path, tmp_path) == ["build.yml build"]
+
+
+def test_a_workflow_with_the_long_extension_is_read(tmp_path: Path) -> None:
+    steps = [{"uses": "actions/checkout@v7"}, {"run": "docker build ."}]
+    _write_workflow(tmp_path, "build.yaml", steps)
+
+    assert _unreduced_jobs(tmp_path, tmp_path) == ["build.yaml build"]
+
+
+def test_a_directory_entry_and_an_exact_entry_become_exclusions() -> None:
+    patterns = release_scope.sparse_patterns(("web/tests/**", "AGENTS.md"))
+
+    assert patterns == ["/*", "!/web/tests/", "!/AGENTS.md"]
+
+
+def test_the_command_prints_the_patterns_of_the_allowlist(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    release_scope.main(["sparse-patterns"])
+
+    assert capsys.readouterr().out.splitlines() == release_scope.sparse_patterns(
+        release_scope.ALLOWLIST
+    )
 
 
 LOOK_ALIKES = (
@@ -608,32 +672,44 @@ def _working_tree(root: Path) -> set[str]:
     }
 
 
-def test_the_sparse_checkout_holds_exactly_the_shipped_paths(
-    repository: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def _reduced_clone(source: Path, destination: Path) -> None:
+    head = _git(source, "rev-parse", "HEAD")
+    _git(source, "clone", "--quiet", "--shared", "--no-checkout", str(source), str(destination))
+    # What the checkout action does for sparse-checkout-cone-mode false.
+    _git(destination, "config", "core.sparseCheckout", "true")
+    sparse_file = destination / _git(destination, "rev-parse", "--git-path", "info/sparse-checkout")
+    sparse_file.parent.mkdir(parents=True, exist_ok=True)
+    with sparse_file.open("a", encoding="utf-8", newline="") as stream:
+        stream.write("\n" + "\n".join(_derived_patterns()) + "\n")
+    _git(destination, "checkout", "--quiet", "--detach", head)
+
+
+def _shipped_tracked_files(root: Path) -> set[str]:
+    tracked = _git(root, "ls-tree", "-r", "--name-only", "-z", "HEAD").split("\0")
+    return {path for path in tracked if path and not release_scope.unshipped(path)}
+
+
+def test_the_reduced_checkout_of_this_repository_holds_exactly_the_shipped_files(
+    tmp_path: Path,
+) -> None:
+    _reduced_clone(ROOT, tmp_path / "clone")
+
+    assert _working_tree(tmp_path / "clone") == _shipped_tracked_files(ROOT)
+
+
+def test_the_reduced_checkout_keeps_the_look_alikes_of_the_unshipped_paths(
+    repository: Path, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
     probes = [
         entry.removesuffix("**") + "nested/probe" if entry.endswith("/**") else entry
         for entry in release_scope.ALLOWLIST
     ]
-    paths = {*probes, *LOOK_ALIKES}
-    _commit(repository, *paths)
-    monkeypatch.chdir(repository)
+    _commit(repository, *probes, *LOOK_ALIKES)
+    clone = tmp_path_factory.mktemp("reduced") / "clone"
 
-    release_scope.main(["sparse-checkout"])
+    _reduced_clone(repository, clone)
 
-    assert _working_tree(repository) == {
-        path for path in paths if not release_scope.unshipped(path)
-    }
-    assert capsys.readouterr().out.splitlines() == release_scope.sparse_patterns()
-
-
-def test_a_failed_sparse_checkout_fails_the_step(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.chdir(tmp_path)
-
-    with pytest.raises(subprocess.CalledProcessError):
-        release_scope.main(["sparse-checkout"])
+    assert _working_tree(clone) == set(LOOK_ALIKES)
 
 
 def test_no_infrastructure_file_names_an_allowlisted_path() -> None:

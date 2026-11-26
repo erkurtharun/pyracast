@@ -50,16 +50,13 @@ def unshipped(path: str) -> bool:
     return any(_matches(path, entry) for entry in ALLOWLIST)
 
 
-def _git(
-    root: Path, *arguments: str, stdin: bytes | None = None
-) -> subprocess.CompletedProcess[bytes]:
+def _git(root: Path, *arguments: str) -> subprocess.CompletedProcess[bytes]:
     git = shutil.which("git")
     if git is None:
         raise FileNotFoundError("git")
     environment = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
     return subprocess.run(  # noqa: S603 -- Resolved git executable; arguments are validated SHAs.
         [git, "-C", str(root), *arguments],
-        input=stdin,
         capture_output=True,
         check=False,
         timeout=GIT_TIMEOUT_SECONDS,
@@ -115,19 +112,12 @@ def decide(event: str, deployed_sha: str, head_sha: str, root: Path) -> Decision
     )
 
 
-def sparse_patterns() -> list[str]:
+def sparse_patterns(entries: Sequence[str]) -> list[str]:
     excluded = [
         f"!/{entry.removesuffix('**')}" if entry.endswith("/**") else f"!/{entry}"
-        for entry in ALLOWLIST
+        for entry in entries
     ]
     return ["/*", *excluded]
-
-
-def leave_out_unshipped(root: Path) -> None:
-    patterns = "".join(f"{pattern}\n" for pattern in sparse_patterns()).encode("utf-8")
-    result = _git(root, "sparse-checkout", "set", "--no-cone", "--stdin", stdin=patterns)
-    if result.returncode != 0:
-        raise _failed(result)
 
 
 def main(arguments: Sequence[str] | None = None) -> None:
@@ -137,11 +127,10 @@ def main(arguments: Sequence[str] | None = None) -> None:
     classify.add_argument("event")
     classify.add_argument("deployed_sha")
     classify.add_argument("head_sha")
-    commands.add_parser("sparse-checkout")
+    commands.add_parser("sparse-patterns")
     values = parser.parse_args(arguments)
-    if values.command == "sparse-checkout":
-        leave_out_unshipped(Path.cwd())
-        print("\n".join(sparse_patterns()))
+    if values.command == "sparse-patterns":
+        print("\n".join(sparse_patterns(ALLOWLIST)))
         return
     decision = decide(values.event, values.deployed_sha, values.head_sha, Path.cwd())
     print(decision.reason)
