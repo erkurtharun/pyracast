@@ -38,6 +38,8 @@ def forward() -> None:
 
 
 def reset_to_leaf() -> None:
+    # A transaction the test left open would hold the restore uncommitted; closing discards it.
+    connection.close()
     # Rows a failed test left can make a forward migration refuse; teardown deletes them anyway.
     with connection.cursor() as cursor:
         tables = connection.introspection.table_names(cursor)
