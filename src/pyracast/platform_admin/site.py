@@ -17,7 +17,7 @@ from django.views.generic import RedirectView
 
 from pyracast.accounts.audit import SecurityEvent, record_refusal
 from pyracast.accounts.authorization import has_platform_admin_session
-from pyracast.accounts.security import has_mfa_evidence
+from pyracast.accounts.security import CONFIRMATION, CONSOLE_PROOF, has_mfa_evidence
 from pyracast.errors import ErrorCode
 from pyracast.platform_admin import (
     access,
@@ -78,8 +78,8 @@ class PlatformAdminSite(admin.AdminSite):
     def admin_view[V: Callable[..., Any]](
         self, view: V, cacheable: bool = False, *, needs_confirmation: bool = True
     ) -> V:
-        # Django and every ModelAdmin build their console routes through here too, so an unsafe
-        # request reaches a view only with a recent confirmation by the authenticator.
+        # Django and every ModelAdmin build their console routes through here too, so a request
+        # reaches a view only with a recent enough proof by the authenticator.
         view = contained(view)
         if needs_confirmation:
             view = self._confirmed(view)
@@ -87,13 +87,17 @@ class PlatformAdminSite(admin.AdminSite):
 
     def _confirmed[V: Callable[..., Any]](self, view: V) -> V:
         def confirmed(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
-            if request.method in SAFE_METHODS or has_mfa_evidence(request, recent=True):
+            reading = request.method in SAFE_METHODS
+            if has_mfa_evidence(request, within=CONSOLE_PROOF if reading else CONFIRMATION):
                 return view(request, *args, **kwargs)
             return self.confirmation(
                 request,
                 ConfirmationForm(user=request.user),
-                console_destination(request, request.headers.get("Referer")),
+                console_destination(
+                    request, request.get_full_path() if reading else request.headers.get("Referer")
+                ),
                 status=403,
+                refused=not reading,
             )
 
         return cast(V, update_wrapper(confirmed, view))
@@ -101,7 +105,7 @@ class PlatformAdminSite(admin.AdminSite):
     def each_context(self, request: HttpRequest) -> dict[str, Any]:
         return {
             **super().each_context(request),
-            "confirmation_needed": not has_mfa_evidence(request, recent=True),
+            "confirmation_needed": not has_mfa_evidence(request, within=CONFIRMATION),
         }
 
     def get_urls(self) -> list[URLPattern | URLResolver]:
@@ -230,13 +234,19 @@ class PlatformAdminSite(admin.AdminSite):
         )
 
     def confirmation(
-        self, request: HttpRequest, form: ConfirmationForm, destination: str, *, status: int
+        self,
+        request: HttpRequest,
+        form: ConfirmationForm,
+        destination: str,
+        *,
+        status: int,
+        refused: bool = False,
     ) -> TemplateResponse:
         return self.workspace_response(
             request,
             "confirm",
             _("Confirm with your authenticator"),
-            {"form": form, "next": destination, "refused": status == 403},
+            {"form": form, "next": destination, "refused": refused},
             status=status,
         )
 

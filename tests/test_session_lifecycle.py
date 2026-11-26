@@ -36,6 +36,7 @@ from tests.support.account_sessions import (
     totp_clock,
     with_totp,
 )
+from tests.support.api import verified_admin
 from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, submit, totp_code
 from tests.support.outbox import deliver_mail
 
@@ -174,29 +175,28 @@ def expiries(records: list[dict[str, Any]]) -> list[str]:
     return [record["reason"] for record in records if record["event"] == "session_expired"]
 
 
-def signed_in_as(administrator: bool) -> tuple[User, Client]:
+def signed_in_as(platform_administrator: bool) -> tuple[User, Client]:
     user = account("owner")
-    if not administrator:
+    if not platform_administrator:
         return user, signed_in(user)
-    User.objects.filter(pk=user.pk).update(is_staff=True)
+    User.objects.filter(pk=user.pk).update(is_staff=True, is_superuser=True)
     client = browser()
     client.force_login(User.objects.get(pk=user.pk))
     return user, client
 
 
+@pytest.mark.parametrize("platform_administrator", [False, True], ids=["member", "administrator"])
 @pytest.mark.parametrize(
-    ("administrator", "marker", "limit", "reason"),
+    ("marker", "limit", "reason"),
     [
-        (False, "last_activity_at", 30 * 24 * 60 * 60, "idle"),
-        (False, "authenticated_at", 90 * 24 * 60 * 60, "absolute"),
-        (True, "last_activity_at", 30 * 60, "idle"),
-        (True, "authenticated_at", 12 * 60 * 60, "absolute"),
+        ("last_activity_at", 30 * 24 * 60 * 60, "idle"),
+        ("authenticated_at", 90 * 24 * 60 * 60, "absolute"),
     ],
-    ids=["member-idle", "member-absolute", "administrator-idle", "administrator-absolute"],
+    ids=["idle", "absolute"],
 )
 @pytest.mark.parametrize(("offset", "kept"), [(-1, True), (0, False)])
-def test_a_session_ends_exactly_at_the_idle_and_absolute_limits_of_its_account(
-    administrator: bool,
+def test_every_session_ends_exactly_after_thirty_days_idle_or_ninety_days_after_sign_in(
+    platform_administrator: bool,
     marker: str,
     limit: int,
     reason: str,
@@ -205,7 +205,7 @@ def test_a_session_ends_exactly_at_the_idle_and_absolute_limits_of_its_account(
     monkeypatch: pytest.MonkeyPatch,
     events: Callable[[], list[dict[str, Any]]],
 ) -> None:
-    user, client = signed_in_as(administrator)
+    user, client = signed_in_as(platform_administrator)
     started = time.time()
     now = started + limit + offset
     session = client.session
@@ -218,26 +218,15 @@ def test_a_session_ends_exactly_at_the_idle_and_absolute_limits_of_its_account(
     assert expiries(events()) == ([] if kept else [reason])
 
 
-def test_an_account_made_administrator_is_held_to_the_administrator_idle_limit_at_its_next_request(
-    events: Callable[[], list[dict[str, Any]]],
+def test_the_app_answers_a_platform_administrator_hours_after_the_authenticator_proof(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    user = account("owner")
-    client = signed_in(user)
+    client, user = verified_admin(confirmed=True)
+    later = time.time() + 2 * settings.PYRACAST_CONSOLE_PROOF_SECONDS
+    monkeypatch.setattr(time, "time", lambda: later)
 
-    def idle_past_the_administrator_limit() -> None:
-        session = client.session
-        session["last_activity_at"] = (
-            time.time() - settings.PYRACAST_ADMIN_SESSION_IDLE_SECONDS - 60
-        )
-        session.save()
-
-    idle_past_the_administrator_limit()
     assert session_user(client) == user.pk
-    idle_past_the_administrator_limit()
-    User.objects.filter(pk=user.pk).update(is_staff=True)
-
-    assert session_user(client) is None
-    assert expiries(events()) == ["idle"]
+    assert client.get("/api/tenants/").status_code == 200
 
 
 def test_session_activity_is_written_at_most_once_a_minute(

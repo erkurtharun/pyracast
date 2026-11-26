@@ -29,6 +29,7 @@ from tests.support.account_sessions import (
     arrive,
     carrying_key,
     elsewhere,
+    lasting_session_cookie,
     moment,
     session_cookie,
     session_key,
@@ -46,6 +47,7 @@ REDIRECTS = {"login"}
 SAMPLES = {"app_label": "regions", "url": "unknown/"}
 SESSION_TABLES = ('"django_session"', '"usersessions_usersession"')
 BOUND = settings.ACCOUNT_REAUTHENTICATION_TIMEOUT
+PROOF = settings.PYRACAST_CONSOLE_PROOF_SECONDS
 STALE = ["missing", "expired"]
 
 
@@ -277,7 +279,7 @@ def test_a_confirmation_sends_its_rotated_key_once_and_the_next_console_writes_u
         late = stale.get(reverse("admin:index"))
         assert late.status_code == 302
     assert confirmed.status_code == 302
-    assert session_cookie(confirmed) == (session_key(client), "", "")
+    assert lasting_session_cookie(confirmed)[0] == session_key(client)
     jar = carrying_key(old, enforce_csrf_checks=False)
 
     arrive(jar, confirmed, late)
@@ -466,3 +468,69 @@ def test_a_language_choice_is_a_confirmed_write_and_signing_out_needs_no_confirm
     assert UserLanguagePreference.objects.get(user=user).language == Language.TR
     assert signed_out.status_code == 302
     assert client.get("/api/session/").json()["user"] is None
+
+
+def later(monkeypatch: pytest.MonkeyPatch, seconds: float) -> None:
+    moved = time.time() + seconds
+    monkeypatch.setattr(time, "time", lambda: moved)
+
+
+@pytest.mark.parametrize("confirmed", [False, True], ids=["signed in", "confirmed"])
+@pytest.mark.parametrize(
+    ("elapsed", "opens"), [(PROOF - 1, True), (PROOF, False)], ids=["within", "after"]
+)
+def test_a_console_page_opens_only_within_an_hour_of_the_last_authenticator_proof(
+    confirmed: bool, elapsed: int, opens: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _ = verified_admin(confirmed=confirmed)
+    path = reverse("admin:workspace_settings")
+    later(monkeypatch, elapsed)
+
+    response = client.get(path)
+
+    if opens:
+        assert response.status_code == 200
+        assert CONFIRMATION not in {template.name for template in response.templates}
+        return
+    assert refused(response)
+    assert f'name="next" value="{path}"'.encode() in response.content
+    assert b"Nothing was saved." not in response.content
+
+
+@CODE_LIMITS
+def test_after_an_hour_the_authenticator_code_opens_the_console_page_that_was_asked_for(
+    operator: tuple[Client, str, float], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, secret, now = operator
+    path = reverse("admin:workspace_settings")
+    later(monkeypatch, PROOF)
+
+    asked = client.get(path)
+    confirmed = client.post(
+        reverse("admin:workspace_confirm"), {"code": totp_code(secret, now), "next": path}
+    )
+
+    assert refused(asked)
+    assert (confirmed.status_code, confirmed["Location"]) == (302, path)
+    assert client.get(path).status_code == 200
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        {"is_superuser": False},
+        {"is_staff": False},
+        {"is_staff": False, "is_superuser": False},
+    ],
+    ids=["staff only", "superuser only", "member"],
+)
+def test_an_account_without_the_console_right_is_sent_away_whatever_its_proof(
+    flags: dict[str, bool],
+) -> None:
+    client, user = verified_admin(confirmed=True)
+    User.objects.filter(pk=user.pk).update(**flags)
+
+    response = client.get(reverse("admin:workspace_settings"))
+
+    assert response.status_code == 302
+    assert response["Location"].startswith(reverse("admin:login"))

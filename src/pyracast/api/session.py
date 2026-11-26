@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Any
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.http import HttpRequest
 from django.middleware.csrf import get_token
@@ -21,7 +22,7 @@ from pyracast.accounts.language import (
 )
 from pyracast.accounts.models import Language
 from pyracast.accounts.session_tag import session_tag
-from pyracast.accounts.sessions import absolute_end, session_limits
+from pyracast.accounts.sessions import absolute_end
 from pyracast.api.serializers import InputSerializer
 
 
@@ -58,11 +59,10 @@ class SessionOutput(serializers.Serializer[Any]):
 def _limits(request: Request) -> dict[str, datetime | int | None]:
     if not request.user.is_authenticated:
         return {"expires_at": None, "idle_seconds": None}
-    limits = session_limits(request.user)
     # SessionLifetime has already ended a session without a valid start time.
     return {
-        "expires_at": absolute_end(request.session, limits),
-        "idle_seconds": limits.idle_seconds,
+        "expires_at": absolute_end(request.session),
+        "idle_seconds": settings.PYRACAST_SESSION_IDLE_SECONDS,
     }
 
 

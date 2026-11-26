@@ -1,5 +1,6 @@
 import time
 from collections.abc import Callable
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -116,7 +117,7 @@ def test_a_request_that_starts_a_step_saves_the_session_without_sending_its_cook
     assert EMAIL_VERIFICATION_CODE_SESSION_KEY in client.session
 
 
-def test_a_created_or_rotated_member_session_key_lasts_for_what_is_left_of_ninety_days() -> None:
+def test_a_created_or_rotated_session_key_lasts_for_what_is_left_of_ninety_days() -> None:
     user = account("owner")
     client = browser()
     ninety_days = 90 * 24 * 60 * 60
@@ -126,6 +127,7 @@ def test_a_created_or_rotated_member_session_key_lasts_for_what_is_left_of_ninet
     created = session_key(client)
     session = client.session
     session["authenticated_at"] -= ten_days
+    session.set_expiry(session.get_expiry_date() - timedelta(seconds=ten_days))
     session.save()
     rotating = submit(client, "auth/reauthenticate", {"password": PASSWORD})
 
@@ -136,7 +138,7 @@ def test_a_created_or_rotated_member_session_key_lasts_for_what_is_left_of_ninet
     assert ninety_days - ten_days - 2 <= rotated_age <= ninety_days - ten_days
 
 
-def test_an_administrator_session_key_is_sent_as_a_browser_session_cookie(
+def test_a_platform_administrator_session_key_lasts_for_what_is_left_of_ninety_days(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user = account("operator")
@@ -151,8 +153,11 @@ def test_an_administrator_session_key_is_sent_as_a_browser_session_cookie(
     )
     signing_in = submit(client, "auth/2fa/authenticate", {"code": totp_code(secret, now)})
 
+    ninety_days = 90 * 24 * 60 * 60
+    key, lifetime = lasting_session_cookie(signing_in)
     assert signing_in.status_code == 200
-    assert session_cookie(signing_in) == (session_key(client), "", "")
+    assert key == session_key(client)
+    assert ninety_days - 2 <= lifetime <= ninety_days
 
 
 def end_by_sign_out(client: Client, monkeypatch: pytest.MonkeyPatch) -> Any:
