@@ -2597,6 +2597,7 @@ test("an open outage editor cannot send once its outage waits for the member's o
 
     held = null;
     await readOnFocus(page);
+    for (const control of inverter) await expect(control).toBeVisible();
     await proposalControls(page, "Export limited")[0].click();
     await expect(editor.getByLabel("Title")).toHaveValue("Export limited");
     reason = "pending_request_limit";

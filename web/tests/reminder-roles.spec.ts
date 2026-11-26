@@ -106,6 +106,8 @@ const isRead = (method: string, url: string) =>
 const isTenants = (method: string, url: string) =>
     method === "GET" && url.endsWith("/api/tenants/");
 const reminders = `/api/tenants/1/regions/${region.id}/reminders/`;
+const isPanelRead = (request: Request) =>
+    request.method() === "GET" && new URL(request.url()).pathname === reminders;
 
 function sent(page: Page, matches: (method: string, url: string) => boolean) {
     const bodies: Record<string, unknown>[] = [];
@@ -413,17 +415,25 @@ test("losing administration while the review is open closes it, sends nothing an
         viewer: (method) => role === "viewer" && method === "GET",
     });
     await asRole(page, () => role);
+    await trackReads(page, reminders);
     const writes = sent(page, isWrite);
     await openReminders(page);
     await radio(page, OUTSIDE, "Cc").check();
     await time(page, 1).fill("09:00");
     await review(page);
+    await readsApplied(page, "/api/tenants/");
+    const tenants = nextRequest(page, isTenants);
+    const replacement = page.waitForRequest(isPanelRead);
     role = "viewer";
-    await tenantsAgain(page);
+    await page.clock.runFor(120_001);
+    await (await tenants).response();
+    await readsApplied(page, "/api/tenants/");
     await expect(dialog(page)).toHaveCount(0);
     await expect(typedFields(page)).toHaveCount(0);
     await expect(line(page, COUNT_ONLY(3))).toBeVisible();
     expect(writes).toEqual([]);
+    await replacement;
+    await readsApplied(page, reminders);
     role = "admin";
     await refetch(page);
     await expect(radio(page, OUTSIDE, "Default")).toBeChecked();
@@ -1300,6 +1310,7 @@ for (const reviewing of [false, true])
             viewer: (method) => revoked && method === "GET",
         });
         await asRole(page, () => "admin");
+        await trackReads(page, reminders);
         await openReminders(page);
         const enabled = page.getByLabel("Send forecast email for this plant");
         const language = page.getByLabel("Language", { exact: true });
@@ -1310,10 +1321,17 @@ for (const reviewing of [false, true])
             await confirmButton(page).click();
             await write.committed;
             revoked = true;
+            let reads = 0;
+            // refetch waits for a read it starts, so the read that read's answer starts is the second.
+            const replacement = page.waitForRequest(
+                (request) => isPanelRead(request) && ++reads === 2,
+            );
             await refetch(page);
             await expect(line(page, COUNT_ONLY(3))).toBeVisible();
             await expect(typedFields(page)).toHaveCount(0);
             await saveElsewhere(page, { ...SAVED, times: ["10:00"] });
+            await replacement;
+            await readsApplied(page, reminders);
             revoked = false;
             await refetch(page);
             await expect(time(page, 1)).toHaveValue("10:00");
