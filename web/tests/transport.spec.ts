@@ -75,12 +75,14 @@ const signedIn = (token: string) => ({
     csrf_token: token,
     language: "en" as const,
     expires_at: "2026-11-18T22:00:00Z",
+    idle_seconds: 30 * 24 * 60 * 60,
     session_tag: "member-session",
 });
 const anonymous = (token: string) => ({
     ...signedIn(token),
     user: null,
     expires_at: null,
+    idle_seconds: null,
     session_tag: null,
 });
 

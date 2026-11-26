@@ -9,6 +9,7 @@ import {
 } from "./support/workspace";
 import {
     focusWindow,
+    idleSeconds,
     isMarked,
     markDocument,
     openInvitations,
@@ -44,7 +45,7 @@ import {
     type Holder,
 } from "./support/saved-copy";
 
-const idleLimit = 30 * 60_000;
+const idleLimit = idleSeconds * 1000;
 const tick = 30_000;
 const signOutPath = "**/api/auth/browser/v1/auth/session";
 const removalPattern = /^[0-9a-f]{32}$/;

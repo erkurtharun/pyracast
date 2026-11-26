@@ -1,5 +1,6 @@
 import time
 from collections.abc import Callable
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -22,13 +23,16 @@ from tests.support.account_sessions import (
     account,
     arrive,
     browser,
+    lasting_session_cookie,
     moment,
     session_cookie,
     session_key,
     session_user,
     signed_in,
+    totp_clock,
+    with_totp,
 )
-from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, submit
+from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, submit, totp_code
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 
@@ -113,17 +117,47 @@ def test_a_request_that_starts_a_step_saves_the_session_without_sending_its_cook
     assert EMAIL_VERIFICATION_CODE_SESSION_KEY in client.session
 
 
-def test_a_created_or_rotated_session_key_is_sent_as_a_browser_session_cookie() -> None:
+def test_a_created_or_rotated_session_key_lasts_for_what_is_left_of_ninety_days() -> None:
     user = account("owner")
     client = browser()
+    ninety_days = 90 * 24 * 60 * 60
+    ten_days = 10 * 24 * 60 * 60
 
     signing_in = submit(client, "auth/login", {"email": user.email, "password": PASSWORD})
     created = session_key(client)
+    session = client.session
+    session["authenticated_at"] -= ten_days
+    session.set_expiry(session.get_expiry_date() - timedelta(seconds=ten_days))
+    session.save()
     rotating = submit(client, "auth/reauthenticate", {"password": PASSWORD})
 
-    assert session_cookie(signing_in) == (created, "", "")
-    assert session_cookie(rotating) == (session_key(client), "", "")
-    assert session_key(client) != created
+    created_value, created_age = lasting_session_cookie(signing_in)
+    rotated_value, rotated_age = lasting_session_cookie(rotating)
+    assert created_value == created != rotated_value == session_key(client)
+    assert ninety_days - 2 <= created_age <= ninety_days
+    assert ninety_days - ten_days - 2 <= rotated_age <= ninety_days - ten_days
+
+
+def test_a_platform_administrator_session_key_lasts_for_what_is_left_of_ninety_days(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = account("operator")
+    User.objects.filter(pk=user.pk).update(is_staff=True, is_superuser=True)
+    secret = with_totp(user)
+    now = time.time()
+    totp_clock(monkeypatch, now)
+    client = browser()
+
+    assert (
+        submit(client, "auth/login", {"email": user.email, "password": PASSWORD}).status_code == 401
+    )
+    signing_in = submit(client, "auth/2fa/authenticate", {"code": totp_code(secret, now)})
+
+    ninety_days = 90 * 24 * 60 * 60
+    key, lifetime = lasting_session_cookie(signing_in)
+    assert signing_in.status_code == 200
+    assert key == session_key(client)
+    assert ninety_days - 2 <= lifetime <= ninety_days
 
 
 def end_by_sign_out(client: Client, monkeypatch: pytest.MonkeyPatch) -> Any:

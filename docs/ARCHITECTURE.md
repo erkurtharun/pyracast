@@ -106,8 +106,8 @@ lists; flow pages name their own sequence and link here. See [tenant-authorizati
 django-allauth's headless browser API is the only authentication authority: no token endpoints
 and no second login path. Passwords are hashed with Argon2 and need 15 characters; social sign-in
 (Google, Microsoft) never merges or grants access by matching email. The console requires a TOTP
-factor, MFA evidence in the session and, for every write, a reauthentication by that authenticator
-within the five-minute window. Provider keys, MFA secrets and sealed mail codes are encrypted with
+factor, a sign-in or confirmation by that authenticator within the last hour for every request
+and, for every write, a reauthentication by it within the five-minute window. Provider keys, MFA secrets and sealed mail codes are encrypted with
 Fernet under HKDF keys derived from the application key, one context per purpose
 (`encryption.py`); this protects against a database-only disclosure, not a compromised host
 ([encryption-key-rotation](flows/encryption-key-rotation.md)).
@@ -115,8 +115,9 @@ Fernet under HKDF keys derived from the application key, one context per purpose
 Sessions are server-side rows. Requests that share a session serialize on a PostgreSQL advisory
 lock, so concurrent requests cannot overwrite each other's security state; that requires one
 PostgreSQL session per request, so transaction pooling and Django's connection pool are refused.
-Sessions end after 12 hours or 30 minutes without a request; any authenticated request, a
-background poll included, counts as activity (`SessionLifetime`). Rate limits for authentication
+Every session ends 90 days after sign-in or after 30 days without a request, and its cookie
+outlasts the browser but never the session. Any authenticated request, a background poll included,
+counts as activity (`SessionLifetime`). Rate limits for authentication
 live in a PostgreSQL cache on its own autocommit connection, so a rolled-back request cannot reset
 them. See [session-and-csrf](flows/session-and-csrf.md),
 [rate-limiting](flows/rate-limiting.md) and the identity flows in the

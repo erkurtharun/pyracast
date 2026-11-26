@@ -321,15 +321,24 @@ def test_session_activity_refresh_never_extends_absolute_lifetime() -> None:
 
 
 @pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
-def test_session_names_the_end_of_its_absolute_lifetime() -> None:
+@pytest.mark.parametrize("platform_administrator", [False, True], ids=["member", "administrator"])
+def test_session_names_the_end_of_its_ninety_days_and_its_thirty_day_idle_limit(
+    platform_administrator: bool,
+) -> None:
     client = Client()
-    assert client.get("/api/session/").json()["expires_at"] is None
-    client.force_login(verified_member())
-    started = client.session["authenticated_at"]
-    expires_at = client.get("/api/session/").json()["expires_at"]
-    assert datetime.fromisoformat(expires_at).timestamp() == pytest.approx(
-        started + project_settings.SESSION_COOKIE_AGE, abs=1
+    anonymous = client.get("/api/session/").json()
+    assert (anonymous["expires_at"], anonymous["idle_seconds"]) == (None, None)
+    user = verified_member()
+    User.objects.filter(pk=user.pk).update(
+        is_staff=platform_administrator, is_superuser=platform_administrator
     )
+    client.force_login(User.objects.get(pk=user.pk))
+    started = client.session["authenticated_at"]
+    session = client.get("/api/session/").json()
+    assert datetime.fromisoformat(session["expires_at"]).timestamp() == pytest.approx(
+        started + 90 * 24 * 60 * 60, abs=1
+    )
+    assert session["idle_seconds"] == 30 * 24 * 60 * 60
 
 
 @pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)

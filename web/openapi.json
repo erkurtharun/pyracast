@@ -11756,6 +11756,10 @@
                         "format": "date-time",
                         "nullable": true
                     },
+                    "idle_seconds": {
+                        "type": "integer",
+                        "nullable": true
+                    },
                     "session_tag": {
                         "type": "string",
                         "nullable": true
@@ -11764,6 +11768,7 @@
                 "required": [
                     "csrf_token",
                     "expires_at",
+                    "idle_seconds",
                     "language",
                     "session_tag",
                     "user"

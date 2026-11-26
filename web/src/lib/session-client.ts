@@ -35,8 +35,6 @@ type Confirmation = {
     covered: boolean;
 };
 
-// PYRACAST_SESSION_IDLE_SECONDS in settings.py: the server ends a session left this long.
-const serverIdleLimitMs = 30 * 60_000;
 const clockTickMs = 30_000;
 
 // The last session tag any tab of this browser observed. A write is an observation of a session
@@ -152,10 +150,15 @@ export function useSessionClock() {
     return now;
 }
 
+// The server's idle limit of the shown session; a session without a user has none.
+function idleLimitMs() {
+    return (state.session?.idle_seconds ?? Infinity) * 1000;
+}
+
 // The wall clock counts a suspended device's sleep; a send time later than now is old, so a clock set back cannot postpone the check.
 function staleSince(sentAt: number) {
     const now = Date.now();
-    return now < sentAt || now - sentAt >= serverIdleLimitMs;
+    return now < sentAt || now - sentAt >= idleLimitMs();
 }
 
 function stale() {

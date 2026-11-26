@@ -36,6 +36,7 @@ from tests.support.account_sessions import (
     totp_clock,
     with_totp,
 )
+from tests.support.api import verified_admin
 from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, submit, totp_code
 from tests.support.outbox import deliver_mail
 
@@ -170,16 +171,41 @@ def test_signing_out_removes_the_device_record_of_the_session() -> None:
     assert not UserSession.objects.filter(session_key=key).exists()
 
 
+def expiries(records: list[dict[str, Any]]) -> list[str]:
+    return [record["reason"] for record in records if record["event"] == "session_expired"]
+
+
+def signed_in_as(platform_administrator: bool) -> tuple[User, Client]:
+    user = account("owner")
+    if not platform_administrator:
+        return user, signed_in(user)
+    User.objects.filter(pk=user.pk).update(is_staff=True, is_superuser=True)
+    client = browser()
+    client.force_login(User.objects.get(pk=user.pk))
+    return user, client
+
+
+@pytest.mark.parametrize("platform_administrator", [False, True], ids=["member", "administrator"])
 @pytest.mark.parametrize(
-    ("marker", "limit"),
-    [("last_activity_at", 30 * 60), ("authenticated_at", 12 * 60 * 60)],
+    ("marker", "limit", "reason"),
+    [
+        ("last_activity_at", 30 * 24 * 60 * 60, "idle"),
+        ("authenticated_at", 90 * 24 * 60 * 60, "absolute"),
+    ],
+    ids=["idle", "absolute"],
 )
 @pytest.mark.parametrize(("offset", "kept"), [(-1, True), (0, False)])
-def test_a_session_ends_exactly_at_its_idle_and_absolute_limits(
-    marker: str, limit: int, offset: int, kept: bool, monkeypatch: pytest.MonkeyPatch
+def test_every_session_ends_exactly_after_thirty_days_idle_or_ninety_days_after_sign_in(
+    platform_administrator: bool,
+    marker: str,
+    limit: int,
+    reason: str,
+    offset: int,
+    kept: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    events: Callable[[], list[dict[str, Any]]],
 ) -> None:
-    user = account("owner")
-    client = signed_in(user)
+    user, client = signed_in_as(platform_administrator)
     started = time.time()
     now = started + limit + offset
     session = client.session
@@ -189,6 +215,18 @@ def test_a_session_ends_exactly_at_its_idle_and_absolute_limits(
     monkeypatch.setattr(time, "time", lambda: now)
 
     assert (session_user(client) == user.pk) is kept
+    assert expiries(events()) == ([] if kept else [reason])
+
+
+def test_the_app_answers_a_platform_administrator_hours_after_the_authenticator_proof(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, user = verified_admin(confirmed=True)
+    later = time.time() + 2 * settings.PYRACAST_CONSOLE_PROOF_SECONDS
+    monkeypatch.setattr(time, "time", lambda: later)
+
+    assert session_user(client) == user.pk
+    assert client.get("/api/tenants/").status_code == 200
 
 
 def test_session_activity_is_written_at_most_once_a_minute(

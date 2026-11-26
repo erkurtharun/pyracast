@@ -3324,6 +3324,7 @@ export interface components {
             language: components["schemas"]["LanguageEnum"];
             /** Format: date-time */
             expires_at: string | null;
+            idle_seconds: number | null;
             session_tag: string | null;
         };
         SessionUserOutput: {

@@ -8,7 +8,7 @@ from django.contrib.auth.models import User
 from django.http import HttpRequest, HttpResponseBase
 from django.utils.translation import gettext_lazy
 
-from pyracast.accounts.security import Factor, has_mfa_evidence, strongest_factor
+from pyracast.accounts.security import CONFIRMATION, Factor, has_mfa_evidence, strongest_factor
 
 FLOWS = {
     Factor.MFA: "mfa_reauthenticate",
@@ -49,7 +49,7 @@ def step_up_required(request: HttpRequest, factor: Factor | None = None) -> APIR
 
 
 def require_recent_mfa(request: HttpRequest) -> APIResponse | None:
-    if request.user.is_authenticated and not has_mfa_evidence(request, recent=True):
+    if request.user.is_authenticated and not has_mfa_evidence(request, within=CONFIRMATION):
         return step_up_required(request, Factor.MFA)
     return None
 

@@ -87,6 +87,7 @@ function session(tag: string, id = 1): Session {
         csrf_token: `token-${tag}`,
         language: "en",
         expires_at: "2026-11-21T00:00:00Z",
+        idle_seconds: 30 * 24 * 60 * 60,
         session_tag: tag,
     };
 }
@@ -96,6 +97,7 @@ const signedOut: Session = {
     csrf_token: "anonymous",
     language: "en",
     expires_at: null,
+    idle_seconds: null,
     session_tag: null,
 };
 const changed = () =>

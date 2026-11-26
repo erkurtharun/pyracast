@@ -1,4 +1,5 @@
 import time
+from dataclasses import dataclass
 from enum import StrEnum, auto
 from ipaddress import IPv6Address, ip_address
 from typing import Any
@@ -31,18 +32,27 @@ def strongest_factor(user: AbstractBaseUser) -> Factor:
     return Factor.PASSWORD if user.has_usable_password() else Factor.CODE
 
 
-def _recent(record: dict[str, Any], now: float) -> bool:
+@dataclass(frozen=True, slots=True)
+class ProofWindow:
+    seconds: int
+    sign_in_counts: bool
+
+
+# A sensitive change needs a reauthentication inside allauth's window; a sign-in is not one.
+CONFIRMATION = ProofWindow(account_settings.REAUTHENTICATION_TIMEOUT, sign_in_counts=False)
+CONSOLE_PROOF = ProofWindow(settings.PYRACAST_CONSOLE_PROOF_SECONDS, sign_in_counts=True)
+
+
+def _inside(record: dict[str, Any], window: ProofWindow, now: float) -> bool:
     at = record.get("at")
     return (
-        bool(record.get("reauthenticated"))
+        (window.sign_in_counts or bool(record.get("reauthenticated")))
         and isinstance(at, int | float)
-        and 0 <= now - at < account_settings.REAUTHENTICATION_TIMEOUT
+        and 0 <= now - at < window.seconds
     )
 
 
-def has_mfa_evidence(request: HttpRequest, *, recent: bool = False) -> bool:
-    # Recent evidence is a reauthentication by a still-enrolled authenticator within the one
-    # reauthentication window (ACCOUNT_REAUTHENTICATION_TIMEOUT); a sign-in never counts as one.
+def has_mfa_evidence(request: HttpRequest, *, within: ProofWindow | None = None) -> bool:
     user = request.user
     if not user.is_authenticated or not user.is_active:
         return False
@@ -52,7 +62,7 @@ def has_mfa_evidence(request: HttpRequest, *, recent: bool = False) -> bool:
         for record in get_authentication_records(request, user)
         if record.get("method") == Factor.MFA
         and record.get("type") in settings.MFA_SUPPORTED_TYPES
-        and (not recent or _recent(record, now))
+        and (within is None or _inside(record, within, now))
     ]
     return bool(
         authenticator_ids

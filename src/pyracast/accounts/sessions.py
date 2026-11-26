@@ -1,6 +1,7 @@
 import math
 import time
 from collections.abc import Callable, Collection
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -35,10 +36,17 @@ class ExpiryReason(StrEnum):
     INVALID_MARKER = "invalid_marker"
 
 
+def absolute_end(session: SessionBase) -> datetime:
+    started = float(session["authenticated_at"])
+    return datetime.fromtimestamp(started + settings.PYRACAST_SESSION_ABSOLUTE_SECONDS, UTC)
+
+
 def start_session(*, request: HttpRequest, user: AbstractBaseUser, **_kwargs: Any) -> None:
     now = time.time()
     request.session["authenticated_at"] = now
     request.session["last_activity_at"] = now
+    # A rotated key keeps this expiry, so every cookie carries only what is left of the session.
+    request.session.set_expiry(absolute_end(request.session))
     issue_tag(request)
     with transaction.atomic():
         record_authority(request, user)
