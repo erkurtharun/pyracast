@@ -189,6 +189,7 @@ async function setup(page: Page) {
                                   starts_at,
                                   ends_at,
                                   energy_mwh: hour < 7 || hour > 18 ? 0 : 1,
+                                  quality: "valid",
                                   snapshot_id: hour === 12 ? 2 : 1,
                                   collected_at: "2026-01-08T03:00:00Z",
                                   available_at: "2026-01-08T03:00:00Z",

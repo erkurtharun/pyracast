@@ -334,19 +334,14 @@ test("outage lifecycle preserves metadata, compares both scenarios and restores 
     ).data;
     expect(csv).toHaveLength(3);
     expect(csv[1]).toEqual({
-        plant_id: "21",
-        plant_name: "Outage plant",
-        timezone: "Europe/Istanbul",
-        date: "2026-11-12",
-        source_kind: "Forecast",
-        starts_at: "2026-11-12T12:00:00+03:00",
-        ends_at: "2026-11-12T13:00:00+03:00",
-        normal_mean_power_mw: "2",
-        normal_energy_mwh: "2",
-        normal_quality_flags: "",
-        affected_mean_power_mw: "0",
-        affected_energy_mwh: "0",
-        affected_quality_flags: "",
+        Plant: "Outage plant",
+        Data: "Forecast",
+        Start: "2026-11-12T12:00:00+03:00",
+        End: "2026-11-12T13:00:00+03:00",
+        "Without outage (MWh)": "2",
+        "With outage (MWh)": "0",
+        "Average power without outage (MW)": "2",
+        "Average power with outage (MW)": "0",
     });
     await page.getByRole("button", { name: "Outages", exact: true }).click();
     await expect(
@@ -863,7 +858,7 @@ test("the outage export waits for the list reloaded after a stale edit", async (
         await readFile(await (await download).path(), "utf8"),
         { header: true, skipEmptyLines: true },
     ).data;
-    expect(records.map((record) => record.title)).toEqual([
+    expect(records.map((record) => record.Title)).toEqual([
         "Changed meanwhile",
     ]);
 });

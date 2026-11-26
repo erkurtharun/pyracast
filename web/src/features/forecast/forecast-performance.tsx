@@ -17,7 +17,7 @@ import { CsvDownload } from "@/ui/csv-download";
 import { DailyAccuracyChart } from "./daily-accuracy-chart";
 import { useShownDays } from "@/features/plant/shown-days";
 import { useExportPlant } from "@/ui/export-plant";
-import { performanceExport } from "@/lib/exports";
+import { performanceExport, usedRealtime } from "@/lib/exports";
 
 type PerformanceQuery = RequestOptions<
     "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/performance/",
@@ -159,9 +159,7 @@ function PerformanceResults({
     const historical = resource.data?.comparison === "historical_model";
     const mode = historical ? "historical" : "forecast";
     const modeName = t(historical ? "model_check" : "forecast_accuracy");
-    const realtimeDay = (day: (typeof matched)[number]) =>
-        day.provisional_snapshot_ids.length > 0;
-    const realtime = matched.some(realtimeDay);
+    const realtime = matched.some(usedRealtime);
     const notCompared =
         (resource.data?.requested_days ?? 0) -
         (resource.data?.matched_days ?? 0);
@@ -279,7 +277,7 @@ function PerformanceResults({
                                                 <tr key={day.date}>
                                                     <td>{day.date}</td>
                                                     <td>
-                                                        {realtimeDay(day)
+                                                        {usedRealtime(day)
                                                             ? t(
                                                                   "provisional_production",
                                                               )

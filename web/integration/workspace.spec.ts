@@ -177,11 +177,11 @@ test("a customer manages one plant site through the real API", async ({
         expect(parsed.errors).toEqual([]);
         expect(parsed.data).toHaveLength(fullCount);
         const positive = parsed.data.filter(
-            (row) => Number(row.mean_power_mw) > 0,
+            (row) => Number(row["Average power (MW)"]) > 0,
         );
         expect(positive).toHaveLength(fullCount / 2);
-        expect(parsed.data[0]?.mean_power_mw).toBe("0");
-        expect(parsed.data.at(-1)!.mean_power_mw).toBe("0");
+        expect(parsed.data[0]?.["Average power (MW)"]).toBe("0");
+        expect(parsed.data.at(-1)!["Average power (MW)"]).toBe("0");
         const localTime = (stamp: string) =>
             new Intl.DateTimeFormat("en-GB", {
                 timeZone: "Europe/Istanbul",
@@ -189,11 +189,11 @@ test("a customer manages one plant site through the real API", async ({
                 minute: "2-digit",
                 hourCycle: "h23",
             }).format(new Date(stamp));
-        expect(parsed.data[0]?.timezone).toBe("Europe/Istanbul");
-        expect(localTime(parsed.data[0]?.starts_at ?? "")).toBe("00:00");
-        expect(localTime(parsed.data.at(-1)?.ends_at ?? "")).toBe("00:00");
-        expect(localTime(positive[0]?.starts_at ?? "")).toBe("06:00");
-        expect(localTime(positive.at(-1)?.ends_at ?? "")).toBe("18:00");
+        expect(parsed.data[0]?.Start).toMatch(/\+03:00$/);
+        expect(localTime(parsed.data[0]?.Start ?? "")).toBe("00:00");
+        expect(localTime(parsed.data.at(-1)?.End ?? "")).toBe("00:00");
+        expect(localTime(positive[0]?.Start ?? "")).toBe("06:00");
+        expect(localTime(positive.at(-1)?.End ?? "")).toBe("18:00");
     }
     await expectFullForecastCsv(24);
     await page.getByLabel("Interval", { exact: true }).selectOption("30");
@@ -265,19 +265,19 @@ test("a customer manages one plant site through the real API", async ({
     expect(outageCsv.errors).toEqual([]);
     expect(outageCsv.data).toHaveLength(48);
     expect(
-        outageCsv.data.some((row) => Number(row.normal_mean_power_mw) > 0),
+        outageCsv.data.some(
+            (row) => Number(row["Average power without outage (MW)"]) > 0,
+        ),
     ).toBe(true);
     expect(
         outageCsv.data.every(
             (row) =>
-                row.affected_mean_power_mw === "0" &&
-                row.affected_energy_mwh === "0",
+                row["Average power with outage (MW)"] === "0" &&
+                row["With outage (MWh)"] === "0",
         ),
     ).toBe(true);
-    expect(outageCsv.data[0]).toMatchObject({
-        plant_name: "Browser plant",
-        timezone: "Europe/Istanbul",
-    });
+    expect(outageCsv.data[0]).toMatchObject({ Plant: "Browser plant" });
+    expect(outageCsv.data[0]?.Start).toMatch(/\+03:00$/);
     await page.screenshot({
         path: testInfo.outputPath("plant-outage-comparison-desktop.png"),
         fullPage: true,
