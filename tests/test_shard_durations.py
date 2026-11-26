@@ -88,7 +88,7 @@ def test_a_result_with_a_document_type_declaration_is_refused(tmp_path: Path) ->
     )
 
     with pytest.raises(ValueError, match="document type"):
-        junit_cases(result)
+        junit_cases(result, tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -110,7 +110,7 @@ def test_a_testcase_without_a_valid_name_or_time_is_refused(
     result.write_text(f"<testsuites><testcase {attributes} /></testsuites>", encoding="utf-8")
 
     with pytest.raises(ValueError, match=r"testcase|time|float"):
-        junit_cases(result)
+        junit_cases(result, tmp_path)
 
 
 def test_recording_rewrites_one_system_and_keeps_the_others(checkout: Path) -> None:
@@ -181,3 +181,15 @@ def test_duration_command_keeps_its_direct_entrypoint() -> None:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "{Linux,Windows}" in result.stdout
+
+
+def test_a_result_outside_the_checkout_is_refused(
+    checkout: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    outside = junit(
+        tmp_path_factory.mktemp("outside") / "result.xml", [("tests.test_a", "test_x", "1.0")]
+    )
+
+    assert shard_durations.main(["Windows", str(outside)]) == 2
+
+    assert "inside the checkout" in capsys.readouterr().err

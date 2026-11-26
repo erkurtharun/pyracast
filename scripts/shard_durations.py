@@ -1,6 +1,7 @@
 import argparse
 import json
 import math
+import os
 import sys
 from collections import defaultdict
 from collections.abc import Iterable
@@ -17,7 +18,10 @@ SYSTEMS = ("Linux", "Windows")
 JUnitCase = tuple[str, str, float]
 
 
-def junit_cases(path: Path) -> list[JUnitCase]:
+def junit_cases(path: Path, root: Path) -> list[JUnitCase]:
+    location = os.path.realpath(path)
+    if not location.startswith(os.path.realpath(root) + os.sep):
+        raise ValueError(f"{path}: a result must lie inside the checkout")
     cases: list[JUnitCase] = []
 
     def start(name: str, attributes: dict[str, str]) -> None:
@@ -37,7 +41,7 @@ def junit_cases(path: Path) -> list[JUnitCase]:
     parser = expat.ParserCreate()
     parser.StartElementHandler = start
     parser.StartDoctypeDeclHandler = refuse_document_type
-    with path.open("rb") as stream:
+    with open(location, "rb") as stream:
         parser.ParseFile(stream)
     return cases
 
@@ -57,7 +61,7 @@ def module_durations(results: Iterable[Path], root: Path) -> dict[str, float]:
     seen: set[tuple[str, str]] = set()
     times: dict[str, list[float]] = defaultdict(list)
     for path in results:
-        for classname, test, seconds in junit_cases(path):
+        for classname, test, seconds in junit_cases(path, root):
             if (classname, test) in seen:
                 raise ValueError(f"{classname}::{test} appears in more than one result")
             seen.add((classname, test))
