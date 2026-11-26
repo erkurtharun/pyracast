@@ -246,11 +246,6 @@ def normalize_reference_capacity(
     moment = timezone.now()
     eligible = _eligible(source, moment)
     copies = ReferenceCapacityNormalization.objects.filter(target_binding=target)
-    reused = tuple(
-        copies.filter(source_snapshot__in=eligible)
-        .order_by("snapshot_id")
-        .values_list("snapshot_id", flat=True)
-    )
     planned = [
         _prepared(snapshot, target, factor, moment)
         for snapshot in eligible.exclude(Exists(copies.filter(source_snapshot=OuterRef("pk"))))
@@ -270,7 +265,6 @@ def normalize_reference_capacity(
                     "source_snapshot_id", "snapshot_id"
                 )
             )
-            reused += tuple(copied.values())
             planned = [copy for copy in planned if copy.source.pk not in copied]
             created = _write(planned, target, actor, reference, factor, moment)
             if created:
@@ -280,6 +274,12 @@ def normalize_reference_capacity(
                     action=AuditAction.REFERENCE_CAPACITY_NORMALIZED,
                     revision=region.revision,
                 )
+    reused = tuple(
+        copies.filter(source_snapshot__in=eligible)
+        .exclude(snapshot_id__in=created)
+        .order_by("snapshot_id")
+        .values_list("snapshot_id", flat=True)
+    )
     dates = sorted(copy.job.target_date for copy in planned)
     return NormalizationOutcome(
         source_binding_id=source.pk,

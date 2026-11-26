@@ -331,6 +331,29 @@ def test_a_copy_written_by_another_writer_after_preparation_is_reused(
     assert AuditEvent.objects.filter(action="reference_capacity_normalized").count() == 1
 
 
+def test_a_copy_written_between_reading_and_planning_is_reported_as_reused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, target = scaled_system(monkeypatch)
+    actual_snapshot_for(system, date(2026, 11, 7))
+    other: list[tuple[int, ...]] = []
+    copied_rows = 'SELECT "forecasts_referencecapacitynormalization"."snapshot_id"'
+
+    def overtaken_after_reading_copies(execute: Any, sql: str, *args: Any) -> Any:
+        result = execute(sql, *args)
+        if not other and sql.startswith(copied_rows):
+            other.append(())
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                other[0] = pool.submit(lambda: invoke_elsewhere(system, target)).result(10)
+        return result
+
+    with connection.execute_wrapper(overtaken_after_reading_copies):
+        ids = normalize(system, target)
+
+    assert ids == other[0] != ()
+    assert ReferenceCapacityNormalization.objects.count() == 1
+
+
 def invoke_elsewhere(system: System, target: SiteBinding) -> tuple[int, ...]:
     try:
         return normalize(system, target)
