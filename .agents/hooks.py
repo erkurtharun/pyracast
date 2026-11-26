@@ -6,6 +6,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+from functools import cache
 from pathlib import Path, PurePosixPath
 
 type JsonValue = bool | int | float | str | list[JsonValue] | dict[str, JsonValue] | None
@@ -51,6 +52,15 @@ PUBLISH_REASON = (
 MARKER_ASSIGNMENT = re.compile(rf"(?:\$env:)?{PUBLISH_MARKER}=1", re.IGNORECASE)
 ASSIGNMENT = re.compile(r"(?:\$env:)?[A-Za-z_]\w*=.*", re.IGNORECASE)
 PUSH_SCOPE_OPTIONS = frozenset({"--all", "--mirror", "--tags"})
+# ";" lets a comment swallow the next lines; "\n;" ends it at its line but splits a continuation.
+NEWLINE_READINGS = (";", "\n;")
+OPERATOR_CHARACTERS = re.escape("();<>|&\n")
+HIDDEN_OPERATOR = re.compile(rf"['\"\\`][{OPERATOR_CHARACTERS}]|[{OPERATOR_CHARACTERS}]['\"\\`]")
+PUSH_BRANCH = r"pr/(?![\w./-]*\.\.)[\w./-]*[\w-]"
+PUSH = rf"git push(?: -u| --set-upstream)? origin {PUSH_BRANCH} 2>&1"
+PUSH_TAIL = r"(?: \| (?:tail|head) (?:-\d+|-n \d+))?"
+BASH_PLAIN_PUSH = re.compile(rf"(?:cd [\w.:/~-]+ && )?{PUSH}{PUSH_TAIL}", re.ASCII)
+POWERSHELL_PLAIN_PUSH = re.compile(rf"(?:cd [\w.:/~\\-]+; )?{PUSH}{PUSH_TAIL}", re.ASCII)
 
 
 def _object(value: JsonValue) -> JsonObject:
@@ -270,8 +280,8 @@ def denied_read(payload: JsonObject, root: Path) -> str | None:
     return next(iter(reasons), None)
 
 
-def _segments(command: str, *, windows: bool) -> list[list[str]]:
-    lexer = shlex.shlex(command.replace("\n", ";"), posix=True, punctuation_chars=True)
+def _segments(command: str, *, windows: bool, newline: str) -> list[list[str]]:
+    lexer = shlex.shlex(command.replace("\n", newline), posix=True, punctuation_chars=True)
     if windows:
         lexer.escape = ""
     lexer.whitespace_split = True
@@ -371,20 +381,20 @@ def _wrapped_command(program: str, arguments: list[str]) -> tuple[str, bool] | N
     return None
 
 
-def _segment_publishes(tokens: list[str]) -> bool:
+def _segment_publishes(tokens: list[str], *, hidden_operator: bool) -> bool:
     for index, token in enumerate(tokens):
         program = _program(token)
         if program == "echo":
             return False
         if program == "git":
             subcommand, arguments = _git_subcommand(tokens[index + 1 :])
-            return subcommand == "push" and _git_push_refused(arguments)
+            return subcommand == "push" and (hidden_operator or _git_push_refused(arguments))
         if program == "gh":
-            return _gh_refused(tokens[index + 1 :])
+            return hidden_operator or _gh_refused(tokens[index + 1 :])
         wrapped = _wrapped_command(program, tokens[index + 1 :])
         if wrapped is not None:
             command, windows = wrapped
-            return _command_publishes(command, windows=windows)
+            return _command_publishes(command, windows=windows, hidden_operator=hidden_operator)
     return False
 
 
@@ -395,10 +405,26 @@ def _shell_command(arguments: JsonObject) -> str | None:
     return command if isinstance(command, str) else None
 
 
-def _command_publishes(command: str, *, windows: bool) -> bool:
-    segments = _segments(command, windows=windows)
+def _plain_push(command: str, *, windows: bool) -> bool:
+    shape = POWERSHELL_PLAIN_PUSH if windows else BASH_PLAIN_PUSH
+    return shape.fullmatch(command.removesuffix("\n")) is not None
+
+
+def _segments_publish(segments: list[list[str]], *, hidden_operator: bool) -> bool:
     return not any(_assigns_marker(tokens) for tokens in segments) and any(
-        _segment_publishes(tokens) for tokens in segments
+        _segment_publishes(tokens, hidden_operator=hidden_operator) for tokens in segments
+    )
+
+
+@cache
+def _command_publishes(command: str, *, windows: bool, hidden_operator: bool = False) -> bool:
+    hidden_operator = hidden_operator or HIDDEN_OPERATOR.search(command) is not None
+    newlines = NEWLINE_READINGS if "\n" in command else NEWLINE_READINGS[:1]
+    return any(
+        _segments_publish(
+            _segments(command, windows=windows, newline=newline), hidden_operator=hidden_operator
+        )
+        for newline in newlines
     )
 
 
@@ -408,6 +434,8 @@ def denied_shell(payload: JsonObject) -> str | None:
         return None
     tool_name = payload.get("tool_name")
     windows = tool_name == "PowerShell" or (tool_name != "Bash" and os.name == "nt")
+    if _plain_push(command, windows=windows):
+        return None
     if _command_publishes(command, windows=windows):
         return PUBLISH_REASON
     return None

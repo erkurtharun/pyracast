@@ -436,7 +436,7 @@ The latest matched day's status and ratio are reported separately; without enoug
 diagnosis or a capacity estimate; the thresholds are engineering guards.
 
 A plant outlook carries it as `production_diagnostic` only for a `forecast` result without
-`as_of` or a frozen scenario, on a day not yet ended, when the run's configuration, production
+a frozen scenario, on a day not yet ended, when the run's configuration, production
 identity, incidents, factor and transfer model still apply and its latest matched day is before
 today; it is `stale` when that day is more than two days before today. The diagnostic changes
 neither forecast power nor any capacity; only reported operating limits drive the outage scenario.
@@ -455,8 +455,8 @@ one the forecast screen shows for that day and source, at 60 minutes:
   for the day before its sunrise, the approval fetch included, the one whose daylight total is
   nearest to the actual production, the later fetch on a tie. A day without a saved forecast is
   `forecast_not_available`; a day whose saved forecasts are all unreadable, or none has a complete
-  daylight total, is `invalid_forecast_data`. The screen's Automatic choice keeps the day-ahead rule
-  (nearest among the forecasts fetched since the previous day's sunrise).
+  daylight total, is `invalid_forecast_data`. The screen's Automatic choice uses the day-ahead rule
+  (nearest among the forecasts fetched since the previous day's sunrise, not by the approval job).
 - `satellite`: the satellite data of the day, calibrated with the activated calibration whose
   training period had begun by that day (as the forecast screen shows it).
 
