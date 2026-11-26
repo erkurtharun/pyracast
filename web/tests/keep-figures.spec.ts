@@ -814,8 +814,10 @@ test("changed production on the plant's screen reads the plant once five minutes
     await signedIn(page);
     const requests = await serveDays(page);
     let total = 1;
-    await page.route(/\/plants\/21\/production\/\?/, (route) =>
-        route.fulfill({
+    let productionReads = 0;
+    await page.route(/\/plants\/21\/production\/\?/, (route) => {
+        productionReads += 1;
+        return route.fulfill({
             json: {
                 timezone: region.timezone,
                 available_start_date: null,
@@ -826,11 +828,12 @@ test("changed production on the plant's screen reads the plant once five minutes
                 intervals: [],
                 total,
             },
-        }),
-    );
+        });
+    });
     await page.goto("/app/w/1/plants/11/production/");
     await expect(plantHeading(page)).toBeVisible();
     await expect.poll(() => requests.length).toBe(1);
+    await expect.poll(() => productionReads).toBe(1);
     for (const next of [2, 3]) {
         total = next;
         await page.clock.fastForward(2 * minute);
