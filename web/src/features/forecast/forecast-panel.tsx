@@ -41,11 +41,10 @@ export function ForecastPanel({
     const metric = electrical ? "mean_power_mw" : "ghi_wm2",
         unit = electrical ? "MW" : "W/m²";
     const rows = chartIntervals(allRows, metric, showFullDay, result);
-    const intervalTime = format.intervals(
+    const time = format.intervals(
         forecast.timezone,
-        allRows.map((row) => row.start),
+        rows.map((row) => [row.start, row.end] as const),
     );
-    const time = (value: string) => intervalTime.format(new Date(value));
     const scenarioLabel = t("with_outages_title");
     const satellite = forecast.source_kind === "estimated_actuals";
     return (

@@ -12,6 +12,7 @@ import {
 import { ForecastTimeControl } from "@/features/forecast/forecast-time";
 import { ViewNav } from "@/ui/action";
 import { plantDay } from "@/lib/format/time";
+import { useFormat } from "@/lib/format/use-format";
 import { ControlField, Select } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import {
@@ -48,6 +49,7 @@ export function ForecastSection({
     show: (next: PlantAddress) => void;
 }) {
     const t = useTranslations("PlantWorkspace");
+    const format = useFormat();
     const { resolution, source, chosen } = options;
     const today = plantDay(timezone);
     const bounds = dateBounds(source, today);
@@ -134,7 +136,12 @@ export function ForecastSection({
                 )}
             </div>
             {clampDate(date, bounds) !== date ? (
-                <Notice>{t("selectDateInRange", bounds)}</Notice>
+                <Notice>
+                    {t("selectDateInRange", {
+                        min: format.day(bounds.min),
+                        max: format.day(bounds.max),
+                    })}
+                </Notice>
             ) : (
                 <PlantForecast
                     key={`${view}-${date}-${resolution}-${source}-${forecastId}-${configurationId}`}

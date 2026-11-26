@@ -36,14 +36,17 @@ function ActivationEffect({
 }) {
     const t = useTranslations("Calibrations");
     const format = useFormat();
-    const factor = format.number(run.factor, 4);
+    const factor = format.recorded(run.factor);
     const start = firstCalibrationDay(run);
     return (
         <>
             <p>
                 {start === null
                     ? t("activate_effect_undated", { factor })
-                    : t("activate_effect", { factor, start })}
+                    : t("activate_effect", {
+                          factor,
+                          start: format.day(start),
+                      })}
             </p>
             <p>
                 {automation?.enabled
@@ -78,6 +81,7 @@ export function CalibrationRunDetail({
     onRequest: (run: Calibration) => void;
 }) {
     const t = useTranslations("Calibrations");
+    const format = useFormat();
     const plant = useExportPlant();
     const blocker = run.activation_blocker;
     const activatable =
@@ -107,8 +111,8 @@ export function CalibrationRunDetail({
                                 onClick={() => onRequest(run)}
                             >
                                 {t("request_new", {
-                                    start: run.window_start,
-                                    end: run.window_end,
+                                    start: format.day(run.window_start),
+                                    end: format.day(run.window_end),
                                 })}
                             </button>
                         ) : (
@@ -205,11 +209,11 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
             <div className="stats">
                 <Stat
                     label={t("factor")}
-                    value={formatter.number(run.factor, 4)}
+                    value={formatter.recorded(run.factor)}
                 />
                 <Stat
                     label={t("window")}
-                    value={`${run.window_start} – ${run.window_end}`}
+                    value={`${formatter.day(run.window_start)} – ${formatter.day(run.window_end)}`}
                 />
                 <Stat label={t("training_days")} value={result.training_days} />
                 <Stat label={t("heldout_days")} value={result.holdout_days} />
@@ -217,12 +221,18 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
                     <>
                         <Stat
                             label={t("baseline")}
-                            value={formatter.number(baseline.daily_mae_mwh, 2)}
+                            value={formatter.rounded(
+                                baseline.daily_mae_mwh,
+                                "MWh",
+                            )}
                             unit="MWh"
                         />
                         <Stat
                             label={t("candidate")}
-                            value={formatter.number(candidate.daily_mae_mwh, 2)}
+                            value={formatter.rounded(
+                                candidate.daily_mae_mwh,
+                                "MWh",
+                            )}
                             unit="MWh"
                         />
                     </>

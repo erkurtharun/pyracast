@@ -111,7 +111,10 @@ for (const role of ["admin", "viewer"] as const) {
         const fullDay = page.getByRole("checkbox", { name: "Show full day" });
         await expect(fullDay).not.toBeChecked();
         await fullDay.check();
-        const labels = ["02:00 GMT+2–02:00 GMT+1", "02:00 GMT+1–03:00 GMT+1"];
+        const labels = [
+            "02:00 (UTC+2)–02:00 (UTC+1)",
+            "02:00 (UTC+1)–03:00 (UTC+1)",
+        ];
         for (const label of labels)
             await expect(
                 table.getByRole("rowheader", { name: label, exact: true }),
@@ -143,7 +146,7 @@ for (const role of ["admin", "viewer"] as const) {
         await expect(
             table.getByRole("rowheader", { name: "03:00–04:00", exact: true }),
         ).toBeVisible();
-        await expect(table.getByRole("rowheader", { name: /GMT/ })).toHaveCount(
+        await expect(table.getByRole("rowheader", { name: /UTC/ })).toHaveCount(
             0,
         );
         await day.fill("2026-10-25");

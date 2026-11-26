@@ -20,8 +20,7 @@ export function EnabledPanel({
     const t = useTranslations("Security");
     const format = useFormat();
     // The server sends seconds since the epoch.
-    const date = (seconds: number) =>
-        format.time(seconds * 1000, deviceZone(), { dateStyle: "medium" });
+    const date = (seconds: number) => format.date(seconds * 1000, deviceZone());
     const { recovery } = facts;
     return (
         <div className="mfa-subpanel">

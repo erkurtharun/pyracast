@@ -30,8 +30,8 @@ export function RegionSettings({
             <h2>{t("plantLocation")}</h2>
             <p>
                 {t("currentLocation", {
-                    latitude: format.number(region.latitude, 6),
-                    longitude: format.number(region.longitude, 6),
+                    latitude: format.recorded(region.latitude),
+                    longitude: format.recorded(region.longitude),
                     timezone: region.timezone,
                 })}
             </p>
@@ -65,8 +65,8 @@ function LocationRequests({
     );
     const latest = requests.data?.results[0];
     const place = (row: { latitude: number; longitude: number }) => ({
-        latitude: format.number(row.latitude, 6),
-        longitude: format.number(row.longitude, 6),
+        latitude: format.recorded(row.latitude),
+        longitude: format.recorded(row.longitude),
     });
     return (
         <>
@@ -166,11 +166,7 @@ function Outcome({
 }) {
     const t = useTranslations("RegionSettings");
     const format = useFormat();
-    const date = format.time(request.reviewed_at, timezone, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-    });
+    const date = format.date(request.reviewed_at, timezone);
     return (
         <div role="status">
             <p>

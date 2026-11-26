@@ -670,7 +670,7 @@ for (const picked of ["2026-03-29", ""] as const)
         await expect(day).toHaveAttribute("max", "2026-03-28");
         await expect(satellite).toBeChecked();
         await expect(
-            page.getByText("Choose a date within 2025-03-27 – 2026-03-28.", {
+            page.getByText("Choose a date within 27 Mar 2025 – 28 Mar 2026.", {
                 exact: true,
             }),
         ).toBeVisible();
@@ -920,7 +920,7 @@ test("region collection schedule validates and saves distinct local times", asyn
     ).toContainText("Not yet");
     await expect(
         page.getByText("Next planned update").locator(".."),
-    ).toContainText("Jan 1, 2026, 10:00 AM");
+    ).toContainText("1 Jan 2026, 10:00");
     await expect(page.getByText(/in plant time/)).toHaveCount(0);
     expect(reads).toBe(1);
     for (const accountDetail of [
@@ -958,7 +958,7 @@ test("region collection schedule validates and saves distinct local times", asyn
     );
     await expect(
         page.getByText("Last update", { exact: true }).locator(".."),
-    ).toContainText("Jan 1, 2026, 9:00 AM");
+    ).toContainText("1 Jan 2026, 09:00");
     expect(reads).toBe(2);
     await page.getByRole("button", { name: "Add time" }).click();
     await page.getByLabel("Update time 3", { exact: true }).fill("10:00");
@@ -1615,13 +1615,13 @@ test("forecast performance shows archived metrics, missing days and selected ran
 
     await page.getByText("Days not compared (1)", { exact: true }).click();
     await expect(
-        page.getByText("No forecast to compare for this day: 2026-11-02"),
+        page.getByText("No forecast to compare for this day: 2 Nov 2026"),
     ).toBeVisible();
     await expect(
         page.locator(".stat").filter({
             hasText: "Mean absolute daily error",
         }),
-    ).toHaveText("Mean absolute daily error1.5 MWh");
+    ).toHaveText("Mean absolute daily error1.50 MWh");
     await expect(
         page
             .locator("section")
@@ -1727,11 +1727,11 @@ test("calibration detail gives the rejection reasons, its period and days, and t
     const detail = page.locator(".calibration-detail");
     await expect(detail.locator(".stat")).toHaveText([
         "Factor1.1",
-        "Period2026-01-01 – 2026-01-10",
+        "Period1 Jan 2026 – 10 Jan 2026",
         "Calibration days8",
         "Test days2",
-        "Error without calibration3 MWh",
-        "Error with this calibration2 MWh",
+        "Error without calibration3.00 MWh",
+        "Error with this calibration2.00 MWh",
     ]);
     await expect(detail.locator(".tags")).toContainText("Preliminary");
     await expect(

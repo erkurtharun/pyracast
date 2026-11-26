@@ -769,7 +769,7 @@ for (const language of ["en", "tr"] as const)
         await expect(page.getByText(words.revision)).toHaveCount(0);
     });
 
-test("an outage card rounds a capacity still in service to two decimals while the editor keeps the entered value", async ({
+test("an outage card and its editor show a capacity still in service with every decimal it was entered with", async ({
     page,
 }) => {
     await workspace(page);
@@ -786,7 +786,7 @@ test("an outage card rounds a capacity still in service to two decimals while th
         .locator("dl > div")
         .filter({ hasText: "Panel capacity still in service" })
         .locator("dd");
-    await expect(panels).toHaveJSProperty("textContent", "2.35\u00a0MW");
+    await expect(panels).toHaveJSProperty("textContent", "2.345678\u00a0MW");
     await page
         .getByRole("button", { name: "Edit outage", exact: true })
         .click();
@@ -1069,9 +1069,7 @@ test.describe("in a browser zone west of the plant", () => {
             .getByLabel("Start", { exact: true })
             .fill("2026-11-11T11:00");
         await page.getByRole("button", { name: "Save", exact: true }).click();
-        await expect(
-            page.getByText(/Start: Nov 11, 2026, 11:00\sAM/),
-        ).toBeVisible();
+        await expect(page.getByText(/Start: 11 Nov 2026, 11:00/)).toBeVisible();
         expect(state.incident()).toMatchObject({
             starts_at: "2026-11-11T08:00:00.000Z",
         });

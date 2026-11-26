@@ -44,7 +44,7 @@ export function CalibrationSelection({
                               })
                             : t("in_force_run", {
                                   id: current.calibration_id,
-                                  factor: format.number(current.factor, 4),
+                                  factor: format.recorded(current.factor),
                                   time: format.deviceTime(current.created_at),
                               })}{" "}
                         {current.origin === "automatic"

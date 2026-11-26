@@ -2657,7 +2657,7 @@ test("the forecast email history shows its columns, the data time of a stale lat
     ]);
     const late = history.locator("tbody tr").first();
     const data = late.locator("td:nth-child(4)");
-    await expect(data).toContainText("Jan 1, 2026, 9:30 AM");
+    await expect(data).toContainText("1 Jan 2026, 09:30");
     await expect(
         data.getByText("Newer forecast data was not available.", {
             exact: true,

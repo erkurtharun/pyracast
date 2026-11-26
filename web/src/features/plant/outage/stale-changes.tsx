@@ -55,7 +55,7 @@ export function StaleChanges({
         const value = outage[field];
         return value === null
             ? t("unknown")
-            : t("power", { value: format.number(value, 6) });
+            : t("power", { value: format.recorded(value) });
     };
     return (
         <div className="notice" role="status">

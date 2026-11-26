@@ -36,7 +36,7 @@ export function ParameterConflict({ conflict }: { conflict: Conflict }) {
         if (field === "mounting_type")
             return fields(CHOICES[values.mounting_type]);
         const value = values[field];
-        return value === null ? fields("unknown") : format.number(value, 6);
+        return value === null ? fields("unknown") : format.recorded(value);
     };
     if (conflict.changed.length === 0 && conflict.dropped.length === 0)
         return null;

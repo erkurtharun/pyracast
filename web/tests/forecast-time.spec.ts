@@ -14,12 +14,15 @@ const irradianceOnly = {
 };
 const satelliteAt = "2026-11-12T01:00:00Z";
 const today = "2026-11-12";
-const plantTime = (value: string) =>
-    new Intl.DateTimeFormat("en", {
-        dateStyle: "medium",
-        timeStyle: "short",
-        timeZone: region.timezone,
-    }).format(new Date(value));
+const PLANT_TIMES = new Map([
+    ["2026-11-10T14:00:00Z", "10 Nov 2026, 17:00"],
+    ["2026-11-10T03:00:00Z", "10 Nov 2026, 06:00"],
+]);
+const plantTime = (value: string) => PLANT_TIMES.get(value) ?? value;
+const SHOWN_DAYS = new Map([
+    ["2026-11-11", "11 Nov 2026"],
+    ["2026-11-12", "12 Nov 2026"],
+]);
 
 function answer(url: URL) {
     const date = url.searchParams.get("date");
@@ -109,7 +112,9 @@ async function openForecast(page: Page, date: string) {
         .click();
     await page.getByLabel("Forecast date").fill(date);
     const panel = page.locator("section.panel");
-    await expect(panel.getByText(date, { exact: true })).toBeVisible();
+    await expect(
+        panel.getByText(SHOWN_DAYS.get(date) ?? date, { exact: true }),
+    ).toBeVisible();
     return {
         requests,
         last: () => requests.at(-1)!,
@@ -156,7 +161,7 @@ test("a past day opens in Automatic with no mark and a chosen time is sent and m
         plantTime(fetches[1]!.fetched_at),
     ]);
     await showsAutomatic(controls, times);
-    await expect(total).toHaveText("12.5 MWh");
+    await expect(total).toHaveText("12.50 MWh");
     await expect(panel.getByText(/^Forecast data: /)).toHaveText(
         `Forecast data: ${plantTime(fetches[1]!.fetched_at)}`,
     );
@@ -173,7 +178,7 @@ test("a past day opens in Automatic with no mark and a chosen time is sent and m
 
     await page.getByRole("button", { name: "Back to automatic" }).click();
     await showsAutomatic(controls, times);
-    await expect(total).toHaveText("12.5 MWh");
+    await expect(total).toHaveText("12.50 MWh");
 });
 
 test("today opens in Automatic with no mark", async ({ page }) => {
@@ -210,7 +215,7 @@ test("a time only the irradiance view lists is refused by the generation view, w
         .click();
     await expect.poll(() => sent(true)).toContain("13");
     await showsAutomatic(controls, times);
-    await expect(panel.locator(".stat strong")).toHaveText("12.5 MWh");
+    await expect(panel.locator(".stat strong")).toHaveText("12.50 MWh");
 
     await irradiance.click();
     await expect(times).toHaveValue("13");
@@ -247,7 +252,7 @@ test("the irradiance view sends the chosen time and leaving the date returns to 
 
     const returned = requests.length;
     await page.getByLabel("Forecast date").fill("2026-11-11");
-    await expect(page.locator("section.panel")).toContainText("2026-11-11");
+    await expect(page.locator("section.panel")).toContainText("11 Nov 2026");
     await showsAutomatic(controls, times);
     expect(
         requests

@@ -42,7 +42,8 @@ export function CalibrationRunList({
                         <tr key={run.id}>
                             <td>{run.id}</td>
                             <td>
-                                {run.window_start} – {run.window_end}
+                                {format.day(run.window_start)} –{" "}
+                                {format.day(run.window_end)}
                             </td>
                             <td>
                                 <CalibrationMarks
@@ -50,7 +51,7 @@ export function CalibrationRunList({
                                     inUse={run.id === inUse}
                                 />
                             </td>
-                            <td>{format.number(run.factor, 4)}</td>
+                            <td>{format.recorded(run.factor)}</td>
                             <td>
                                 <button
                                     className="text-button"

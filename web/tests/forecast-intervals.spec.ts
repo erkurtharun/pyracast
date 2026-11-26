@@ -247,11 +247,7 @@ for (const electrical of [true, false]) {
             }),
         ).toBeVisible();
         await expect(panel(page).getByText(/^Forecast data: /)).toHaveText(
-            `Forecast data: ${new Intl.DateTimeFormat("en", {
-                dateStyle: "medium",
-                timeStyle: "short",
-                timeZone: region.timezone,
-            }).format(new Date("2026-11-13T18:00:00Z"))}`,
+            "Forecast data: 13 Nov 2026, 21:00",
         );
         await expect(panel(page).getByText(/^Satellite data: /)).toHaveCount(0);
         await expect(panel(page).locator(".tag")).toHaveCount(0);
@@ -315,7 +311,7 @@ test("generation intervals show energy without redundant visible power columns",
     ).toBeVisible();
     await expect(table.locator(".interval-value")).toHaveText(["2", "2"]);
     await expect(table.getByRole("row").nth(1)).toContainText(
-        "Average power: 2 MW.",
+        "Average power: 2.00 MW.",
     );
     await expect(page.locator(".interval-notes")).toHaveCount(0);
     await expect(

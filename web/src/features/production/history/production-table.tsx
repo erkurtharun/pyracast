@@ -10,7 +10,7 @@ export function ProductionTable({
     tenantId,
     rows,
     visibleRows,
-    timeFormatter,
+    time,
     intervalLabel,
     canManage,
     canAct,
@@ -25,7 +25,7 @@ export function ProductionTable({
     tenantId: number;
     rows: Interval[];
     visibleRows: Interval[];
-    timeFormatter: Intl.DateTimeFormat;
+    time: (value: string) => string;
     intervalLabel: (row: Interval) => string;
     canManage: boolean;
     canAct: (row: Interval) => boolean;
@@ -64,7 +64,7 @@ export function ProductionTable({
                                     <td>
                                         <ProductionReading
                                             row={row}
-                                            timeFormatter={timeFormatter}
+                                            time={time}
                                         />
                                     </td>
                                     {actions && (

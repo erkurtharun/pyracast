@@ -8,6 +8,7 @@ import { useExportPlant } from "@/ui/export-plant";
 import { Notice } from "@/ui/ui";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import type { ForecastInterval as Interval } from "../forecast-intervals";
+import type { SummaryUnit } from "@/lib/format/number";
 import { useFormat } from "@/lib/format/use-format";
 import {
     collectedAt,
@@ -55,7 +56,7 @@ export function ForecastSummary({
     const collected = satellite
         ? collectedAt(forecast, result)
         : forecastFetchedAt(forecast, result);
-    const unit = electrical ? "MWh" : "kWh/m²";
+    const unit: SummaryUnit = electrical ? "MWh" : "kWh/m²";
     return (
         <>
             <div className="section-heading">
@@ -67,7 +68,9 @@ export function ForecastSummary({
                               ? t("electrical_generation")
                               : t("irradiance")}
                     </h2>
-                    <p className="fine">{forecast.date}</p>
+                    <p className="fine">
+                        {forecast.date && format.day(forecast.date)}
+                    </p>
                     {forecast.freshness === "stale" && (
                         <p className="fine">
                             {forecast.stale_reason === "connection_inactive"
@@ -121,8 +124,10 @@ export function ForecastSummary({
                     diagnostic.latest_performance_index !== null &&
                     diagnostic.latest_matched_day
                         ? t("production_below_model", {
-                              percent: 1 - diagnostic.latest_performance_index,
-                              date: diagnostic.latest_matched_day,
+                              percent: format.percent(
+                                  1 - diagnostic.latest_performance_index,
+                              ),
+                              date: format.day(diagnostic.latest_matched_day),
                           })
                         : t("earlier_below_model")}
                 </Notice>
@@ -215,14 +220,14 @@ function DayTotal({
 }: {
     label: string;
     value: number | null | undefined;
-    unit: string;
+    unit: SummaryUnit;
 }) {
     const format = useFormat();
     return (
         <div className="stat">
             <span>{label}</span>
             <strong>
-                {format.number(value, 2)}
+                {format.rounded(value, unit)}
                 {"\u00a0"}
                 <small>{unit}</small>
             </strong>

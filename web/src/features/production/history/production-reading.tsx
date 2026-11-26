@@ -7,15 +7,14 @@ import { sameInterval, type Interval } from "./model";
 
 export function ProductionReading({
     row,
-    timeFormatter,
+    time,
 }: {
     row: Interval;
-    timeFormatter: Intl.DateTimeFormat;
+    time: (value: string) => string;
 }) {
     const t = useTranslations("ProductionHistory");
     const format = useFormat();
     const label = useLabel();
-    const time = (value: string) => timeFormatter.format(new Date(value));
     const entered =
         row.observation != null || row.effective?.aggregated === true;
     const originals = row.provider_originals;
@@ -27,7 +26,7 @@ export function ProductionReading({
             <div className="production-value">
                 {row.effective == null
                     ? t("missing")
-                    : format.number(row.effective.energy_mwh)}{" "}
+                    : format.recorded(row.effective.energy_mwh)}{" "}
                 {row.effective && (
                     <span className="fine">
                         {source === "settlement" ? (
@@ -65,7 +64,7 @@ export function ProductionReading({
                                 : "provider_original",
                             {
                                 interval: `${time(original.starts_at)}–${time(original.ends_at)}`,
-                                value: format.quantity(
+                                value: format.recordedQuantity(
                                     original.energy_mwh,
                                     "MWh",
                                 ),
@@ -81,7 +80,7 @@ export function ProductionReading({
                             : "recorded_under_interval",
                         {
                             interval: `${time(observation.starts_at)}–${time(observation.ends_at)}`,
-                            value: format.quantity(
+                            value: format.recordedQuantity(
                                 observation.energy_mwh,
                                 "MWh",
                             ),

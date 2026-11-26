@@ -8,7 +8,7 @@ type Day = Pick<components["schemas"]["PerformanceDay"], "date" | "error_mwh">;
 // The table of matched days below the chart carries the same values for assistive technology.
 export function DailyAccuracyChart({ days }: { days: readonly Day[] }) {
     const t = useTranslations("ForecastPerformance");
-    const { number } = useFormat();
+    const { day: dayText, rounded } = useFormat();
     const largest = Math.max(
         Number.EPSILON,
         ...days.map((day) => Math.abs(day.error_mwh ?? 0)),
@@ -31,8 +31,8 @@ export function DailyAccuracyChart({ days }: { days: readonly Day[] }) {
                         key={day.date}
                         className={`chart-column ${day.error_mwh == null ? "missing" : ""}`}
                         title={t("daily_error_tooltip", {
-                            date: day.date,
-                            error: number(day.error_mwh),
+                            date: dayText(day.date),
+                            error: rounded(day.error_mwh, "MWh"),
                         })}
                     >
                         <div
@@ -44,8 +44,8 @@ export function DailyAccuracyChart({ days }: { days: readonly Day[] }) {
                 ))}
             </div>
             <div className="chart-axis">
-                <span>{first?.date}</span>
-                <span>{last?.date}</span>
+                <span>{first && dayText(first.date)}</span>
+                <span>{last && dayText(last.date)}</span>
             </div>
         </>
     );

@@ -2111,7 +2111,7 @@ for (const action of ["Set", "Remove entered value"] as const)
         await focusWindow(page);
         await expect(day).toHaveValue("2026-11-10");
         await expect(
-            editor.getByLabel("Your value for Nov 09, 2026 08:00–08:30 (MWh)", {
+            editor.getByLabel("Your value for 9 Nov 2026, 08:00–08:30 (MWh)", {
                 exact: true,
             }),
         ).toBeVisible();
