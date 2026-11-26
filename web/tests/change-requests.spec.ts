@@ -349,6 +349,7 @@ test("a member's staged revert names the EPİAŞ value only where one covers the
                 starts_at: at(from),
                 ends_at: at(to),
                 energy_mwh: energy,
+                quality: "valid",
                 source_kind: "settlement_injection",
                 snapshot_id: 1,
                 collected_at: `${date}T00:00:00Z`,
@@ -2596,6 +2597,7 @@ test("an open outage editor cannot send once its outage waits for the member's o
 
     held = null;
     await readOnFocus(page);
+    for (const control of inverter) await expect(control).toBeVisible();
     await proposalControls(page, "Export limited")[0].click();
     await expect(editor.getByLabel("Title")).toHaveValue("Export limited");
     reason = "pending_request_limit";

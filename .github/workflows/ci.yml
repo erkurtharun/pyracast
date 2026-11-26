@@ -170,7 +170,7 @@ jobs:
   verify_ubuntu:
     name: Verify (ubuntu-latest)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     outputs:
       coverage: ${{ steps.coverage.outputs.artifact-id }}
     env:

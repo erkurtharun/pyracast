@@ -16,6 +16,7 @@ const provider = (starts_at: string, ends_at: string, energy_mwh: number) => ({
     starts_at,
     ends_at,
     energy_mwh,
+    quality: "valid",
     source_kind: "settlement_injection",
     snapshot_id: 1,
     collected_at: "2026-11-10T00:00:00Z",

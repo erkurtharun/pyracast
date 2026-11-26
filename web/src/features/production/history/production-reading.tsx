@@ -1,7 +1,7 @@
 "use client";
 import { useTranslations } from "next-intl";
 import { useFormat } from "@/lib/format/use-format";
-import { qualityOf } from "@/lib/production";
+import { productionSource, qualityOf } from "@/lib/production";
 import { useLabel } from "@/ui/vocabulary";
 import { sameInterval, type Interval } from "./model";
 
@@ -20,13 +20,7 @@ export function ProductionReading({
         row.observation != null || row.effective?.aggregated === true;
     const originals = row.provider_originals;
     const corrected = entered && originals.length > 0;
-    const source = entered
-        ? "manual"
-        : row.effective?.source_kind === "settlement_injection"
-          ? "settlement"
-          : row.effective?.source_kind === "realtime_generation"
-            ? "provisional"
-            : "manual";
+    const source = productionSource(row);
     const quality = row.effective?.quality;
     return (
         <>

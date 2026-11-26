@@ -8,9 +8,12 @@ const NOTICE_POLICY =
     "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'";
 const SOURCE = path.resolve(__dirname, "../src");
 const REGISTERING = workerWithdrawn
-    ? { mentions: [], importers: [] }
+    ? { mentions: ["features/saved/saved-figures.ts"], importers: [] }
     : {
-          mentions: ["lib/worker-registration.tsx"],
+          mentions: [
+              "lib/worker-registration.tsx",
+              "features/saved/saved-figures.ts",
+          ],
           importers: ["app/app/layout.tsx"],
       };
 

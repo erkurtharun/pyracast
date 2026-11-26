@@ -15,6 +15,8 @@ import {
     type PlantSection,
 } from "@/lib/routes";
 import { OwnPendingRequests } from "@/features/inbox/operational-inbox";
+import { useShownPlant } from "@/features/saved/saved-figures";
+import { useWorkspace } from "@/features/workspace/workspace-shell";
 import { ViewNav } from "@/ui/action";
 import { ExportPlant } from "@/ui/export-plant";
 import { usePageTitle } from "@/ui/page-title";
@@ -65,6 +67,7 @@ export function PlantWorkspace({
     const t = useTranslations("PlantWorkspace");
     const format = useFormat();
     const canManage = useCanManageWorkspace();
+    const { tenant } = useWorkspace();
     const navigate = useNavigate();
     const refresh = useRefresh();
     const navigation = usePlantNavigation(scope, tab, address);
@@ -95,6 +98,13 @@ export function PlantWorkspace({
                 ? comparisonDays
                 : [productionDay, productionDay];
     usePageTitle(`${t(tab)} · ${currentPlant.name}`);
+    useShownPlant({
+        tenant: scope.tenant_id,
+        site: scope.region_id,
+        plant: plant.id,
+        name: currentPlant.name,
+        workspace: tenant.name,
+    });
     return (
         <ExportPlant
             value={{ id: currentPlant.id, name: currentPlant.name, timezone }}

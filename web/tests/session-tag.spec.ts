@@ -436,9 +436,10 @@ test("a read refused after the document adopted another session during this tab'
     Object.assign(globalThis.window.localStorage, {
         setItem: (key: string, value: string) => {
             stored.set(key, value);
-            adopted ??= authRequest("account/providers", "GET").catch(
-                (failure) => failure,
-            );
+            if (key === "pyracast.sessionRevision")
+                adopted ??= authRequest("account/providers", "GET").catch(
+                    (failure) => failure,
+                );
         },
     });
     const ending = signOut().catch((failure) => failure);
@@ -543,7 +544,10 @@ test("V3: tabs store only the tags their reads observed, so crossing reads conve
     expect(stored.get(observedTagKey)).toBe("b");
     await adoptSession(session("a"));
     expect(stored.get(observedTagKey)).toBe("a");
-    expect([...stored.values()]).toEqual(["a"]);
+    expect([...stored.keys()].sort()).toEqual([
+        "pyracast.sessionRevision",
+        observedTagKey,
+    ]);
 });
 
 test("V4: a refused sign-out changes no observed tag", async () => {

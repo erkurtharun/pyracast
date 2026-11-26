@@ -10,14 +10,14 @@ test("the encoder writes a byte order mark, CRLF rows, quoted text and empty mis
         ["a", "b", "c"],
         [
             [1, "x", null],
-            [true, 'say "hi", then', ""],
+            [2.5, 'say "hi", then', ""],
         ],
     );
     expect(document.startsWith("\uFEFF")).toBe(true);
     expect(lines(document)).toEqual([
         '"a","b","c"',
         '1,"x",',
-        'true,"say ""hi"", then",""',
+        '2.5,"say ""hi"", then",""',
         "",
     ]);
 });

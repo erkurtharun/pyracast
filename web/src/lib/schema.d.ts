@@ -3020,6 +3020,7 @@ export interface components {
             ends_at: string;
             /** Format: double */
             energy_mwh: number;
+            quality: string;
             source_kind: string;
             snapshot_id: number;
             /** Format: date-time */

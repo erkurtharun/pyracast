@@ -2,11 +2,15 @@ import { expect, test } from "./support/test";
 import { mockApi, region } from "./support/workspace";
 import type { Page } from "@playwright/test";
 
-// The page's own navigation to the date also requests a .../forecast/?date= address.
 function forecastRead(page: Page) {
-    return page.waitForResponse((response) =>
-        response.url().includes("/plants/21/forecast/?date=2026-11-14"),
-    );
+    return page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+            url.pathname ===
+                `/api/tenants/1/regions/${region.id}/plants/21/forecast/` &&
+            url.searchParams.get("date") === "2026-11-14"
+        );
+    });
 }
 
 // Advances exactly one poll period and waits for the answer of that single poll.

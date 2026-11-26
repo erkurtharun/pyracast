@@ -11,6 +11,7 @@ Read on demand. The code is the source of truth; these pages hold what it cannot
 | Irradiance, energy and calibration calculations | [IRRADIANCE.md](IRRADIANCE.md) |
 | Production topology, release and recovery | [DEPLOYMENT.md](DEPLOYMENT.md) |
 | How the installed app, its service worker and a release under an open window behave | [flows/installed-app.md](flows/installed-app.md) |
+| How figures are kept on a device, refreshed and read without a connection | [flows/saved-figures.md](flows/saved-figures.md) |
 | How contributors and coding agents work, verify and deliver | [AGENTS.md](../AGENTS.md) |
 
 ## Keeping it true

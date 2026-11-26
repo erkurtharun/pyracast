@@ -8,7 +8,7 @@ import {
     type SavedRecords,
 } from "./support/worker-database";
 import { loadScript, SCOPE, type ScriptOptions } from "./support/worker-script";
-import { workerWithdrawn } from "./support/worker-state";
+import { workerState } from "./support/worker-state";
 
 const NOW = instant.getTime();
 const HOUR = 3_600_000;
@@ -255,7 +255,7 @@ const LABELS: Record<Language, Record<string, string>> = {
     },
 };
 
-if (!workerWithdrawn)
+if (workerState === "figures")
     test.describe("the worker without a connection", () => {
         test.describe("a saved forecast page", () => {
             for (const language of ["en", "tr"] as const)

@@ -1,7 +1,31 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { csvDocument, type CsvExport } from "@/lib/csv";
+import {
+    csvDocument,
+    readable,
+    type CsvExport,
+    type CsvTexts,
+} from "@/lib/csv";
+import { useCodeLabel, useLabel } from "./vocabulary";
+
+function useCsvTexts(): CsvTexts {
+    const t = useTranslations("CsvFile");
+    const performance = useTranslations("ForecastPerformance");
+    const label = useLabel();
+    const reason = useCodeLabel("ForecastPerformance.reasons");
+    return {
+        column: (column) => t(`columns.${column}`),
+        text: (text) => {
+            if (text.kind === "word") return t(`words.${text.word}`);
+            if (text.kind === "label") return label(text.group, text.value);
+            const missing = performance(
+                "production_or_reference_data_is_unavailable",
+            );
+            return text.reason ? reason(text.reason, missing) : missing;
+        },
+    };
+}
 
 export function CsvDownload({
     build,
@@ -14,6 +38,7 @@ export function CsvDownload({
 }) {
     const t = useTranslations("CsvDownload");
     const common = useTranslations("Common");
+    const texts = useCsvTexts();
     return (
         <button
             type="button"
@@ -21,8 +46,9 @@ export function CsvDownload({
             disabled={pending}
             onClick={() => {
                 const file = build();
+                const { header, rows } = readable(file, texts);
                 const url = URL.createObjectURL(
-                    new Blob([csvDocument(file.header, file.rows)], {
+                    new Blob([csvDocument(header, rows)], {
                         type: "text/csv;charset=utf-8",
                     }),
                 );
