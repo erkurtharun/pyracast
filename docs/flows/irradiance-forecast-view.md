@@ -86,7 +86,7 @@ sequenceDiagram
 | `forecast_id` with `satellite`, or not one of the day's options | 400 `invalid_request`, field `forecast_id` |
 | Date outside today - 366 .. today + 14 days (region timezone) | 400 `date_out_of_range` |
 | `satellite` for a future day (the UI limits the date by source) | 400 `completed_day_required` |
-| Stored snapshot intervals that cannot be decoded where they are read (the rules of `forecast-view`), or a figure of valid inputs beyond a float | 400 `calculation_out_of_range`; one `forecast_read_fault` warning naming the record and the class of the failure |
+| Stored snapshot intervals that cannot be decoded where they are read (the rules of `forecast-view`) | 400 `calculation_out_of_range`; one `forecast_read_fault` warning naming the record and the class of the failure |
 | Any other error inside the read (for example `local_day_bounds` for a local date the timezone skips) | 500 `server_error` with `request_id` (read from code, not reproduced) |
 | Same session has another request running for over 5 s | 429 `session_busy`, `Retry-After: 1`; the client waits at most 2 s and repeats once |
 | Statement over 60 s | 503 `request_timeout` with `request_id` |
