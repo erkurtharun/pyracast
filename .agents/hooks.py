@@ -6,6 +6,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 type JsonValue = bool | int | float | str | list[JsonValue] | dict[str, JsonValue] | None
@@ -51,6 +52,7 @@ PUBLISH_REASON = (
 MARKER_ASSIGNMENT = re.compile(rf"(?:\$env:)?{PUBLISH_MARKER}=1", re.IGNORECASE)
 ASSIGNMENT = re.compile(r"(?:\$env:)?[A-Za-z_]\w*=.*", re.IGNORECASE)
 PUSH_SCOPE_OPTIONS = frozenset({"--all", "--mirror", "--tags"})
+REDIRECTION_OPERATORS = frozenset({">", ">>", "<", ">&", "<&", "&>", "&>>", ">|"})
 
 
 def _object(value: JsonValue) -> JsonObject:
@@ -270,7 +272,163 @@ def denied_read(payload: JsonObject, root: Path) -> str | None:
     return next(iter(reasons), None)
 
 
-def _segments(command: str, *, windows: bool) -> list[list[str]]:
+@dataclass(frozen=True, slots=True)
+class _Dialect:
+    escape: str
+    descriptor: re.Pattern[str]
+    pattern: re.Pattern[str]
+    powershell: bool
+
+
+def _shell_pattern(escape: str, *, powershell: bool) -> re.Pattern[str]:
+    escaped = re.escape(escape)
+    doubled_single, doubled_double = ("|''", '|""') if powershell else ("", "")
+    return re.compile(
+        rf"(?P<blank>[ \t\r]+)"
+        rf"|(?P<continuation>{escaped}\n)"
+        rf"|(?P<escaped>{escaped}.)"
+        rf"|(?P<single>'(?:[^']{doubled_single})*')"
+        rf'|(?P<double>"(?:{escaped}.{doubled_double}|[^"{escaped}])*")'
+        rf"|(?P<merge>[<>]&[0-9])"
+        rf"|(?P<operator>[();<>|&]+)"
+        rf"|(?P<newline>\n)"
+        rf"|(?P<comment>#[^\n]*)"
+        rf"|(?P<plain>[^ \t\r\n'\"();<>|&#`{escaped}]+|{escaped})"
+        rf"|(?P<substitution>`)",
+        re.DOTALL,
+    )
+
+
+BASH = _Dialect(
+    escape="\\",
+    descriptor=re.compile(r"[0-9]+"),
+    pattern=_shell_pattern("\\", powershell=False),
+    powershell=False,
+)
+POWERSHELL = _Dialect(
+    escape="`",
+    descriptor=re.compile(r"[0-9*]"),
+    pattern=_shell_pattern("`", powershell=True),
+    powershell=True,
+)
+
+
+def _unquoted(kind: str, text: str, dialect: _Dialect) -> str:
+    if kind == "escaped":
+        return text[1:]
+    if kind == "single":
+        return text[1:-1].replace("''", "'") if dialect.powershell else text[1:-1]
+    if kind == "double":
+        escaped = re.escape(dialect.escape)
+        inner = re.sub(rf'{escaped}(["{escaped}])', r"\1", text[1:-1])
+        return inner.replace('""', '"') if dialect.powershell else inner
+    return text
+
+
+class _ShellReader:
+    def __init__(self, dialect: _Dialect) -> None:
+        self.dialect = dialect
+        self.commands: list[list[str]] = [[]]
+        self.word: str | None = None
+        self.quoted = False
+        self.pending: str | None = None
+
+    def read(self, command: str) -> list[list[str]]:
+        position = 0
+        while position < len(command):
+            match = self.dialect.pattern.match(command, position)
+            if match is None:
+                raise ValueError("The command has an unterminated quote.")
+            kind, text = match.lastgroup or "", match.group()
+            if kind == "comment" and self.word is not None:
+                kind, text = "plain", "#"
+            self._take(kind, text)
+            position = match.start() + len(text)
+        self._end_word()
+        self._keep_pending()
+        return self.commands
+
+    def _take(self, kind: str, text: str) -> None:
+        if kind == "substitution":
+            raise ValueError("A backtick substitution cannot be classified.")
+        if kind in {"plain", "escaped"}:
+            self._extend(_unquoted(kind, text, self.dialect), quoted=kind == "escaped")
+        elif kind in {"single", "double"}:
+            self._string(_unquoted(kind, text, self.dialect))
+        elif kind == "merge":
+            self._redirection(text, target=False)
+        elif kind == "operator":
+            self._operator(text)
+        elif kind == "newline":
+            self._separate()
+        elif kind == "blank":
+            self._end_word()
+
+    def _extend(self, text: str, *, quoted: bool) -> None:
+        self.word = (self.word or "") + text
+        self.quoted = self.quoted or quoted
+
+    def _string(self, text: str) -> None:
+        starts_word = self.word is None
+        self._extend(text, quoted=True)
+        if starts_word and self.dialect.powershell:
+            self._end_word()
+
+    def _operator(self, text: str) -> None:
+        inside_powershell_word = self.dialect.powershell and self.word is not None
+        if inside_powershell_word and set(text) <= {"<", ">"} and not self._word_is_descriptor():
+            self._extend(text, quoted=False)
+        elif text in REDIRECTION_OPERATORS:
+            self._redirection(text, target=True)
+        else:
+            self._separate()
+
+    def _redirection(self, operator: str, *, target: bool) -> None:
+        if self._word_is_descriptor():
+            operator = f"{self.word}{operator}"
+            self.word = None
+        self._end_word()
+        self._keep_pending()
+        self.pending = operator if target else None
+
+    def _word_is_descriptor(self) -> bool:
+        return (
+            self.word is not None
+            and not self.quoted
+            and self.pending is None
+            and self.dialect.descriptor.fullmatch(self.word) is not None
+        )
+
+    def _end_word(self) -> None:
+        if self.word is None:
+            return
+        if self.pending is None:
+            self.commands[-1].append(self.word)
+        else:
+            self.commands[-1].extend(_closing_remainder(self.pending, self.word))
+            self.pending = None
+        self.word = None
+        self.quoted = False
+
+    def _keep_pending(self) -> None:
+        if self.pending is not None:
+            self.commands[-1].append(self.pending)
+            self.pending = None
+
+    def _separate(self) -> None:
+        self._end_word()
+        self._keep_pending()
+        self.commands.append([])
+
+
+def _closing_remainder(operator: str, target: str) -> list[str]:
+    # Bash reads `>&-x` as closing the descriptor and passes `x` on as an argument.
+    if operator.endswith("&") and target.startswith("-") and len(target) > 1:
+        return [target[1:]]
+    return []
+
+
+def _punctuation_commands(command: str, *, windows: bool) -> list[list[str]]:
     lexer = shlex.shlex(command.replace("\n", ";"), posix=True, punctuation_chars=True)
     if windows:
         lexer.escape = ""
@@ -279,13 +437,20 @@ def _segments(command: str, *, windows: bool) -> list[list[str]]:
         tokens = list(lexer)
     except ValueError:
         return [_command_tokens(part) for part in re.split(r"&&|\|\||[;|&\n]", command)]
-    segments: list[list[str]] = [[]]
+    commands: list[list[str]] = [[]]
     for token in tokens:
         if token and set(token) <= set(lexer.punctuation_chars):
-            segments.append([])
+            commands.append([])
         else:
-            segments[-1].append(token)
-    return segments
+            commands[-1].append(token)
+    return commands
+
+
+def shell_commands(command: str, *, windows: bool) -> list[list[str]]:
+    try:
+        return _ShellReader(POWERSHELL if windows else BASH).read(command)
+    except ValueError:
+        return _punctuation_commands(command, windows=windows)
 
 
 def _assigns_marker(tokens: list[str]) -> bool:
@@ -396,9 +561,9 @@ def _shell_command(arguments: JsonObject) -> str | None:
 
 
 def _command_publishes(command: str, *, windows: bool) -> bool:
-    segments = _segments(command, windows=windows)
-    return not any(_assigns_marker(tokens) for tokens in segments) and any(
-        _segment_publishes(tokens) for tokens in segments
+    commands = shell_commands(command, windows=windows)
+    return not any(_assigns_marker(tokens) for tokens in commands) and any(
+        _segment_publishes(tokens) for tokens in commands
     )
 
 
