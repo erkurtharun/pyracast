@@ -189,8 +189,10 @@ msgstr "Gerçekleşen tahmini"
 msgid "This plant allows at most %(limit)s delivery times a day."
 msgstr "Bu santral günde en fazla %(limit)s gönderim saatine izin verir."
 
-msgid "You receive this email because of your role in %(workspace)s."
-msgstr "Bu e-postayı %(workspace)s çalışma alanındaki rolünüz nedeniyle alıyorsunuz."
+msgid "Email about the workspace %(workspace)s, sent to the people with a role in it."
+msgstr ""
+"%(workspace)s çalışma alanıyla ilgili e-posta; bu çalışma alanında rolü "
+"olan kişilere gönderilir."
 
 msgid "%(plant)s is approved"
 msgstr "%(plant)s onaylandı"

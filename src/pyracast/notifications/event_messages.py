@@ -24,7 +24,7 @@ from pyracast.notifications.links import plant_url, workspace_url
 from pyracast.plants.models import Plant
 from pyracast.regions.models import AuditAction, AuditEvent, Region
 
-FOOTER = _("You receive this email because of your role in %(workspace)s.")
+FOOTER = _("Email about the workspace %(workspace)s, sent to the people with a role in it.")
 
 
 @dataclass(frozen=True)
