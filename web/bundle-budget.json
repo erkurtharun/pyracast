@@ -2,7 +2,7 @@
     "tolerancePercent": 1,
     "firstLoad": {
         "/app": 663944,
-        "/app/w/[tenantId]": 689939,
+        "/app/w/[tenantId]": 696895,
         "/app/w/[tenantId]/plants/[siteId]/[section]": 778958
     },
     "onDemand": {
@@ -11,9 +11,9 @@
         "ProductionSection": 34430,
         "ForecastPerformance": 7130,
         "ReminderEditor": 12915,
-        "copyState": 3467,
+        "copyState": 7747,
         "english": 73776,
         "turkish": 80026
     },
-    "otherOnDemand": 17685
+    "otherOnDemand": 21195
 }

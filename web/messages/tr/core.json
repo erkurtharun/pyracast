@@ -221,6 +221,15 @@
         "homeScreen": "Paylaş'a, ardından Ana Ekrana Ekle'ye dokunun. Paylaş görünmüyorsa sayfa menüsündedir.",
         "dock": "Safari'de Dosya > Dock'a Ekle'yi seçin."
     },
+    "KeepFigures": {
+        "title": "Değerleri bu cihazda sakla",
+        "statement": "Bu cihazda bu tarayıcıyı açabilen herkes, değerler kaldırılana veya siz çıkış yapana kadar onları giriş yapmadan okuyabilir. Ortak kullanılan bir cihazda açmayın.",
+        "kept": "{count} santralin değerleri bu cihazda saklanıyor.",
+        "paused": "Değerler bir sonraki girişinizden sonra yeniden saklanır.",
+        "turnOn": "Aç",
+        "remove": "Bu cihazdan kaldır",
+        "notNow": "Şimdi değil"
+    },
     "Common": {
         "unexpected": "Bir sorun oluştu. Tekrar deneyin.",
         "saveFailed": "Kaydedilemedi.",

@@ -29,6 +29,8 @@ import { Brand } from "@/ui/brand";
 import { LanguageSelect } from "@/ui/language-select";
 import { Empty, Notice, RefreshFailed } from "@/ui/ui";
 import { WorkspaceAccess } from "@/ui/workspace-access";
+import { KeepFigures, KeepFiguresOffer } from "@/features/saved/keep-figures";
+import { useSavedFiguresRefresh } from "@/features/saved/saved-figures";
 import { RecentDeletionProvider } from "@/features/trash/recent-deletion";
 import { InstallApp } from "./install-app";
 import { chooseWorkspace, rememberWorkspace } from "./workspace-choice";
@@ -87,6 +89,7 @@ export function WorkspaceShell({
     );
     const owner = useContext(QueryOwner);
     const client = useQueryClient();
+    useSavedFiguresRefresh(client, session);
     useEffect(() => {
         if (owner === undefined) return;
         const list = keys.path(owner, "/api/tenants/");
@@ -247,6 +250,7 @@ export function WorkspaceShell({
                     </button>
                 </div>
                 <InstallApp />
+                <KeepFigures tenant={tenant?.id} />
             </aside>
             <div className="main-wrap">
                 <header className="topbar">
@@ -267,6 +271,7 @@ export function WorkspaceShell({
                         <SessionEndingSoon expiresAt={session.expires_at} />
                     )}
                     {changed && <Notice>{errors("sessionChanged")}</Notice>}
+                    <KeepFiguresOffer />
                     <RefreshFailed resource={tenants} />
                     <WorkspaceAccess value={screen === "account" || canManage}>
                         <Workspace value={{ tenant, user, navigating }}>

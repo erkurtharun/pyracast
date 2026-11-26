@@ -3,7 +3,7 @@
         "title": "Pyracast could not be opened",
         "retry": "Try again",
         "loading": "Loading…",
-        "savedFiguresUnchecked": "The figures saved on this device could not be checked. Try again."
+        "savedFiguresUnchecked": "The figures kept on this device could not be checked. Try again."
     },
     "AppError": {
         "title": "This page could not be displayed",

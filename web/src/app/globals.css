@@ -84,6 +84,7 @@ textarea:focus-visible,
     color: var(--cream);
     border-right: 1px solid var(--neutral-0-a5);
     z-index: 20;
+    overflow-y: auto;
 }
 .sidebar :focus-visible {
     outline-color: var(--amber);
