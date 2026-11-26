@@ -1,8 +1,10 @@
 from collections.abc import Collection
 from typing import Any
 
+from django.core.management.color import no_style
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
+from django.db.migrations.recorder import MigrationRecorder
 from django.db.models import Model, QuerySet
 
 
@@ -33,6 +35,19 @@ def row_values(rows: QuerySet[Model], fields: Collection[str] | None = None) -> 
 
 def forward() -> None:
     migrate(*leaf_nodes())
+
+
+def reset_to_leaf() -> None:
+    # Rows a failed test left can make a forward migration refuse; teardown deletes them anyway.
+    with connection.cursor() as cursor:
+        tables = connection.introspection.table_names(cursor)
+    recorder = MigrationRecorder.Migration._meta.db_table
+    connection.ops.execute_sql_flush(
+        connection.ops.sql_flush(
+            no_style(), [table for table in tables if table != recorder], allow_cascade=True
+        )
+    )
+    forward()
 
 
 def constraints(table: str) -> dict[str, Any]:

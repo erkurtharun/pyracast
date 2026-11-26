@@ -89,7 +89,7 @@ class RenameInPlace(Operation):
         to_state: ProjectState,
     ) -> None:
         model = to_state.apps.get_model(app_label, self.model_name)
-        schema_editor.execute(self.rename_sql(schema_editor, model, self.old_name, self.item.name))
+        self.rename(schema_editor, model, self.old_name, self.item.name)
 
     def database_backwards(
         self,
@@ -99,7 +99,22 @@ class RenameInPlace(Operation):
         to_state: ProjectState,
     ) -> None:
         model = to_state.apps.get_model(app_label, self.model_name)
-        schema_editor.execute(self.rename_sql(schema_editor, model, self.item.name, self.old_name))
+        self.rename(schema_editor, model, self.item.name, self.old_name)
+
+    def rename(
+        self,
+        schema_editor: BaseDatabaseSchemaEditor,
+        model: type[models.Model],
+        old: str,
+        new: str,
+    ) -> None:
+        # Locked first, so autovacuum cannot hold the table while it waits for this transaction.
+        schema_editor.execute(self.lock_sql(schema_editor, model))
+        schema_editor.execute(self.rename_sql(schema_editor, model, old, new))
+
+    def lock_sql(self, schema_editor: BaseDatabaseSchemaEditor, model: type[models.Model]) -> str:
+        table = schema_editor.quote_name(model._meta.db_table)
+        return f"LOCK TABLE {table} IN ACCESS EXCLUSIVE MODE"
 
     def rename_sql(
         self,
