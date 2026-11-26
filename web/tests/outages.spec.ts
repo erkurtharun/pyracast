@@ -94,13 +94,12 @@ async function workspace(
                 },
             ]);
         else if (path.endsWith("/performance/"))
-            data = {
-                metrics: null,
-                baseline_metrics: null,
+            data = answer("PerformanceOutput", {
+                data_source: "forecast",
                 days: [],
                 matched_days: 0,
                 requested_days: 1,
-            };
+            });
         else if (path.endsWith("/outages/") && method === "GET") {
             outageReads++;
             const results = incident

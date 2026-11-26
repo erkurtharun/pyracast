@@ -136,6 +136,7 @@ test("after midnight the day keeps a forecast saved before its sunrise", async (
     await expect(dataLine).toHaveText(`Forecast data: ${plantTime(savedAt)}`);
     await expect(times.locator("option")).toHaveText([
         "Automatic",
+        "Best forecast",
         plantTime(savedAt),
     ]);
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-14");

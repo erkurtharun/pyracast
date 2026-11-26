@@ -10,10 +10,11 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.plants.activation import activate_calibration
 from pyracast.plants.availability import reference_intervals
 from pyracast.plants.calibration_data import build_calibration_dataset, current_source_validation
+from pyracast.plants.history import plant_outlook
 from pyracast.plants.measurements import select_measurements, selection_fingerprint
 from pyracast.plants.models import CalibrationRun, Plant
 from pyracast.plants.numerics import POLICY_VERSION
-from pyracast.plants.performance import forecast_performance
+from pyracast.plants.performance import production_comparison
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.plants.training import run_calibration
@@ -50,7 +51,9 @@ def actual_piece(
     return source
 
 
-def import_day(system: System, plant: Plant, day: date, *, end_hour: int = 18) -> None:
+def import_day(
+    system: System, plant: Plant, day: date, *, first_hour: int = 7, end_hour: int = 18
+) -> None:
     start, _ = local_day_bounds(day, system.binding.timezone)
     assert plant.current_configuration_id is not None
     import_observations(
@@ -62,7 +65,7 @@ def import_day(system: System, plant: Plant, day: date, *, end_hour: int = 18) -
         unit="MWh",
         observations=[
             ObservationInput(start + timedelta(hours=hour), start + timedelta(hours=hour + 1), 26)
-            for hour in range(7, end_hour)
+            for hour in range(first_hour, end_hour)
         ],
     )
 
@@ -167,22 +170,32 @@ def test_full_native_and_composite_representations_share_effective_day_fingerpri
     assert CalibrationRun.objects.count() == 1
 
 
-def test_historical_model_comparison_uses_the_same_archived_actual_composition(
+def test_the_satellite_comparison_shows_the_composed_figure_of_the_forecast_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    morning = actual_piece(system, DAY, 7, 12)
-    afternoon = actual_piece(system, DAY, 12, 18)
-    import_day(system, plant, DAY)
-    result = forecast_performance(
-        plant, start_date=DAY, end_date=DAY, comparison="historical_model", daylight_only=True
+    morning = actual_piece(system, DAY, 0, 12)
+    afternoon = actual_piece(system, DAY, 12, 24)
+    import_day(system, plant, DAY, first_hour=0, end_hour=24)
+
+    shown = plant_outlook(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        target_date=DAY,
+        resolution_minutes=60,
+        source="satellite",
     )
+    result = production_comparison(plant, start_date=DAY, end_date=DAY, data_source="satellite")
+
+    provenance = cast(dict[str, Any], shown["result"])["provenance"]
+    assert provenance["selection_policy"] == ACTUAL_COMPOSITION_POLICY
+    assert provenance["source_snapshot_ids"] == [afternoon.pk, morning.pk]
     assert result["matched_days"] == 1
-    row = result["days"][0]
-    assert row["predicted_energy_mwh"] == pytest.approx(572)
-    assert row["measured_energy_mwh"] == pytest.approx(286)
-    assert row["source_snapshot_ids"] == [afternoon.pk, morning.pk]
-    assert row["reference_provenance"]["selection_policy"] == ACTUAL_COMPOSITION_POLICY
+    daylight = cast(dict[str, Any], shown["result"])["daylight"]
+    assert result["days"][0]["predicted_energy_mwh"] == daylight["energy_mwh"]
+    assert result["days"][0]["measured_energy_mwh"] == pytest.approx(24 * 26)
 
 
 def test_seven_composite_native_days_fit_without_synthetic_provider_snapshots(

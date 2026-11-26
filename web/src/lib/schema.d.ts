@@ -1300,12 +1300,6 @@ export interface components {
             | "waiting_for_approval"
             | "paused"
             | "provider_attention";
-        /**
-         * @description * `archived_forecast` - archived_forecast
-         *     * `historical_model` - historical_model
-         * @enum {string}
-         */
-        ComparisonEnum: "archived_forecast" | "historical_model";
         ConfigurationOutput: {
             readonly id: number;
             /** Technical details revision */
@@ -1363,6 +1357,12 @@ export interface components {
          * @enum {string}
          */
         CurrentCalibrationOutputOriginEnum: "manual" | "automatic";
+        /**
+         * @description * `forecast` - forecast
+         *     * `satellite` - satellite
+         * @enum {string}
+         */
+        DataSourceEnum: "forecast" | "satellite";
         /**
          * @description * `configuration_unavailable` - Configuration Unavailable
          *     * `forecast_unavailable` - Forecast Unavailable
@@ -2254,12 +2254,6 @@ export interface components {
                 | null;
         };
         /**
-         * @description * `daylight_intervals` - daylight_intervals
-         *     * `full_day` - full_day
-         * @enum {string}
-         */
-        MetricScopeEnum: "daylight_intervals" | "full_day";
-        /**
          * @description * `unknown` - Unknown
          *     * `fixed` - Fixed
          *     * `tracking` - Tracking
@@ -2511,53 +2505,24 @@ export interface components {
                       | components["schemas"]["NullEnum"]
                   )
                 | null;
-            selection_policy:
-                | (
-                      | components["schemas"]["PerformanceSelectionPolicyEnum"]
-                      | components["schemas"]["NullEnum"]
-                  )
-                | null;
-            snapshot_id: number | null;
-            issuance_id: number | null;
-            configuration_id: number | null;
-            model_version: string | null;
-            source_snapshot_ids?: number[];
-            reference_provenance?: unknown;
-            /** Format: date-time */
-            collected_at: string | null;
-            /** Format: date-time */
-            available_at: string | null;
-            /** Format: date-time */
-            selection_cutoff: string | null;
+            forecast_id: number | null;
             calibration_id: number | null;
-            calibration_in_sample: boolean | null;
-            /** Format: double */
-            factor: number | null;
             /** Format: double */
             measured_energy_mwh: number | null;
             /** Format: double */
             predicted_energy_mwh: number | null;
             /** Format: double */
-            baseline_energy_mwh: number | null;
-            /** Format: double */
             error_mwh: number | null;
-            manual_observation_ids: number[];
-            settlement_snapshot_ids: number[];
-            provisional_snapshot_ids: number[];
-            source_kind: string | null;
-            historical_configuration_assumed: boolean;
             provisional_production: boolean;
         };
         /**
-         * @description * `configuration_not_comparable` - Configuration Not Comparable
-         *     * `forecast_not_available` - Forecast Not Available
+         * @description * `forecast_not_available` - Forecast Not Available
          *     * `estimated_actuals_not_available` - Estimated Actuals Not Available
          *     * `invalid_forecast_data` - Invalid Forecast Data
          *     * `incomplete_or_invalid_day` - Incomplete Or Invalid Day
          * @enum {string}
          */
         PerformanceDayReasonEnum:
-            | "configuration_not_comparable"
             | "forecast_not_available"
             | "estimated_actuals_not_available"
             | "invalid_forecast_data"
@@ -2568,18 +2533,6 @@ export interface components {
          * @enum {string}
          */
         PerformanceDayStatusEnum: "matched" | "missing";
-        PerformanceMetrics: {
-            /** Format: double */
-            interval_mae_mw: number;
-            /** Format: double */
-            source_positive_mae_mw: number | null;
-            /** Format: double */
-            bias_mw: number;
-            /** Format: double */
-            daily_mae_mwh: number;
-            /** Format: double */
-            daily_bias_mwh: number;
-        };
         PerformanceOutput: {
             plant_id: number;
             configuration_id: number | null;
@@ -2590,50 +2543,20 @@ export interface components {
             end_date: string;
             /** Format: date-time */
             evaluated_at: string;
-            selection_policy: components["schemas"]["PerformanceSelectionPolicyEnum"];
-            comparison: components["schemas"]["ComparisonEnum"];
-            /** Format: time */
-            issuance_cutoff: string | null;
-            measurement_policy: string;
-            /** Format: date-time */
-            configuration_created_at: string | null;
-            measurement_basis: string | null;
-            metric_scope: components["schemas"]["MetricScopeEnum"];
-            daylight_policy: string | null;
-            matched_days: number;
+            data_source: components["schemas"]["DataSourceEnum"];
             requested_days: number;
-            missing_days: number;
-            excluded_days: number;
-            scored_intervals: number;
-            /** Format: double */
-            scored_hours: number;
+            matched_days: number;
             /**
              * Format: double
-             * @description Sum of absolute daily errors over measured energy.
+             * @description Sum of absolute daily errors over actual production.
              */
             relative_error: number | null;
-            /**
-             * Format: double
-             * @description One minus the absolute daily error over that of the uncalibrated reference, on days the calibration did not train on.
-             */
-            skill_score: number | null;
-            skill_days: number;
-            metrics: components["schemas"]["PerformanceMetrics"] | null;
-            baseline_metrics:
-                components["schemas"]["PerformanceMetrics"] | null;
+            /** Format: double */
+            daily_mae_mwh: number | null;
+            /** Format: double */
+            daily_bias_mwh: number | null;
             days: components["schemas"]["PerformanceDay"][];
-            uncertainty: string;
         };
-        /**
-         * @description * `latest-published-pre-daylight-issuance-v1` - Archived Issuance
-         *     * `native-then-authorized-scale-complete-actuals-v4` - Estimated Actuals
-         *     * `native-estimated-actuals-coverage-v1` - Composed Estimated Actuals
-         * @enum {string}
-         */
-        PerformanceSelectionPolicyEnum:
-            | "latest-published-pre-daylight-issuance-v1"
-            | "native-then-authorized-scale-complete-actuals-v4"
-            | "native-estimated-actuals-coverage-v1";
         PlantConflict: {
             code: components["schemas"]["ErrorCode"];
             message: string;
@@ -3299,10 +3222,11 @@ export interface components {
         };
         /**
          * @description * `auto` - auto
+         *     * `best` - best
          *     * `manual` - manual
          * @enum {string}
          */
-        SelectionModeEnum: "auto" | "manual";
+        SelectionModeEnum: "auto" | "best" | "manual";
         /**
          * @description * `closest_to_production` - closest_to_production
          *     * `latest` - latest
@@ -6128,6 +6052,11 @@ export interface operations {
                  *     * `60` - 60
                  */
                 resolution_minutes?: 30 | 60;
+                /**
+                 * @description * `auto` - auto
+                 *     * `best` - best
+                 */
+                selection_mode?: "auto" | "best";
             };
             header?: never;
             path: {
@@ -6628,13 +6557,11 @@ export interface operations {
         parameters: {
             query?: {
                 /**
-                 * @description * `archived_forecast` - archived_forecast
-                 *     * `historical_model` - historical_model
+                 * @description * `forecast` - forecast
+                 *     * `satellite` - satellite
                  */
-                comparison?: "archived_forecast" | "historical_model";
-                daylight_only?: boolean;
+                data_source?: "forecast" | "satellite";
                 end_date?: string;
-                issuance_cutoff?: string | null;
                 start_date?: string;
             };
             header?: never;

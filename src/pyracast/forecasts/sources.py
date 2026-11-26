@@ -130,6 +130,14 @@ def covering_ids(
     return identifiers
 
 
+def with_normalization(snapshots: QuerySet[ForecastSnapshot]) -> QuerySet[ForecastSnapshot]:
+    """The snapshots with the capacity normalization and lineage their provenance names."""
+    lineage = "capacity_normalization__source_snapshot"
+    return snapshots.select_related(f"{lineage}__job").defer(
+        f"{lineage}__raw_payload", f"{lineage}__normalized_intervals"
+    )
+
+
 def covering_snapshots(
     snapshots: QuerySet[ForecastSnapshot], start: datetime, end: datetime
 ) -> list[ForecastSnapshot]:

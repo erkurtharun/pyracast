@@ -311,8 +311,7 @@ SPECTACULAR_SETTINGS = {
         "ReminderMemberKindEnum": ["administrator", "member"],
         "FreshnessEnum": "pyracast.api.serializers.Freshness",
         "StaleReasonEnum": "pyracast.api.serializers.StaleReason",
-        "PerformanceDayReasonEnum": "pyracast.plants.performance.DayReason",
-        "PerformanceSelectionPolicyEnum": "pyracast.plants.performance.SelectionPolicy",
+        "PerformanceDayReasonEnum": "pyracast.plants.day_reason.DayReason",
         "DaylightStatusEnum": ["normal", "polar_day", "polar_night"],
         "OutageScenarioStatusEnum": ["estimated", "unknown_impact"],
         "UnavailableReasonEnum": [

@@ -273,7 +273,7 @@ for (const electrical of [true, false]) {
             .click();
         const file = await download;
         expect(file.suggestedFilename()).toBe(
-            `pyracast-east-array-2026-11-14-${electrical ? "generation" : "irradiance"}.csv`,
+            `pyracast-east-array-2026-11-14-20261113T2100-${electrical ? "generation" : "irradiance"}.csv`,
         );
         const records = Papa.parse<Record<string, string>>(
             await readFile(await file.path(), "utf8"),

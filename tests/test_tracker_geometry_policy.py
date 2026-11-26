@@ -15,7 +15,7 @@ from pyracast.plants.history import plant_outlook
 from pyracast.plants.incident_forecasts import incident_scenario
 from pyracast.plants.models import CalibrationRun, ForecastIssuance, Plant, PlantConfiguration
 from pyracast.plants.numerics import DERATING_POLICY, MODEL_VERSION
-from pyracast.plants.performance import forecast_performance
+from pyracast.plants.performance import production_comparison
 from pyracast.plants.tracking import MODEL_V1, MODEL_V2
 from pyracast.plants.training import run_calibration
 from pyracast.plants.transfer import reference_power_mw, transfer_model
@@ -331,12 +331,11 @@ def test_production_diagnostic_needs_evidence_fitted_under_the_forecast_version(
     assert _outlook(system, plant, NOW.date())["production_diagnostic"] is None
 
 
-@pytest.mark.parametrize("calibrated", VERSIONS)
-def test_a_recomputed_performance_day_uses_the_version_of_its_calibration(
-    monkeypatch: pytest.MonkeyPatch, calibrated: str
+def test_a_compared_satellite_day_uses_the_version_of_its_calibration(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant, configuration = _tracking_plant(monkeypatch)
-    reference = actual_snapshot_for(system, MEASURED_DAY, power_kw=0.2)
+    actual_snapshot_for(system, MEASURED_DAY, power_kw=0.2)
     connection = EpiasConnection.objects.create(
         plant=plant,
         provider_plant_id=2,
@@ -347,34 +346,22 @@ def test_a_recomputed_performance_day_uses_the_version_of_its_calibration(
     )
     acquisition((configuration, connection))
     selected_factor(system, configuration, NOW - timedelta(days=20))
-    CalibrationRun.objects.update(
-        result={"training_day_dates": [MEASURED_DAY.isoformat()], "transfer_model": calibrated}
-    )
-    limit = power_limit(configuration)
-    assert limit is not None
-    expected = sum(
-        min(
-            limit,
-            0.8
-            * reference_power_mw(
-                configuration,
-                datetime.fromisoformat(row["start"]),
-                datetime.fromisoformat(row["end"]),
-                row["power_kw"],
-                model_version=calibrated,
-            ),
-        )
-        / 2
-        for row in reference.normalized_intervals
-    )
-    for default in VERSIONS:
-        _default(monkeypatch, default)
-        day = forecast_performance(
-            plant,
-            start_date=MEASURED_DAY,
-            end_date=MEASURED_DAY,
-            comparison="historical_model",
-        )["days"][0]
-        assert day["factor"] == 0.8
-        assert day["model_version"] == calibrated
-        assert day["predicted_energy_mwh"] == pytest.approx(expected, rel=1e-12)
+    run = CalibrationRun.objects.get()
+    figures: dict[tuple[str, str], float] = {}
+    for calibrated in VERSIONS:
+        run.result = {
+            "training_day_dates": [MEASURED_DAY.isoformat()],
+            "transfer_model": calibrated,
+        }
+        run.save(update_fields=("result",))
+        for default in VERSIONS:
+            _default(monkeypatch, default)
+            day = production_comparison(
+                plant, start_date=MEASURED_DAY, end_date=MEASURED_DAY, data_source="satellite"
+            )["days"][0]
+            assert day["calibration_id"] == run.pk
+            figures[calibrated, default] = day["predicted_energy_mwh"]
+
+    for calibrated in VERSIONS:
+        assert figures[calibrated, MODEL_V1] == figures[calibrated, MODEL_V2]
+    assert figures[MODEL_V1, MODEL_V1] != figures[MODEL_V2, MODEL_V1]

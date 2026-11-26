@@ -438,7 +438,6 @@ class ForecastIssuance(models.Model):
     factor = models.FloatField()
     payloads = models.JSONField()
     outage_scenarios = models.JSONField()
-    native_intervals = models.JSONField()
 
     class Meta:
         indexes = (models.Index(fields=("plant", "target_date"), name="%(class)s_plant_day_idx"),)
