@@ -158,7 +158,7 @@ export function ProductionImport({
             ? [
                   ...selection.preview.preview,
                   ...(selection.preview.warnings ?? []),
-              ].flatMap((row) => [row.starts_at, row.ends_at])
+              ].map((row) => [row.starts_at, row.ends_at] as const)
             : [],
     );
     const implausible =

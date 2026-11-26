@@ -2,6 +2,7 @@ import { MISSING } from "./number";
 
 export type Instant = string | number | Date | null | undefined;
 export type PlantDays = readonly [first: string, last: string];
+export type IntervalBounds = readonly [start: string, end: string];
 
 const DAY_MS = 86_400_000;
 const LONG_MONTH_LANGUAGES = new Set(["tr"]);
@@ -12,17 +13,55 @@ function instant(value: Instant): Date | null {
     return Number.isFinite(date.getTime()) ? date : null;
 }
 
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
+function formatter(
+    key: string,
+    build: () => Intl.DateTimeFormat,
+): Intl.DateTimeFormat {
+    let built = formatters.get(key);
+    if (!built) {
+        built = build();
+        formatters.set(key, built);
+    }
+    return built;
+}
+
+const wallClockFormat = (timeZone: string) =>
+    formatter(
+        `wall ${timeZone}`,
+        () =>
+            new Intl.DateTimeFormat("en-US", {
+                timeZone,
+                hourCycle: "h23",
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+            }),
+    );
+
+// Built from parts: the en-GB short September is "Sept" in current ICU data.
+const calendarFormat = (locale: string, timeZone: string) =>
+    formatter(
+        `calendar ${locale} ${timeZone}`,
+        () =>
+            new Intl.DateTimeFormat(locale, {
+                timeZone,
+                day: "numeric",
+                month: LONG_MONTH_LANGUAGES.has(
+                    new Intl.Locale(locale).language,
+                )
+                    ? "long"
+                    : "short",
+                year: "numeric",
+            }),
+    );
+
 function wallClock(at: Date, timeZone: string) {
-    const parts = new Intl.DateTimeFormat("en-US", {
-        timeZone,
-        hourCycle: "h23",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-    }).formatToParts(at);
+    const parts = wallClockFormat(timeZone).formatToParts(at);
     const part = (type: Intl.DateTimeFormatPartTypes) =>
         Number(parts.find((item) => item.type === type)?.value);
     return {
@@ -37,15 +76,8 @@ function wallClock(at: Date, timeZone: string) {
 
 const pad = (value: number, width = 2) => String(value).padStart(width, "0");
 
-// Built from parts: the en-GB short September is "Sept" in current ICU data.
 function calendarDate(locale: string, at: Date, timeZone: string): string {
-    const language = new Intl.Locale(locale).language;
-    const parts = new Intl.DateTimeFormat(locale, {
-        timeZone,
-        day: "numeric",
-        month: LONG_MONTH_LANGUAGES.has(language) ? "long" : "short",
-        year: "numeric",
-    }).formatToParts(at);
+    const parts = calendarFormat(locale, timeZone).formatToParts(at);
     const part = (type: Intl.DateTimeFormatPartTypes) =>
         parts.find((item) => item.type === type)?.value;
     return `${part("day")} ${part("month")} ${part("year")}`;
@@ -187,28 +219,20 @@ export function plantDay(
     offset = 0,
     now: Date = new Date(),
 ): string {
-    const parts = new Intl.DateTimeFormat("en-US", {
-        timeZone,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-    }).formatToParts(now);
-    const part = (type: Intl.DateTimeFormatPartTypes) =>
-        Number(parts.find((item) => item.type === type)?.value);
-    return new Date(
-        Date.UTC(part("year"), part("month") - 1, part("day") + offset),
-    )
+    const { year, month, day } = wallClock(now, timeZone);
+    return new Date(Date.UTC(year, month - 1, day + offset))
         .toISOString()
         .slice(0, 10);
 }
 
-// The offset is named only when it changes inside the shown intervals.
 export function intervalClock(
     timeZone: string,
-    timestamps: Iterable<string>,
+    intervals: Iterable<IntervalBounds>,
 ): (value: Instant) => string {
     const offsets = new Set(
-        Array.from(timestamps, (value) => zoneLabel(timeZone, new Date(value))),
+        Array.from(intervals).flatMap((bounds) =>
+            bounds.map((value) => zoneLabel(timeZone, new Date(value))),
+        ),
     );
     return offsets.size > 1
         ? (value) => formatZonedClock(value, timeZone)

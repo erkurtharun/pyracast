@@ -43,7 +43,7 @@ export function ForecastPanel({
     const rows = chartIntervals(allRows, metric, showFullDay, result);
     const time = format.intervals(
         forecast.timezone,
-        allRows.map((row) => row.start),
+        rows.map((row) => [row.start, row.end] as const),
     );
     const scenarioLabel = t("with_outages_title");
     const satellite = forecast.source_kind === "estimated_actuals";

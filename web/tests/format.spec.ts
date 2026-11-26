@@ -218,16 +218,58 @@ test("a plant day is the calendar date in the plant zone, shifted by whole days"
 
 test("interval times name the offset only when it changes inside the range", () => {
     const steady = intervalClock("Europe/Istanbul", [
-        "2026-01-07T09:00:00Z",
-        "2026-01-07T10:00:00Z",
+        ["2026-01-07T09:00:00Z", "2026-01-07T10:00:00Z"],
     ]);
     expect(steady("2026-01-07T09:00:00Z")).toBe("12:00");
+    expect(steady("2026-01-07T10:00:00Z")).toBe("13:00");
     const shift = intervalClock("Europe/Berlin", [
-        "2026-03-29T00:00:00Z",
-        "2026-03-29T01:30:00Z",
+        ["2026-03-29T00:00:00Z", "2026-03-29T00:30:00Z"],
+        ["2026-03-29T01:30:00Z", "2026-03-29T02:00:00Z"],
     ]);
     expect(shift("2026-03-29T00:00:00Z")).toBe("01:00 (UTC+1)");
     expect(shift("2026-03-29T01:30:00Z")).toBe("03:30 (UTC+2)");
+});
+
+test("interval times name the offset when only the end of the last interval lies after the change", () => {
+    const clock = intervalClock("Europe/Berlin", [
+        ["2026-10-24T23:30:00Z", "2026-10-25T00:30:00Z"],
+        ["2026-10-25T00:30:00Z", "2026-10-25T01:30:00Z"],
+    ]);
+    expect(clock("2026-10-25T00:30:00Z")).toBe("02:30 (UTC+2)");
+    expect(clock("2026-10-25T01:30:00Z")).toBe("02:30 (UTC+1)");
+});
+
+test("the times of a zone's intervals reuse the formatters built for its first time", () => {
+    const DateTimeFormat = Intl.DateTimeFormat;
+    let built = 0;
+    const counted = new Proxy(DateTimeFormat, {
+        construct(target, args: ConstructorParameters<typeof DateTimeFormat>) {
+            built += 1;
+            return new target(...args);
+        },
+    });
+    const hour = (index: number) =>
+        new Date(Date.UTC(2026, 6, 7, index)).toISOString();
+    Object.defineProperty(Intl, "DateTimeFormat", { value: counted });
+    try {
+        const bounds = Array.from(
+            { length: 24 },
+            (_, index) => [hour(index), hour(index + 1)] as const,
+        );
+        const clock = intervalClock("Asia/Tokyo", bounds);
+        formatTime("tr", hour(0), "Asia/Tokyo");
+        const first = built;
+        for (const [start, end] of bounds) {
+            clock(start);
+            clock(end);
+            formatTime("tr", start, "Asia/Tokyo");
+        }
+        expect(built).toBe(first);
+    } finally {
+        Object.defineProperty(Intl, "DateTimeFormat", {
+            value: DateTimeFormat,
+        });
+    }
 });
 
 test("a plant timestamp is the ISO wall time in the plant zone with its offset", () => {

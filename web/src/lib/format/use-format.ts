@@ -22,6 +22,7 @@ import {
     intervalClock,
     zoneLabel,
     type Instant,
+    type IntervalBounds,
     type PlantDays,
 } from "./time";
 
@@ -54,8 +55,10 @@ export function useFormat() {
                 formatZonedTime(locale, value, deviceZone()),
             zone: (timeZone: string, days?: PlantDays) =>
                 days ? daysZoneLabel(timeZone, days) : zoneLabel(timeZone),
-            intervals: (timeZone: string, timestamps: Iterable<string>) =>
-                intervalClock(timeZone, timestamps),
+            intervals: (
+                timeZone: string,
+                intervals: Iterable<IntervalBounds>,
+            ) => intervalClock(timeZone, intervals),
         }),
         [locale],
     );

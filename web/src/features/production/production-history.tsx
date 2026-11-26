@@ -183,14 +183,13 @@ export function ProductionHistory({
     const hasValues = rows.some((row) => row.effective != null);
     const time = format.intervals(
         history?.timezone ?? timezone,
-        rows.flatMap((row) => [
-            row.starts_at,
-            row.ends_at,
-            ...[
+        rows.flatMap((row) =>
+            [
+                row,
                 ...row.provider_originals,
                 ...row.previous_configuration_observations,
-            ].flatMap((other) => [other.starts_at, other.ends_at]),
-        ]),
+            ].map((bounds) => [bounds.starts_at, bounds.ends_at] as const),
+        ),
     );
     const intervalLabel = (row: Bounds) =>
         `${time(row.starts_at)}–${time(row.ends_at)}`;
