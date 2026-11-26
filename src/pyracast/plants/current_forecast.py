@@ -1,22 +1,19 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import cast
 
 from pyracast.forecasts.faults import FROZEN_PAYLOAD_FAULTS, stored_data
-from pyracast.forecasts.history import ARCHIVED, composed_irradiance, live_state, result_state
+from pyracast.forecasts.history import composed_irradiance, live_state, result_state
 from pyracast.forecasts.intraday import (
     ActualsMode,
     apply_intraday_source,
     prepare_intraday_source,
 )
 from pyracast.forecasts.models import ForecastSnapshot
-from pyracast.forecasts.sources import (
-    current_forecast_snapshots,
-    mark_forecast_fallback,
-)
+from pyracast.forecasts.sources import LaterFetch, current_forecast_snapshots
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_sources import SELECTION_POLICY, apply_composition, compose_snapshots
 from pyracast.plants.forecasting import calibration_at, forecast_payload
-from pyracast.plants.measurements import production_identity_at, production_identity_current
+from pyracast.plants.measurements import production_identity_current
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.plants.operations import configuration_is_current
 from pyracast.plants.transfer import transfer_model
@@ -29,7 +26,9 @@ def current_forecast(
     now: datetime,
     *,
     actuals: ActualsMode = "none",
+    chosen: LaterFetch | None = None,
 ) -> dict[str, object]:
+    """`chosen` answers a chosen fetch of today as it was known at its publication."""
     configuration = (
         PlantConfiguration.objects.select_related("binding__provider_account")
         .filter(pk=plant.current_configuration_id, plant=plant, created_at__lte=now)
@@ -40,51 +39,27 @@ def current_forecast(
     if configuration is not None and not configuration_is_current(configuration):
         configuration = None
     return _composed_forecast(
-        plant, target_date, resolution_minutes, now, now, configuration, actuals=actuals
+        plant,
+        target_date,
+        resolution_minutes,
+        now,
+        configuration,
+        actuals=actuals,
+        chosen=chosen,
     )
-
-
-def saved_forecast(
-    plant: Plant, target_date: date, resolution_minutes: int, now: datetime
-) -> dict[str, object]:
-    from pyracast.plants.automatic_forecast import reference_transition_forecast
-
-    _, end = local_day_bounds(target_date, plant.region.timezone)
-    cutoff = min(now, end - timedelta(microseconds=1))
-    configurations = (
-        PlantConfiguration.objects.select_related("binding__provider_account")
-        .filter(plant=plant)
-        .order_by("-created_at", "-pk")
-    )
-    configuration = configurations.filter(created_at__lte=cutoff).first()
-    while configuration is not None:
-        _, configured_end = local_day_bounds(target_date, configuration.binding.timezone)
-        cutoff = min(cutoff, configured_end - timedelta(microseconds=1))
-        if configuration.created_at <= cutoff:
-            break
-        configuration = configurations.filter(created_at__lte=cutoff).first()
-    outlook = _composed_forecast(
-        plant, target_date, resolution_minutes, cutoff, now, configuration, historical=True
-    )
-    outlook = reference_transition_forecast(plant, target_date, resolution_minutes, cutoff, outlook)
-    for key in ("result", "regional_irradiance"):
-        payload = cast(dict[str, object] | None, outlook[key])
-        if payload is not None:
-            mark_forecast_fallback(payload, cutoff)
-    return outlook
 
 
 def _composed_forecast(
     plant: Plant,
     target_date: date,
     resolution_minutes: int,
-    cutoff: datetime,
     now: datetime,
     configuration: PlantConfiguration | None,
     *,
-    historical: bool = False,
     actuals: ActualsMode = "none",
+    chosen: LaterFetch | None = None,
 ) -> dict[str, object]:
+    cutoff = chosen.published_at if chosen is not None else now
     actuals_only = actuals == "only"
     snapshot = None
     calibration = None
@@ -95,7 +70,11 @@ def _composed_forecast(
     if configuration is not None:
         start, end = local_day_bounds(target_date, configuration.binding.timezone)
         snapshots = current_forecast_snapshots(
-            binding_id=configuration.binding_id, start=start, end=end, as_of=cutoff
+            binding_id=configuration.binding_id,
+            start=start,
+            end=end,
+            as_of=cutoff,
+            pinned=chosen,
         )
         with stored_data("plant", plant.pk, target_date, "actuals", FROZEN_PAYLOAD_FAULTS):
             source = (
@@ -117,11 +96,7 @@ def _composed_forecast(
             snapshots = []
         snapshot = snapshots[0] if snapshots else None
         calibration = calibration_at(configuration, cutoff)
-        if calibration is not None and not (
-            production_identity_at(calibration, cutoff)
-            if historical
-            else production_identity_current(calibration)
-        ):
+        if calibration is not None and not production_identity_current(calibration):
             calibration = None
         if snapshot is not None:
             with stored_data("plant", plant.pk, target_date, "forecast"):
@@ -155,8 +130,6 @@ def _composed_forecast(
                 )
             if source is None:
                 cast(dict[str, object], result["provenance"])["selection_policy"] = SELECTION_POLICY
-            if historical and configuration.pk != plant.current_configuration_id:
-                cast(list[str], result["quality_flags"]).append("previous_configuration")
     return {
         "plant_id": plant.pk,
         "date": target_date.isoformat(),
@@ -167,9 +140,7 @@ def _composed_forecast(
         "source_kind": source_kind,
         **result_state(
             snapshot is not None,
-            ARCHIVED
-            if historical
-            else live_state(
+            live_state(
                 connection_current=True,
                 oldest_collected_at=min((row.collected_at for row in used_snapshots), default=None),
                 now=now,

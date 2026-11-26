@@ -6,13 +6,7 @@ from django.test import Client
 from django.test.utils import CaptureQueriesContext
 
 from tests.support.domain import System
-from tests.support.forecast_history import (
-    PLANT_READS,
-    REGION_READS,
-    TODAY,
-    add_history,
-    usable_calibration,
-)
+from tests.support.forecast_history import READS, TODAY, add_history, usable_calibration
 from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -36,9 +30,9 @@ def _costs(
     return costs
 
 
-@pytest.mark.parametrize(("scope", "reads"), [("plant", PLANT_READS), ("region", REGION_READS)])
+@pytest.mark.parametrize("scope", ["plant", "region"])
 def test_forecast_reads_cost_the_same_at_ten_times_the_history(
-    monkeypatch: pytest.MonkeyPatch, scope: str, reads: tuple[tuple[str, date], ...]
+    monkeypatch: pytest.MonkeyPatch, scope: str
 ) -> None:
     system, plant = make_plant(monkeypatch)
     usable_calibration(system, plant)
@@ -47,10 +41,10 @@ def test_forecast_reads_cost_the_same_at_ten_times_the_history(
     client.force_login(system.member)
     url = _urls(system, plant.pk)[scope]
     client.get(url, {"date": str(TODAY)})
-    small = _costs(client, url, reads)
+    small = _costs(client, url, READS)
     add_history(system, plant, range(1, 10))
-    large = _costs(client, url, reads)
-    assert {read: cost[0] for read, cost in large.items()} == dict.fromkeys(reads, 200)
+    large = _costs(client, url, READS)
+    assert {read: cost[0] for read, cost in large.items()} == dict.fromkeys(READS, 200)
     assert {read: cost[1] for read, cost in large.items()} == {
         read: cost[1] for read, cost in small.items()
     }

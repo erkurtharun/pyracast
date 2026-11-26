@@ -105,6 +105,24 @@ def _fill(sheet: Worksheet, row: int) -> str:
     return fill
 
 
+def _bordered(sheet: Worksheet) -> list[str]:
+    return [
+        cell.coordinate
+        for row in sheet.iter_rows()
+        for cell in row
+        if any(
+            side is not None and side.style
+            for side in (
+                cell.border.left,
+                cell.border.right,
+                cell.border.top,
+                cell.border.bottom,
+                cell.border.diagonal,
+            )
+        )
+    ]
+
+
 def _merged(sheet: Worksheet) -> set[str]:
     return {str(merged) for merged in sheet.merged_cells.ranges}
 
@@ -312,6 +330,15 @@ def test_the_sheet_reads_at_a_glance_without_grid_filter_or_frozen_rows() -> Non
         assert header.font.b
         assert header.font.color.rgb.endswith(WHITE)
         assert header.fill.fgColor.rgb.endswith(INK)
+    assert [_fill(sheet, row) for row in (8, 9, 11, 13, 15, 16)] == [
+        WHITE,
+        INK,
+        TINT,
+        WHITE,
+        INK,
+        INK,
+    ]
+    assert _bordered(sheet) == []
     assert sheet["A17"].value == datetime(2026, 10, 26, 11)
     assert sheet["B17"].value == datetime(2026, 10, 26, 12)
     assert sheet["A17"].number_format == sheet["B17"].number_format == "hh:mm"
@@ -415,6 +442,35 @@ def test_a_long_word_in_capitals_breaks_between_whole_letters() -> None:
     assert _title_height("KARAMANMERKEZGÜNEŞENERJİSİGENELSANTRAL") == 3 * 19 + 4
 
 
+@pytest.mark.parametrize(
+    ("name", "lines"),
+    [("A " + "K" * 20, 3), ("GES KARAMANMERKEZGÜNEŞENERJİSİGENELSANTRAL", 4)],
+    ids=["one letter", "an abbreviation"],
+)
+def test_an_overlong_word_after_a_short_word_starts_on_a_new_line(name: str, lines: int) -> None:
+    assert _title_height(name) == lines * 19 + 4
+
+
+@pytest.mark.parametrize(
+    ("name", "lines"),
+    [("a" * 24 + " ", 1), (" " + "a" * 24, 1), ("a" * 12 + "  " + "a" * 11, 2)],
+    ids=["a trailing space", "a leading space", "two inner spaces"],
+)
+def test_spaces_at_the_ends_of_a_line_add_no_line(name: str, lines: int) -> None:
+    assert _title_height(name) == lines * 19 + 4
+
+
+def test_a_full_body_row_ending_in_a_space_stays_one_line_high() -> None:
+    sheet = _sheet(replace(_report(), unit="k" * 34 + " "))
+    assert sheet.row_dimensions[6].height == 25
+
+
+def test_a_body_row_is_measured_by_the_text_written_to_its_cell() -> None:
+    sheet = _sheet(replace(_report(), unit="k" * 34 + "\x01" * 5))
+    assert sheet["A6"].value == "Unit: " + "k" * 34
+    assert sheet.row_dimensions[6].height == 25
+
+
 def test_turkish_subtitle_and_missing_data_note_rows_stay_one_line_high() -> None:
     missing = _day(date(2026, 5, 10), None, coverage=0.0)
     sheet = _sheet(_report(_day(date(2026, 5, 9)), missing, electrical=False), "tr")
@@ -492,6 +548,7 @@ def test_each_day_has_its_dated_heading_and_header_and_the_days_alternate_fills(
     ] * 2
     assert sheet["C24"].value is None
     assert sheet["C24"].fill.fgColor.rgb.endswith(TINT)
+    assert _bordered(sheet) == []
     assert sheet.max_row == 29
 
 

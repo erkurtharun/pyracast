@@ -54,7 +54,7 @@ def _quarters(character: str) -> int:
 
 def _line_count(line: str, room: int, width: Callable[[str], int]) -> int:
     lines, used = 1, 0
-    for word in line.split(" "):
+    for word in line.strip(" ").split(" "):
         size = sum(map(width, word))
         gap = width(" ") if used else 0
         if used + gap + size <= room:
@@ -62,7 +62,8 @@ def _line_count(line: str, room: int, width: Callable[[str], int]) -> int:
         elif size <= room:
             lines, used = lines + 1, size
         else:
-            used += gap
+            if used:
+                lines, used = lines + 1, 0
             for character in word:
                 if used and used + width(character) > room:
                     lines, used = lines + 1, 0
@@ -85,10 +86,11 @@ def _row(
     for value, span, shown in cells:
         cell = cast(Cell, sheet.cell(row, column))
         if isinstance(value, str):
-            cell.value = _clean(value)
+            text = _clean(value)
+            cell.value = text
             cell.data_type = "s"
             room = sum(widths[column - 1 : column - 1 + span]) - 2
-            lines = max(lines, _lines(value, room, len))
+            lines = max(lines, _lines(text, room, len))
         else:
             cell.value = value
             cell.number_format = shown

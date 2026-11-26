@@ -126,7 +126,6 @@ def test_production_diagnostic_does_not_infer_lost_capacity(
         {"latest_matched_day": "2026-11-10"},
         {"other": {"result": {"transfer_model": TRACKING_MODEL_VERSION}}},
         {"other": {"production_snapshot_ids": [999]}},
-        {"explicit_cutoff": True},
     ],
 )
 def test_diagnostic_rejects_incompatible_latest_evidence_without_falling_back(
@@ -135,19 +134,13 @@ def test_diagnostic_rejects_incompatible_latest_evidence_without_falling_back(
     system, plant, run = _live_plant(monkeypatch)
     fields = ("policy", "baseline_factor", "latest_matched_day")
     _suspect(run, **{key: changes[key] for key in fields if key in changes})
-    options: dict[str, Any] = {}
     if "other" in changes:
         other = CalibrationRun.objects.get(pk=run.pk)
         other.pk = None
         other.result = other.result | changes["other"].get("result", {})
         other.production_snapshot_ids = changes["other"].get("production_snapshot_ids", [])
         other.save()
-    if changes.get("explicit_cutoff"):
-        options["as_of"] = NOW - timedelta(days=1)
-        publish_snapshot(
-            snapshot_for(system, NOW.date(), collected_at=NOW - timedelta(days=1, hours=2))
-        )
-    assert _outlook(system, plant, **options)["production_diagnostic"] is None
+    assert _outlook(system, plant)["production_diagnostic"] is None
 
 
 @pytest.mark.parametrize("status", ["ready", "rejected", "insufficient"])

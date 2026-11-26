@@ -105,7 +105,7 @@ def by_date(days: list[dict[str, Any]]) -> dict[date, dict[str, Any]]:
 def forecast_read(client: Client, system: System, plant: Plant, day: date) -> dict[str, Any]:
     response = client.get(
         plant_path(system, plant, "forecast"),
-        {"date": day.isoformat(), "data_source": "auto", "resolution_minutes": "60"},
+        {"date": day.isoformat(), "data_source": "forecast", "resolution_minutes": "60"},
     )
     assert response.status_code == 200, response.content
     return cast(dict[str, Any], response.json())
@@ -178,17 +178,29 @@ def _instant(value: str | None) -> datetime | None:
 
 
 def forecast_window(system: System) -> None:
-    """Estimated actuals for the 7 past days and a forecast for today and the 14 days after."""
+    """A forecast saved before sunrise for the 7 past days and one for today and the 14 after."""
     for offset in range(-7, 0):
-        day = TODAY + timedelta(days=offset)
-        _, end = local_day_bounds(day, system.binding.timezone)
-        estimated_actuals(system, day, 0.3, end + timedelta(hours=1))
+        saved_before_sunrise(system, TODAY + timedelta(days=offset))
     for offset in range(15):
         publish_snapshot(
             snapshot_for(
                 system, TODAY + timedelta(days=offset), collected_at=NOW - timedelta(hours=1)
             )
         )
+
+
+def saved_before_sunrise(
+    system: System, day: date, *, power_kw: float = 0.3, minutes: int = 0
+) -> ForecastSnapshot:
+    start, _ = local_day_bounds(day, system.binding.timezone)
+    return publish_snapshot(
+        snapshot_for(
+            system,
+            day,
+            power_kw=power_kw,
+            collected_at=start - timedelta(hours=3, minutes=minutes),
+        )
+    )
 
 
 def metered(
@@ -308,7 +320,7 @@ def test_a_daylight_saving_day_has_one_row_per_local_hour(
     )
     start, end = local_day_bounds(day, "Europe/Berlin")
     monkeypatch.setattr(timezone, "now", lambda: end + timedelta(hours=12))
-    estimated_actuals(system, day, 0.3, end + timedelta(hours=1))
+    saved_before_sunrise(system, day)
     metered(system, plant, day)
     body = days_of(system, plant)
     assert body["today"] == (day + timedelta(days=1)).isoformat()
@@ -342,8 +354,7 @@ def test_each_forecast_day_is_the_reduced_automatic_forecast_read(
     forecast_window(system)
     body = days_of(system, plant)
     each_forecast_day_is_its_read(client_for(system.member), system, plant, body)
-    assert {day["source_kind"] for day in body["forecast"][:7]} == {"estimated_actuals"}
-    assert {day["source_kind"] for day in body["forecast"][7:]} == {"forecast"}
+    assert {day["source_kind"] for day in body["forecast"]} == {"forecast"}
     assert all(day["rows"] and day["total_mwh"] is not None for day in body["forecast"])
     assert all(len(day["rows"]) == 24 for day in body["forecast"])
     assert all(day["affected"] is None for day in body["forecast"])
@@ -356,9 +367,7 @@ def test_superseded_partial_and_newly_calibrated_days_are_the_reduced_forecast_r
     configuration = plant.current_configuration
     assert configuration is not None
     for offset in range(-7, 0):
-        day = TODAY + timedelta(days=offset)
-        _, end = local_day_bounds(day, system.binding.timezone)
-        estimated_actuals(system, day, 0.3, end + timedelta(hours=1))
+        saved_before_sunrise(system, TODAY + timedelta(days=offset))
     for offset in range(14):
         day = TODAY + timedelta(days=offset)
         publish_snapshot(snapshot_for(system, day, collected_at=NOW - timedelta(hours=2)))
@@ -377,14 +386,29 @@ def test_superseded_partial_and_newly_calibrated_days_are_the_reduced_forecast_r
     each_forecast_day_is_its_read(client, system, plant, body)
     assert [
         forecast_read(client, system, plant, TODAY + timedelta(days=offset))["calibration_id"]
-        for offset in range(-7, 0)
-    ] == [None] * 3 + [run.pk] * 4
+        for offset in range(-7, 1)
+    ] == [None] * 7 + [run.pk]
     days = by_date(body["forecast"])
     assert days[superseded]["total_mwh"] < days[superseded + timedelta(days=1)]["total_mwh"]
     last = days[TODAY + timedelta(days=14)]
     assert last["partial"] is True
     assert last["total_mwh"] is not None
     assert [row["mwh"] is None for row in last["rows"]] == [False] * 10 + [True] * 14
+
+
+def test_a_day_whose_forecast_covers_only_the_night_has_no_total(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    night = TODAY + timedelta(days=2)
+    snapshot = snapshot_for(system, night, collected_at=NOW)
+    snapshot.normalized_intervals = snapshot.normalized_intervals[:5]
+    publish_snapshot(snapshot)
+    day = by_date(days_of(system, plant)["forecast"])[night]
+    assert day["partial"] is True
+    assert day["total_mwh"] is None
+    read = forecast_read(client_for(system.member), system, plant, night)
+    assert same_instants(day) == same_instants(reduced_forecast(read))
 
 
 def test_a_plant_without_a_configuration_answers_each_day_as_its_reads(
@@ -479,7 +503,7 @@ def test_a_refused_or_empty_day_carries_its_reason_without_rows(
     client = client_for(system.member)
     refusal = client.get(
         plant_path(system, plant, "forecast"),
-        {"date": TODAY.isoformat(), "data_source": "auto", "resolution_minutes": "60"},
+        {"date": TODAY.isoformat(), "data_source": "forecast", "resolution_minutes": "60"},
     )
     assert refusal.status_code == 400
     assert refusal.json()["code"] == "calculation_out_of_range"
@@ -498,7 +522,7 @@ def test_a_refused_or_empty_day_carries_its_reason_without_rows(
         "affected": None,
         "rows": [],
     }
-    assert empty_past["unavailable_reason"] == "estimated_actuals_unavailable"
+    assert empty_past["unavailable_reason"] == "forecast_unavailable"
     assert empty_future["unavailable_reason"] == "forecast_unavailable"
     for day in (empty_past, empty_future):
         assert day["rows"] == []
@@ -509,10 +533,12 @@ def test_a_refused_or_empty_day_carries_its_reason_without_rows(
 
 
 @pytest.mark.parametrize(
-    "damage", ["06.11.2026 00:00", MISSING, None, 7], ids=["text", "missing", "null", "number"]
+    ("damage", "fault"),
+    [("06.11.2026 00:00", "ValueError"), (MISSING, "KeyError"), (None, "TypeError")],
+    ids=["text", "missing", "null"],
 )
 def test_a_damaged_past_day_is_refused_while_every_other_day_is_answered(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, damage: object
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, damage: object, fault: str
 ) -> None:
     system, plant = make_plant(monkeypatch)
     forecast_window(system)
@@ -520,21 +546,21 @@ def test_a_damaged_past_day_is_refused_while_every_other_day_is_answered(
         metered(system, plant, TODAY - timedelta(days=offset))
     before = days_of(system, plant)
     damaged = TODAY - timedelta(days=3)
-    _, end = local_day_bounds(damaged, system.binding.timezone)
-    snapshot = estimated_actuals(system, damaged, 0.3, end + timedelta(hours=2))
-    rows = [dict(row) for row in snapshot.normalized_intervals]
+    issuance = ForecastIssuance.objects.get(target_date=damaged)
+    payloads = deepcopy(issuance.payloads)
+    row = payloads["60"]["intervals"][3]
     if damage is MISSING:
-        del rows[3]["start"]
+        del row["start"]
     else:
-        rows[3]["start"] = damage
-    stored_again(snapshot, normalized_intervals=rows)
+        row["start"] = damage
+    stored_again(issuance, payloads=payloads)
     with caplog.at_level(logging.WARNING, logger=FAULTS):
         after = days_of(system, plant)
     refused = by_date(after["forecast"])[damaged]
     assert refused == {
         "date": damaged.isoformat(),
         "timezone": "Europe/Istanbul",
-        "source_kind": "estimated_actuals",
+        "source_kind": "forecast",
         "freshness": "missing",
         "stale_reason": None,
         "unavailable_reason": "calculation_out_of_range",
@@ -550,7 +576,7 @@ def test_a_damaged_past_day_is_refused_while_every_other_day_is_answered(
     assert after["production"] == before["production"]
     [warning] = [record for record in caplog.records if record.name == FAULTS]
     assert damaged.isoformat() in warning.getMessage()
-    assert "ValueError" in warning.getMessage()
+    assert fault in warning.getMessage()
 
 
 def failing_on(monkeypatch: pytest.MonkeyPatch, day: date, error: Exception) -> None:
@@ -1101,8 +1127,7 @@ def older_sources(system: System, plant: Plant, copies: range) -> None:
     for copy in copies:
         for offset in range(-7, 0):
             day = TODAY + timedelta(days=offset)
-            _, end = local_day_bounds(day, system.binding.timezone)
-            estimated_actuals(system, day, 0.3 + copy / 100, end + timedelta(minutes=59 - copy))
+            saved_before_sunrise(system, day, power_kw=0.3 + copy / 100, minutes=1 + copy)
         for offset in range(15):
             publish_snapshot(
                 snapshot_for(
@@ -1202,11 +1227,9 @@ def test_the_days_read_issues_no_more_queries_than_its_days_read_one_by_one(
             forecast_read(client, system, plant, day)
             for day in (TODAY - timedelta(days=7), TODAY, TODAY + timedelta(days=14))
         ]
-        assert {read["calibration_id"] for read in reads} == {run.pk}
-        assert all(
-            (read["outage_scenario"] is not None) == calibration.endswith("outage")
-            for read in reads
-        )
+        assert [read["calibration_id"] for read in reads] == [None, run.pk, run.pk]
+        outage = calibration.endswith("outage")
+        assert [read["outage_scenario"] is not None for read in reads] == [False, outage, outage]
     client.get(plant_path(system, plant))
     days = queries_of(client, system, plant)
     one_by_one = queries_of_each_day_read_alone(client, system, plant)
@@ -1266,7 +1289,7 @@ def test_the_days_read_takes_at_most_25_single_day_forecast_reads(
     for offset in range(1, 31):
         metered(system, plant, TODAY - timedelta(days=offset))
     client = client_for(system.member)
-    parameters = {"date": TODAY.isoformat(), "data_source": "auto", "resolution_minutes": "60"}
+    parameters = {"date": TODAY.isoformat(), "data_source": "forecast", "resolution_minutes": "60"}
     days, single = best_of_five_alternately(
         lambda: client.get(plant_path(system, plant)),
         lambda: client.get(plant_path(system, plant, "forecast"), parameters),

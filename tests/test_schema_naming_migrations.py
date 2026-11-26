@@ -3,6 +3,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from functools import cache
 from io import StringIO
 from threading import Event
 from typing import Any
@@ -11,9 +12,11 @@ import pytest
 from django.apps import apps
 from django.core.management import call_command
 from django.db import connection, connections, transaction
+from django.db.migrations.loader import MigrationLoader
 from psycopg import sql
 
 from pyracast.connections.secrets import api_key_fingerprints, decrypt_api_key
+from pyracast.db import RenameInPlace
 from pyracast.forecasts.models import HistoricalReferenceImport
 from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
 from pyracast.plants.models import MountingType
@@ -98,17 +101,30 @@ RENAME = re.compile(
 )
 QUOTED = r'"\w+"'
 RENAME_IN_PLACE = re.compile(
-    rf"ALTER TABLE ({QUOTED}) RENAME CONSTRAINT {QUOTED} TO {QUOTED}"
-    rf"|ALTER INDEX {QUOTED} RENAME TO {QUOTED}"
+    rf"ALTER TABLE {QUOTED} RENAME CONSTRAINT ({QUOTED}) TO ({QUOTED})"
+    rf"|ALTER INDEX ({QUOTED}) RENAME TO ({QUOTED})"
 )
-LOCK = re.compile(rf"LOCK TABLE ({QUOTED}) IN ACCESS EXCLUSIVE MODE")
+LOCK = re.compile(rf"LOCK TABLE {QUOTED} IN ACCESS EXCLUSIVE MODE")
 
 
 def statements(app: str, name: str, *, backwards: bool = False) -> list[str]:
     output = StringIO()
     call_command("sqlmigrate", app, name, backwards=backwards, stdout=output)
     lines = [line for line in output.getvalue().splitlines() if not line.startswith("--")]
-    return [part.strip() for part in " ".join(lines).split(";") if part.strip()]
+    return [" ".join(part.split()) for part in " ".join(lines).split(";") if part.strip()]
+
+
+@cache
+def owning_tables(app: str, name: str) -> dict[tuple[str, str], str]:
+    loader = MigrationLoader(None)
+    before = loader.project_state((app, name), at_end=False).apps
+    owners: dict[tuple[str, str], str] = {}
+    for operation in loader.get_migration(app, name).operations:
+        if isinstance(operation, RenameInPlace):
+            table = f'"{before.get_model(app, operation.model_name)._meta.db_table}"'
+            old, new = f'"{operation.old_name}"', f'"{operation.item.name}"'
+            owners[old, new] = owners[new, old] = table
+    return owners
 
 
 @pytest.mark.parametrize(("app", "name"), NAMING)
@@ -132,12 +148,12 @@ def test_naming_migrations_lock_each_table_before_they_rename_in_it(
         for index, statement in enumerate(issued)
         if index not in locks and not RENAME.fullmatch(statement)
     ] == []
+    owners = owning_tables(app, name)
     for index in in_place:
-        renamed_in = RENAME_IN_PLACE.fullmatch(issued[index])
-        locked = LOCK.fullmatch(issued[index - 1])
-        assert renamed_in
-        assert locked
-        assert renamed_in[1] in {None, locked[1]}
+        renamed = RENAME_IN_PLACE.fullmatch(issued[index])
+        assert renamed
+        source, target = (group for group in renamed.groups() if group)
+        assert issued[index - 1] == f"LOCK TABLE {owners[source, target]} IN ACCESS EXCLUSIVE MODE"
 
 
 def lock_requests(pid: int, *relations: int) -> set[tuple[str, str, bool]]:

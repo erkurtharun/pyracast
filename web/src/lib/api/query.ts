@@ -89,6 +89,8 @@ export type Loaded<T> = {
     data?: T;
     error?: string;
     denied: boolean;
+    // A refused read keeps the answer it last stored, so its figures can outlive the refusal.
+    invalidFields: string[];
     loading: boolean;
     updatedAt: number;
     retry: () => void;
@@ -166,6 +168,12 @@ export function discard(client: QueryClient, queryKey: QueryKey) {
     void client.resetQueries({ queryKey, exact: true });
 }
 
+function invalidFields(error: unknown): string[] {
+    return error instanceof ApiError && error.status === 400
+        ? Object.keys(error.fields)
+        : [];
+}
+
 function useOwner() {
     const owner = useContext(QueryOwner);
     if (owner === undefined)
@@ -205,6 +213,7 @@ function useLoaded<T>(
     });
     return {
         ...shownAnswer<T>(query),
+        invalidFields: invalidFields(query.error),
         loading: query.isPending,
         updatedAt: query.dataUpdatedAt,
         retry: () => void query.refetch({ cancelRefetch: false }),

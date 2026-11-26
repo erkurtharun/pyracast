@@ -321,6 +321,8 @@ SPECTACULAR_SETTINGS = {
             "estimated_actuals_unavailable",
         ],
         "DayUnavailableReasonEnum": "pyracast.plants.serializers.DayUnavailableReason",
+        "SelectionModeEnum": "pyracast.forecasts.selection.SELECTION_MODES",
+        "SelectionRuleEnum": "pyracast.forecasts.selection.SELECTION_RULES",
         "DiagnosticStatusEnum": ["suspected", "normal", "insufficient"],
         "DiagnosticDayStatusEnum": ["shortfall", "within_threshold"],
     },

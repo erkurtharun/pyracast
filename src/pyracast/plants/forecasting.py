@@ -3,22 +3,21 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from math import isfinite
 from typing import Any, cast
-from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
 
-from pyracast.errors import UNEXPECTED, DomainError, ErrorCode
+from pyracast.errors import UNEXPECTED
 from pyracast.forecasts.capacity_normalization import normalization_provenance
 from pyracast.forecasts.faults import FROZEN_PAYLOAD_FAULTS, stored_data
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import ForecastSnapshot
-from pyracast.forecasts.outlook import Policy, plant_days_include
 from pyracast.forecasts.projections import saved_day_payload
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
     CalibrationStatus,
+    ForecastIssuance,
     Plant,
     PlantConfiguration,
 )
@@ -281,74 +280,66 @@ def require_resolution(resolution_minutes: int) -> None:
         raise ValidationError(UNEXPECTED)
 
 
-def require_known_cutoff(as_of: datetime | None, now: datetime) -> None:
-    if as_of is not None and (as_of.utcoffset() is None or as_of > now):
-        raise ValidationError(UNEXPECTED)
-
-
-def archived_forecast(
-    plant: Plant,
-    target_date: date,
-    resolution_minutes: int,
-    now: datetime,
-    as_of: datetime | None = None,
-    *,
-    binding_id: int | None = None,
-) -> dict[str, object]:
-    today = now.astimezone(ZoneInfo(plant.region.timezone)).date()
-    if not plant_days_include(Policy.ARCHIVE, target_date, today):
-        raise DomainError(ErrorCode.DATE_OUT_OF_RANGE)
-    require_resolution(resolution_minutes)
-    require_known_cutoff(as_of, now)
-    return issued_forecast(
-        plant, target_date, resolution_minutes, now, as_of=as_of, binding_id=binding_id
-    )
-
-
 def issued_forecast(
     plant: Plant,
     target_date: date,
     resolution_minutes: int,
     now: datetime,
     *,
-    as_of: datetime | None = None,
     binding_id: int | None = None,
 ) -> dict[str, object]:
-    from pyracast.plants.forecast_archive import forecast_cutoff, select_forecast_issuance
+    from pyracast.plants.forecast_archive import select_forecast_issuance
 
-    cutoff = (as_of or now).astimezone(UTC)
-    issuance = select_forecast_issuance(plant, target_date, as_of=cutoff, binding_id=binding_id)
+    issuance = select_forecast_issuance(plant, target_date, as_of=now, binding_id=binding_id)
     if issuance is None:
-        configuration = next(
-            (
-                candidate
-                for candidate in PlantConfiguration.objects.select_related("binding")
-                .filter(plant=plant, created_at__lte=cutoff)
-                .order_by("-created_at", "-pk")
-                if candidate.created_at < forecast_cutoff(target_date, candidate.binding)
-                and (binding_id is None or candidate.binding_id == binding_id)
-            ),
-            None,
-        )
-        return {
-            "plant_id": plant.pk,
-            "date": target_date.isoformat(),
-            "timezone": plant.region.timezone,
-            "as_of": cutoff.isoformat(),
-            "configuration_id": configuration.pk if configuration else None,
-            "snapshot_id": None,
-            "issuance_id": None,
-            "calibration_id": None,
-            "source_kind": "forecast",
-            "freshness": "missing",
-            "stale_reason": None,
-            "unavailable_reason": "forecast_unavailable"
-            if configuration is not None
-            else "configuration_unavailable",
-            "result": None,
-            "regional_irradiance": None,
-            "outage_scenario": None,
-        }
+        return missing_forecast(plant, target_date, now, binding_id=binding_id)
+    return issuance_outlook(plant, issuance, target_date, resolution_minutes, now)
+
+
+def missing_forecast(
+    plant: Plant, target_date: date, now: datetime, *, binding_id: int | None = None
+) -> dict[str, object]:
+    from pyracast.plants.forecast_archive import forecast_cutoff
+
+    configuration = next(
+        (
+            candidate
+            for candidate in PlantConfiguration.objects.select_related("binding")
+            .filter(plant=plant, created_at__lte=now)
+            .order_by("-created_at", "-pk")
+            if candidate.created_at < forecast_cutoff(target_date, candidate.binding)
+            and (binding_id is None or candidate.binding_id == binding_id)
+        ),
+        None,
+    )
+    return {
+        "plant_id": plant.pk,
+        "date": target_date.isoformat(),
+        "timezone": plant.region.timezone,
+        "as_of": now.astimezone(UTC).isoformat(),
+        "configuration_id": configuration.pk if configuration else None,
+        "snapshot_id": None,
+        "issuance_id": None,
+        "calibration_id": None,
+        "source_kind": "forecast",
+        "freshness": "missing",
+        "stale_reason": None,
+        "unavailable_reason": "forecast_unavailable"
+        if configuration is not None
+        else "configuration_unavailable",
+        "result": None,
+        "regional_irradiance": None,
+        "outage_scenario": None,
+    }
+
+
+def issuance_outlook(
+    plant: Plant,
+    issuance: ForecastIssuance,
+    target_date: date,
+    resolution_minutes: int,
+    now: datetime,
+) -> dict[str, object]:
     configuration, snapshot = issuance.configuration, issuance.snapshot
     with stored_data("plant", plant.pk, target_date, "archived_forecast", FROZEN_PAYLOAD_FAULTS):
         result = deepcopy(issuance.payloads[str(resolution_minutes)])
@@ -362,7 +353,7 @@ def issued_forecast(
         "plant_id": plant.pk,
         "date": target_date.isoformat(),
         "timezone": configuration.binding.timezone,
-        "as_of": (as_of or min(now, issuance.cutoff_at)).astimezone(UTC).isoformat(),
+        "as_of": min(now, issuance.cutoff_at).astimezone(UTC).isoformat(),
         "configuration_id": configuration.pk,
         "snapshot_id": snapshot.pk,
         "issuance_id": issuance.pk,

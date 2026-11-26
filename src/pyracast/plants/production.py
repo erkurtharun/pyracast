@@ -184,6 +184,11 @@ def native_production_days(
     return NativeProduction(zone, tuple(days))
 
 
+def production_total(plant: Plant, day: date, now: datetime) -> float | None:
+    """The day's production under `MEASUREMENT_POLICY`, or None unless it covers daylight."""
+    return native_production_days(plant, day, day, now).days[0].total_mwh
+
+
 def _role(actor: User | None, plant: Plant) -> str | None:
     if actor is None:
         return None

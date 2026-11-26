@@ -732,14 +732,14 @@ test("the comparison file names each day's status and the reason a day was not c
         file: "comparison",
         comparison: "Forecast accuracy",
         forecast: "Forecast",
-        satellite: "Production calculated from satellite data",
+        satellite: "Satellite data",
     });
     expect(file.filename).toBe(
         "pyracast-dogu-array-2026-11-01-2026-11-03-comparison.csv",
     );
     expect(lines(file)).toEqual([
         '"Plant","Comparison","Date","Status","Reason","Data","Actual (MWh)","Forecast (MWh)","Forecast − actual (MWh)","Real-time (EPİAŞ)"',
-        '"Doğu: array","Forecast accuracy","2026-11-01","Compared",,"Production calculated from satellite data",10,11,1,"Yes"',
+        '"Doğu: array","Forecast accuracy","2026-11-01","Compared",,"Satellite data",10,11,1,"Yes"',
         '"Doğu: array","Forecast accuracy","2026-11-02","Not compared","No forecast to compare for this day",,10,,,"No"',
         '"Doğu: array","Forecast accuracy","2026-11-03","Not compared","Data is missing for this day","Forecast",,4,,"No"',
         "",
@@ -750,13 +750,13 @@ test("the comparison file names each day's status and the reason a day was not c
                 file: "karsilastirma",
                 comparison: "Tahmin doğruluğu",
                 forecast: "Tahmin",
-                satellite: "Uydu verisinden hesaplanan üretim",
+                satellite: "Uydu verisi",
             }),
             "tr",
         ).slice(0, 2),
     ).toEqual([
         '"Santral","Karşılaştırma","Tarih","Durum","Neden","Veri","Gerçekleşen (MWh)","Tahmin (MWh)","Tahmin − gerçekleşen (MWh)","Gerçek zamanlı (EPİAŞ)"',
-        '"Doğu: array","Tahmin doğruluğu","2026-11-01","Karşılaştırıldı",,"Uydu verisinden hesaplanan üretim",10,11,1,"Evet"',
+        '"Doğu: array","Tahmin doğruluğu","2026-11-01","Karşılaştırıldı",,"Uydu verisi",10,11,1,"Evet"',
     ]);
 });
 
@@ -808,12 +808,12 @@ test("the comparison file of expected production uses the expected columns in ei
                 file: "comparison",
                 comparison: "Weather-based expected production",
                 forecast: "Forecast",
-                satellite: "Production calculated from satellite data",
+                satellite: "Satellite data",
             }),
         ).slice(0, 2),
     ).toEqual([
         '"Plant","Comparison","Date","Status","Reason","Data","Actual (MWh)","Expected (MWh)","Expected − actual (MWh)","Real-time (EPİAŞ)"',
-        '"Doğu: array","Weather-based expected production","2026-11-01","Compared",,"Production calculated from satellite data",10,11,1,"Yes"',
+        '"Doğu: array","Weather-based expected production","2026-11-01","Compared",,"Satellite data",10,11,1,"Yes"',
     ]);
     expect(
         lines(
@@ -821,13 +821,13 @@ test("the comparison file of expected production uses the expected columns in ei
                 file: "karsilastirma",
                 comparison: "Hava koşullarına göre beklenen üretim",
                 forecast: "Tahmin",
-                satellite: "Uydu verisinden hesaplanan üretim",
+                satellite: "Uydu verisi",
             }),
             "tr",
         ).slice(0, 2),
     ).toEqual([
         '"Santral","Karşılaştırma","Tarih","Durum","Neden","Veri","Gerçekleşen (MWh)","Beklenen (MWh)","Beklenen − gerçekleşen (MWh)","Gerçek zamanlı (EPİAŞ)"',
-        '"Doğu: array","Hava koşullarına göre beklenen üretim","2026-11-01","Karşılaştırıldı",,"Uydu verisinden hesaplanan üretim",10,11,1,"Evet"',
+        '"Doğu: array","Hava koşullarına göre beklenen üretim","2026-11-01","Karşılaştırıldı",,"Uydu verisi",10,11,1,"Evet"',
     ]);
 });
 
@@ -897,7 +897,7 @@ test("the generation file names its columns as the values table does, without qu
     const names = {
         file: "generation",
         forecast: "Forecast",
-        satellite: "Production calculated from satellite data",
+        satellite: "Satellite data",
     };
     const forecast = { date: "2026-11-12", source_kind: "forecast" };
     const file = forecastExport(plant, forecast, [forecastRow], {
@@ -926,12 +926,12 @@ const forecastNames = {
     en: {
         file: "generation",
         forecast: "Forecast",
-        satellite: "Production calculated from satellite data",
+        satellite: "Satellite data",
     },
     tr: {
         file: "uretim",
         forecast: "Tahmin",
-        satellite: "Uydu verisinden hesaplanan üretim",
+        satellite: "Uydu verisi",
     },
 } as const;
 
@@ -999,7 +999,7 @@ test("the generation file names satellite rows and writes an interval of both ki
     const names = {
         file: "generation",
         forecast: "Forecast",
-        satellite: "Production calculated from satellite data",
+        satellite: "Satellite data",
     };
     const row = (kinds: string[]) => ({
         start: "2026-11-12T08:00:00Z",
@@ -1018,7 +1018,7 @@ test("the generation file names satellite rows and writes an interval of both ki
     );
     expect(lines(satellite).slice(0, 2)).toEqual([
         '"Plant","Data","Start","End","Energy (MWh)","Average power (MW)"',
-        '"IŞIK Çiftliği","Production calculated from satellite data","2026-11-12T11:00:00+03:00","2026-11-12T12:00:00+03:00",2,',
+        '"IŞIK Çiftliği","Satellite data","2026-11-12T11:00:00+03:00","2026-11-12T12:00:00+03:00",2,',
     ]);
     const mixed = forecastExport(
         plant,
@@ -1034,12 +1034,7 @@ test("the generation file names satellite rows and writes an interval of both ki
         lines(mixed)
             .slice(0, 4)
             .map((line) => line.split(",")[1]),
-    ).toEqual([
-        '"Data"',
-        '"Production calculated from satellite data"',
-        '"Forecast"',
-        '"Forecast"',
-    ]);
+    ).toEqual(['"Data"', '"Satellite data"', '"Forecast"', '"Forecast"']);
     const electrical = { electrical: true, scenario: false };
     const mixedDay = { date: "2026-11-12", source_kind: "mixed" };
     const satelliteDay = {
@@ -1068,7 +1063,7 @@ test("the generation file names satellite rows and writes an interval of both ki
         ).slice(0, 2),
     ).toEqual([
         '"Santral","Veri","Başlangıç","Bitiş","Enerji (MWh)","Ortalama güç (MW)"',
-        '"Doğu: array","Uydu verisinden hesaplanan üretim","2026-11-12T11:00:00+03:00","2026-11-12T12:00:00+03:00",2,',
+        '"Doğu: array","Uydu verisi","2026-11-12T11:00:00+03:00","2026-11-12T12:00:00+03:00",2,',
     ]);
 });
 
