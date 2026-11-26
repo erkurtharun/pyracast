@@ -55,8 +55,8 @@ test("interval labels name the offset across the missing spring hour", async ({
         "2026-03-29T00:00:00.000Z",
         "2026-03-29T01:00:00.000Z",
     ]);
-    await expect(table).toContainText("01:00 GMT+1–03:00 GMT+2");
-    await expect(table).toContainText("03:00 GMT+2–04:00 GMT+2");
+    await expect(table).toContainText("01:00 (UTC+1)–03:00 (UTC+2)");
+    await expect(table).toContainText("03:00 (UTC+2)–04:00 (UTC+2)");
     await expect(table).not.toContainText("02:00");
 });
 
@@ -67,6 +67,6 @@ test("interval labels tell the repeated autumn hour apart by its offset", async 
         "2026-10-25T00:00:00.000Z",
         "2026-10-25T01:00:00.000Z",
     ]);
-    await expect(table).toContainText("02:00 GMT+2–02:00 GMT+1");
-    await expect(table).toContainText("02:00 GMT+1–03:00 GMT+1");
+    await expect(table).toContainText("02:00 (UTC+2)–02:00 (UTC+1)");
+    await expect(table).toContainText("02:00 (UTC+1)–03:00 (UTC+1)");
 });

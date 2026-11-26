@@ -139,12 +139,9 @@ function PerformanceResults({
 }) {
     const t = useTranslations("ForecastPerformance");
     const plant = useExportPlant();
-    const formatter = useFormat();
-    const format = (value: number | null) => formatter.number(value);
-    const signed = (value: number | null | undefined) =>
-        formatter.signed(value, 2);
-    const percent = (value: number | null) =>
-        formatter.quantity(value === null ? null : value * 100, "%", 1);
+    const format = useFormat();
+    const energy = (value: number | null | undefined) =>
+        format.rounded(value, "MWh");
     const reasonLabel = useCodeLabel("ForecastPerformance.reasons");
     const resource = useApiQuery(
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/performance/",
@@ -173,7 +170,7 @@ function PerformanceResults({
             : unavailable;
         missingReasons.set(reason, [
             ...(missingReasons.get(reason) ?? []),
-            day.date,
+            format.day(day.date),
         ]);
     }
     return (
@@ -205,7 +202,9 @@ function PerformanceResults({
                                 <div className="stats">
                                     <Stat
                                         label={t("relative_error")}
-                                        value={percent(data.relative_error)}
+                                        value={format.percent(
+                                            data.relative_error,
+                                        )}
                                     />
                                     <Stat
                                         label={t("matched_days")}
@@ -215,13 +214,16 @@ function PerformanceResults({
                                 <div className="stats">
                                     <Stat
                                         label={t("daylight_energy_error")}
-                                        value={data.metrics?.daily_mae_mwh}
+                                        value={energy(
+                                            data.metrics?.daily_mae_mwh,
+                                        )}
                                         unit="MWh"
                                     />
                                     <DifferenceStat
                                         label={t("daylight_energy_bias")}
-                                        value={signed(
+                                        value={format.signed(
                                             data.metrics?.daily_bias_mwh,
+                                            2,
                                         )}
                                         meaning={(direction) =>
                                             t("difference_meaning", {
@@ -253,8 +255,10 @@ function PerformanceResults({
                                         <caption>
                                             {t("date_range", {
                                                 mode: modeName,
-                                                start: data.start_date,
-                                                end: data.end_date,
+                                                start: format.day(
+                                                    data.start_date,
+                                                ),
+                                                end: format.day(data.end_date),
                                             })}
                                         </caption>
                                         <thead>
@@ -275,7 +279,9 @@ function PerformanceResults({
                                         <tbody>
                                             {matched.map((day) => (
                                                 <tr key={day.date}>
-                                                    <td>{day.date}</td>
+                                                    <td>
+                                                        {format.day(day.date)}
+                                                    </td>
                                                     <td>
                                                         {usedRealtime(day)
                                                             ? t(
@@ -284,17 +290,17 @@ function PerformanceResults({
                                                             : t("matched")}
                                                     </td>
                                                     <td>
-                                                        {format(
+                                                        {energy(
                                                             day.measured_energy_mwh,
                                                         )}
                                                     </td>
                                                     <td>
-                                                        {format(
+                                                        {energy(
                                                             day.predicted_energy_mwh,
                                                         )}
                                                     </td>
                                                     <td>
-                                                        {format(day.error_mwh)}
+                                                        {energy(day.error_mwh)}
                                                     </td>
                                                 </tr>
                                             ))}

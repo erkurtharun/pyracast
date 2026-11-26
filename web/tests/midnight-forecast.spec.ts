@@ -22,12 +22,11 @@ async function pollOnce(page: Page) {
 
 const savedAt = "2026-11-14T03:00:00Z";
 const laterAt = "2026-11-14T09:00:00Z";
-const plantTime = (value: string) =>
-    new Intl.DateTimeFormat("en", {
-        dateStyle: "medium",
-        timeStyle: "short",
-        timeZone: region.timezone,
-    }).format(new Date(value));
+const PLANT_TIMES = new Map([
+    ["2026-11-14T03:00:00Z", "14 Nov 2026, 06:00"],
+    ["2026-11-14T09:00:00Z", "14 Nov 2026, 12:00"],
+]);
+const plantTime = (value: string) => PLANT_TIMES.get(value) ?? value;
 
 async function openToday(page: Page) {
     await page.clock.install({ time: new Date("2026-11-14T20:59:40Z") });

@@ -5,6 +5,7 @@ from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 
 CONSOLE = "/admin/"
+APPLICATION = "/app/"
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 # The console path a provider sign-in started from, kept in the session that completed it until
 # the console's first page follows it.
@@ -41,4 +42,4 @@ def console_destination(request: HttpRequest, target: str | None) -> str:
 
 
 def sign_in(target: str) -> str:
-    return "/app/?next=" + quote(target, safe="/")
+    return f"{APPLICATION}?next=" + quote(target, safe="/")

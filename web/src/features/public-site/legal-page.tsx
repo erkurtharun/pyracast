@@ -1,5 +1,5 @@
 import { homeCopy, type PublicLanguage } from "./home-copy";
-import { formatTime } from "@/lib/format/time";
+import { formatDay } from "@/lib/format/time";
 import { publicPath } from "@/lib/public-metadata";
 import { SiteShell } from "./site-shell";
 import styles from "./public-site.module.css";
@@ -31,12 +31,7 @@ export function LegalPage({
                     <p className={styles.updated}>
                         {copy.updated}:{" "}
                         <time dateTime={updated}>
-                            {formatTime(
-                                language,
-                                `${updated}T00:00:00Z`,
-                                "UTC",
-                                { dateStyle: "long" },
-                            )}
+                            {formatDay(language, updated)}
                         </time>
                     </p>
                 </header>

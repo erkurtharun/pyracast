@@ -30,6 +30,7 @@ from pyracast.platform_admin.failures import contained
 from pyracast.platform_admin.forms import ConfirmationForm
 from pyracast.platform_admin.historical import historical_import
 from pyracast.platform_admin.navigation import (
+    APPLICATION,
     CONSOLE_RETURN,
     SAFE_METHODS,
     console_destination,
@@ -242,11 +243,17 @@ class PlatformAdminSite(admin.AdminSite):
         status: int,
         refused: bool = False,
     ) -> TemplateResponse:
+        opens = has_mfa_evidence(request, within=CONSOLE_PROOF)
         return self.workspace_response(
             request,
             "confirm",
             _("Confirm with your authenticator"),
-            {"form": form, "next": destination, "refused": refused},
+            {
+                "form": form,
+                "next": destination,
+                "cancel": destination if opens else APPLICATION,
+                "refused": refused,
+            },
             status=status,
         )
 

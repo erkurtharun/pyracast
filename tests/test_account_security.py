@@ -342,6 +342,15 @@ def test_session_names_the_end_of_its_ninety_days_and_its_thirty_day_idle_limit(
 
 
 @pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
+@override_settings(PYRACAST_SESSION_IDLE_SECONDS=60 * 60)
+def test_session_names_the_configured_idle_limit() -> None:
+    client = Client()
+    client.force_login(verified_member())
+
+    assert client.get("/api/session/").json()["idle_seconds"] == 60 * 60
+
+
+@pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
 def test_mfa_evidence_is_bound_to_current_user_and_live_authenticator() -> None:
     request = RequestFactory().get("/admin/")
     request.user = verified_member()

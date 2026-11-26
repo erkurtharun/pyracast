@@ -3,6 +3,18 @@ import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
 import { accessibilityViolations } from "../tests/support/accessibility";
 
+const MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(" ");
+
+function shownDay(isoDay: string): string {
+    const [year = 0, month = 0, day = 0] = isoDay.split("-").map(Number);
+    return `${day} ${MONTHS[month - 1]} ${year}`;
+}
+
+function shownMegawattHours(value: number): string {
+    const digits = value.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return `${digits} MWh`;
+}
+
 test("a customer manages one plant site through the real API", async ({
     page,
 }, testInfo) => {
@@ -115,7 +127,7 @@ test("a customer manages one plant site through the real API", async ({
     async function expectTableRows(date: string, name: string, rows: number) {
         const panel = page
             .locator("section.panel")
-            .filter({ has: page.getByText(date, { exact: true }) });
+            .filter({ has: page.getByText(shownDay(date), { exact: true }) });
         const toggle = panel.getByText("Show table", { exact: true });
         await toggle.click();
         await expect(
@@ -155,12 +167,13 @@ test("a customer manages one plant site through the real API", async ({
         return forecast.result.daylight;
     }
     const hourlyDaylight = await daylightForecast(60);
-    const daylightEnergy = new Intl.NumberFormat("en", {
-        maximumFractionDigits: 2,
-    }).format(hourlyDaylight.energy_mwh);
+    const daylightTotal = shownMegawattHours(hourlyDaylight.energy_mwh);
     await expect(
-        page.locator(".stat").filter({ hasText: /^Daily total/ }),
-    ).toContainText(`${daylightEnergy} MWh`);
+        page
+            .locator(".stat")
+            .filter({ hasText: /^Daily total/ })
+            .locator("strong"),
+    ).toHaveText(daylightTotal);
     await expect(page.locator(".stat")).toHaveCount(1);
     async function expectFullForecastCsv(fullCount: 24 | 48) {
         const download = page.waitForEvent("download");
@@ -202,8 +215,11 @@ test("a customer manages one plant site through the real API", async ({
         hourlyDaylight.energy_mwh,
     );
     await expect(
-        page.locator(".stat").filter({ hasText: /^Daily total/ }),
-    ).toContainText(`${daylightEnergy} MWh`);
+        page
+            .locator(".stat")
+            .filter({ hasText: /^Daily total/ })
+            .locator("strong"),
+    ).toHaveText(daylightTotal);
     await expectFullForecastCsv(48);
     // Outage times are entered on the plant's wall clock, whatever zone the browser runs in.
     const outageTimes = await page.evaluate(() => {
@@ -245,14 +261,17 @@ test("a customer manages one plant site through the real API", async ({
         page.locator(".stat").getByText("With outage", { exact: true }),
     ).toBeVisible();
     await expect(
-        page.locator(".stat").filter({ hasText: /^Without outage/ }),
-    ).toContainText(`${daylightEnergy} MWh`);
+        page
+            .locator(".stat")
+            .filter({ hasText: /^Without outage/ })
+            .locator("strong"),
+    ).toHaveText(daylightTotal);
     await expect(
         page
             .locator(".stat")
             .filter({ hasText: /^With outage/ })
             .locator("strong"),
-    ).toHaveText("0 MWh");
+    ).toHaveText("0.00 MWh");
     const outageDownload = page.waitForEvent("download");
     await page
         .getByRole("button", { name: "Download CSV", exact: true })

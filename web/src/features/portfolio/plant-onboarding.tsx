@@ -131,7 +131,7 @@ function Wizard({
     const refresh = useRefresh();
     const forget = useForgetDeletion();
     const reviewNumber = (value: unknown) =>
-        value == null || value === "" ? "" : format.number(Number(value), 6);
+        value == null || value === "" ? "" : format.recorded(Number(value));
     const reviewAngle = (value: unknown) => {
         const shown = reviewNumber(value);
         return shown ? `${shown}°` : MISSING;
@@ -337,8 +337,8 @@ function Wizard({
                     {existing && (
                         <p className="fine">
                             {t("keptLocation", {
-                                latitude: format.number(existing.latitude, 6),
-                                longitude: format.number(existing.longitude, 6),
+                                latitude: format.recorded(existing.latitude),
+                                longitude: format.recorded(existing.longitude),
                                 timezone: existing.timezone,
                             })}
                         </p>

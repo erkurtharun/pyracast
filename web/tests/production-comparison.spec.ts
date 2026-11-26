@@ -8,6 +8,8 @@ type PerformanceDay = Mock<components["schemas"]["PerformanceDay"]>;
 
 const day = (index: number) =>
     `2026-${index < 20 ? "10" : "11"}-${String(index < 20 ? index + 12 : index - 19).padStart(2, "0")}`;
+const shownDay = (index: number) =>
+    `${index < 20 ? index + 12 : index - 19} ${index < 20 ? "Oct" : "Nov"} 2026`;
 
 test("available historical model days appear without empty grid rows", async ({
     page,
@@ -88,7 +90,7 @@ test("available historical model days appear without empty grid rows", async ({
         comparison
             .locator(".stat")
             .filter({ hasText: "Absolute error as % of production" }),
-    ).toContainText("20 %");
+    ).toContainText("20%");
     await expect(comparison.locator(".stat")).toHaveCount(4);
     await expect(
         comparison.getByText(/Improvement over|outside the calibration days/),
@@ -122,7 +124,7 @@ test("available historical model days appear without empty grid rows", async ({
     ).toBeVisible();
     await expect(
         comparison.getByRole("table", {
-            name: "Weather-based expected production · 2026-10-12 – 2026-11-10",
+            name: "Weather-based expected production · 12 Oct 2026 – 10 Nov 2026",
         }),
     ).toBeVisible();
     await expect(
@@ -140,10 +142,10 @@ test("available historical model days appear without empty grid rows", async ({
         .getByText("Days not compared (22)", { exact: true })
         .click();
     await expect(comparison.getByRole("listitem")).toHaveText([
-        `The data to compare with cannot be used: ${day(0)}`,
+        `The data to compare with cannot be used: ${shownDay(0)}`,
         `No satellite data for this day: ${Array.from(
             { length: 21 },
-            (_, index) => day(index + 1),
+            (_, index) => shownDay(index + 1),
         ).join(", ")}`,
     ]);
     await comparison.getByRole("button", { name: "Forecast accuracy" }).click();
@@ -196,7 +198,7 @@ test("a completely unavailable comparison stays compact", async ({ page }) => {
                 days: Array.from(
                     { length: 30 },
                     (_, index): PerformanceDay => ({
-                        date: String(index),
+                        date: day(index),
                         status: "missing",
                         reason: "forecast_not_available",
                         measured_energy_mwh: null,
@@ -233,7 +235,7 @@ test("a completely unavailable comparison stays compact", async ({ page }) => {
     await expect(comparison.getByRole("listitem")).toHaveText([
         `No forecast to compare for this day: ${Array.from(
             { length: 30 },
-            (_, index) => String(index),
+            (_, index) => shownDay(index),
         ).join(", ")}`,
     ]);
 });
@@ -385,7 +387,7 @@ test("a forecast accuracy comparison signs the daily difference, counts no day n
     ).toHaveCount(0);
     await expect(
         comparison.getByRole("table", {
-            name: "Forecast accuracy · 2026-11-09 – 2026-11-10",
+            name: "Forecast accuracy · 9 Nov 2026 – 10 Nov 2026",
         }),
     ).toBeVisible();
     for (const name of [

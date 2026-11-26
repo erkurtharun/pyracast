@@ -181,18 +181,16 @@ export function ProductionHistory({
                       daylight.includes(row) || intervalKey(row) === editing,
               );
     const hasValues = rows.some((row) => row.effective != null);
-    const timeFormatter = format.intervals(
+    const time = format.intervals(
         history?.timezone ?? timezone,
-        rows.flatMap((row) => [
-            row.starts_at,
-            row.ends_at,
-            ...[
+        rows.flatMap((row) =>
+            [
+                row,
                 ...row.provider_originals,
                 ...row.previous_configuration_observations,
-            ].flatMap((other) => [other.starts_at, other.ends_at]),
-        ]),
+            ].map((bounds) => [bounds.starts_at, bounds.ends_at] as const),
+        ),
     );
-    const time = (value: string) => timeFormatter.format(new Date(value));
     const intervalLabel = (row: Bounds) =>
         `${time(row.starts_at)}–${time(row.ends_at)}`;
     const staged = new Set(
@@ -204,18 +202,14 @@ export function ProductionHistory({
         write.action === "revert"
             ? t("remove_correction")
             : t("save_value", {
-                  energy: format.number(write.change.energy ?? 0, 6),
+                  energy: format.recorded(write.change.energy ?? 0),
                   quality: label("ObservationQuality", write.change.quality),
               });
     const orphanRepeats = repeatsOrphan(screen);
     const datedInterval = (key: string) => {
         const [start = "", end = ""] = key.split("/");
-        const date = format.time(start, history?.timezone ?? timezone, {
-            year: "numeric",
-            month: "short",
-            day: "2-digit",
-        });
-        return `${date} ${time(start)}–${time(end)}`;
+        const date = format.date(start, history?.timezone ?? timezone);
+        return `${date}, ${time(start)}–${time(end)}`;
     };
 
     // Applies an event decided on the shown state; null when the screen refuses it.
@@ -484,7 +478,10 @@ export function ProductionHistory({
                                 : day?.total_mwh == null
                                   ? t("total_unavailable")
                                   : t("total", {
-                                        total: format.number(day.total_mwh),
+                                        total: format.rounded(
+                                            day.total_mwh,
+                                            "MWh",
+                                        ),
                                     })}
                         </strong>
                         {refreshButton}
@@ -516,7 +513,7 @@ export function ProductionHistory({
                             tenantId={scope.tenant_id}
                             rows={rows}
                             visibleRows={visibleRows}
-                            timeFormatter={timeFormatter}
+                            time={time}
                             intervalLabel={intervalLabel}
                             canManage={canManage}
                             canAct={(row) => canAct(access, row)}

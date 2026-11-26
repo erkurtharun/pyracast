@@ -3,6 +3,7 @@ import {
     TYPE,
     type MessageFormatElement,
 } from "@formatjs/icu-messageformat-parser";
+import { createTranslator } from "next-intl";
 import { test, expect, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
 import {
@@ -463,6 +464,61 @@ test("CSV validation is localized while ISO timestamps, units and values remain 
     );
 });
 
+test("a count in a sentence is grouped as the language groups numbers", () => {
+    const values = {
+        count: 1284,
+        shown: 1284,
+        total: 1284,
+        attention: 1284,
+        unused: 1284,
+        row: 1284,
+        first: 1284,
+        second: 1284,
+        created: 1284,
+        existing: 1284,
+        file: "production.csv",
+        start: "Start",
+        end: "End",
+        column: "Actual",
+        status: "Status",
+        source: "Source",
+    };
+    const keys = [
+        "Dashboard.shownOf",
+        "Dashboard.needAttention",
+        "Security.recoveryCount",
+        "KeepFigures.kept",
+        "ProductionCsv.interval",
+        "ProductionCsv.future",
+        "ProductionCsv.energy",
+        "ProductionCsv.quality",
+        "ProductionCsv.mixed",
+        "ProductionCsv.overlap",
+        "ForecastPerformance.daily_comparison",
+        "ForecastPerformance.unavailable_dates",
+        "ProductionHistory.missing_intervals",
+        "ProductionImport.validated_file",
+        "ProductionImport.import_complete",
+        "PlantOnboarding.inBinMore",
+        "WorkspaceMembers.reminderLimitWarning",
+        "ChangeRequests.pendingContext",
+    ];
+    for (const [language, grouped] of [
+        ["en", "1,284"],
+        ["tr", "1.284"],
+    ] as const) {
+        const translate = createTranslator({
+            locale: language,
+            messages: messages[language],
+        });
+        for (const key of keys) {
+            const text = translate(key as never, values as never);
+            expect(text, `${language} ${key}`).toContain(grouped);
+            expect(text, `${language} ${key}`).not.toMatch(/\d{4}/);
+        }
+    }
+});
+
 test("Turkish plant search and capacity formatting follow the selected language", async ({
     page,
 }) => {
@@ -487,7 +543,7 @@ test("Turkish plant search and capacity formatting follow the selected language"
     await page.goto("/app/");
     await page.getByRole("searchbox", { name: "Santral ara" }).fill("ışık");
     await expect(page.getByRole("heading", { name: "IŞIK GES" })).toBeVisible();
-    await expect(page.getByText("1.235 MWp", { exact: true })).toBeVisible();
+    await expect(page.getByText("1.234,5 MWp", { exact: true })).toBeVisible();
 });
 
 test("coded forecast errors are explained in the selected language", async ({
@@ -526,12 +582,12 @@ test.describe("the session end notice", () => {
         [
             "en",
             "Plants",
-            "Automatic sign-out at 10:00 PM GMT+3. Save your work.",
+            "Automatic sign-out at 22:00 (UTC+3). Save your work.",
         ],
         [
             "tr",
             "Santraller",
-            "Otomatik çıkış saati: 22:00 GMT+3. Çalışmanızı kaydedin.",
+            "Otomatik çıkış saati: 22:00 (UTC+3). Çalışmanızı kaydedin.",
         ],
     ] as const) {
         test(`appears five minutes before the session ends in ${language}`, async ({

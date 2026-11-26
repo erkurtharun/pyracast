@@ -226,7 +226,7 @@ test("withdraws a pending location request and offers the form again", async ({
     await openLocationSettings(page);
     await page.getByRole("button", { name: "Withdraw", exact: true }).click();
     await expect(
-        page.getByText("Location change withdrawn on Jan 2, 2026."),
+        page.getByText("Location change withdrawn on 2 Jan 2026."),
     ).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Send location change to Pyracast" }),
@@ -263,7 +263,7 @@ test("a direct move of a never-approved plant refills the form with the stored l
         .getByRole("button", { name: "Send location change to Pyracast" })
         .click();
     await expect(
-        page.getByText("Location change approved on Jan 2, 2026."),
+        page.getByText("Location change approved on 2 Jan 2026."),
     ).toBeVisible();
     await expect(page.getByLabel("Latitude (°)")).toHaveValue("37.123457");
     await expect(page.getByLabel("Reason (optional)")).toHaveValue("");
@@ -321,7 +321,7 @@ for (const item of stoppedForecasts)
             ),
         ).toBeVisible();
         await expect(
-            page.getByText("Location change approved on Jan 3, 2026.", {
+            page.getByText("Location change approved on 3 Jan 2026.", {
                 exact: true,
             }),
         ).toBeVisible();
@@ -351,7 +351,7 @@ test("shows the operator's decision and note on the latest request", async ({
     );
     await openLocationSettings(page);
     await expect(
-        page.getByText("Location change approved on Jan 3, 2026.", {
+        page.getByText("Location change approved on 3 Jan 2026.", {
             exact: true,
         }),
     ).toBeVisible();

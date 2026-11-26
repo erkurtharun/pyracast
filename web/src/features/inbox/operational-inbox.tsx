@@ -22,21 +22,6 @@ import { usePageTitle } from "@/ui/page-title";
 import { Notice, ReadFailed, RefreshFailed } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
 
-const SHORT_TIME: Intl.DateTimeFormatOptions = {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-};
-const ZONED_TIME: Intl.DateTimeFormatOptions = {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZoneName: "shortOffset",
-};
-
 type ChangeRequest = components["schemas"]["ChangeRequestOutput"];
 type IncidentKind = components["schemas"]["IncidentKindEnum"];
 type Summary = components["schemas"]["ChangeRequestSummaryOutput"];
@@ -328,8 +313,7 @@ function InboxPage({
 function Triage({ item }: { item: Summary }) {
     const t = useTranslations("ChangeRequests");
     const format = useFormat();
-    const time = (value: string) =>
-        format.time(value, item.timezone, SHORT_TIME);
+    const time = (value: string) => format.time(value, item.timezone);
     return (
         <>
             <p>
@@ -646,26 +630,20 @@ function ProductionProposal({
 }) {
     const t = useTranslations("ChangeRequests");
     const format = useFormat();
-    const evidenceTime = (value: string) =>
-        format.time(value, timezone, ZONED_TIME);
+    const evidenceTime = (value: string) => format.zonedTime(value, timezone);
     return (
         <section className="proposal-comparison">
             <h4>
                 {evidenceTime(row.starts_at)} –{" "}
-                {format.time(row.ends_at, timezone, {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    timeZoneName: "shortOffset",
-                })}
+                {format.zonedClock(row.ends_at, timezone)}
             </h4>
             {row.action === "revert" &&
                 (row.proposed ? (
                     <p>
                         {t("revertToProvider", {
-                            value: format.quantity(
+                            value: format.recordedQuantity(
                                 row.proposed.energy_mwh,
                                 "MWh",
-                                6,
                             ),
                         })}
                     </p>
@@ -689,7 +667,7 @@ function ProductionProposal({
                 {t("atSubmission")}:{" "}
                 {row.baseline_energy_mwh === null
                     ? t("noReading")
-                    : format.quantity(row.baseline_energy_mwh, "MWh", 6)}
+                    : format.recordedQuantity(row.baseline_energy_mwh, "MWh")}
             </p>
             {(row.baseline_energy_mwh !== (row.current?.energy_mwh ?? null) ||
                 row.baseline_source_kind !==
@@ -714,7 +692,10 @@ function ProductionProposal({
                             >
                                 {evidenceTime(interval.starts_at)} –{" "}
                                 {evidenceTime(interval.ends_at)}:{" "}
-                                {format.quantity(interval.energy_mwh, "MWh", 6)}
+                                {format.recordedQuantity(
+                                    interval.energy_mwh,
+                                    "MWh",
+                                )}
                             </li>
                         ))}
                     </ul>
@@ -731,7 +712,7 @@ function ReadingValue({ value }: { value: Reading | null }) {
     return value ? (
         <>
             <p className="proposal-energy">
-                {format.quantity(value.energy_mwh, "MWh", 6)}
+                {format.recordedQuantity(value.energy_mwh, "MWh")}
             </p>
             <p>
                 {label("ObservationQuality", qualityOf(value.quality))} ·{" "}
@@ -776,9 +757,9 @@ function IncidentProposal({
     ) => {
         if (value === null || value === undefined)
             return name === "ends_at" ? t("ongoing") : t("unknown");
-        if (typeof value === "number") return format.number(value, 6);
+        if (typeof value === "number") return format.recorded(value);
         if (name === "starts_at" || name === "ends_at")
-            return format.time(value, timezone, ZONED_TIME);
+            return format.zonedTime(value, timezone);
         if (name === "kind")
             return label("IncidentKind", value as IncidentKind);
         return value || MISSING;

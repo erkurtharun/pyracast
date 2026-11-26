@@ -118,8 +118,8 @@ for (const satellite of [false, true]) {
         await expect(
             page.getByText(
                 satellite
-                    ? /^Satellite data: Nov 14, 2026/
-                    : /^Forecast data: Nov 14, 2026/,
+                    ? /^Satellite data: 14 Nov 2026/
+                    : /^Forecast data: 14 Nov 2026/,
             ),
         ).toBeVisible();
         await expect(
@@ -148,7 +148,7 @@ test("an outage with no usable intervals does not present unknown energy as zero
     await openForecast(page, true, forecastResult(true), {
         outage_scenario: { status: "unknown_impact", result: affected },
     });
-    await expect(stat(page, /^Without outage/)).toContainText("30 MWh");
+    await expect(stat(page, /^Without outage/)).toContainText("30.00 MWh");
     await expect(stat(page, /^With outage/)).toContainText("— MWh");
 });
 
@@ -166,7 +166,7 @@ for (const electrical of [true, false]) {
         Object.assign(result.daylight, { energy_mwh: 0, energy_kwh_m2: 0 });
         await openForecast(page, electrical, result);
         await expect(stat(page, /^Daily total/)).toContainText(
-            electrical ? "0 MWh" : "0 kWh/m²",
+            electrical ? "0.00 MWh" : "0.00 kWh/m²",
         );
         await expect(page.getByRole("status")).toHaveCount(0);
     });
@@ -240,7 +240,7 @@ for (const electrical of [true, false]) {
         if (electrical) await page.setViewportSize({ width: 390, height: 844 });
         await openForecast(page, electrical, forecastResult(electrical));
         await expect(stat(page, /^Daily total/)).toContainText(
-            electrical ? "30 MWh" : "1 kWh/m²",
+            electrical ? "30.00 MWh" : "1.00 kWh/m²",
         );
         await expect(page.getByRole("status")).toHaveCount(0);
         await expect(
@@ -321,8 +321,8 @@ for (const name of ["outage_scenario"]) {
             },
         };
         await openForecast(page, true, forecastResult(true), scenario);
-        await expect(stat(page, /^Without outage/)).toContainText("30 MWh");
-        await expect(stat(page, /^With outage/)).toContainText("15 MWh");
+        await expect(stat(page, /^Without outage/)).toContainText("30.00 MWh");
+        await expect(stat(page, /^With outage/)).toContainText("15.00 MWh");
     });
 }
 
@@ -339,7 +339,7 @@ for (const member of [false, true]) {
             { outage_scenario: { status: "unknown_impact", result: affected } },
             { member },
         );
-        await expect(stat(page, /^Without outage/)).toContainText("30 MWh");
+        await expect(stat(page, /^Without outage/)).toContainText("30.00 MWh");
         await expect(stat(page, /^With outage/)).toContainText("— MWh");
         await expect(page.getByRole("status")).toHaveText(
             member

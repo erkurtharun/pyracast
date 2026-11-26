@@ -90,7 +90,7 @@ export function Portfolio() {
                         {t("plants")}{" "}
                         {sites.data && (
                             <span className="count" aria-hidden="true">
-                                {rows.length}
+                                {format.recorded(rows.length)}
                             </span>
                         )}
                     </h1>
@@ -199,7 +199,10 @@ export function Portfolio() {
                                     <h2>{siteName(site)}</h2>
                                     {metadata && (
                                         <p>
-                                            {`${format.significant(metadata.dc_capacity_mw, 4)} MWp`}
+                                            {format.recordedQuantity(
+                                                metadata.dc_capacity_mw,
+                                                "MWp",
+                                            )}
                                         </p>
                                     )}
                                     {site.attention && (

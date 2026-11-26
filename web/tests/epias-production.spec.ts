@@ -448,8 +448,10 @@ test("generation filtering preserves native intervals and repeated local hours a
     );
     await openProduction(page);
     await expect(table(page).getByRole("row")).toHaveCount(5);
-    await expect(row(page, "02:00 GMT+2–02:00 GMT+1")).toContainText("0 UEVM");
-    await expect(row(page, "02:00 GMT+1–02:30 GMT+1")).toContainText("—");
+    await expect(row(page, "02:00 (UTC+2)–02:00 (UTC+1)")).toContainText(
+        "0 UEVM",
+    );
+    await expect(row(page, "02:00 (UTC+1)–02:30 (UTC+1)")).toContainText("—");
     await page.getByRole("checkbox", { name: "Show full day" }).check();
     await expect(table(page).getByRole("row")).toHaveCount(7);
 });
@@ -561,7 +563,7 @@ test("manual-only days distinguish absent production from a measured all-zero da
     ).toBeVisible();
     await expect(table(page).getByRole("row")).toHaveCount(25);
     await expect(
-        page.getByText("Daily total: 0 MWh", { exact: true }),
+        page.getByText("Daily total: 0.00 MWh", { exact: true }),
     ).toHaveCount(0);
     await page
         .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
@@ -600,7 +602,7 @@ test("manual-only days distinguish absent production from a measured all-zero da
     state.provider.fill(0);
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(
-        page.getByText("Daily total: 0 MWh", { exact: true }),
+        page.getByText("Daily total: 0.00 MWh", { exact: true }),
     ).toBeVisible();
     await expect(table(page).getByRole("row")).toHaveCount(25);
 });
@@ -652,7 +654,7 @@ test("reloading a conflict preserves the draft when the native interval disappea
     );
     await page.getByRole("button", { name: "Reload current values" }).click();
     await expect(
-        page.getByLabel("Your value for Nov 09, 2026 08:00–09:00 (MWh)"),
+        page.getByLabel("Your value for 9 Nov 2026, 08:00–09:00 (MWh)"),
     ).toHaveValue("2.5");
     await expect(
         page.getByRole("alert").filter({
@@ -716,7 +718,7 @@ test("importing a different native interval preserves an open draft for recovery
         .getByRole("button", { name: "Import 1 value", exact: true })
         .click();
     await expect(
-        page.getByLabel("Your value for Nov 09, 2026 08:00–09:00 (MWh)"),
+        page.getByLabel("Your value for 9 Nov 2026, 08:00–09:00 (MWh)"),
     ).toHaveValue("2.5");
     await expect(
         page.getByRole("button", { name: "Save", exact: true }),
