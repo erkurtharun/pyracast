@@ -26,7 +26,9 @@ const SHOWN_DAYS = new Map([
 
 function answer(url: URL) {
     const date = url.searchParams.get("date");
-    const chosen = Number(url.searchParams.get("forecast_id")) || undefined;
+    const best = url.searchParams.get("selection_mode") === "best";
+    const chosen =
+        Number(url.searchParams.get("forecast_id")) || (best ? 12 : undefined);
     if (url.searchParams.get("data_source") === "satellite")
         return {
             json: {
@@ -68,12 +70,13 @@ function answer(url: URL) {
             source_kind: "forecast",
             freshness: latest ? "fresh" : "archived",
             selection: {
-                mode: chosen ? "manual" : "auto",
-                rule: chosen
-                    ? null
-                    : latest
-                      ? "latest"
-                      : "closest_to_production",
+                mode: best ? "best" : chosen ? "manual" : "auto",
+                rule:
+                    chosen && !best
+                        ? null
+                        : latest
+                          ? "latest"
+                          : "closest_to_production",
                 forecast_id: shown.forecast_id,
                 options: offered.map(({ forecast_id, fetched_at }) => ({
                     forecast_id,
@@ -157,6 +160,7 @@ test("a past day opens in Automatic with no mark and a chosen time is sent and m
     const total = panel.locator(".stat strong");
     await expect(times.locator("option")).toHaveText([
         "Automatic",
+        "Best forecast",
         plantTime(fetches[0]!.fetched_at),
         plantTime(fetches[1]!.fetched_at),
     ]);
@@ -189,6 +193,79 @@ test("today opens in Automatic with no mark", async ({ page }) => {
     await showsAutomatic(controls, times);
     expect(last().searchParams.get("data_source")).toBe("forecast");
     expect(last().searchParams.has("forecast_id")).toBe(false);
+});
+
+test("the best forecast is asked for on past days and today returns to Automatic", async ({
+    page,
+}) => {
+    const { requests, last, controls, times, panel } = await openForecast(
+        page,
+        "2026-11-11",
+    );
+    const total = panel.locator(".stat strong");
+    await times.selectOption("best");
+    await expect
+        .poll(() => last().searchParams.get("selection_mode"))
+        .toBe("best");
+    expect(last().searchParams.has("forecast_id")).toBe(false);
+    await expect(times.locator("option:checked")).toHaveText("Best forecast");
+    await expect(total).toHaveText("11.25 MWh");
+    await expect(panel.getByText(/^Forecast data: /)).toHaveText(
+        `Forecast data: ${plantTime(fetches[0]!.fetched_at)}`,
+    );
+    await expect(controls.locator(".tag")).toHaveCount(0);
+    await expect(
+        controls.getByRole("button", { name: "Back to automatic" }),
+    ).toHaveCount(0);
+
+    await page.getByLabel("Forecast date").fill("2026-11-10");
+    await expect.poll(() => last().searchParams.get("date")).toBe("2026-11-10");
+    expect(last().searchParams.get("selection_mode")).toBe("best");
+    await expect(times).toHaveValue("best");
+
+    await page
+        .getByRole("button", { name: "Irradiance forecast", exact: true })
+        .click();
+    const best = times.locator("option", { hasText: "Best forecast" });
+    await expect.poll(() => last().pathname).not.toContain("/plants/");
+    await expect(best).toHaveCount(0);
+    await page
+        .getByRole("button", { name: "Generation forecast", exact: true })
+        .click();
+
+    await page.getByLabel("Forecast date").fill(today);
+    await expect.poll(() => last().searchParams.get("date")).toBe(today);
+    await showsAutomatic(controls, times);
+    await expect(best).toHaveCount(0);
+    const askedBest = requests.filter(
+        (url) =>
+            (!url.pathname.includes("/plants/") ||
+                url.searchParams.get("date") === today) &&
+            url.searchParams.has("selection_mode"),
+    );
+    expect(askedBest).toEqual([]);
+});
+
+test("the downloads of Automatic and the best forecast are named by the fetch time each shows", async ({
+    page,
+}) => {
+    const { times, panel } = await openForecast(page, "2026-11-11");
+    const download = async () => {
+        const file = page.waitForEvent("download");
+        await panel.getByRole("button", { name: "Download CSV" }).click();
+        return (await file).suggestedFilename();
+    };
+    const shown = panel.getByText(/^Forecast data: /);
+
+    await expect(shown).toHaveText("Forecast data: 10 Nov 2026, 06:00");
+    expect(await download()).toBe(
+        "pyracast-east-array-2026-11-11-20261110T0600-generation.csv",
+    );
+    await times.selectOption("best");
+    await expect(shown).toHaveText("Forecast data: 10 Nov 2026, 17:00");
+    expect(await download()).toBe(
+        "pyracast-east-array-2026-11-11-20261110T1700-generation.csv",
+    );
 });
 
 test("a time only the irradiance view lists is refused by the generation view, which shows Automatic", async ({

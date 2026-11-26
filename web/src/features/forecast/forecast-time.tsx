@@ -7,16 +7,20 @@ import { Tag } from "@/ui/ui";
 
 type Options = NonNullable<Forecast["selection"]>["options"];
 
+export type ForecastTime = "auto" | "best" | number;
+
 export function ForecastTimeControl({
     timezone,
     options,
-    forecastId,
+    offersBest,
+    value,
     onChoose,
 }: {
     timezone: string;
     options: Options;
-    forecastId: number | undefined;
-    onChoose: (forecastId: number | undefined) => void;
+    offersBest: boolean;
+    value: ForecastTime;
+    onChoose: (next: ForecastTime) => void;
 }) {
     const t = useTranslations("DataSource");
     const format = useFormat();
@@ -25,16 +29,19 @@ export function ForecastTimeControl({
             {options.length > 0 && (
                 <Select
                     label={t("forecast_time")}
-                    value={forecastId === undefined ? "" : String(forecastId)}
+                    value={value === "auto" ? "" : String(value)}
                     onChange={(event) =>
                         onChoose(
-                            event.target.value
-                                ? Number(event.target.value)
-                                : undefined,
+                            event.target.value === ""
+                                ? "auto"
+                                : event.target.value === "best"
+                                  ? "best"
+                                  : Number(event.target.value),
                         )
                     }
                 >
                     <option value="">{t("automatic")}</option>
+                    {offersBest && <option value="best">{t("best")}</option>}
                     {options.map((option) => (
                         <option
                             key={option.forecast_id}
@@ -45,13 +52,13 @@ export function ForecastTimeControl({
                     ))}
                 </Select>
             )}
-            {forecastId !== undefined && (
+            {typeof value === "number" && (
                 <>
                     <Tag tone="warning">{t("manual")}</Tag>
                     <button
                         type="button"
                         className="button secondary"
-                        onClick={() => onChoose(undefined)}
+                        onClick={() => onChoose("auto")}
                     >
                         {t("back_to_automatic")}
                     </button>

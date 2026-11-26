@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, cast
 
 import pytest
@@ -12,14 +12,19 @@ from pyracast.forecasts.history import HISTORY_SELECTION_POLICY, select_actual_s
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.history import plant_outlook
-from pyracast.plants.models import ForecastIssuance, PlantConfiguration
+from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration
 from pyracast.plants.operations import revise_plant
 from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, System
 from tests.support.errors import raises_code
 from tests.support.invariants import stored_again
-from tests.support.plant_operations import make_plant, publish_snapshot, snapshot_for
+from tests.support.plant_operations import (
+    make_plant,
+    publish_snapshot,
+    saved_actuals,
+    snapshot_for,
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 8)
@@ -403,3 +408,43 @@ def test_history_selection_preserves_complete_day_when_newer_rolling_window_is_p
     complete.normalized_intervals = complete.normalized_intervals[:-6]
     stored_again(complete)
     assert select_actual_snapshot(system.binding, DAY, NOW) == partial
+
+
+def test_a_declaration_counts_its_day_in_the_zone_of_its_own_location(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    original = plant.current_configuration_id
+    saved_actuals(system, DAY)
+    Region.objects.filter(pk=system.region.pk).update(timezone="America/Los_Angeles")
+    location = SiteBinding.objects.get(pk=system.binding.pk)
+    location.pk = None
+    location.region_revision += 1
+    location.save()
+    later = PlantConfiguration.objects.create(
+        region_id=plant.region_id,
+        plant=plant,
+        binding=location,
+        revision=2,
+        dc_capacity_mw=130,
+        inverter_capacity_mw=100,
+        created_by=system.member,
+    )
+    # 06:00 on 8 November in Istanbul, the location's zone; still 7 November in Los Angeles.
+    PlantConfiguration.objects.filter(pk=later.pk).update(
+        created_at=datetime(2026, 11, 8, 3, tzinfo=UTC)
+    )
+    Plant.objects.filter(pk=plant.pk).update(current_configuration=later)
+
+    result = plant_outlook(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        target_date=DAY,
+        resolution_minutes=60,
+        source="satellite",
+    )
+
+    assert result["configuration_id"] == original
+    assert result["result"] is not None

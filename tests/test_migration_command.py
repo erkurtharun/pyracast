@@ -120,6 +120,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0007_plant_parameters_revision",
             "0008_calibration_run_available_at",
             "0009_technical_details_names",
+            "0010_forecast_issuance_without_native_intervals",
         ),
         "regions": (
             "0002_audit_event_details",

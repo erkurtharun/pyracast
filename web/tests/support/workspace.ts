@@ -358,8 +358,6 @@ export async function mockApi(
                 end_date: "2026-01-01",
                 matched_days: 0,
                 requested_days: 1,
-                metrics: null,
-                baseline_metrics: null,
                 days: [],
             });
         else if (path.endsWith("/forecast/"))

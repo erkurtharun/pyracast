@@ -232,33 +232,26 @@ type Day = Pick<
     | "date"
     | "status"
     | "reason"
-    | "source_kind"
     | "measured_energy_mwh"
     | "predicted_energy_mwh"
     | "error_mwh"
-    | "provisional_snapshot_ids"
+    | "provisional_production"
 >;
-
-export function usedRealtime(day: Pick<Day, "provisional_snapshot_ids">) {
-    return day.provisional_snapshot_ids.length > 0;
-}
 
 export type PerformanceFileNames = {
     file: string;
     comparison: string;
-    forecast: string;
-    satellite: string;
 };
 
 export function performanceExport(
     plant: PlantRef,
     performance: Pick<
         Schemas["PerformanceOutput"],
-        "start_date" | "end_date" | "comparison"
+        "start_date" | "end_date" | "data_source"
     > & { days: readonly Day[] },
     names: PerformanceFileNames,
 ): CsvExport {
-    const expected = performance.comparison === "historical_model";
+    const satellite = performance.data_source === "satellite";
     return table<Day>(
         plantFilename(
             plant.name,
@@ -284,27 +277,18 @@ export function performanceExport(
                         ? null
                         : { kind: "reason", reason: day.reason },
             ],
-            [
-                "data",
-                (day) =>
-                    day.source_kind === null
-                        ? null
-                        : day.source_kind === "estimated_actuals"
-                          ? names.satellite
-                          : names.forecast,
-            ],
             ["actual_mwh", (day) => day.measured_energy_mwh],
             [
-                expected ? "expected_mwh" : "forecast_mwh",
+                satellite ? "satellite_mwh" : "forecast_mwh",
                 (day) => day.predicted_energy_mwh,
             ],
             [
-                expected
-                    ? "expected_difference_mwh"
+                satellite
+                    ? "satellite_difference_mwh"
                     : "forecast_difference_mwh",
                 (day) => day.error_mwh,
             ],
-            ["realtime", usedRealtime],
+            ["realtime", (day) => day.provisional_production],
         ],
         performance.days,
     );
@@ -338,6 +322,14 @@ export type ForecastFileNames = {
     satellite: string;
 };
 
+// ISO 8601 basic form on the plant's wall clock, such as 20261110T1700.
+function fileTime(value: string | undefined, timeZone: string): string {
+    return (
+        plantTimestamp(value, timeZone)?.slice(0, 16).replaceAll(/[-:]/g, "") ??
+        ""
+    );
+}
+
 export function forecastExport(
     plant: PlantRef,
     forecast: { date?: string; source_kind?: string | null },
@@ -346,7 +338,13 @@ export function forecastExport(
         electrical,
         scenario,
         names,
-    }: { electrical: boolean; scenario: boolean; names: ForecastFileNames },
+        fetchedAt,
+    }: {
+        electrical: boolean;
+        scenario: boolean;
+        names: ForecastFileNames;
+        fetchedAt?: string;
+    },
 ): CsvExport {
     const kind = (kinds: readonly string[] | undefined) =>
         !kinds?.length
@@ -356,7 +354,12 @@ export function forecastExport(
               : names.forecast;
     const day = forecast.source_kind ? [forecast.source_kind] : [];
     return table<ForecastRow>(
-        plantFilename(plant.name, names.file, forecast.date ?? ""),
+        plantFilename(
+            plant.name,
+            names.file,
+            forecast.date ?? "",
+            fileTime(fetchedAt, plant.timezone),
+        ),
         [
             plantColumn(plant),
             [

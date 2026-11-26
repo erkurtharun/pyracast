@@ -1047,13 +1047,6 @@ msgid ""
 msgstr "Güncel sağlayıcı bağlantısı doğrulandı. Santral artık onaylanabilir."
 
 msgid ""
-"This time does not exist on that day or occurs twice because of a clock "
-"change. Choose another time."
-msgstr ""
-"Bu saat, saat değişikliği nedeniyle o gün hiç yok veya iki kez var. Başka "
-"bir saat seçin."
-
-msgid ""
 "The mail server's acceptance is unknown. Confirm with the mail provider "
 "before a manual resend."
 msgstr ""

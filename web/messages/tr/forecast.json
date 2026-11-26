@@ -51,7 +51,6 @@
     },
     "ForecastPerformance": {
         "production_comparison": "Karşılaştırma",
-        "previousday_cutoff": "Önceki gün bu saate kadarki son tahmini kullan",
         "start_date": "Başlangıç tarihi",
         "end_date": "Bitiş tarihi",
         "load_performance": "Göster",
@@ -60,37 +59,30 @@
         "matched_days": "Karşılaştırılan günler",
         "daylight_energy_error": "Ortalama günlük mutlak hata",
         "daylight_energy_bias": "Ortalama günlük fark",
-        "difference_meaning": "{mode, select, historical {{direction, select, high {Üretim beklenenin altında} other {Üretim beklenenin üstünde}}} other {{direction, select, high {Tahmin yüksek} other {Tahmin düşük}}}}",
+        "difference_meaning": "{mode, select, satellite {{direction, select, high {Uydu verisi yüksek} other {Uydu verisi düşük}}} other {{direction, select, high {Tahmin yüksek} other {Tahmin düşük}}}}",
         "_includes_provisional_reported_production_meter_boundary": "EPİAŞ gerçek zamanlı üretim verisi içerir.",
         "no_complete_production_and_reference_pairs_are": "Bu tarih aralığında karşılaştırılabilen gün yok. Başka tarihler seçin veya gerçekleşen üretimi kontrol edin.",
         "date": "Tarih",
         "status": "Durum",
         "measured_mwh": "Gerçekleşen (MWh)",
-        "model_mwh": "Beklenen (MWh)",
-        "predicted_mwh": "Tahmin (MWh)",
-        "error_mwh": "{mode, select, historical {Beklenen − gerçekleşen (MWh)} other {Tahmin − gerçekleşen (MWh)}}",
+        "shown_mwh": "{mode, select, satellite {Uydu verisi (MWh)} other {Tahmin (MWh)}}",
+        "error_mwh": "{mode, select, satellite {Uydu verisi − gerçekleşen (MWh)} other {Tahmin − gerçekleşen (MWh)}}",
         "provisional_production": "Gerçek zamanlı (EPİAŞ)",
         "matched": "Karşılaştırıldı",
-        "daylight_rules": "En fazla 90 gün.",
+        "range_limit": "En fazla 90 gün.",
         "daily_comparison": "Karşılaştırılan günler ({count, number})",
         "date_range": "{mode} · {start} – {end}",
         "unavailable_dates": "Karşılaştırılamayan günler ({count, number})",
         "reasons": {
             "estimated_actuals_not_available": "Bu gün için uydu verisi yok",
             "forecast_not_available": "Bu gün için karşılaştırılacak tahmin yok",
-            "configuration_not_comparable": "Ölçüm noktası veya saat dilimi güncel ayarlardan farklı",
             "incomplete_or_invalid_day": "Üretim değerleri eksik veya kullanılamıyor",
             "invalid_forecast_data": "Karşılaştırılacak veri kullanılamıyor"
         },
-        "forecast_accuracy": "Tahmin doğruluğu",
-        "model_check": "Hava koşullarına göre beklenen üretim",
-        "advanced": "Gelişmiş",
         "relative_error": "Mutlak hatanın üretime oranı",
         "reason_dates": "{reason}: {dates}",
         "daily_error_title": "Günlere göre mutlak hata",
         "daily_error_tooltip": "{date}: {error} MWh",
-        "forecast_kind": "Tahmin",
-        "satellite_kind": "Uydu verisi",
         "file": "karsilastirma"
     },
     "Calibrations": {
@@ -308,7 +300,7 @@
         "new_mwh": "Sonra (MWh)",
         "exact_interval": "Saat: {start} – {end}",
         "missing": "—",
-        "confirm_import": "{count} değeri içe aktar"
+        "confirm_import": "{count, number} değeri içe aktar"
     },
     "DataSource": {
         "data_source": "Veri",
@@ -316,6 +308,7 @@
         "satellite": "Uydu verisi",
         "forecast_time": "Tahmin saati",
         "automatic": "Otomatik",
+        "best": "En iyi tahmin",
         "manual": "Manuel",
         "back_to_automatic": "Otomatiğe dön"
     },

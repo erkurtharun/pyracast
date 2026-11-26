@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
 import { accessibilityViolations } from "../tests/support/accessibility";
@@ -10,9 +10,11 @@ function shownDay(isoDay: string): string {
     return `${day} ${MONTHS[month - 1]} ${year}`;
 }
 
-function shownMegawattHours(value: number): string {
-    const digits = value.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-    return `${digits} MWh`;
+// The seeded day is the run's tomorrow, so its daylight total changes with the season.
+async function expectShownTotal(shown: Locator, energyMwh: number) {
+    await expect(shown).toHaveText(/^\d{1,3}(?:,\d{3})*\.\d{2}\sMWh$/);
+    const figure = Number((await shown.innerText()).replace(/[^\d.]/g, ""));
+    expect(Math.abs(figure - energyMwh)).toBeLessThanOrEqual(0.005);
 }
 
 test("a customer manages one plant site through the real API", async ({
@@ -167,13 +169,11 @@ test("a customer manages one plant site through the real API", async ({
         return forecast.result.daylight;
     }
     const hourlyDaylight = await daylightForecast(60);
-    const daylightTotal = shownMegawattHours(hourlyDaylight.energy_mwh);
-    await expect(
-        page
-            .locator(".stat")
-            .filter({ hasText: /^Daily total/ })
-            .locator("strong"),
-    ).toHaveText(daylightTotal);
+    const dailyTotal = page
+        .locator(".stat")
+        .filter({ hasText: /^Daily total/ })
+        .locator("strong");
+    await expectShownTotal(dailyTotal, hourlyDaylight.energy_mwh);
     await expect(page.locator(".stat")).toHaveCount(1);
     async function expectFullForecastCsv(fullCount: 24 | 48) {
         const download = page.waitForEvent("download");
@@ -214,12 +214,7 @@ test("a customer manages one plant site through the real API", async ({
     expect((await daylightForecast(30)).energy_mwh).toBe(
         hourlyDaylight.energy_mwh,
     );
-    await expect(
-        page
-            .locator(".stat")
-            .filter({ hasText: /^Daily total/ })
-            .locator("strong"),
-    ).toHaveText(daylightTotal);
+    await expectShownTotal(dailyTotal, hourlyDaylight.energy_mwh);
     await expectFullForecastCsv(48);
     // Outage times are entered on the plant's wall clock, whatever zone the browser runs in.
     const outageTimes = await page.evaluate(() => {
@@ -260,12 +255,13 @@ test("a customer manages one plant site through the real API", async ({
     await expect(
         page.locator(".stat").getByText("With outage", { exact: true }),
     ).toBeVisible();
-    await expect(
+    await expectShownTotal(
         page
             .locator(".stat")
             .filter({ hasText: /^Without outage/ })
             .locator("strong"),
-    ).toHaveText(daylightTotal);
+        hourlyDaylight.energy_mwh,
+    );
     await expect(
         page
             .locator(".stat")

@@ -140,11 +140,6 @@ def _fitted_start(run: CalibrationRun) -> date | None:
         return None
 
 
-def fitted_on(run: CalibrationRun, day: date) -> bool:
-    days = run.result.get("training_day_dates")
-    return isinstance(days, list) and day.isoformat() in days
-
-
 @dataclass(frozen=True)
 class CalibrationTimeline:
     """Usable activated runs, newest activation first, up to the newest baseline reset."""
@@ -176,12 +171,6 @@ def calibration_timeline(configuration: PlantConfiguration, as_of: datetime) -> 
         if start is not None and _fits(run, configuration, as_of):
             fitted.append((start, run))
     return CalibrationTimeline(tuple(runs_with_unchanged_incidents(configuration, fitted, as_of)))
-
-
-def calibration_for_day(
-    configuration: PlantConfiguration, day: date, as_of: datetime
-) -> CalibrationRun | None:
-    return calibration_timeline(configuration, as_of).for_day(day)
 
 
 def forecast_daylight(

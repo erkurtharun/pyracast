@@ -180,7 +180,10 @@ for (const section of sections) {
         await tab(page, section.open).click();
         await expect(section.shown(page)).toBeVisible();
         expect(requested).not.toEqual([]);
-        await tab(page, "Forecast").click();
+        await page
+            .getByRole("navigation", { name: "Plant sections" })
+            .getByRole("button", { name: "Forecast", exact: true })
+            .click();
         await expect(page.getByLabel("Forecast date")).toBeVisible();
         const again = scriptRequests(page);
         for (const name of [...section.before, section.open])

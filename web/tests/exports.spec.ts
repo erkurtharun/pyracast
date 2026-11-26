@@ -683,11 +683,10 @@ const comparisonDay = {
     date: "2026-11-01",
     status: "matched",
     reason: null,
-    source_kind: "estimated_actuals",
     measured_energy_mwh: 10,
     predicted_energy_mwh: 11,
     error_mwh: 1,
-    provisional_snapshot_ids: [7] as number[],
+    provisional_production: true,
 } as const;
 
 const notCompared = [
@@ -696,138 +695,91 @@ const notCompared = [
         date: "2026-11-02",
         status: "missing",
         reason: "forecast_not_available",
-        source_kind: null,
         predicted_energy_mwh: null,
         error_mwh: null,
-        provisional_snapshot_ids: [] as number[],
+        provisional_production: false,
     },
     {
         ...comparisonDay,
         date: "2026-11-03",
         status: "missing",
         reason: null,
-        source_kind: "forecast",
         measured_energy_mwh: null,
         predicted_energy_mwh: 4,
         error_mwh: null,
-        provisional_snapshot_ids: [] as number[],
+        provisional_production: false,
     },
 ] as const;
 
+function comparisonFile(
+    data_source: "forecast" | "satellite",
+    names: Record<"file" | "comparison", string>,
+    days: readonly (typeof comparisonDay | (typeof notCompared)[number])[] = [
+        comparisonDay,
+        ...notCompared,
+    ],
+) {
+    return performanceExport(
+        plant,
+        {
+            start_date: "2026-11-01",
+            end_date: days.at(-1)?.date ?? "2026-11-01",
+            data_source,
+            days,
+        },
+        names,
+    );
+}
+
 test("the comparison file names each day's status and the reason a day was not compared", () => {
-    const archived = (
-        names: Record<"file" | "comparison" | "forecast" | "satellite", string>,
-    ) =>
-        performanceExport(
-            plant,
-            {
-                start_date: "2026-11-01",
-                end_date: "2026-11-03",
-                comparison: "archived_forecast",
-                days: [comparisonDay, ...notCompared],
-            },
-            names,
-        );
-    const file = archived({
+    const file = comparisonFile("forecast", {
         file: "comparison",
-        comparison: "Forecast accuracy",
-        forecast: "Forecast",
-        satellite: "Satellite data",
+        comparison: "Forecast",
     });
     expect(file.filename).toBe(
         "pyracast-dogu-array-2026-11-01-2026-11-03-comparison.csv",
     );
     expect(lines(file)).toEqual([
-        '"Plant","Comparison","Date","Status","Reason","Data","Actual (MWh)","Forecast (MWh)","Forecast − actual (MWh)","Real-time (EPİAŞ)"',
-        '"Doğu: array","Forecast accuracy","2026-11-01","Compared",,"Satellite data",10,11,1,"Yes"',
-        '"Doğu: array","Forecast accuracy","2026-11-02","Not compared","No forecast to compare for this day",,10,,,"No"',
-        '"Doğu: array","Forecast accuracy","2026-11-03","Not compared","Data is missing for this day","Forecast",,4,,"No"',
+        '"Plant","Comparison","Date","Status","Reason","Actual (MWh)","Forecast (MWh)","Forecast − actual (MWh)","Real-time (EPİAŞ)"',
+        '"Doğu: array","Forecast","2026-11-01","Compared",,10,11,1,"Yes"',
+        '"Doğu: array","Forecast","2026-11-02","Not compared","No forecast to compare for this day",10,,,"No"',
+        '"Doğu: array","Forecast","2026-11-03","Not compared","Data is missing for this day",,4,,"No"',
         "",
     ]);
     expect(
         lines(
-            archived({
+            comparisonFile("forecast", {
                 file: "karsilastirma",
-                comparison: "Tahmin doğruluğu",
-                forecast: "Tahmin",
-                satellite: "Uydu verisi",
+                comparison: "Tahmin",
             }),
             "tr",
         ).slice(0, 2),
     ).toEqual([
-        '"Santral","Karşılaştırma","Tarih","Durum","Neden","Veri","Gerçekleşen (MWh)","Tahmin (MWh)","Tahmin − gerçekleşen (MWh)","Gerçek zamanlı (EPİAŞ)"',
-        '"Doğu: array","Tahmin doğruluğu","2026-11-01","Karşılaştırıldı",,"Uydu verisi",10,11,1,"Evet"',
+        '"Santral","Karşılaştırma","Tarih","Durum","Neden","Gerçekleşen (MWh)","Tahmin (MWh)","Tahmin − gerçekleşen (MWh)","Gerçek zamanlı (EPİAŞ)"',
+        '"Doğu: array","Tahmin","2026-11-01","Karşılaştırıldı",,10,11,1,"Evet"',
     ]);
 });
 
-test("a compared day says real-time only when it used EPİAŞ real-time values, not by an entered source text", () => {
-    const entered = {
-        ...comparisonDay,
-        source_kind: "forecast",
-        manual_observation_ids: [5],
-        provisional_snapshot_ids: [],
-        provisional_production: true,
-    };
-    const file = performanceExport(
-        plant,
-        {
-            start_date: "2026-11-01",
-            end_date: "2026-11-01",
-            comparison: "archived_forecast",
-            days: [entered],
-        },
-        {
-            file: "comparison",
-            comparison: "Forecast accuracy",
-            forecast: "Forecast",
-            satellite: "",
-        },
-    );
-    expect(lines(file)[1]).toBe(
-        '"Doğu: array","Forecast accuracy","2026-11-01","Compared",,"Forecast",10,11,1,"No"',
-    );
-});
-
-test("the comparison file of expected production uses the expected columns in either language", () => {
-    const file = (
-        names: Record<"file" | "comparison" | "forecast" | "satellite", string>,
-    ) =>
-        performanceExport(
-            plant,
-            {
-                start_date: "2026-11-01",
-                end_date: "2026-11-01",
-                comparison: "historical_model",
-                days: [comparisonDay],
-            },
-            names,
-        );
+test("the comparison file of satellite data uses the satellite data columns in either language", () => {
+    const file = (names: Record<"file" | "comparison", string>) =>
+        comparisonFile("satellite", names, [comparisonDay]);
     expect(
-        lines(
-            file({
-                file: "comparison",
-                comparison: "Weather-based expected production",
-                forecast: "Forecast",
-                satellite: "Satellite data",
-            }),
-        ).slice(0, 2),
+        lines(file({ file: "comparison", comparison: "Satellite data" })).slice(
+            0,
+            2,
+        ),
     ).toEqual([
-        '"Plant","Comparison","Date","Status","Reason","Data","Actual (MWh)","Expected (MWh)","Expected − actual (MWh)","Real-time (EPİAŞ)"',
-        '"Doğu: array","Weather-based expected production","2026-11-01","Compared",,"Satellite data",10,11,1,"Yes"',
+        '"Plant","Comparison","Date","Status","Reason","Actual (MWh)","Satellite data (MWh)","Satellite data − actual (MWh)","Real-time (EPİAŞ)"',
+        '"Doğu: array","Satellite data","2026-11-01","Compared",,10,11,1,"Yes"',
     ]);
     expect(
         lines(
-            file({
-                file: "karsilastirma",
-                comparison: "Hava koşullarına göre beklenen üretim",
-                forecast: "Tahmin",
-                satellite: "Uydu verisi",
-            }),
+            file({ file: "karsilastirma", comparison: "Uydu verisi" }),
             "tr",
         ).slice(0, 2),
     ).toEqual([
-        '"Santral","Karşılaştırma","Tarih","Durum","Neden","Veri","Gerçekleşen (MWh)","Beklenen (MWh)","Beklenen − gerçekleşen (MWh)","Gerçek zamanlı (EPİAŞ)"',
-        '"Doğu: array","Hava koşullarına göre beklenen üretim","2026-11-01","Karşılaştırıldı",,"Uydu verisi",10,11,1,"Evet"',
+        '"Santral","Karşılaştırma","Tarih","Durum","Neden","Gerçekleşen (MWh)","Uydu verisi (MWh)","Uydu verisi − gerçekleşen (MWh)","Gerçek zamanlı (EPİAŞ)"',
+        '"Doğu: array","Uydu verisi","2026-11-01","Karşılaştırıldı",,10,11,1,"Evet"',
     ]);
 });
 
@@ -840,15 +792,10 @@ test("every plant file keeps its dates and kind when the plant name is long or h
             {
                 start_date: "2026-11-01",
                 end_date: "2026-11-02",
-                comparison: "archived_forecast",
+                data_source: "forecast",
                 days: [],
             },
-            {
-                file: "karsilastirma",
-                comparison: "",
-                forecast: "",
-                satellite: "",
-            },
+            { file: "karsilastirma", comparison: "" },
         ),
         calibrationsExport(long, [], "kalibrasyonlar", null),
         calibrationExport(long, run, "kalibrasyon-40", false),

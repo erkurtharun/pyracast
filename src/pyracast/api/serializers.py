@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from django.core.validators import ProhibitNullCharactersValidator
 from django.db import models
+from django.http import QueryDict
 from django.utils.translation import gettext_lazy
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
@@ -139,9 +140,21 @@ class LocationChangeOutput(serializers.ModelSerializer[RegionLocationChangeReque
         read_only_fields = fields
 
 
+class SingleChoice(serializers.ChoiceField):
+    """A query choice given explicitly is one non-blank value: DRF would read a blank one as
+    absent and Django would hand over the last of repeated ones."""
+
+    def get_value(self, dictionary: Any) -> Any:
+        name = cast(str, self.field_name)
+        if isinstance(dictionary, QueryDict) and name in dictionary:
+            values = dictionary.getlist(name)
+            return values[0] if len(values) == 1 else values
+        return super().get_value(dictionary)
+
+
 class ForecastQuery(InputSerializer):
     date = serializers.DateField()
-    data_source = serializers.ChoiceField(choices=SOURCES, default="forecast")
+    data_source = SingleChoice(choices=SOURCES, default="forecast")
     forecast_id = serializers.IntegerField(min_value=1, required=False)
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:

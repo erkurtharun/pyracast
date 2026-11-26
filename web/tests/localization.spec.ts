@@ -465,57 +465,140 @@ test("CSV validation is localized while ISO timestamps, units and values remain 
 });
 
 test("a count in a sentence is grouped as the language groups numbers", () => {
-    const values = {
-        count: 1284,
-        shown: 1284,
-        total: 1284,
-        attention: 1284,
-        unused: 1284,
-        row: 1284,
-        first: 1284,
-        second: 1284,
-        created: 1284,
-        existing: 1284,
-        file: "production.csv",
-        start: "Start",
-        end: "End",
-        column: "Actual",
-        status: "Status",
-        source: "Source",
-    };
-    const keys = [
-        "Dashboard.shownOf",
-        "Dashboard.needAttention",
-        "Security.recoveryCount",
-        "KeepFigures.kept",
-        "ProductionCsv.interval",
-        "ProductionCsv.future",
-        "ProductionCsv.energy",
-        "ProductionCsv.quality",
-        "ProductionCsv.mixed",
-        "ProductionCsv.overlap",
-        "ForecastPerformance.daily_comparison",
-        "ForecastPerformance.unavailable_dates",
-        "ProductionHistory.missing_intervals",
-        "ProductionImport.validated_file",
-        "ProductionImport.import_complete",
-        "PlantOnboarding.inBinMore",
-        "WorkspaceMembers.reminderLimitWarning",
-        "ChangeRequests.pendingContext",
+    const count = { count: 1284 };
+    const row = { row: 1284 };
+    const sentences: [
+        string,
+        Record<string, number | string>,
+        string,
+        string,
+    ][] = [
+        [
+            "Dashboard.shownOf",
+            { shown: 1284, total: 2391 },
+            "1,284 of 2,391 plants shown",
+            "2.391 santralden 1.284 tanesi gösteriliyor",
+        ],
+        [
+            "Dashboard.needAttention",
+            { attention: 1284 },
+            "1,284 plants need action.",
+            "1.284 santralde işlem gerekiyor.",
+        ],
+        [
+            "Security.recoveryCount",
+            { unused: 1284, total: 2391 },
+            "1,284 of 2,391 recovery codes unused.",
+            "2.391 kurtarma kodundan 1.284 tanesi kullanılmamış.",
+        ],
+        [
+            "KeepFigures.kept",
+            count,
+            "Figures of 1,284 plants are kept on this device.",
+            "1.284 santralin değerleri bu cihazda saklanıyor.",
+        ],
+        [
+            "ProductionCsv.interval",
+            { ...row, start: "starts_at", end: "ends_at" },
+            "Row 1,284: write starts_at and ends_at with their offset, 30 or 60 minutes apart, as in the example.",
+            "Satır 1.284: starts_at ve ends_at sütunlarına saatleri örnekteki gibi saat farkıyla, aralarında 30 veya 60 dakika olacak şekilde yazın.",
+        ],
+        [
+            "ProductionCsv.future",
+            row,
+            "Row 1,284: the end lies in the future. Remove the row or correct its time.",
+            "Satır 1.284: bitiş zamanı gelecekte. Satırı kaldırın veya saatini düzeltin.",
+        ],
+        [
+            "ProductionCsv.energy",
+            { ...row, column: "energy_kwh" },
+            "Row 1,284: write energy_kwh as zero or a positive number.",
+            "Satır 1.284: energy_kwh sütununa sıfır veya pozitif bir sayı yazın.",
+        ],
+        [
+            "ProductionCsv.quality",
+            { ...row, status: "quality", source: "source" },
+            "Row 1,284: write Normal, Outage, Production curtailed or Invalid value in the quality column and up to 200 characters in the source column.",
+            "Satır 1.284: quality sütununa Normal, Kesinti, Üretim kısıldı veya Geçersiz değer; source sütununa en fazla 200 karakter yazın.",
+        ],
+        [
+            "ProductionCsv.mixed",
+            row,
+            "Row 1,284: the half hours of this hour have different statuses. Correct each half hour separately.",
+            "Satır 1.284: bu saatin yarım saatlerinin durumu farklı. Her yarım saati ayrı düzeltin.",
+        ],
+        [
+            "ProductionCsv.overlap",
+            { first: 1284, second: 2391 },
+            "Rows 1,284 and 2,391 cover the same time. Remove one of them or correct its time.",
+            "Satır 1.284 ile satır 2.391 aynı saati kapsıyor. Birini kaldırın veya saatini düzeltin.",
+        ],
+        [
+            "ForecastPerformance.daily_comparison",
+            count,
+            "Days compared (1,284)",
+            "Karşılaştırılan günler (1.284)",
+        ],
+        [
+            "ForecastPerformance.unavailable_dates",
+            count,
+            "Days not compared (1,284)",
+            "Karşılaştırılamayan günler (1.284)",
+        ],
+        [
+            "ProductionHistory.missing_intervals",
+            count,
+            "1,284 intervals without a value",
+            "1.284 aralıkta değer yok",
+        ],
+        [
+            "ProductionImport.validated_file",
+            { ...count, file: "production.csv" },
+            "production.csv · 1,284 rows read",
+            "production.csv · 1.284 satır okundu",
+        ],
+        [
+            "ProductionImport.import_complete",
+            { created: 1284, existing: 2391 },
+            "Imported. New values: 1,284 · Already saved: 2,391",
+            "İçe aktarıldı. Yeni değer: 1.284 · Zaten kayıtlı: 2.391",
+        ],
+        [
+            "ProductionImport.confirm_import",
+            { count: 1000 },
+            "Import 1,000 values",
+            "1.000 değeri içe aktar",
+        ],
+        [
+            "PlantOnboarding.inBinMore",
+            count,
+            "1,284 more plants from this location are in the recycle bin.",
+            "Bu konumdan 1.284 santral daha geri dönüşüm kutusunda.",
+        ],
+        [
+            "WorkspaceMembers.reminderLimitWarning",
+            count,
+            "1,284 plants send their forecast email to all members and are at the recipient limit. A new member pauses that email until recipients are removed.",
+            "1.284 santralin tahmin e-postası tüm üyelere gidiyor ve alıcı sınırına ulaştı. Yeni bir üye eklenirse, alıcı sayısı azaltılana kadar bu e-posta duraklatılır.",
+        ],
+        [
+            "ChangeRequests.pendingContext",
+            count,
+            "Your change requests waiting for approval: 1,284. See them in the Inbox.",
+            "Onay bekleyen değişiklik talepleriniz: 1.284. Gelen kutusunda görebilirsiniz.",
+        ],
     ];
-    for (const [language, grouped] of [
-        ["en", "1,284"],
-        ["tr", "1.284"],
-    ] as const) {
-        const translate = createTranslator({
-            locale: language,
-            messages: messages[language],
-        });
-        for (const key of keys) {
-            const text = translate(key as never, values as never);
-            expect(text, `${language} ${key}`).toContain(grouped);
-            expect(text, `${language} ${key}`).not.toMatch(/\d{4}/);
-        }
+    const translators = {
+        en: createTranslator({ locale: "en", messages: messages.en }),
+        tr: createTranslator({ locale: "tr", messages: messages.tr }),
+    };
+    for (const [key, values, english, turkish] of sentences) {
+        expect(translators.en(key as never, values as never), key).toBe(
+            english,
+        );
+        expect(translators.tr(key as never, values as never), key).toBe(
+            turkish,
+        );
     }
 });
 

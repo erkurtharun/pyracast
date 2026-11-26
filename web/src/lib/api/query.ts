@@ -264,7 +264,7 @@ export function readListOnce<P extends ListPath>(
     path: P,
     options: RequestOptions<P, "get">,
 ) {
-    return client.fetchQuery<Stored<Answer<P, "get">>>({
+    return client.query<Stored<Answer<P, "get">>>({
         queryKey: keys.request(owner, path, options),
         queryFn: answered(() =>
             withSentAt(

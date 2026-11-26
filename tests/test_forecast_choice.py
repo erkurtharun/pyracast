@@ -1,10 +1,11 @@
 import logging
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
 from django.test import Client
+from django.utils import timezone
 
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
@@ -13,7 +14,7 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
 from pyracast.plants.forecast_archive import forecast_cutoff
 from pyracast.plants.models import ForecastIssuance, Plant, ProductionObservation
-from pyracast.plants.performance import forecast_performance
+from pyracast.regions.models import Region
 from tests.support.domain import System
 from tests.support.forecast_history import DAY, TODAY
 from tests.support.invariants import stored_again
@@ -445,16 +446,195 @@ def test_the_removed_data_sources_and_as_of_are_refused(monkeypatch: pytest.Monk
             assert (response.status_code, response.json()["code"]) == (400, "invalid_request")
 
 
-def test_forecast_accuracy_keeps_scoring_the_latest_forecast_before_sunrise(
+def _comparison(client: Client, system: System, plant: Plant, **query: str) -> dict[str, Any]:
+    response = client.get(
+        _plant_path(system, plant).removesuffix("forecast/") + "performance/",
+        {"start_date": DAY.isoformat(), "end_date": DAY.isoformat(), **query},
+    )
+    assert response.status_code == 200, response.json()
+    body: dict[str, Any] = response.json()
+    return body
+
+
+def test_the_comparison_matches_real_time_production_with_the_saved_forecast_nearest_to_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
     fetches = _owners_example(system)
     client, path = _client(system), _plant_path(system, plant)
-    _manual_production(system, plant, _total(client, path, fetches["previous 10:00"]))
+    nearest = _total(client, path, fetches["previous 10:00"])
+    _epias_production(system, plant, "realtime_generation", nearest)
 
-    shown = _read(client, path)
-    scored = forecast_performance(plant, start_date=DAY, end_date=DAY)
+    shown = _read(client, path, resolution_minutes=60)
+    compared = _comparison(client, system, plant)
 
-    assert _shown(shown)[2] == fetches["previous 10:00"].pk
-    assert scored["days"][0]["snapshot_id"] == fetches["day 04:00"].pk
+    day = compared["days"][0]
+    assert (day["status"], day["reason"], compared["matched_days"]) == ("matched", None, 1)
+    assert _shown(shown) == ("auto", "closest_to_production", fetches["previous 10:00"].pk)
+    assert day["forecast_id"] == fetches["previous 10:00"].pk
+    assert day["predicted_energy_mwh"] == shown["result"]["daylight"]["energy_mwh"]
+    assert day["measured_energy_mwh"] == pytest.approx(nearest)
+    assert day["error_mwh"] == pytest.approx(0, abs=1e-9)
+    assert day["provisional_production"] is True
+
+
+def test_best_shows_the_nearest_saved_forecast_where_automatic_keeps_the_day_before_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    two_days_before = DAY - timedelta(days=2)
+    nearer = _fetch(system, _at(two_days_before, 10), 0.40)
+    _fetch(system, _at(two_days_before, 17), 0.30)
+    _fetch(system, _at(PREVIOUS, 10), 0.52)
+    day_before = _fetch(system, _at(PREVIOUS, 17), 0.50)
+    client, path = _client(system), _plant_path(system, plant)
+    _manual_production(system, plant, _total(client, path, nearer))
+
+    automatic = _read(client, path, resolution_minutes=60)
+    best = _read(client, path, resolution_minutes=60, selection_mode="best")
+    compared = _comparison(client, system, plant)
+
+    assert _shown(automatic) == ("auto", "closest_to_production", day_before.pk)
+    assert _shown(best) == ("best", "closest_to_production", nearer.pk)
+    assert best["snapshot_id"] == nearer.pk
+    assert _ids(best) == _ids(automatic)
+    [day] = compared["days"]
+    assert day["forecast_id"] == nearer.pk
+    assert day["predicted_energy_mwh"] == best["result"]["daylight"]["energy_mwh"]
+
+
+def test_best_shows_the_latest_saved_forecast_without_a_production_total(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    _fetch(system, _at(PREVIOUS, 10), 0.52)
+    latest = _fetch(system, _at(PREVIOUS, 17), 0.50)
+    client, path = _client(system), _plant_path(system, plant)
+
+    assert _shown(_read(client, path, selection_mode="best")) == ("best", "latest", latest.pk)
+
+
+def test_best_is_refused_where_it_is_not_offered(monkeypatch: pytest.MonkeyPatch) -> None:
+    system, plant = make_plant(monkeypatch)
+    fetches = _owners_example(system)
+    _fetch(system, _at(TODAY, 4), 0.40, day=TODAY)
+    client = _client(system)
+    plant_path = _plant_path(system, plant)
+    refusals: tuple[tuple[date, dict[str, str | int | list[str]]], ...] = (
+        (TODAY, {"selection_mode": "best"}),
+        (DAY + timedelta(days=2), {"selection_mode": "best"}),
+        (DAY, {"selection_mode": "best", "data_source": "satellite"}),
+        (DAY, {"selection_mode": "best", "forecast_id": fetches["day 04:00"].pk}),
+        (DAY, {"selection_mode": "auto", "forecast_id": fetches["day 04:00"].pk}),
+        (DAY, {"selection_mode": ""}),
+        (DAY, {"selection_mode": ["auto", "best"]}),
+    )
+
+    for day, query in refusals:
+        response = client.get(plant_path, {"date": day.isoformat(), **query})
+        body = response.json()
+        assert (response.status_code, body["code"]) == (400, "invalid_request"), query
+        assert list(body["fields"]) == ["selection_mode"], query
+    refused = client.get(_region_path(system), {"date": DAY.isoformat(), "selection_mode": "best"})
+    assert (refused.status_code, refused.json()["code"]) == (400, "invalid_request")
+
+
+def test_best_beyond_the_forecast_days_is_refused_as_best_and_without_it_as_out_of_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    client, path = _client(system), _plant_path(system, plant)
+    beyond = {"date": (TODAY + timedelta(days=15)).isoformat()}
+
+    best = client.get(path, {**beyond, "selection_mode": "best"})
+    automatic = client.get(path, beyond)
+
+    assert (best.status_code, best.json()["code"]) == (400, "invalid_request")
+    assert list(best.json()["fields"]) == ["selection_mode"]
+    assert (automatic.status_code, automatic.json()["code"]) == (400, "date_out_of_range")
+
+
+def test_a_blank_or_repeated_data_source_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    system, plant = make_plant(monkeypatch)
+    client = _client(system)
+
+    for path in (_plant_path(system, plant), _region_path(system)):
+        for value in ("", ["unknown", "satellite"]):
+            response = client.get(path, {"date": DAY.isoformat(), "data_source": value})
+            body = response.json()
+            assert (response.status_code, body["code"]) == (400, "invalid_request")
+            assert list(body["fields"]) == ["data_source"]
+
+
+def test_a_readable_saved_forecast_is_compared_beside_a_damaged_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    readable = _fetch(system, _at(PREVIOUS, 4), 0.40)
+    damaged = _fetch(system, _at(PREVIOUS, 5), 0.30)
+    issuance = ForecastIssuance.objects.get(snapshot=damaged)
+    stored_again(issuance, payloads=list(issuance.payloads.values()))
+    _manual_production(system, plant, 5)
+
+    [day] = _comparison(_client(system), system, plant)["days"]
+
+    assert (day["status"], day["reason"], day["forecast_id"]) == ("matched", None, readable.pk)
+
+
+def test_settled_production_clears_the_real_time_mark_of_a_compared_day(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    _fetch(system, _at(PREVIOUS, 10), 0.52)
+    client = _client(system)
+
+    _epias_production(system, plant, "realtime_generation", 500)
+    [provisional] = _comparison(client, system, plant)["days"]
+    _epias_production(system, plant, "settlement_injection", 480)
+    [settled] = _comparison(client, system, plant)["days"]
+
+    assert (provisional["provisional_production"], provisional["measured_energy_mwh"]) == (
+        True,
+        pytest.approx(500),
+    )
+    assert (settled["provisional_production"], settled["measured_energy_mwh"]) == (
+        False,
+        pytest.approx(480),
+    )
+
+
+def test_both_reads_count_past_days_in_the_zone_of_the_plants_region(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    Region.objects.filter(pk=system.region.pk).update(timezone="America/Los_Angeles")
+    # 8 November has ended in Istanbul, the configuration's zone, but not in Los Angeles.
+    monkeypatch.setattr(timezone, "now", lambda: datetime(2026, 11, 9, 1, tzinfo=UTC))
+    client, path = _client(system), _plant_path(system, plant)
+
+    def classified(day: date) -> tuple[int, int]:
+        query = {"start_date": day.isoformat(), "end_date": day.isoformat()}
+        compared = client.get(path.removesuffix("forecast/") + "performance/", query)
+        best = client.get(path, {"date": day.isoformat(), "selection_mode": "best"})
+        return compared.status_code, best.status_code
+
+    assert classified(DAY) == (400, 400)
+    assert classified(PREVIOUS) == (200, 200)
+
+
+def test_a_day_without_a_saved_forecast_is_not_compared(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    _fetch(system, _at(DAY, 10), 0.20)
+    _manual_production(system, plant, 5)
+
+    compared = _comparison(_client(system), system, plant)
+
+    day = compared["days"][0]
+    assert (day["status"], day["reason"], day["forecast_id"]) == (
+        "missing",
+        "forecast_not_available",
+        None,
+    )
+    assert (compared["matched_days"], compared["relative_error"]) == (0, None)
