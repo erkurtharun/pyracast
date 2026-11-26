@@ -106,7 +106,7 @@ def test_mail_rendering_restores_the_caller_language_and_preserves_typed_workboo
     assert sheet.title == "Iş\u0131n\u0131m"
     assert sheet["A10"].value == datetime(2026, 11, 10)
     assert sheet["A10"].number_format == "dd.mm.yyyy"
-    assert isinstance(sheet["B10"].value, float)
+    assert isinstance(sheet["C10"].value, float)
 
 
 def test_delivery_language_is_database_constrained() -> None:
@@ -139,6 +139,6 @@ def test_an_old_forecast_shows_its_localized_time_under_the_unavailable_sentence
         "Daha yeni tahmin verisi al\u0131namad\u0131.\n"
         f"Tahmin verisi: {9 - days} Kas\u0131m 2026, 16:00 (UTC+3)\n"
     ) in message.body
-    assert attached_sheet(message)["B4"].value == (
+    assert attached_sheet(message)["A4"].value == (
         snapshot.collected_at.astimezone(ZoneInfo(system.region.timezone)).replace(tzinfo=None)
     )

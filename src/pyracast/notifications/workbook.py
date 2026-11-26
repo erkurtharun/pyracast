@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 from io import BytesIO
-from itertools import zip_longest
 from textwrap import wrap
 from typing import TYPE_CHECKING, cast
 from zoneinfo import ZoneInfo
@@ -24,49 +24,73 @@ from pyracast.notifications.presentation import Figure, figure, interval_value
 if TYPE_CHECKING:
     from pyracast.notifications.presentation import ForecastReport
 
+type Value = str | float | date | datetime | None
+
 _ILLEGAL_XML = re.compile(r"[\x00-\x08\x0b-\x0c\x0e-\x1f\ud800-\udfff￾￿]")
-_HEADER = "09383A"
-_LEFT = Alignment(horizontal="left", vertical="top")
-_RIGHT = Alignment(horizontal="right", vertical="top")
+_INK = "09383A"
+_WHITE = "FFFFFF"
+_TINT = "DDEBEA"
+_NOTE = "F1F5F9"
+_CENTRED = Alignment(horizontal="center", vertical="center", wrap_text=True)
 _TOTAL = "#,##0.00"
 _INTERVAL = "#,##0.000"
-_TITLE_CHARACTERS = 15
+_LINE_POINTS = 15
+_TITLE_CHARACTERS = 24
 _TITLE_LINE_POINTS = 19
 
 
-def _text(sheet: Worksheet, row: int, column: int, value: str) -> Cell:
-    cell = cast(Cell, sheet.cell(row, column))
-    cell.value = _ILLEGAL_XML.sub("", value)
-    cell.data_type = "s"
-    cell.alignment = _LEFT
-    return cell
+def _clean(value: str) -> str:
+    return _ILLEGAL_XML.sub("", value)
 
 
-def _number(
-    sheet: Worksheet, row: int, column: int, value: float | date | datetime | None, shown: str
-) -> None:
-    cell = sheet.cell(row, column, value)
-    cell.number_format = shown
-    cell.alignment = _RIGHT
+def _quoted(value: str) -> str:
+    return '"' + _clean(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def _header(sheet: Worksheet, row: int, titles: list[str]) -> None:
-    for column, title in enumerate(titles, 1):
-        cell = _text(sheet, row, column, title)
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor=_HEADER)
+def _quarters(character: str) -> int:
+    if character in "MWmw@":
+        return 6
+    return 5 if character.isupper() else 4
 
 
-def _heading(sheet: Worksheet, row: int, title: str) -> None:
-    _text(sheet, row, 1, title).font = Font(bold=True, size=12)
+def _lines(text: str, characters: int) -> int:
+    return sum(
+        len(wrap("".join(c * _quarters(c) for c in line), characters * 4)) or 1
+        for line in text.split("\n")
+    )
 
 
-def _print_setup(sheet: Worksheet) -> None:
-    sheet.sheet_view.showGridLines = True
-    sheet.sheet_view.showRowColHeaders = True
-    sheet.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
-    sheet.page_setup.fitToWidth = 1
-    sheet.page_setup.fitToHeight = 0
+def _row(
+    sheet: Worksheet,
+    row: int,
+    widths: Sequence[int],
+    fill: str,
+    cells: Sequence[tuple[Value, int, str]],
+) -> Cell:
+    lines, column = 1, 1
+    for value, span, shown in cells:
+        cell = cast(Cell, sheet.cell(row, column))
+        if isinstance(value, str):
+            cell.value = _clean(value)
+            cell.data_type = "s"
+            lines = max(lines, _lines(value, sum(widths[column - 1 : column - 1 + span]) - 2))
+        else:
+            cell.value = value
+            cell.number_format = shown
+            lines = max(lines, shown.count("\n") + 1)
+        if span > 1:
+            sheet.merge_cells(
+                start_row=row, start_column=column, end_row=row, end_column=column + span - 1
+            )
+        column += span
+    dark = fill == _INK
+    for column in range(1, len(widths) + 1):
+        styled = sheet.cell(row, column)
+        styled.font = Font(size=11 if dark else 12, bold=dark, color=_WHITE if dark else _INK)
+        styled.fill = PatternFill("solid", fgColor=fill)
+        styled.alignment = _CENTRED
+    sheet.row_dimensions[row].height = min(409, lines * _LINE_POINTS + 10)
+    return cast(Cell, sheet.cell(row, 1))
 
 
 def _value_label(report: ForecastReport) -> str:
@@ -88,123 +112,147 @@ def _notes(report: ForecastReport, figures: list[Figure], outage: bool) -> list[
     return notes
 
 
+def _top(sheet: Worksheet, report: ForecastReport, widths: Sequence[int], day_format: str) -> None:
+    full = len(widths)
+    title = _row(sheet, 1, widths, _WHITE, [(report.plant_name, full, "")])
+    title.font = Font(size=14, bold=True, color=_INK)
+    sheet.row_dimensions[1].height = min(
+        409, _lines(cast(str, title.value), _TITLE_CHARACTERS) * _TITLE_LINE_POINTS + 4
+    )
+    subtitle = (
+        _("Generation forecast · Pyracast")
+        if report.electrical
+        else _("Solar irradiance forecast (GHI) · Pyracast")
+    )
+    _row(sheet, 2, widths, _WHITE, [(subtitle, full, "")])
+    zone = ZoneInfo(report.timezone)
+    collected = report.collected_at.astimezone(zone) if report.collected_at else None
+    reference = collected or datetime.combine(report.days[-1].day, datetime.min.time(), zone)
+    data_time: tuple[Value, int, str] = (
+        (
+            collected.replace(tzinfo=None),
+            full,
+            _quoted(f"{_('Forecast data')}: ") + f"{day_format} hh:mm",
+        )
+        if collected
+        else (_("Forecast data"), full, "")
+    )
+    _row(sheet, 4, widths, _WHITE, [data_time])
+    zone_text = f"{_('Time zone')}: {report.timezone} ({utc_offset(reference)})"
+    _row(sheet, 5, widths, _WHITE, [(zone_text, full, "")])
+    _row(sheet, 6, widths, _WHITE, [(f"{_('Unit')}: {report.unit}", full, "")])
+
+
+def _heading(sheet: Worksheet, row: int, widths: Sequence[int], title: str) -> None:
+    _row(sheet, row, widths, _WHITE, [(title, len(widths), "")]).font = Font(
+        size=12, bold=True, color=_INK
+    )
+
+
 def _daily(
     sheet: Worksheet,
     report: ForecastReport,
     figures: list[Figure],
+    widths: Sequence[int],
     *,
     outage: bool,
     day_format: str,
 ) -> int:
-    title = _text(sheet, 1, 1, report.plant_name)
-    title.font = Font(bold=True, size=14)
-    title.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-    lines = sum(
-        len(wrap(line, _TITLE_CHARACTERS)) or 1 for line in cast(str, title.value).split("\n")
-    )
-    sheet.row_dimensions[1].height = min(409, lines * _TITLE_LINE_POINTS + 4)
-    _text(
-        sheet,
-        2,
-        1,
-        _("Generation forecast · Pyracast")
-        if report.electrical
-        else _("Solar irradiance forecast (GHI) · Pyracast"),
-    )
-    zone = ZoneInfo(report.timezone)
-    collected = report.collected_at.astimezone(zone) if report.collected_at else None
-    reference = collected or datetime.combine(report.days[-1].day, datetime.min.time(), zone)
-    _text(sheet, 4, 1, _("Forecast data"))
-    _number(
-        sheet, 4, 2, collected.replace(tzinfo=None) if collected else None, f"{day_format} hh:mm"
-    )
-    _text(sheet, 5, 1, _("Time zone"))
-    _text(sheet, 5, 2, f"{report.timezone} ({utc_offset(reference)})")
-    _text(sheet, 6, 1, _("Unit"))
-    _text(sheet, 6, 2, report.unit)
-    _heading(sheet, 8, _("Daily totals"))
-    titles = [_("Date"), _value_label(report)]
+    _heading(sheet, 8, widths, _("Daily totals"))
+    titles = [(_value_label(report), 1, "")]
     if outage:
-        titles.append(_("Without outage (MWh)"))
-    _header(sheet, 9, titles)
+        titles.append((_("Without outage (MWh)"), 1, ""))
+    _row(sheet, 9, widths, _INK, [(_("Date"), 2, ""), *titles])
     row = 9
-    for day, shown in zip(report.days, figures, strict=True):
+    for position, (day, shown) in enumerate(zip(report.days, figures, strict=True)):
         row += 1
-        _number(sheet, row, 1, day.day, day_format)
-        _number(sheet, row, 2, shown.value, _TOTAL)
+        cells: list[tuple[Value, int, str]] = [(day.day, 2, day_format), (shown.value, 1, _TOTAL)]
         if outage:
             without = shown.without_outage if shown.outage == "included" else shown.value
-            _number(sheet, row, 3, without, _TOTAL)
+            cells.append((without, 1, _TOTAL))
+        _row(sheet, row, widths, _TINT if position % 2 else _WHITE, cells)
     for note in _notes(report, figures, outage):
         row += 1
-        _text(sheet, row, 1, note)
+        _row(sheet, row, widths, _NOTE, [(note, len(widths), "")])
     return row
 
 
-def _intervals(
+def _time(moment: datetime, zone: ZoneInfo, *, offset: bool) -> tuple[Value, int, str]:
+    local = moment.astimezone(zone)
+    shown = "hh:mm" + (_quoted("\n" + utc_offset(local)) if offset else "")
+    return local.replace(tzinfo=None), 1, shown
+
+
+def _days(
     sheet: Worksheet,
     report: ForecastReport,
     figures: list[Figure],
+    widths: Sequence[int],
     *,
     after: int,
     outage: bool,
     day_format: str,
-) -> list[int]:
+) -> int:
     zone = ZoneInfo(report.timezone)
-    rows = [
-        (day, shown, item)
-        for day, shown in zip(report.days, figures, strict=True)
-        for item in day.intervals
+    titles: list[tuple[Value, int, str]] = [
+        (_("From"), 1, ""),
+        (_("To"), 1, ""),
+        (_value_label(report), 1, ""),
     ]
-    offsets = any(
-        end - start != timedelta(days=1)
-        for start, end in (local_day_bounds(day.day, report.timezone) for day in report.days)
-    )
-    titles = [_("Date"), _("From"), _("To"), _value_label(report)]
     if outage:
-        titles.append(_("Without outage (MWh)"))
-    if offsets:
-        titles.append(_("UTC offset"))
-    _heading(sheet, after + 2, _("Hourly values") if report.electrical else _("Interval values"))
-    header = after + 3
-    _header(sheet, header, titles)
-    for row, (day, shown, item) in enumerate(rows, header + 1):
-        _number(sheet, row, 1, day.day, day_format)
-        _number(sheet, row, 2, item.start.astimezone(zone).replace(tzinfo=None), "hh:mm")
-        _number(sheet, row, 3, item.end.astimezone(zone).replace(tzinfo=None), "hh:mm")
-        _number(sheet, row, 4, interval_value(item, shown), _INTERVAL)
-        column = 5
-        if outage:
-            _number(sheet, row, column, item.energy if item.complete else None, _INTERVAL)
-            column += 1
-        if offsets:
-            _text(sheet, row, column, utc_offset(item.start.astimezone(zone)))
-    sheet.auto_filter.ref = f"A{header}:{get_column_letter(len(titles))}{header + len(rows)}"
-    return [14, 8, 8, 20, *((24,) if outage else ()), *((12,) if offsets else ())]
+        titles.append((_("Without outage (MWh)"), 1, ""))
+    row = after + 2
+    _heading(sheet, row, widths, _("Hourly values") if report.electrical else _("Interval values"))
+    for position, (day, shown) in enumerate(zip(report.days, figures, strict=True)):
+        start, end = local_day_bounds(day.day, report.timezone)
+        offset = end - start != timedelta(days=1)
+        fill = _TINT if position % 2 else _WHITE
+        row += 2
+        _row(sheet, row, widths, _INK, [(day.day, len(widths), day_format)])
+        row += 1
+        _row(sheet, row, widths, _INK, titles)
+        for item in day.intervals:
+            row += 1
+            cells = [
+                _time(item.start, zone, offset=offset),
+                _time(item.end, zone, offset=offset),
+                (interval_value(item, shown), 1, _INTERVAL),
+            ]
+            if outage:
+                cells.append((item.energy if item.complete else None, 1, _INTERVAL))
+            _row(sheet, row, widths, fill, cells)
+    return row
 
 
 def build_workbook(report: ForecastReport) -> bytes:
     figures = [figure(day) for day in report.days]
     outage = any(shown.outage == "included" for shown in figures)
+    widths = (9, 9, 12, 12) if outage else (9, 9, 24)
     day_format = pgettext("Excel date format", "dd mmm yyyy")
     workbook = Workbook()
     workbook.properties.creator = "Pyracast"
     workbook.properties.lastModifiedBy = "Pyracast"
-    workbook.properties.title = _ILLEGAL_XML.sub(
-        "", f"{report.plant_name} {day_text(report.days[-1].day)}"
-    )
+    workbook.properties.title = _clean(f"{report.plant_name} {day_text(report.days[-1].day)}")
     sheet = cast(Worksheet, workbook.active)
     sheet.title = (
         pgettext("workbook sheet", "Forecast")
         if report.electrical
         else pgettext("workbook sheet", "Irradiance")
     )
-    last = _daily(sheet, report, figures, outage=outage, day_format=day_format)
-    hourly = _intervals(sheet, report, figures, after=last, outage=outage, day_format=day_format)
-    daily = (26, 20, 24 if outage else 0)
-    for column, widths in enumerate(zip_longest(hourly, daily, fillvalue=0), 1):
-        sheet.column_dimensions[get_column_letter(column)].width = max(widths)
-    _print_setup(sheet)
+    for column, width in enumerate(widths, 1):
+        sheet.column_dimensions[get_column_letter(column)].width = width
+    _top(sheet, report, widths, day_format)
+    last = _daily(sheet, report, figures, widths, outage=outage, day_format=day_format)
+    last = _days(sheet, report, figures, widths, after=last, outage=outage, day_format=day_format)
+    sheet.sheet_view.showGridLines = False
+    sheet.sheet_view.showRowColHeaders = False
+    sheet.sheet_view.zoomScale = 100
+    sheet.sheet_view.zoomScaleNormal = 100
+    sheet.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+    sheet.page_setup.fitToWidth = 1
+    sheet.page_setup.fitToHeight = 0
+    sheet.print_options.horizontalCentered = True
+    sheet.print_area = f"A1:{get_column_letter(len(widths))}{last}"
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()

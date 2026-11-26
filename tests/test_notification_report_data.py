@@ -283,18 +283,24 @@ def test_the_sent_workbook_lists_the_daylight_hours_of_both_days_under_the_total
     book = load_workbook(BytesIO(cast(bytes, message.attachments[0][1])))
     (sheet,) = book.worksheets
     cells = [[cell.value for cell in row] for row in sheet.iter_rows()]
-    header = next(row for row, values in enumerate(cells) if values[:3] == ["Date", "From", "To"])
+    heading = next(row for row, values in enumerate(cells) if values[0] == "Hourly values")
     zone = ZoneInfo(system.binding.timezone)
     today = SLOT.astimezone(zone).date()
     tomorrow = today + timedelta(days=1)
-    totals = {row[0].date(): row[1] for row in cells[:header] if isinstance(row[0], datetime)}
+    totals = {row[0].date(): row[2] for row in cells[:heading] if isinstance(row[0], datetime)}
     hours: dict[date, list[tuple[datetime, datetime, float]]] = {today: [], tomorrow: []}
-    for stamp, start, end, value, *_ in cells[header + 1 :]:
-        assert isinstance(stamp, datetime)
+    day = None
+    for start, end, value, *_ in cells[heading + 1 :]:
+        if start is None or start == "From":
+            continue
         assert isinstance(start, datetime)
+        if end is None:
+            day = start.date()
+            continue
         assert isinstance(end, datetime)
         assert isinstance(value, int | float)
-        hours[stamp.date()].append((start, end, value))
+        assert day is not None
+        hours[day].append((start, end, value))
     assert hours[today]
     assert hours[tomorrow]
     assert sum(value for *_, value in hours[tomorrow]) == pytest.approx(totals[tomorrow], abs=0.005)
