@@ -204,3 +204,37 @@ test("a signed-in person's choice on the public site is saved as their preferenc
         "x-session-tag": firstAccount.tag,
     });
 });
+
+test("the language link saves a signed-in choice and then follows the link", async ({
+    page,
+    context,
+    baseURL,
+}) => {
+    await context.addCookies([
+        { name: "pyracast_language", value: "tr", url: baseURL! },
+    ]);
+    await page.route("**/api/session/", (route) =>
+        route.fulfill({ json: sessionAnswer(firstAccount, null) }),
+    );
+    await page.route("**/api/session/language/", (route) =>
+        route.fulfill({
+            json: { ...sessionAnswer(firstAccount, null), language: "en" },
+        }),
+    );
+    await page.goto("/privacy/");
+    await expect(page).toHaveURL("/tr/privacy/");
+    await page.route(
+        (url) => url.pathname === "/privacy/",
+        (route) => route.fulfill({ status: 204 }),
+    );
+    const saved = page.waitForRequest("**/api/session/language/");
+    const followed = page.waitForRequest(
+        (request) =>
+            request.isNavigationRequest() &&
+            new URL(request.url()).pathname === "/privacy/",
+    );
+    await page.locator('header a[hreflang="en"]').click();
+    await saved;
+    await followed;
+    await expect(page).toHaveURL("/tr/privacy/");
+});
