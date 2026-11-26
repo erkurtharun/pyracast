@@ -505,7 +505,7 @@ export async function savedCopyState(
 }
 
 export async function savedFiguresAvailable() {
-    if (!SAVED_FIGURES) return false;
+    if (!SAVED_FIGURES || readStored(savedFlagKey) === undefined) return false;
     return (
         (await boundedStore((store, limit) => store.available(limit))) ?? false
     );
@@ -568,7 +568,7 @@ export async function removeSavedFiguresHere() {
     );
 }
 
-// Every key of the kept figures and of their offer starts with the flag's name.
+// Every key of the kept figures and of the person's choice to keep none starts with the flag's name.
 export function subscribeSavedFigures(listener: () => void) {
     const changed = (event: StorageEvent) => {
         if (event.key?.startsWith(savedFlagKey) !== false) listener();

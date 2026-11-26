@@ -2,6 +2,7 @@ import type { BrowserContext } from "@playwright/test";
 import { expect, instant, test, type Page } from "./support/test";
 import { errorBody } from "./support/errors";
 import {
+    accountWith,
     firstAccount,
     invitationPreview,
     mockApi,
@@ -16,6 +17,7 @@ import {
     isMarked,
     markDocument,
     serveSession,
+    sessionAnswer,
 } from "./support/session";
 import {
     controlVisibility,
@@ -37,13 +39,37 @@ import { savedFiguresOff } from "./support/worker-state";
 
 test.skip(
     savedFiguresOff,
-    "The switch and the refresh exist only while saved figures are on.",
+    "The setting and the refresh exist only while saved figures are on.",
 );
 
 const minute = 60_000;
-const title = "Keep figures on this device";
-const statement =
-    "Anyone who can open this browser on this device can read these figures without signing in, until they are removed or you sign out. Do not turn this on for a shared device.";
+const setting = {
+    en: {
+        label: "Open figures without a connection",
+        hint: "Your figures are kept on this device, where anyone using this browser can read them without signing in until you sign out or turn this off.",
+        heading: "Account",
+    },
+    tr: {
+        label: "Değerleri bağlantı olmadan aç",
+        hint: "Değerleriniz bu cihazda saklanır; bu tarayıcıyı kullanan herkes, siz çıkış yapana veya bunu kapatana kadar onları giriş yapmadan okuyabilir.",
+        heading: "Hesap",
+    },
+} as const;
+const removedTexts = {
+    en: [
+        "Keep figures on this device",
+        "Turn on",
+        "Not now",
+        "Remove from this device",
+    ],
+    tr: [
+        "Değerleri bu cihazda sakla",
+        "Aç",
+        "Şimdi değil",
+        "Bu cihazdan kaldır",
+    ],
+} as const;
+const emptyCopy = { plants: 0, days: 0, flag: null, marks: [] };
 const daysPath = /\/api\/tenants\/\d+\/regions\/\d+\/plants\/\d+\/days\/$/;
 const owner = { user: 1, session: "tag-a" };
 const storeLock = "pyracast.saved-copy";
@@ -128,19 +154,6 @@ function refreshIdle(page: Page) {
     }, refreshLock);
 }
 
-async function watchAction(page: Page, name: string) {
-    await page.getByRole("button", { name }).evaluate((button) =>
-        new MutationObserver((records) => {
-            if (records.some((record) => record.oldValue !== null))
-                Object.assign(window, { actionEnded: true });
-        }).observe(button, {
-            attributeFilter: ["disabled"],
-            attributeOldValue: true,
-        }),
-    );
-    return () => page.evaluate(() => "actionEnded" in window);
-}
-
 function plants(page: Page) {
     return page.getByRole("heading", { name: "Plants", exact: true });
 }
@@ -185,9 +198,39 @@ function countRequests(page: Page, pathname: string) {
     return () => count;
 }
 
-async function openSwitch(page: Page) {
-    await page.getByText(title, { exact: true }).click();
-    await expect(page.getByText(statement)).toBeVisible();
+function keepSetting(page: Page, language: keyof typeof setting = "en") {
+    return page.getByRole("checkbox", { name: setting[language].label });
+}
+
+function settingsHeading(page: Page, language: keyof typeof setting = "en") {
+    return page.getByRole("heading", {
+        name: setting[language].heading,
+        exact: true,
+        level: 1,
+    });
+}
+
+async function expectNoRemovedTexts(
+    page: Page,
+    language: keyof typeof setting = "en",
+) {
+    for (const text of removedTexts[language])
+        await expect(page.getByText(text, { exact: true })).toHaveCount(0);
+}
+
+// The person turned keeping off on this device before; the store loads because the flag is set.
+async function turnedOffBefore(page: Page) {
+    await onBlankPage(page);
+    await page.evaluate(() => {
+        window.localStorage.setItem("pyracast.saved", "1");
+        window.localStorage.setItem("pyracast.savedOff.1", "1");
+    });
+}
+
+async function openSettings(page: Page) {
+    await page.goto("/app/account/");
+    await expect(settingsHeading(page)).toBeVisible();
+    await expect(keepSetting(page)).toBeVisible();
 }
 
 function heldTotals(page: Page) {
@@ -204,34 +247,27 @@ async function heldCopy(page: Page, plants: unknown[]) {
     });
 }
 
-test("without the worker's registration the shell offers no switch and loads no store", async ({
+test("without the worker's registration neither the workspace nor the settings keep figures, and no store loads", async ({
     page,
 }) => {
     await signedIn(page);
     const chunk = await watchStoreChunk(page);
     await page.goto("/app/w/1/");
     await expect(plants(page)).toBeVisible();
-    await expect(page.getByText(title)).toHaveCount(0);
+    await page.goto("/app/account/");
+    await expect(settingsHeading(page)).toBeVisible();
+    await expect(page.getByText(setting.en.label)).toHaveCount(0);
     expect(chunk.requested()).toBe(false);
 });
 
-test("the switch turned on in an open document holds the workspace's plant and its figures without a reload, and removing them leaves nothing", async ({
+test("a person who opens a workspace has its plant and figures kept without any action, and the setting turns keeping off and on again", async ({
     page,
 }) => {
     await supplyRegistration(page);
-    await signedIn(page);
+    const account = await signedIn(page);
     const requests = await serveDays(page);
     await page.goto("/app/w/1/");
     await expect(plants(page)).toBeVisible();
-    await markDocument(page);
-    expect(await readCopy(page)).toEqual({
-        plants: 0,
-        days: 0,
-        flag: null,
-        marks: [],
-    });
-    await openSwitch(page);
-    await page.getByRole("button", { name: "Turn on" }).click();
     await expect
         .poll(() => heldTotals(page))
         .toEqual([
@@ -255,23 +291,87 @@ test("the switch turned on in an open document holds the workspace's plant and i
             openedAt: null,
         }),
     ]);
-    expect(await isMarked(page)).toBe(true);
-    await page.getByText(title, { exact: true }).click();
-    await openSwitch(page);
-    await expect(
-        page.getByText("Figures of 1 plant are kept on this device."),
-    ).toBeVisible();
-    await page.getByRole("button", { name: "Remove from this device" }).click();
-    await expect(page.getByRole("button", { name: "Turn on" })).toBeVisible();
-    expect(await readCopy(page)).toEqual({
-        plants: 0,
-        days: 0,
-        flag: null,
-        marks: [],
+    await expectNoRemovedTexts(page);
+    await expect(page.getByText(setting.en.label)).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Account", exact: true }).click();
+    await expect(settingsHeading(page)).toBeVisible();
+    await expect(keepSetting(page)).toBeChecked();
+    await expect(keepSetting(page)).toHaveAccessibleDescription(
+        setting.en.hint,
+    );
+    await keepSetting(page).uncheck();
+    await expect.poll(() => readCopy(page)).toEqual(emptyCopy);
+    await page.reload();
+    await expect(keepSetting(page)).not.toBeChecked();
+    account.current = { ...firstAccount, tag: "tag-b" };
+    await page.goto("/app/w/1/");
+    await expect(plants(page)).toBeVisible();
+    await openSettings(page);
+    await expect(keepSetting(page)).not.toBeChecked();
+    expect(await readCopy(page)).toEqual(emptyCopy);
+    expect(requests).toHaveLength(1);
+
+    await keepSetting(page).check();
+    await expect.poll(async () => (await readCopy(page)).days).toBe(2);
+    expect((await readCopy(page)).holder).toMatchObject({
+        session: "tag-b",
+        active: true,
     });
+    await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    await expect(
+        page.getByRole("heading", { name: "Welcome back" }),
+    ).toBeVisible();
+    expect(await readCopy(page)).toMatchObject({ plants: 0, days: 0 });
 });
 
-test("Turn on in a browser whose local storage refuses the flag keeps no figures and leaves the switch off", async ({
+for (const language of ["en", "tr"] as const)
+    test(`on a 360 pixel wide screen in ${language} the setting fits, describes itself and turns off and on from the keyboard`, async ({
+        page,
+    }) => {
+        await page.setViewportSize({ width: 360, height: 740 });
+        await supplyRegistration(page);
+        const account = await mockApi(page, {
+            account: {
+                current: accountWith({ language_preference: language }),
+            },
+        });
+        await page.route("**/api/session/", (route) =>
+            route.fulfill({
+                json: { ...sessionAnswer(account.current, null), language },
+            }),
+        );
+        await serveDays(page);
+        await page.goto("/app/account/");
+        await expect(settingsHeading(page, language)).toBeVisible();
+        const box = keepSetting(page, language);
+        await expect(box).toBeChecked();
+        await expect(page.getByText(setting[language].hint)).toBeVisible();
+        await expect(box).toHaveAccessibleDescription(setting[language].hint);
+        await expectNoRemovedTexts(page, language);
+        const target = await page
+            .locator("label.check-field", { has: box })
+            .boundingBox();
+        expect(target?.width).toBeGreaterThanOrEqual(44);
+        expect(target?.height).toBeGreaterThanOrEqual(44);
+        expect(
+            await page.evaluate(() => document.documentElement.scrollWidth),
+        ).toBeLessThanOrEqual(360);
+        await expect.poll(async () => (await readCopy(page)).days).toBe(2);
+        await box.focus();
+        await page.keyboard.press("Tab");
+        await page.keyboard.press("Shift+Tab");
+        await expect(box).toBeFocused();
+        await page.keyboard.press("Space");
+        await expect(box).not.toBeChecked();
+        await expect.poll(() => readCopy(page)).toEqual(emptyCopy);
+        await expect(box).toBeFocused();
+        await page.keyboard.press("Space");
+        await expect(box).toBeChecked();
+        await expect.poll(async () => (await readCopy(page)).days).toBe(2);
+    });
+
+test("a browser whose local storage refuses the flag shows no setting, creates no database and reads no days", async ({
     page,
 }) => {
     await page.addInitScript(() => {
@@ -301,16 +401,13 @@ test("Turn on in a browser whose local storage refuses the flag keeps no figures
     await supplyRegistration(page);
     await signedIn(page);
     const requests = await serveDays(page);
+    const chunk = await watchStoreChunk(page);
     await page.goto("/app/w/1/");
     await expect(plants(page)).toBeVisible();
-    await openSwitch(page);
-    const ended = await watchAction(page, "Turn on");
-    await page.getByRole("button", { name: "Turn on" }).click();
-    await expect.poll(ended).toBe(true);
-    await expect(page.getByRole("button", { name: "Turn on" })).toBeVisible();
-    await expect(
-        page.getByRole("button", { name: "Remove from this device" }),
-    ).toHaveCount(0);
+    await page.goto("/app/account/");
+    await expect(settingsHeading(page)).toBeVisible();
+    await chunk.reached;
+    await expect(page.getByText(setting.en.label)).toHaveCount(0);
     expect(
         await page.evaluate(async () =>
             (await indexedDB.databases()).map(({ name }) => name),
@@ -319,25 +416,20 @@ test("Turn on in a browser whose local storage refuses the flag keeps no figures
     expect(requests).toEqual([]);
 });
 
-test("a Turn on that waited while another window changed the session changes nothing, and the new session turns on its own figures", async ({
+test("a turn-on in the settings that waited while another window changed the session changes nothing, and the new session keeps its own figures", async ({
     page,
     context,
 }) => {
     const account: AccountState = { current: firstAccount };
-    await onBlankPage(page);
-    await page.evaluate(() =>
-        window.localStorage.setItem("pyracast.saved", "1"),
-    );
+    await turnedOffBefore(page);
     const other = await context.newPage();
     for (const tab of [page, other]) {
         await supplyRegistration(tab);
         await signedIn(tab, account);
         await serveDays(tab);
-        await tab.goto("/app/w/1/");
-        await expect(plants(tab)).toBeVisible();
-        await expect(tab.getByText(title, { exact: true })).toBeVisible();
+        await openSettings(tab);
+        await expect(keepSetting(tab)).not.toBeChecked();
     }
-    await openSwitch(page);
     await markDocument(other);
     const [mine, theirs] = [await lockClient(page), await lockClient(other)];
     const lock = await lockTaker(context);
@@ -349,7 +441,7 @@ test("a Turn on that waited while another window changed the session changes not
     await expect.poll(() => lock.waitingFor(theirs)).toBe(1);
     await lock.take();
     await expect.poll(lock.waiting).toBe(1);
-    await page.getByRole("button", { name: "Turn on" }).click();
+    await keepSetting(page).check();
     await expect.poll(() => lock.waitingFor(mine)).toBe(1);
     await lock.release();
     await expect.poll(lock.granted).toBe(2);
@@ -363,9 +455,7 @@ test("a Turn on that waited while another window changed the session changes not
     await lock.release();
     await page.clock.resume();
     await expect.poll(() => isMarked(other).catch(() => "loading")).toBe(false);
-    await expect(plants(other)).toBeVisible();
-    await openSwitch(other);
-    await other.getByRole("button", { name: "Turn on" }).click();
+    await expect(keepSetting(other)).toBeChecked();
     await expect.poll(async () => (await readCopy(other)).days).toBe(2);
     expect((await readCopy(other)).holder).toMatchObject({
         session: "tag-b",
@@ -373,24 +463,20 @@ test("a Turn on that waited while another window changed the session changes not
     });
 });
 
-test("a Turn on that waits while another window signs out and finds no figures to remove keeps no figures and reads no days", async ({
+test("a turn-on in the settings that waits while another window signs out and finds no figures to remove keeps no figures and reads no days", async ({
     page,
     context,
 }) => {
     const account: AccountState = { current: firstAccount };
-    await onBlankPage(page);
-    await page.evaluate(() =>
-        window.localStorage.setItem("pyracast.saved", "1"),
-    );
+    await turnedOffBefore(page);
     const other = await context.newPage();
     const reads: DaysRequest[][] = [];
     for (const tab of [page, other]) {
         await supplyRegistration(tab);
         await signedIn(tab, account);
         reads.push(await serveDays(tab));
-        await tab.goto("/app/w/1/");
-        await expect(plants(tab)).toBeVisible();
-        await expect(tab.getByText(title, { exact: true })).toBeVisible();
+        await openSettings(tab);
+        await expect(keepSetting(tab)).not.toBeChecked();
     }
     let reach!: () => void;
     const reached = new Promise<void>((resolve) => (reach = resolve));
@@ -402,7 +488,6 @@ test("a Turn on that waits while another window signs out and finds no figures t
         await answered;
         await route.fallback();
     });
-    await openSwitch(page);
     const [mine, theirs] = [await lockClient(page), await lockClient(other)];
     const lock = await lockTaker(context);
     await lock.take();
@@ -412,13 +497,13 @@ test("a Turn on that waits while another window signs out and finds no figures t
     await expect.poll(() => lock.waitingFor(theirs)).toBe(1);
     await lock.take();
     await expect.poll(lock.waiting).toBe(1);
-    await page.getByRole("button", { name: "Turn on" }).click();
+    await keepSetting(page).check();
     await expect.poll(() => lock.waitingFor(mine)).toBe(1);
     await lock.release();
     await reached;
     await expect.poll(lock.granted).toBe(2);
     await lock.release();
-    await expect(page.getByRole("button", { name: "Turn on" })).toBeEnabled();
+    await expect.poll(() => lock.waitingFor(mine)).toBe(0);
     expect((await readCopy(page)).holder).toBeUndefined();
     expect(reads.flat()).toEqual([]);
     answer();
@@ -426,110 +511,50 @@ test("a Turn on that waits while another window signs out and finds no figures t
     await expect(
         other.getByRole("heading", { name: "Welcome back" }),
     ).toBeVisible();
+    expect((await readCopy(page)).holder).toBeUndefined();
+    expect(reads.flat()).toEqual([]);
 });
 
-test("a Turn on that commits after another window read the switch shows there once it commits", async ({
+test("a turn-on in the settings that commits after another window read the figures starts that window's refresh once it commits", async ({
     page,
     context,
 }) => {
     const write = await holdHolderWrite(page);
+    await turnedOffBefore(page);
+    const visibility = await controlVisibility(page);
     const other = await context.newPage();
-    for (const tab of [page, other]) {
+    const reads: DaysRequest[][] = [];
+    for (const [tab, address] of [
+        [page, "/app/account/"],
+        [other, "/app/w/1/"],
+    ] as const) {
         await supplyRegistration(tab);
         await signedIn(tab);
-        await serveDays(tab);
-        await tab.goto("/app/w/1/");
-        await expect(plants(tab)).toBeVisible();
+        reads.push(await serveDays(tab));
+        await tab.goto(address);
     }
-    await openSwitch(other);
-    await expect(other.getByRole("button", { name: "Turn on" })).toBeVisible();
-    await openSwitch(page);
+    await expect(plants(other)).toBeVisible();
+    await expect(keepSetting(page)).not.toBeChecked();
+    await visibility.hide();
     const theirs = await lockClient(other);
     await write.arm();
     await pauseClock(page);
-    await page.getByRole("button", { name: "Turn on" }).click();
+    await keepSetting(page).check();
     await expect.poll(write.held).toBe(true);
-    await other.getByText(title, { exact: true }).click();
-    await openSwitch(other);
+    await other.evaluate(() =>
+        document.dispatchEvent(new Event("visibilitychange")),
+    );
     await expect.poll(() => waitingFor(other, theirs)).toBe(1);
     await page.clock.runFor(2_000);
-    await expect(other.getByText(title, { exact: true })).toHaveCount(0);
+    await expect.poll(() => waitingFor(other, theirs)).toBe(0);
+    expect(reads.flat()).toEqual([]);
     await write.release();
     await page.clock.resume();
-    await openSwitch(other);
-    await expect(
-        other.getByRole("button", { name: "Remove from this device" }),
-    ).toBeVisible();
+    await expect.poll(() => reads[1]?.length).toBe(1);
+    expect(reads[0]).toEqual([]);
 });
 
-for (const answer of ["Not now", "Turn on"])
-    test(`${answer} in the offer of one installed window takes the offer away in another`, async ({
-        page,
-        context,
-    }) => {
-        const windows = [page, await context.newPage()];
-        for (const tab of windows) {
-            await tab.addInitScript(() =>
-                Object.defineProperty(navigator, "standalone", { value: true }),
-            );
-            await supplyRegistration(tab);
-            await signedIn(tab);
-            await serveDays(tab);
-            await tab.goto("/app/w/1/");
-            await expect(
-                tab.getByRole("region", { name: title }),
-            ).toBeVisible();
-        }
-        await page
-            .getByRole("region", { name: title })
-            .getByRole("button", { name: answer })
-            .click();
-        for (const tab of windows)
-            await expect(tab.getByRole("region", { name: title })).toHaveCount(
-                0,
-            );
-        await expect
-            .poll(async () => (await readCopy(page)).days)
-            .toBe(answer === "Turn on" ? 2 : 0);
-    });
-
-test("the offer is put once, in an installed window only, and Not now keeps the device without a copy", async ({
-    page,
-    context,
-}) => {
-    await supplyRegistration(page);
-    await signedIn(page);
-    await serveDays(page);
-    await page.goto("/app/w/1/");
-    await expect(plants(page)).toBeVisible();
-    await expect(page.getByText(title, { exact: true })).toBeVisible();
-    await expect(page.getByRole("region", { name: title })).toHaveCount(0);
-    const installed = await context.newPage();
-    await installed.addInitScript(() =>
-        Object.defineProperty(navigator, "standalone", { value: true }),
-    );
-    await supplyRegistration(installed);
-    await signedIn(installed);
-    await installed.goto("/app/w/1/");
-    const offer = installed.getByRole("region", { name: title });
-    await expect(offer).toBeVisible();
-    await expect(offer.getByText(statement)).toBeVisible();
-    await expect(installed.locator("body")).toBeFocused();
-    await offer.getByRole("button", { name: "Not now" }).click();
-    await expect(offer).toHaveCount(0);
-    await installed.reload();
-    await expect(plants(installed)).toBeVisible();
-    await expect(installed.getByText(title, { exact: true })).toBeVisible();
-    await expect(offer).toHaveCount(0);
-    expect(await readCopy(installed)).toEqual({
-        plants: 0,
-        days: 0,
-        flag: null,
-        marks: [],
-    });
-});
-
-test("Turn on in the offer keeps the workspace's figures and the offer is not put again", async ({
+test("an installed window shows no offer and keeps the workspace's figures without any action", async ({
     page,
 }) => {
     await page.addInitScript(() =>
@@ -539,13 +564,13 @@ test("Turn on in the offer keeps the workspace's figures and the offer is not pu
     await signedIn(page);
     await serveDays(page);
     await page.goto("/app/w/1/");
-    const offer = page.getByRole("region", { name: title });
-    await offer.getByRole("button", { name: "Turn on" }).click();
-    await expect(offer).toHaveCount(0);
+    await expect(plants(page)).toBeVisible();
     await expect.poll(async () => (await readCopy(page)).days).toBe(2);
+    await expectNoRemovedTexts(page);
+    await expect(page.locator("body")).toBeFocused();
     await page.reload();
     await expect(plants(page)).toBeVisible();
-    await expect(offer).toHaveCount(0);
+    await expectNoRemovedTexts(page);
 });
 
 test("a run reads a plant once, not again before its hour has passed and not while the window is hidden", async ({
@@ -1113,9 +1138,6 @@ test("a site list the screen read less than thirty seconds ago is not read again
     const sites = countRequests(page, "/api/tenants/1/sites/");
     await page.goto("/app/w/1/");
     await expect(plants(page)).toBeVisible();
-    expect(sites()).toBe(1);
-    await openSwitch(page);
-    await page.getByRole("button", { name: "Turn on" }).click();
     await expect.poll(async () => (await readCopy(page)).days).toBe(2);
     expect(sites()).toBe(1);
 });

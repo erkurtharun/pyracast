@@ -1,11 +1,17 @@
 "use client";
 import type { QueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import {
+    readStored,
+    removeSavedFiguresHere,
     savedCopyState,
+    savedFiguresAvailable,
     sessionOwner,
     sessionStill,
     subscribeSavedFigures,
+    turnOnSavedFigures,
+    useSessionState,
+    writeStored,
     type Session,
 } from "@/lib/session-client";
 
@@ -24,6 +30,8 @@ export type RefreshContext = {
     current: () => boolean;
 };
 
+const turnedOffPrefix = "pyracast.savedOff.";
+const choiceListeners = new Set<() => void>();
 let plant: ShownPlant | undefined;
 let workspace: number | undefined;
 const opened = new Set<() => void>();
@@ -65,13 +73,37 @@ export function useShownWorkspace(tenant: number | undefined) {
     }, [tenant]);
 }
 
-// Only the worker reads the copy, so without its registration the copy is neither offered nor refreshed.
-export async function registered() {
+// Only the worker reads the copy, so without its registration the copy is neither kept nor refreshed.
+async function registered() {
     try {
         return Boolean(await navigator.serviceWorker?.getRegistration("/app/"));
     } catch {
         return false;
     }
+}
+
+async function keepingPossible() {
+    return (await registered()) && (await savedFiguresAvailable());
+}
+
+// Figures are kept by default; only this person's own "off" on this device stops it.
+function turnedOff(user: number) {
+    return readStored(turnedOffPrefix + user) !== null;
+}
+
+function subscribeChoice(listener: () => void) {
+    choiceListeners.add(listener);
+    const unsubscribe = subscribeSavedFigures(listener);
+    return () => {
+        choiceListeners.delete(listener);
+        unsubscribe();
+    };
+}
+
+async function keepFigures(user: number, kept: boolean) {
+    writeStored(turnedOffPrefix + user, kept ? null : "1");
+    for (const listener of choiceListeners) listener();
+    await (kept ? turnOnSavedFigures() : removeSavedFiguresHere());
 }
 
 function startRefresh(context: RefreshContext) {
@@ -96,7 +128,7 @@ function stopRefresh() {
     mounted = undefined;
 }
 
-export function useSavedFiguresRefresh(
+export function useSavedFigures(
     client: QueryClient,
     session: Session | undefined,
 ) {
@@ -114,11 +146,22 @@ export function useSavedFiguresRefresh(
         };
         let active = true;
         const check = async () => {
-            const on =
-                (await registered()) && (await savedCopyState()).state === "on";
+            const state = (await registered())
+                ? (await savedCopyState()).state
+                : "unavailable";
             if (!active) return;
-            if (on) startRefresh(shown);
-            else stopRefresh();
+            if (state === "on") {
+                startRefresh(shown);
+                return;
+            }
+            stopRefresh();
+            if (
+                state === "off" &&
+                !turnedOff(user) &&
+                (await savedFiguresAvailable()) &&
+                active
+            )
+                void turnOnSavedFigures();
         };
         void check();
         const unsubscribe = subscribeSavedFigures(() => void check());
@@ -128,4 +171,28 @@ export function useSavedFiguresRefresh(
             stopRefresh();
         };
     }, [client, owner, user, tag]);
+}
+
+export function useKeptFiguresPreference() {
+    const user = useSessionState().session?.user?.id;
+    const [possible, setPossible] = useState(false);
+    const kept = useSyncExternalStore(
+        subscribeChoice,
+        () => user !== undefined && !turnedOff(user),
+        () => true,
+    );
+    useEffect(() => {
+        let active = true;
+        void keepingPossible().then((answer) => {
+            if (active) setPossible(answer);
+        });
+        return () => {
+            active = false;
+        };
+    }, []);
+    if (!possible || user === undefined) return undefined;
+    return {
+        kept,
+        change: (next: boolean) => void keepFigures(user, next),
+    };
 }

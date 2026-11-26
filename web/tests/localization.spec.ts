@@ -492,12 +492,6 @@ test("a count in a sentence is grouped as the language groups numbers", () => {
             "2.391 kurtarma kodundan 1.284 tanesi kullanılmamış.",
         ],
         [
-            "KeepFigures.kept",
-            count,
-            "Figures of 1,284 plants are kept on this device.",
-            "1.284 santralin değerleri bu cihazda saklanıyor.",
-        ],
-        [
             "ProductionCsv.interval",
             { ...row, start: "starts_at", end: "ends_at" },
             "Row 1,284: write starts_at and ends_at with their offset, 30 or 60 minutes apart, as in the example.",

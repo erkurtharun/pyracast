@@ -15,7 +15,7 @@ test.skip(
     "Runs against a build whose saved figures are withdrawn.",
 );
 
-const title = "Keep figures on this device";
+const setting = "Open figures without a connection";
 const minute = 60_000;
 const daysPath = /\/api\/tenants\/\d+\/regions\/\d+\/plants\/\d+\/days\/$/;
 
@@ -30,7 +30,7 @@ async function watchRefreshCode(page: Page) {
     return () => requested;
 }
 
-test("a withdrawn build whose kept figures could not be removed offers neither the switch nor the figures and reads nothing for them", async ({
+test("a withdrawn build whose kept figures could not be removed shows neither the setting nor the figures and reads nothing for them", async ({
     page,
 }) => {
     await seedCopy(page);
@@ -54,8 +54,11 @@ test("a withdrawn build whose kept figures could not be removed offers neither t
     expect(await readCopy(page)).toMatchObject({ plants: 1, flag: "1" });
     for (let step = 0; step < 12; step += 1)
         await page.clock.fastForward(5 * minute);
-    await expect(page.getByText(title, { exact: true })).toHaveCount(0);
-    await expect(page.getByRole("region", { name: title })).toHaveCount(0);
+    await page.getByRole("button", { name: "Account", exact: true }).click();
+    await expect(
+        page.getByRole("heading", { name: "Account", exact: true, level: 1 }),
+    ).toBeVisible();
+    await expect(page.getByText(setting, { exact: true })).toHaveCount(0);
     expect(days).toEqual([]);
     expect(refreshCode()).toBe(false);
 
