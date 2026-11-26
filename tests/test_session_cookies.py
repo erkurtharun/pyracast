@@ -13,8 +13,8 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.contrib.sessions.models import Session
 from django.core.exceptions import ImproperlyConfigured
-from django.http import HttpResponse
-from django.test import Client, override_settings
+from django.http import HttpRequest, HttpResponse
+from django.test import Client, RequestFactory, override_settings
 from django.utils import timezone
 
 from pyracast import settings as production
@@ -262,6 +262,41 @@ def test_a_late_activity_answer_of_a_sessions_last_second_keeps_a_newer_sign_in(
 
     assert session_key(jar) == session_key(newer) != old
     assert session_user(jar) == user.pk
+
+
+def test_a_confirmation_answered_after_its_sessions_end_sends_no_session_cookie(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = signed_in(account("owner"))
+    session = client.session
+    ends = timezone.now() + timedelta(hours=1)
+    session.set_expiry(ends)
+    session.save()
+    clock = [ends - timedelta(milliseconds=500)]
+    monkeypatch.setattr(timezone, "now", lambda: clock[0])
+    rotate = SessionStore.cycle_key
+
+    def rotate_before_the_end(store: SessionStore) -> None:
+        rotate(store)
+        clock[0] = ends + timedelta(milliseconds=500)
+
+    monkeypatch.setattr(SessionStore, "cycle_key", rotate_before_the_end)
+
+    confirmation = submit(client, "auth/reauthenticate", {"password": PASSWORD})
+
+    assert confirmation.status_code == 200
+    assert session_cookie(confirmation) is None
+
+
+def test_a_new_session_that_has_already_ended_sends_no_cookie() -> None:
+    def start_an_ended_session(request: HttpRequest) -> HttpResponse:
+        request.session["step"] = "started"
+        request.session.set_expiry(timezone.now() - timedelta(seconds=1))
+        return HttpResponse()
+
+    response = SessionCookie(start_an_ended_session)(RequestFactory().get("/"))
+
+    assert session_cookie(response) is None
 
 
 def read_session(client: Client, token: str) -> Any:

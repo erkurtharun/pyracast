@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from http.cookies import Morsel
 from typing import Any, cast
 
 from django.conf import settings
@@ -48,12 +49,12 @@ def persist(request: HttpRequest) -> None:
         raise SessionInterrupted("Another session of the account ended this one.") from None
 
 
+def _ended(cookie: Morsel[str]) -> bool:
+    age = cookie["max-age"]
+    return isinstance(age, int) and age <= 0
+
+
 class SessionCookie(SessionMiddleware):
-    # A response sends the session cookie only when its request created or rotated the key and
-    # the key has lifetime left, and deletes it (an empty value) only when its request ended the
-    # stored session the cookie named other than by expiry; an expired session leaves its key,
-    # which names no session. So an answer reaching the browser late never restores an older key,
-    # and neither an expiry nor a session's last second deletes the key of a later sign-in.
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         super().__init__(get_response)
         if not issubclass(self.SessionStore, SessionStore):
@@ -62,12 +63,18 @@ class SessionCookie(SessionMiddleware):
     def process_response(self, request: HttpRequest, response: HttpResponse) -> HttpResponse:
         response = super().process_response(request, response)
         name = settings.SESSION_COOKIE_NAME
-        carried = request.COOKIES.get(name)
         cookie = response.cookies.get(name)
-        if carried is None or cookie is None:
+        if cookie is None:
+            return response
+        # A browser deletes a cookie without lifetime left; sent late, it would end a newer sign-in.
+        if cookie.value and _ended(cookie):
+            del response.cookies[name]
+            return response
+        carried = request.COOKIES.get(name)
+        if carried is None:
             return response
         if cookie.value:
-            keep = cookie.value != carried and cookie["max-age"] != 0
+            keep = cookie.value != carried
         else:
             session = cast(SessionStore, request.session)
             keep = session.found and not session.lapsed
