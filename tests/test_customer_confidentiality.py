@@ -182,6 +182,7 @@ CUSTOMER_FIELDS = {
     "hours",
     "id",
     "idempotency_key",
+    "idle_seconds",
     "ids",
     "inactive_reason",
     "incident",
