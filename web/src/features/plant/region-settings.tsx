@@ -166,11 +166,7 @@ function Outcome({
 }) {
     const t = useTranslations("RegionSettings");
     const format = useFormat();
-    const date = format.time(request.reviewed_at, timezone, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-    });
+    const date = format.date(request.reviewed_at, timezone);
     return (
         <div role="status">
             <p>

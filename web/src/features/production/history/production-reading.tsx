@@ -7,15 +7,14 @@ import { sameInterval, type Interval } from "./model";
 
 export function ProductionReading({
     row,
-    timeFormatter,
+    time,
 }: {
     row: Interval;
-    timeFormatter: Intl.DateTimeFormat;
+    time: (value: string) => string;
 }) {
     const t = useTranslations("ProductionHistory");
     const format = useFormat();
     const label = useLabel();
-    const time = (value: string) => timeFormatter.format(new Date(value));
     const entered =
         row.observation != null || row.effective?.aggregated === true;
     const originals = row.provider_originals;

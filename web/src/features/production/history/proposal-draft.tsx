@@ -62,6 +62,7 @@ export function ProposalDraft({
     const t = useTranslations("ChangeRequests");
     const history = useTranslations("ProductionHistory");
     const format = useFormat();
+    const draftDay = format.day(draft.day);
     const label = useLabel();
     const attempt = useAttempt<ProposalBody>();
     const headingId = useId();
@@ -142,10 +143,10 @@ export function ProposalDraft({
                 {t("draftTitle")}
             </h3>
             <p className="fine">
-                {t("intervals", { count })} · {draft.day}. {t("draftDayLocked")}
+                {t("intervals", { count })} · {draftDay}. {t("draftDayLocked")}
             </p>
             {controls.away && (
-                <Notice>{t("draftOtherDay", { day: draft.day })}</Notice>
+                <Notice>{t("draftOtherDay", { day: draftDay })}</Notice>
             )}
             <ul className="production-proposal-items">
                 {items.map((item) => {
@@ -267,7 +268,7 @@ export function ProposalDraft({
                             type="button"
                             onClick={onReturn}
                         >
-                            {t("returnToDraftDay", { day: draft.day })}
+                            {t("returnToDraftDay", { day: draftDay })}
                         </button>
                     )}
                     <button

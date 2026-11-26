@@ -1,3 +1,4 @@
+import { fileNumber } from "./format/number";
 import type { Vocabulary } from "./vocabulary";
 
 export type CsvValue = string | number | null;
@@ -125,8 +126,7 @@ export function unguarded(value: string): string {
 
 function cell(value: CsvValue): string {
     if (value === null) return "";
-    if (typeof value === "number")
-        return Number.isFinite(value) ? String(value) : "";
+    if (typeof value === "number") return fileNumber(value);
     // Quoting alone does not stop a spreadsheet from evaluating a leading formula character.
     const safe = guarded(value) ? `'${value}` : value;
     return `"${safe.replaceAll('"', '""')}"`;

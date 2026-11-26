@@ -3,29 +3,26 @@ import { useLocale } from "next-intl";
 import { useMemo } from "react";
 import {
     formatNumber,
+    formatPercent,
     formatQuantity,
+    formatRounded,
     formatSigned,
-    formatSignificant,
+    type SummaryUnit,
 } from "./number";
 import {
     daysZoneLabel,
     deviceZone,
+    formatClock,
+    formatDate,
+    formatDay,
     formatTime,
-    intervalTimeFormatter,
+    formatZonedClock,
+    formatZonedTime,
+    intervalClock,
     zoneLabel,
     type Instant,
     type PlantDays,
 } from "./time";
-
-// Workspace events (inbox, invitations, recycle bin) are read in the device zone, so they name its offset.
-const DEVICE_TIME: Intl.DateTimeFormatOptions = {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZoneName: "shortOffset",
-};
 
 export function useFormat() {
     const locale = useLocale();
@@ -33,23 +30,31 @@ export function useFormat() {
         () => ({
             number: (value: unknown, digits?: number) =>
                 formatNumber(locale, value, digits),
-            signed: (value: unknown, digits: number) =>
-                formatSigned(locale, value, digits),
-            significant: (value: unknown, digits: number) =>
-                formatSignificant(locale, value, digits),
+            rounded: (value: unknown, unit: SummaryUnit) =>
+                formatRounded(locale, value, unit),
             quantity: (value: unknown, unit: string, digits?: number) =>
                 formatQuantity(locale, value, unit, digits),
-            time: (
-                value: Instant,
-                timeZone: string,
-                options?: Intl.DateTimeFormatOptions,
-            ) => formatTime(locale, value, timeZone, options),
+            signed: (value: unknown, digits: number) =>
+                formatSigned(locale, value, digits),
+            percent: (fraction: unknown) => formatPercent(locale, fraction),
+            day: (day: string) => formatDay(locale, day),
+            date: (value: Instant, timeZone: string) =>
+                formatDate(locale, value, timeZone),
+            clock: (value: Instant, timeZone: string) =>
+                formatClock(value, timeZone),
+            time: (value: Instant, timeZone: string) =>
+                formatTime(locale, value, timeZone),
+            zonedTime: (value: Instant, timeZone: string) =>
+                formatZonedTime(locale, value, timeZone),
+            zonedClock: (value: Instant, timeZone: string) =>
+                formatZonedClock(value, timeZone),
+            // Workspace and account events are read in the device zone, so they name its offset.
             deviceTime: (value: Instant) =>
-                formatTime(locale, value, deviceZone(), DEVICE_TIME),
+                formatZonedTime(locale, value, deviceZone()),
             zone: (timeZone: string, days?: PlantDays) =>
                 days ? daysZoneLabel(timeZone, days) : zoneLabel(timeZone),
             intervals: (timeZone: string, timestamps: Iterable<string>) =>
-                intervalTimeFormatter(locale, timeZone, timestamps),
+                intervalClock(timeZone, timestamps),
         }),
         [locale],
     );

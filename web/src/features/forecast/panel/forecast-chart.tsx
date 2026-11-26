@@ -1,6 +1,7 @@
 "use client";
 import { useTranslations } from "next-intl";
 import type { ForecastInterval as Interval } from "../forecast-intervals";
+import type { SummaryUnit } from "@/lib/format/number";
 import { useFormat } from "@/lib/format/use-format";
 
 export function ForecastChart({
@@ -14,15 +15,14 @@ export function ForecastChart({
 }: {
     rows: Interval[];
     metric: "mean_power_mw" | "ghi_wm2";
-    unit: string;
+    unit: SummaryUnit;
     electrical: boolean;
     scenario: boolean;
     scenarioLabel: string;
     time: (value: string) => string;
 }) {
     const t = useTranslations("Forecast");
-    const { number } = useFormat();
-    const digits = electrical ? 2 : 0;
+    const { rounded } = useFormat();
     const [firstRow] = rows;
     const lastRow = rows.at(-1);
     const title = electrical
@@ -64,16 +64,16 @@ export function ForecastChart({
                             scenario
                                 ? t("scenario_tooltip", {
                                       time: time(row.start),
-                                      normal: number(row[metric], digits),
-                                      affected: number(
+                                      normal: rounded(row[metric], unit),
+                                      affected: rounded(
                                           row.affected_mean_power_mw,
-                                          digits,
+                                          unit,
                                       ),
                                       unit,
                                   })
                                 : t("interval_tooltip", {
                                       time: time(row.start),
-                                      value: number(row[metric], digits),
+                                      value: rounded(row[metric], unit),
                                       unit,
                                   })
                         }

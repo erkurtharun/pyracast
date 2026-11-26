@@ -14,9 +14,7 @@ export function RefreshFailed({ resource }: { resource: Loaded<unknown> }) {
     return (
         <ReadFailed resource={resource}>
             {t("refreshFailed", {
-                time: format.time(resource.updatedAt, deviceZone(), {
-                    timeStyle: "short",
-                }),
+                time: format.clock(resource.updatedAt, deviceZone()),
             })}{" "}
         </ReadFailed>
     );
@@ -87,8 +85,13 @@ export function Stat({
         <div className="stat">
             <span>{label}</span>
             <strong>
-                {typeof value === "string" ? value : format.number(value)}{" "}
-                <small>{unit}</small>
+                {typeof value === "string" ? value : format.number(value)}
+                {unit && (
+                    <>
+                        {" "}
+                        <small>{unit}</small>
+                    </>
+                )}
             </strong>
             {note && <span>{note}</span>}
         </div>

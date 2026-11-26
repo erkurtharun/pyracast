@@ -199,7 +199,10 @@ export function Portfolio() {
                                     <h2>{siteName(site)}</h2>
                                     {metadata && (
                                         <p>
-                                            {`${format.significant(metadata.dc_capacity_mw, 4)} MWp`}
+                                            {format.quantity(
+                                                metadata.dc_capacity_mw,
+                                                "MWp",
+                                            )}
                                         </p>
                                     )}
                                     {site.attention && (

@@ -220,7 +220,7 @@
             "pending_request_limit": "Bu santral için onay bekleyen değişiklik talebiniz çok fazla. Yenisini göndermeden önce birini geri çekin veya bir kararı bekleyin."
         },
         "capacityRequired": "Devrede kalan güçlerden en az birini girin veya Etkisi bilinmiyor seçeneğini seçin.",
-        "capacityCeiling": "Teknik bilgilere göre en fazla {value} MW girebilirsiniz.",
+        "capacityCeiling": "Teknik bilgilere göre en fazla {value} MW girebilirsiniz.",
         "reportOutage": "Kesinti bildir",
         "editOutage": "Kesintiyi düzenle",
         "closeEditor": "Kapat",
@@ -460,7 +460,7 @@
         "editStagedInterval": "{interval} aralığındaki düzeltmeyi düzenle",
         "removeStaged": "Kaldır",
         "removeStagedInterval": "{interval} aralığındaki düzeltmeyi kaldır",
-        "stagedProviderReading": "EPİAŞ değerini kullan ({energy} MWh)",
+        "stagedProviderReading": "EPİAŞ değerini kullan ({energy} MWh)",
         "stagedChanged": "Bu aralık siz ekledikten sonra değişti. Düzenleyin veya kaldırın.",
         "sending": "Gönderiliyor…",
         "discardDraft": "Değişiklik talebinden vazgeç",

@@ -151,13 +151,8 @@ export function ProductionImport({
                 });
         }
     }
-    const date = (value: string) =>
-        format.time(value, timezone, {
-            year: "numeric",
-            month: "short",
-            day: "2-digit",
-        });
-    const timeFormatter = format.intervals(
+    const date = (value: string) => format.date(value, timezone);
+    const time = format.intervals(
         timezone,
         selection.status === "preview"
             ? [
@@ -166,7 +161,6 @@ export function ProductionImport({
               ].flatMap((row) => [row.starts_at, row.ends_at])
             : [],
     );
-    const time = (value: string) => timeFormatter.format(new Date(value));
     const implausible =
         selection.status === "preview" &&
         (selection.preview.warnings ?? []).some(
@@ -334,8 +328,14 @@ export function ProductionImport({
                                             </span>
                                             <span className="sr-only">
                                                 {t("exact_interval", {
-                                                    start: row.starts_at,
-                                                    end: row.ends_at,
+                                                    start: format.zonedTime(
+                                                        row.starts_at,
+                                                        timezone,
+                                                    ),
+                                                    end: format.zonedTime(
+                                                        row.ends_at,
+                                                        timezone,
+                                                    ),
                                                 })}
                                             </span>
                                         </th>

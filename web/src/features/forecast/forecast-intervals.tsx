@@ -33,7 +33,11 @@ function IntervalValue({
     return (
         <>
             <span className="interval-value">
-                {value == null ? MISSING : format.number(value)}
+                {value == null
+                    ? MISSING
+                    : electrical
+                      ? format.number(value)
+                      : format.rounded(value, "W/m²")}
             </span>
             {value == null && (
                 <span className="sr-only">{t("data_unavailable")}</span>
@@ -43,7 +47,7 @@ function IntervalValue({
                     {power == null
                         ? t("_average_power_unavailable")
                         : t("average_power", {
-                              power: format.number(power, 2),
+                              power: format.rounded(power, "MW"),
                           })}
                 </span>
             )}
