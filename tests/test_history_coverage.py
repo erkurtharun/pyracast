@@ -1,10 +1,17 @@
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
+from django.db import connection, transaction
+from django.utils import timezone
 
 from pyracast.forecasts.coverage import history_day_complete
 from pyracast.forecasts.faults import DamagedStoredDataError
+from pyracast.forecasts.history import select_actual_snapshot
 from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.irradiance import local_day_bounds
+from tests.support.invariants import stored_again
+from tests.support.performance_history import estimated_actuals
+from tests.support.plant_operations import make_plant
 
 
 @pytest.mark.parametrize(
@@ -126,3 +133,24 @@ def test_stored_intervals_that_are_not_an_array_are_damage_of_the_snapshot(store
             ForecastSnapshot(pk=7, normalized_intervals=stored), date(2026, 11, 8), "UTC"
         )
     assert (damage.value.identity, damage.value.fault) == (7, "TypeError")
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_damaged_estimated_actual_candidate_leaves_no_database_cursor_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, _ = make_plant(monkeypatch)
+    day = timezone.now().date() - timedelta(days=3)
+    _, end = local_day_bounds(day, system.binding.timezone)
+    snapshot = estimated_actuals(system, day, 0.3, end + timedelta(hours=2))
+    rows = [dict(row) for row in snapshot.normalized_intervals]
+    rows[3]["start"] = "06.11.2026 00:00"
+    stored_again(snapshot, normalized_intervals=rows)
+    with transaction.atomic():
+        with pytest.raises(DamagedStoredDataError) as damage:
+            select_actual_snapshot(system.binding, day, timezone.now())
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT name FROM pg_cursors")
+            open_cursors = cursor.fetchall()
+    assert damage.value.identity == snapshot.pk
+    assert open_cursors == []

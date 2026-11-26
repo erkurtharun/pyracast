@@ -1,3 +1,5 @@
+from collections.abc import Generator
+from contextlib import closing
 from copy import deepcopy
 from datetime import date, datetime, timedelta
 from typing import Literal, cast
@@ -94,13 +96,15 @@ def select_actual_snapshot(
     binding: SiteBinding, target_date: date, as_of: datetime
 ) -> ForecastSnapshot | None:
     start, end = local_day_bounds(target_date, binding.timezone)
-    return first_complete_actuals(
+    candidates = cast(
+        Generator[ForecastSnapshot],
         single_snapshot_actual_queryset(
             binding, start, end, collected_from=end, as_of=as_of
         ).iterator(),
-        target_date,
-        binding.timezone,
     )
+    # A cursor the garbage collector closes during another query of the connection deadlocks.
+    with closing(candidates):
+        return first_complete_actuals(candidates, target_date, binding.timezone)
 
 
 def historical_irradiance(snapshot: ForecastSnapshot, target_date: date) -> dict[str, object]:
