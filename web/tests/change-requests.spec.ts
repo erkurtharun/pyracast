@@ -687,7 +687,7 @@ test("mobile admin reviews current context, refreshes a conflict and approves ex
     ).toBeVisible();
     await detail.getByText("EPİAŞ values", { exact: true }).click();
     await expect(detail.locator("details li")).toHaveText(
-        /09:00 \(UTC\+3\): 1\sMWh/,
+        /^9 Nov 2026, 08:00 \(UTC\+3\) – 9 Nov 2026, 09:00 \(UTC\+3\): 1\xa0MWh$/,
     );
     await expect(detail.getByText("0.5 MWh", { exact: true })).toHaveCount(0);
     await detail.getByRole("button", { name: "Approve", exact: true }).click();
