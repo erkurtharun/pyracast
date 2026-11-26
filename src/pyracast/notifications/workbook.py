@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import date, datetime, timedelta
 from io import BytesIO
-from textwrap import wrap
 from typing import TYPE_CHECKING, cast
 from zoneinfo import ZoneInfo
 
@@ -53,11 +52,26 @@ def _quarters(character: str) -> int:
     return 5 if character.isupper() else 4
 
 
-def _lines(text: str, characters: int) -> int:
-    return sum(
-        len(wrap("".join(c * _quarters(c) for c in line), characters * 4)) or 1
-        for line in text.split("\n")
-    )
+def _line_count(line: str, room: int, width: Callable[[str], int]) -> int:
+    lines, used = 1, 0
+    for word in line.split(" "):
+        size = sum(map(width, word))
+        gap = width(" ") if used else 0
+        if used + gap + size <= room:
+            used += gap + size
+        elif size <= room:
+            lines, used = lines + 1, size
+        else:
+            used += gap
+            for character in word:
+                if used and used + width(character) > room:
+                    lines, used = lines + 1, 0
+                used += width(character)
+    return lines
+
+
+def _lines(text: str, room: int, width: Callable[[str], int]) -> int:
+    return sum(_line_count(line, room, width) for line in text.split("\n"))
 
 
 def _row(
@@ -73,7 +87,8 @@ def _row(
         if isinstance(value, str):
             cell.value = _clean(value)
             cell.data_type = "s"
-            lines = max(lines, _lines(value, sum(widths[column - 1 : column - 1 + span]) - 2))
+            room = sum(widths[column - 1 : column - 1 + span]) - 2
+            lines = max(lines, _lines(value, room, len))
         else:
             cell.value = value
             cell.number_format = shown
@@ -117,7 +132,8 @@ def _top(sheet: Worksheet, report: ForecastReport, widths: Sequence[int], day_fo
     title = _row(sheet, 1, widths, _WHITE, [(report.plant_name, full, "")])
     title.font = Font(size=14, bold=True, color=_INK)
     sheet.row_dimensions[1].height = min(
-        409, _lines(cast(str, title.value), _TITLE_CHARACTERS) * _TITLE_LINE_POINTS + 4
+        409,
+        _lines(cast(str, title.value), _TITLE_CHARACTERS * 4, _quarters) * _TITLE_LINE_POINTS + 4,
     )
     subtitle = (
         _("Generation forecast · Pyracast")
