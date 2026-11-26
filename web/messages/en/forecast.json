@@ -310,6 +310,7 @@
         "satellite": "Satellite data",
         "forecast_time": "Forecast time",
         "automatic": "Automatic",
+        "best": "Best forecast",
         "manual": "Manual",
         "back_to_automatic": "Back to automatic"
     },

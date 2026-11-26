@@ -13,6 +13,7 @@ export type ForecastQuery = {
     resolution: 30 | 60;
     source: DataSource;
     forecastId?: number;
+    best?: boolean;
     poll: number | false;
 };
 
@@ -24,6 +25,7 @@ export function useForecastRead(
         resolution,
         source,
         forecastId,
+        best,
         poll,
     }: ForecastQuery,
     enabled = true,
@@ -37,6 +39,7 @@ export function useForecastRead(
                 resolution_minutes: resolution,
                 data_source: source,
                 forecast_id: forecastId,
+                selection_mode: best ? "best" : undefined,
             },
         },
         { poll, enabled: enabled && electrical },

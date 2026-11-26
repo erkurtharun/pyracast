@@ -310,6 +310,7 @@
         "satellite": "Uydu verisi",
         "forecast_time": "Tahmin saati",
         "automatic": "Otomatik",
+        "best": "En iyi tahmin",
         "manual": "Manuel",
         "back_to_automatic": "Otomatiğe dön"
     },
