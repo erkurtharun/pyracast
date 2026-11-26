@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 from collections.abc import Sequence
+from itertools import pairwise
 from pathlib import Path
 
 import psutil
@@ -218,6 +219,20 @@ def test_shard_runs_receive_pytest_arguments_after_a_double_dash(
 
     assert commands[-1][-1] == "-x"
     assert "scripts.pytest_shard" in commands[-1]
+
+
+@pytest.mark.parametrize("shard", [False, True], ids=["full", "shard"])
+def test_only_a_shard_lets_idle_workers_take_queued_tests(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, shard: bool
+) -> None:
+    commands = record_runs(monkeypatch, None)
+    monkeypatch.setattr(check, "finish_shard", lambda output: None)
+    argv = ["--shard", "1/4", "--shard-output", str(tmp_path / "shard")] if shard else []
+
+    assert check.main(["--tests-only", *argv]) == 0
+
+    assert commands[-1].count("--dist") == shard
+    assert (("--dist", "worksteal") in pairwise(commands[-1])) is shard
 
 
 @pytest.mark.parametrize(

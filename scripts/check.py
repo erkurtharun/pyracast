@@ -146,6 +146,8 @@ def pytest_stage(
         "scripts.pytest_shard",
         "-n",
         "auto",
+        "--dist",
+        "worksteal",
         "-o",
         f"addopts={shlex.join(options)}",
         "--cov-report=",
