@@ -84,7 +84,7 @@ sequenceDiagram
 
 ## Authorization
 
-- Console: `PlatformAdminSite.has_permission` requires an active staff superuser with MFA evidence (`has_mfa_evidence`: a TOTP or recovery-code record in the session backed by a live `Authenticator`); `admin_view` adds CSRF protection and, for every POST, a recent authenticator confirmation, and sends everyone else to the admin login.
+- Console: the console gate (`admin-console-access`): an active staff superuser with MFA evidence for a live authenticator, a proof by the authenticator within the last hour for every request and a recent confirmation for every unsafe one; `admin_view` adds CSRF protection and sends everyone else to the admin login.
 - Operations: `require_platform_admin` (active staff superuser, no MFA check) in `create_account`, `configure_binding`, `save_provider_setup` and `validate_binding`.
 - Script: no actor, no audit; whoever holds database settings and the decryption key can spend quota.
 - Database: `provideraccount_provider_external_account_id_uniq`, `provideraccount_api_key_fingerprint_uniq`, `provideraccount_encrypted_api_key_chk`, `provideraccount_provider_chk`, `provideraccount_daily_quota_chk` (1..10), `sitebinding_region_region_revision_uniq` (one binding per region revision), `sitebinding_validated_chk` (validation moment and key revision together), binding checks (capacity, azimuth, losses, power basis, health). Provider accounts are platform-wide, deliberately shared across tenants.

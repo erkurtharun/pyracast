@@ -68,7 +68,7 @@ sequenceDiagram
 | Store | R/W | What |
 | --- | --- | --- |
 | Worker registration | W | Scope `/app/`, script `/app/sw.js`, made by `WorkerRegistration`; the browser checks the script at every document load under `/app/` and at every `register()` call |
-| `pyracast-saved` (IndexedDB) | R, W | The application (`web/src/lib/saved/store.ts`) sets the holder's `confirmedAt` to the moment of every signed-in session it adopts, also on focus or a visibility change (`AppRoot`), and clears the figures of a copy that had expired. No current screen turns a copy on, so only a copy that already exists is read. The worker reads it only after a navigation failed and writes it in two cases, each one transaction: a copy whose `confirmedAt` is more than 90 days old or more than a day ahead of the clock loses `plants` and `days` and keeps its holder unchanged; `/app/?saved=remove&token=<removal>` with the stored token empties `plants` and `days` and sets the holder's `active` false (`web/public/app/sw.js`) |
+| `pyracast-saved` (IndexedDB) | R, W | The application (`web/src/lib/saved/store.ts`) sets the holder's `confirmedAt` to the moment of every signed-in session it adopts, also on focus or a visibility change (`AppRoot`), and clears the figures of a copy that had expired. The switch "Keep figures on this device" and its offer create the copy, and the refresh writes its plants and days (flow `saved-figures`). The worker reads it only after a navigation failed and writes it in two cases, each one transaction: a copy whose `confirmedAt` is more than 90 days old or more than a day ahead of the clock loses `plants` and `days` and keeps its holder unchanged; `/app/?saved=remove&token=<removal>` with the stored token empties `plants` and `days` and sets the holder's `active` false (`web/public/app/sw.js`) |
 
 No database table, Cache Storage entry, stored document, script or API answer is involved.
 
@@ -133,14 +133,16 @@ No database table, Cache Storage entry, stored document, script or API answer is
   `web/tests/saved-pages.spec.ts` (both worker scripts run in Node), `web/tests/browser-workers.spec.ts` (the mocked
   and integration suites block workers), `web/tests/security-headers.spec.ts` (headers of the manifest, icons and
   worker; the page policy), `web/tests/document-title.spec.ts` (titles in a tab and an installed window),
-  `web/tests/leave-guard.spec.ts` (questions before a document load).
+  `web/tests/leave-guard.spec.ts` (questions before a document load), `web/tests/keep-figures.spec.ts` (the switch, its
+  offer and the refresh).
 - Playwright, production build (`web/playwright.production.config.ts`, workers allowed): two `next start` servers, of
   `.next` and of a second build of the same source into `.next-second` (the build ids differ by themselves), behind
   `web/testing/front.ts`, which switches the build behind one origin (`PUT /__front/build`), sends `/api/` to the API
   mock of the selected build (`API_PORTS` in `web/testing/builds.ts`), names the build that answered in the
   `x-front-build` header and chooses what `/app/sw.js` answers (`PUT /__front/script`).
   `web/production-tests/app-worker.spec.ts` (scope, notice, policy, replacement by the withdrawal script),
-  `web/production-tests/saved-pages.spec.ts` (saved pages from a seeded copy) and
+  `web/production-tests/saved-pages.spec.ts` (saved pages from a seeded copy),
+  `web/production-tests/round-trip.spec.ts` (switch on, offline pages, renewal, removal; flow `saved-figures`) and
   `web/production-tests/release.spec.ts`: after a release a navigation takes the new build's Flight answer and then
   loads its document; with an unsaved value the browser asks on a shell entry and on the Actuals to Comparison switch
   before any router request, Stay keeps the old build's document at its address with the editor usable, its save goes

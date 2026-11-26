@@ -64,7 +64,7 @@ sequenceDiagram
 
 ## Authorization
 
-- Gate: `PlatformAdminSite.has_permission` requires an active staff superuser and `security.has_mfa_evidence` (any age). `admin_view` adds CSRF, `never_cache`, a recent authenticator confirmation for every unsafe method and `contained`. A failure redirects to `admin:login`, which `PlatformAdminSite.login` sends to `/app/?next=<console path>` (anonymous) or `/app/`.
+- Gate: the console gate (`admin-console-access`): an active staff superuser with MFA evidence for a live authenticator, a proof by the authenticator within the last hour for every request and a recent confirmation for every unsafe one. `admin_view` also adds CSRF, `never_cache` and `contained`. A failure redirects to `admin:login`, which `PlatformAdminSite.login` sends to `/app/?next=<console path>` (anonymous) or `/app/`.
 - CSRF: `CsrfViewMiddleware` and `admin_view` (`csrf_protect`); a POST without a valid token is 403 before the gate runs, also for anonymous callers.
 - Operation: `set_recipient_limit` repeats `require_platform_admin` (active staff superuser). It checks no authenticator evidence, so it is a second line, not a replacement for `has_permission`.
 - Database: the singleton and range check constraints bound the row even for writers that bypass the form. Tenant scope: none. The setting is platform-wide; customers read it through the reminders API (`recipient_limit`, `recipient_count`, `recipient_limit_exceeded`).

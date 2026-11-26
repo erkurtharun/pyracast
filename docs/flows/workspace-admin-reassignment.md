@@ -69,7 +69,7 @@ sequenceDiagram
 
 ## Authorization
 
-- Site gate: `PlatformAdminSite.has_permission` needs an active staff superuser and `security.has_mfa_evidence` (any age). `admin_view` adds CSRF, `never_cache`, a recent authenticator confirmation for every unsafe method and `contained`. `PlatformAdminSite.login` sends an anonymous caller to `/app/?next=<console path>`, any other refused caller to `/app/`.
+- Site gate: the console gate (`admin-console-access`): an active staff superuser with MFA evidence for a live authenticator, a proof by the authenticator within the last hour for every request and a recent confirmation for every unsafe one. `admin_view` also adds CSRF, `never_cache` and `contained`. `PlatformAdminSite.login` sends an anonymous caller to `/app/?next=<console path>`, any other refused caller to `/app/`.
 - Operation gate: `require_platform_admin` (active staff superuser, no authenticator check) in `reassign_workspace_admin` and `disable_workspace_automation`. Target gate: the form queryset and the operation's own lookup, which is authoritative.
 - Database: partial unique index `membership_tenant_administrator_uniq`, check `membership_role_chk`, and `workspaceadminchange_administrator_chk` (new and previous administrator differ).
 

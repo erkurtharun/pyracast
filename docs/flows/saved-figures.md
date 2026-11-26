@@ -152,7 +152,7 @@ touches the worker, the switch or sign-in:
 - Offline reading alone: a release that sets `SAVED_FIGURES` in `web/src/lib/saved/feature.ts` to `false` and serves
   the Phase 3 worker (the worker without the reader and the saved pages); the tests then run in the state "saved
   figures withdrawn". Every document then deletes the database and forgets the flag at its start, the switch and the
-  offer render nothing and no refresh runs. Keep the deletion at start for at least one further release, 12 h later,
+  offer render nothing and no refresh runs. Keep the deletion at start for at least one further release, 90 days later,
   because a window of the withdrawn build can still turn the switch on until its session ends.
 - The worker: the withdrawal of `docs/DEPLOYMENT.md`, "App worker", together with `SAVED_FIGURES` off, so no copy
   remains without a reader.

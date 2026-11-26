@@ -60,7 +60,7 @@ The message broker is read on Operations only (queue message, consumer and dead-
 
 ## Authorization
 
-- View only: every route is wrapped by `PlatformAdminSite.admin_view`, whose gate `has_permission` is `has_platform_admin_session` (active staff superuser plus session MFA evidence for a live authenticator), re-evaluated on every request. The three pages answer GET and HEAD only (`require_safe`); a POST first needs the console confirmation (`admin-console-access`) and then answers 405.
+- View only: every route passes the console gate (`admin-console-access`): an active staff superuser with MFA evidence for a live authenticator, a proof by the authenticator within the last hour for every request and a recent confirmation for every unsafe one, re-evaluated on every request. The three pages answer GET and HEAD only (`require_safe`); a confirmed POST answers 405.
 - No operation or database check exists because no domain record is written. There is no tenant scoping: all companies, plant names and recipient addresses are visible by design. Sign-in and confirmation belong to `admin-console-access`.
 
 ## Failure paths
