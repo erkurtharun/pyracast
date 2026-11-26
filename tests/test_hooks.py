@@ -574,6 +574,11 @@ def test_configured_matchers_cover_reads_through_the_ide_and_shell_tools() -> No
         "git push origin pr/K02 main",
         "git push --all origin",
         "git push --mirror origin",
+        "git push --tags origin pr/K02 2>&1",
+        "git push origin main 2>&1",
+        "git push 2>&1",
+        "git push origin main > pr/K02",
+        "git push origin pr/K02 2>&1 && git push origin main 2> err.txt",
         "git status && git push origin main",
         "gh pr merge 18 --squash",
         "gh -R owner/repo pr merge 18",
@@ -652,6 +657,54 @@ def test_shell_commands_that_do_not_publish_are_allowed(repository: Path, comman
     )
 
     assert decision is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git push -u origin pr/K02 2>&1",
+        "git push origin pr/K02 > out.txt",
+        "git push origin pr/K02 2> err.txt",
+        "git push origin pr/K02 >> out.txt 2>&1 | tail -5",
+    ],
+)
+@pytest.mark.parametrize("tool_name", ["Bash", "PowerShell"])
+def test_a_redirected_push_of_a_pull_request_branch_is_allowed(
+    repository: Path, tool_name: str, command: str
+) -> None:
+    decision = _decision(
+        _invoke(
+            repository,
+            "pre-shell",
+            {"tool_name": tool_name, "tool_input": {"command": command}},
+            env=_environment_without_marker(),
+        )
+    )
+
+    assert decision is None
+
+
+@pytest.mark.parametrize(
+    ("command", "refused"),
+    [
+        ("git push origin pr/K02 *>&1", False),
+        ("git push origin pr/K02 2>$null", False),
+        ("git push origin main *> out.txt", True),
+    ],
+)
+def test_powershell_stream_redirections_leave_the_push_rule_to_the_destination(
+    repository: Path, command: str, refused: bool
+) -> None:
+    decision = _decision(
+        _invoke(
+            repository,
+            "pre-shell",
+            {"tool_name": "PowerShell", "tool_input": {"command": command}},
+            env=_environment_without_marker(),
+        )
+    )
+
+    assert (decision is not None) == refused
 
 
 @pytest.mark.parametrize(
