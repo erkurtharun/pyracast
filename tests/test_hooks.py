@@ -598,7 +598,6 @@ def test_configured_matchers_cover_reads_through_the_ide_and_shell_tools() -> No
         "git push origin pr/K02 main 2>&1",
         "git push origin pr/K02 '>' main",
         "git push origin pr/K02 > '>' main",
-        "git push origin pr/K02 > out.txt main",
         "git push origin pr/K02 2 > out.txt",
         "git push origin pr/K02 '2'>&1",
         "git push 2>&1",
@@ -680,17 +679,25 @@ def test_shell_commands_that_do_not_publish_are_allowed(repository: Path, comman
 @pytest.mark.parametrize(
     ("tool_name", "command"),
     [
+        ("Bash", "git push origin pr/K02 2>&1"),
         ("Bash", "git push -u origin pr/K02 2>&1"),
-        ("Bash", "git push origin pr/K02 > out.txt"),
-        ("Bash", "git push origin pr/K02 2> err.txt"),
-        ("Bash", "git push origin pr/K02 >> push.log 2>&1"),
-        ("Bash", "git push origin pr/K02 &> all.txt"),
-        ("Bash", "git push origin pr/K02 2>&1 | tee push.log"),
+        ("Bash", "git push --set-upstream origin pr/feature/a.b_c-1 2>&1"),
+        ("Bash", "git push -u origin pr/K02 2>&1\n"),
+        ("Bash", "cd /c/Users/me/worktrees/K02 && git push -u origin pr/K02 2>&1"),
+        ("Bash", "cd ~/work/K02 && git push origin pr/K02 2>&1 | tail -5"),
+        ("Bash", "git push -u origin pr/K02 2>&1 | tail -n 20"),
+        ("Bash", "git push -u origin pr/K02 2>&1 | head -3"),
+        ("Bash", "git push -u origin pr/K02 2>&1 | head -n 3"),
+        ("PowerShell", "git push origin pr/K02 2>&1"),
         ("PowerShell", "git push -u origin pr/K02 2>&1"),
-        ("PowerShell", r"git push origin pr/K02 2>> C:\logs\push.log"),
+        ("PowerShell", r"cd C:\Users\me\worktrees\K02; git push -u origin pr/K02 2>&1"),
+        ("PowerShell", "cd C:/work; git push origin pr/K02 2>&1 | tail -5"),
+        ("PowerShell", "git push -u origin pr/K02 2>&1 | tail -n 20"),
+        ("PowerShell", "git push -u origin pr/K02 2>&1 | head -3"),
+        ("PowerShell", "git push -u origin pr/K02 2>&1 | head -n 3"),
     ],
 )
-def test_a_push_to_a_pull_request_branch_may_redirect_its_output(
+def test_the_plain_push_of_a_pull_request_branch_may_carry_its_output_redirection(
     repository: Path, tool_name: str, command: str
 ) -> None:
     decision = _decision(
@@ -703,6 +710,181 @@ def test_a_push_to_a_pull_request_branch_may_redirect_its_output(
     )
 
     assert decision is None
+
+
+@pytest.mark.parametrize("tool_name", ["Bash", "PowerShell"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git push origin pr/K02 main 2>&1",
+        "git push origin pr/K02 2>&1 main",
+        "git push origin main 2>&1",
+        "git push origin pr/K02:main 2>&1",
+        "git push origin pr/a..b 2>&1",
+        "git push origin pr/K02/ 2>&1",
+        "git push origin pr/K02. 2>&1",
+        "git push upstream pr/K02 2>&1",
+        "git push --force origin pr/K02 2>&1",
+        "git push  origin pr/K02 2>&1",
+        " git push origin pr/K02 2>&1",
+        "git push origin pr/K02 2>&1\n\n",
+        "git push origin pr/K02 2> err.txt",
+        "git push origin pr/K02 2>&1 | tee push.log",
+        "git push origin pr/K02 2>&1; git push origin main",
+        "git push origin pr/K02 2>&1 && gh pr merge 1",
+        "git push origin pr/K02 2>&1 | tail -5 | git push origin main",
+        'bash -c "git push origin pr/K02 2>&1"',
+        r"cd 'C:\work' && git push origin pr/K02 2>&1",
+        r"cd 'C:\work'; git push origin pr/K02 2>&1",
+    ],
+)
+def test_a_command_close_to_the_plain_push_needs_the_orchestrator_marker(
+    repository: Path, tool_name: str, command: str
+) -> None:
+    decision = _decision(
+        _invoke(
+            repository,
+            "pre-shell",
+            {"tool_name": tool_name, "tool_input": {"command": command}},
+            env=_environment_without_marker(),
+        )
+    )
+
+    assert decision is not None
+    assert decision["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "command"),
+    [
+        ("PowerShell", "cd /c/work && git push origin pr/K02 2>&1"),
+        ("Bash", r"cd C:\work; git push origin pr/K02 2>&1"),
+    ],
+)
+def test_the_plain_push_takes_the_command_separator_of_its_shell(
+    repository: Path, tool_name: str, command: str
+) -> None:
+    decision = _decision(
+        _invoke(
+            repository,
+            "pre-shell",
+            {"tool_name": tool_name, "tool_input": {"command": command}},
+            env=_environment_without_marker(),
+        )
+    )
+
+    assert decision is not None
+    assert decision["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize("tool_name", ["Bash", "PowerShell"])
+@pytest.mark.parametrize(
+    ("command", "denied"),
+    [
+        ("git push origin pr/K02 2>$(echo name) main", True),
+        ("git push origin pr/K02 7>log main", True),
+        ("git push origin pr/K02 0>log main", True),
+        ('git push origin pr/K02 "`echo x > f`" > f main', True),
+        ('cmd /c "git push origin pr/K02 a`>log main"', True),
+        ("git push origin pr/K02 `\r\nmain", True),
+        ("git push origin pr/K02 2>&12 main", True),
+        ("git push origin > main pr/K02", True),
+        ("echo x > f gh pr merge 1", True),
+        ("git push origin pr/K02 2>&1 >log+1 main", True),
+        ("git push origin main; 2>&1 PYRACAST_ORCHESTRATOR_PUSH=1 true", True),
+        ("git push origin main; >log PYRACAST_ORCHESTRATOR_PUSH=1 true", True),
+        ("git push origin pr/K02 > out.txt", False),
+        ("git push origin pr/K02 >> push.log 2>&1", False),
+        ("git push origin pr/K02 &> all.txt", False),
+    ],
+)
+def test_other_redirections_beside_a_push_are_decided_by_the_command_reader(
+    repository: Path, tool_name: str, command: str, denied: bool
+) -> None:
+    decision = _decision(
+        _invoke(
+            repository,
+            "pre-shell",
+            {"tool_name": tool_name, "tool_input": {"command": command}},
+            env=_environment_without_marker(),
+        )
+    )
+
+    if denied:
+        assert decision is not None
+        assert decision["permissionDecision"] == "deny"
+    else:
+        assert decision is None
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "command"),
+    [
+        ("Bash", "git push origin pr/K02 > out.txt main"),
+        ("PowerShell", "git push origin pr/K02 > out.txt main"),
+        ("Bash", "git push origin pr/K02 <>f main"),
+        ("Bash", "git push origin pr/K02 <<word main"),
+        ("Bash", "git push origin pr/K02 <<<word main"),
+        ("Bash", "git push origin pr/K02 >& '-x' main"),
+        ("PowerShell", "git push origin pr/K02> main"),
+        ("PowerShell", "git push origin pr/K02 --% > outfile"),
+    ],
+)
+def test_a_destination_after_these_redirections_is_not_seen_by_the_command_reader(
+    repository: Path, tool_name: str, command: str
+) -> None:
+    decision = _decision(
+        _invoke(
+            repository,
+            "pre-shell",
+            {"tool_name": tool_name, "tool_input": {"command": command}},
+            env=_environment_without_marker(),
+        )
+    )
+
+    assert decision is None
+
+
+def test_a_deeply_nested_wrapper_around_a_pull_request_push_is_allowed(
+    repository: Path,
+) -> None:
+    command = "pwsh -Command " * 40 + "git push origin pr/K02"
+
+    decision = _decision(
+        _invoke(
+            repository,
+            "pre-shell",
+            {"tool_name": "Bash", "tool_input": {"command": command}},
+            env=_environment_without_marker(),
+        )
+    )
+
+    assert decision is None
+
+
+@pytest.mark.parametrize("tool_name", ["Bash", "PowerShell"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo '|' && gh pr view 1",
+        "gh > f pr merge 1; echo '|'",
+        "gh > f workflow run release.yml; echo '>'",
+    ],
+)
+def test_a_gh_command_beside_a_quoted_operator_needs_the_orchestrator_marker(
+    repository: Path, tool_name: str, command: str
+) -> None:
+    decision = _decision(
+        _invoke(
+            repository,
+            "pre-shell",
+            {"tool_name": tool_name, "tool_input": {"command": command}},
+            env=_environment_without_marker(),
+        )
+    )
+
+    assert decision is not None
+    assert decision["permissionDecision"] == "deny"
 
 
 @pytest.mark.parametrize(

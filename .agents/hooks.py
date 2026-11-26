@@ -6,8 +6,8 @@ import shlex
 import shutil
 import subprocess
 import sys
+from functools import cache
 from pathlib import Path, PurePosixPath
-from string import ascii_letters, digits
 
 type JsonValue = bool | int | float | str | list[JsonValue] | dict[str, JsonValue] | None
 type JsonObject = dict[str, JsonValue]
@@ -56,14 +56,11 @@ PUSH_SCOPE_OPTIONS = frozenset({"--all", "--mirror", "--tags"})
 NEWLINE_READINGS = (";", "\n;")
 OPERATOR_CHARACTERS = re.escape("();<>|&\n")
 HIDDEN_OPERATOR = re.compile(rf"['\"\\`][{OPERATOR_CHARACTERS}]|[{OPERATOR_CHARACTERS}]['\"\\`]")
-PLAIN_CHARACTERS = frozenset(f"{ascii_letters}{digits} \t\n_./:=@+,%~-<>&|;")
-WINDOWS_PLAIN_CHARACTERS = PLAIN_CHARACTERS | {"\\"}
-DESCRIPTOR_MERGE = r"2>&1|1>&2"
-# A backslash reaches a target only in PowerShell text; Bash text with one is never plain.
-FILE_REDIRECTION = r"[12]?>>?[ \t]*[\w./:\\-]+"
-REDIRECTION = re.compile(
-    rf"(?<![^ \t\n])(?:{DESCRIPTOR_MERGE}|{FILE_REDIRECTION})(?=[ \t\n;|&]|\Z)", re.ASCII
-)
+PUSH_BRANCH = r"pr/(?![\w./-]*\.\.)[\w./-]*[\w-]"
+PUSH = rf"git push(?: -u| --set-upstream)? origin {PUSH_BRANCH} 2>&1"
+PUSH_TAIL = r"(?: \| (?:tail|head) (?:-\d+|-n \d+))?"
+BASH_PLAIN_PUSH = re.compile(rf"(?:cd [\w.:/~-]+ && )?{PUSH}{PUSH_TAIL}", re.ASCII)
+POWERSHELL_PLAIN_PUSH = re.compile(rf"(?:cd [\w.:/~\\-]+; )?{PUSH}{PUSH_TAIL}", re.ASCII)
 
 
 def _object(value: JsonValue) -> JsonObject:
@@ -393,7 +390,7 @@ def _segment_publishes(tokens: list[str], *, hidden_operator: bool) -> bool:
             subcommand, arguments = _git_subcommand(tokens[index + 1 :])
             return subcommand == "push" and (hidden_operator or _git_push_refused(arguments))
         if program == "gh":
-            return _gh_refused(tokens[index + 1 :])
+            return hidden_operator or _gh_refused(tokens[index + 1 :])
         wrapped = _wrapped_command(program, tokens[index + 1 :])
         if wrapped is not None:
             command, windows = wrapped
@@ -408,12 +405,9 @@ def _shell_command(arguments: JsonObject) -> str | None:
     return command if isinstance(command, str) else None
 
 
-def _plain(command: str, *, windows: bool) -> bool:
-    return set(command) <= (WINDOWS_PLAIN_CHARACTERS if windows else PLAIN_CHARACTERS)
-
-
-def _without_redirections(command: str) -> str:
-    return REDIRECTION.sub("", command)
+def _plain_push(command: str, *, windows: bool) -> bool:
+    shape = POWERSHELL_PLAIN_PUSH if windows else BASH_PLAIN_PUSH
+    return shape.fullmatch(command.removesuffix("\n")) is not None
 
 
 def _segments_publish(segments: list[list[str]], *, hidden_operator: bool) -> bool:
@@ -422,13 +416,15 @@ def _segments_publish(segments: list[list[str]], *, hidden_operator: bool) -> bo
     )
 
 
+@cache
 def _command_publishes(command: str, *, windows: bool, hidden_operator: bool = False) -> bool:
     hidden_operator = hidden_operator or HIDDEN_OPERATOR.search(command) is not None
+    newlines = NEWLINE_READINGS if "\n" in command else NEWLINE_READINGS[:1]
     return any(
         _segments_publish(
             _segments(command, windows=windows, newline=newline), hidden_operator=hidden_operator
         )
-        for newline in NEWLINE_READINGS
+        for newline in newlines
     )
 
 
@@ -438,8 +434,8 @@ def denied_shell(payload: JsonObject) -> str | None:
         return None
     tool_name = payload.get("tool_name")
     windows = tool_name == "PowerShell" or (tool_name != "Bash" and os.name == "nt")
-    if _plain(command, windows=windows):
-        command = _without_redirections(command)
+    if _plain_push(command, windows=windows):
+        return None
     if _command_publishes(command, windows=windows):
         return PUBLISH_REASON
     return None
