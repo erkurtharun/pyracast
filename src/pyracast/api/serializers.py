@@ -7,8 +7,9 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from pyracast.accounts.models import Tenant, WorkspaceRole
-from pyracast.errors import ENTER_A_VALUE, UNEXPECTED
-from pyracast.forecasts.models import SnapshotSourceKind
+from pyracast.errors import ENTER_A_VALUE, UNEXPECTED, UNKNOWN_FORECAST
+from pyracast.forecasts.outlook import SOURCES
+from pyracast.forecasts.selection import SELECTION_MODES, SELECTION_RULES
 from pyracast.regions.models import (
     NAME_INVISIBLE_CHARACTER,
     NAME_MAX_LENGTH,
@@ -140,9 +141,13 @@ class LocationChangeOutput(serializers.ModelSerializer[RegionLocationChangeReque
 
 class ForecastQuery(InputSerializer):
     date = serializers.DateField()
-    data_source = serializers.ChoiceField(
-        choices=("auto", *SnapshotSourceKind.values, "archived_forecast"), default="auto"
-    )
+    data_source = serializers.ChoiceField(choices=SOURCES, default="forecast")
+    forecast_id = serializers.IntegerField(min_value=1, required=False)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if attrs["data_source"] == "satellite" and "forecast_id" in attrs:
+            raise serializers.ValidationError({"forecast_id": [UNKNOWN_FORECAST]})
+        return attrs
 
 
 def _optional_number() -> serializers.FloatField:
@@ -277,6 +282,20 @@ class StaleReason(models.TextChoices):
     CONNECTION_INACTIVE = "connection_inactive"
 
 
+class ForecastOptionOutput(serializers.Serializer[Any]):
+    forecast_id = serializers.IntegerField()
+    fetched_at = serializers.DateTimeField()
+
+
+class ForecastSelectionOutput(serializers.Serializer[Any]):
+    """Which forecast the answer shows: chosen automatically by `rule`, or by the reader."""
+
+    mode = serializers.ChoiceField(choices=SELECTION_MODES)
+    rule = serializers.ChoiceField(choices=SELECTION_RULES, allow_null=True)
+    forecast_id = serializers.IntegerField(allow_null=True)
+    options = ForecastOptionOutput(many=True)
+
+
 class ForecastEnvelope(serializers.Serializer[dict[str, Any]]):
     date = serializers.DateField()
     timezone = serializers.CharField()
@@ -291,6 +310,7 @@ class ForecastEnvelope(serializers.Serializer[dict[str, Any]]):
         ),
         allow_null=True,
     )
+    selection = ForecastSelectionOutput(allow_null=True)
 
 
 class ForecastOutput(ForecastEnvelope):

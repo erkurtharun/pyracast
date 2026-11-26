@@ -303,6 +303,9 @@ msgstr "Hata"
 msgid "Choose a day before today and within the past year."
 msgstr "Bugünden önce ve son bir yıl içinde kalan bir gün seçin."
 
+msgid "Choose one of this day's forecast times."
+msgstr "Bu günün tahmin saatlerinden birini seçin."
+
 msgid "Existing Solcast account"
 msgstr "Mevcut Solcast hesabı"
 

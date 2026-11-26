@@ -119,7 +119,7 @@ def test_turkish_forecast_completed_day_validation_preserves_its_code() -> None:
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/"
     response = client.get(
         path,
-        {"date": "9999-12-31", "data_source": "estimated_actuals"},
+        {"date": "9999-12-31", "data_source": "satellite"},
         HTTP_ACCEPT_LANGUAGE="tr",
     )
     assert response.status_code == 400

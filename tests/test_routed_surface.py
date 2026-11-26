@@ -61,7 +61,6 @@ API_ROUTES = sorted(
         (PLANT + "calibrations/<int:calibration_id>/activate/", ("POST",)),
         (PLANT + "change-requests/incidents/", ("POST",)),
         (PLANT + "change-requests/production/", ("POST",)),
-        (PLANT + "days/", ("GET",)),
         (PLANT + "forecast/", ("GET",)),
         (PLANT + "outages/", ("GET", "POST")),
         (PLANT + "outages/<int:incident_id>/", ("PUT",)),

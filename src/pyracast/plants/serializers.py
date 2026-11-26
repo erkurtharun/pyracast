@@ -1,7 +1,6 @@
 from dataclasses import fields as dataclass_fields
 from typing import Any
 
-from django.db import models
 from django.utils.dateparse import parse_datetime
 from django.utils.formats import number_format
 from django.utils.translation import gettext
@@ -13,6 +12,7 @@ from pyracast.api.serializers import (
     FiniteFloat,
     ForecastEnvelope,
     ForecastProvenanceOutput,
+    ForecastQuery,
     InputSerializer,
     IrradianceSummaryOutput,
     PlantName,
@@ -593,13 +593,8 @@ class CalibrationAutomationOutput(serializers.Serializer[dict[str, Any]]):
     last_attempt = AutomaticCalibrationAttemptOutput(allow_null=True)
 
 
-class ForecastQuery(InputSerializer):
-    date = serializers.DateField()
-    data_source = serializers.ChoiceField(
-        choices=("auto", "forecast", "estimated_actuals", "archived_forecast"), default="auto"
-    )
+class PlantForecastQuery(ForecastQuery):
     resolution_minutes = serializers.ChoiceField(choices=(30, 60), default=30)
-    as_of = AwareDateTime(required=False)
 
 
 class PowerIntervalOutput(serializers.Serializer[dict[str, Any]]):
@@ -708,79 +703,3 @@ class PlantForecastOutput(ForecastEnvelope):
     regional_irradiance = IrradianceSummaryField(allow_null=True)
     outage_scenario = OutageScenarioField(allow_null=True, default=None)
     production_diagnostic = ProductionDiagnosticField(allow_null=True, default=None)
-
-
-ROWS_PER_DAY_LIMIT = 52
-
-
-class ForecastDayRowOutput(serializers.Serializer[Any]):
-    """Energy in MWh on the measurement basis of the plant."""
-
-    start = serializers.DateTimeField()
-    end = serializers.DateTimeField()
-    mwh = serializers.FloatField(allow_null=True)
-    affected_mwh = serializers.FloatField(allow_null=True)
-    sources = serializers.ListField(child=serializers.CharField(), allow_null=True)
-
-
-class AffectedDayOutput(serializers.Serializer[Any]):
-    status = serializers.ChoiceField(choices=("estimated", "unknown_impact"))
-    total_mwh = serializers.FloatField(allow_null=True)
-
-    def get_fields(self) -> dict[str, serializers.Field[Any, Any, Any, Any]]:
-        return {**super().get_fields(), "partial": serializers.BooleanField()}
-
-
-class DayUnavailableReason(models.TextChoices):
-    CONFIGURATION_UNAVAILABLE = "configuration_unavailable"
-    FORECAST_UNAVAILABLE = "forecast_unavailable"
-    ESTIMATED_ACTUALS_UNAVAILABLE = "estimated_actuals_unavailable"
-    CALCULATION_OUT_OF_RANGE = ErrorCode.CALCULATION_OUT_OF_RANGE.value
-
-
-class ForecastDayOutput(ForecastEnvelope):
-    unavailable_reason = serializers.ChoiceField(
-        choices=DayUnavailableReason.choices, allow_null=True
-    )
-    collected_at = serializers.DateTimeField(allow_null=True)
-    total_mwh = serializers.FloatField(allow_null=True)
-
-    def get_fields(self) -> dict[str, serializers.Field[Any, Any, Any, Any]]:
-        return {
-            **super().get_fields(),
-            "partial": serializers.BooleanField(),
-            "affected": AffectedDayOutput(allow_null=True),
-            "rows": serializers.ListField(
-                child=ForecastDayRowOutput(), max_length=ROWS_PER_DAY_LIMIT
-            ),
-        }
-
-
-class ProductionDayRowOutput(serializers.Serializer[Any]):
-    start = serializers.DateTimeField()
-    end = serializers.DateTimeField()
-    mwh = serializers.FloatField(allow_null=True)
-    quality = serializers.CharField(allow_null=True)
-
-    def get_fields(self) -> dict[str, serializers.Field[Any, Any, Any, Any]]:
-        return {
-            **super().get_fields(),
-            "source": serializers.CharField(allow_null=True),
-            "provisional": serializers.BooleanField(allow_null=True),
-        }
-
-
-class SavedProductionDayOutput(serializers.Serializer[Any]):
-    date = serializers.DateField()
-    timezone = serializers.CharField()
-    total_mwh = serializers.FloatField(allow_null=True)
-    complete = serializers.BooleanField()
-    rows = serializers.ListField(child=ProductionDayRowOutput(), max_length=ROWS_PER_DAY_LIMIT)
-
-
-class PlantDaysOutput(serializers.Serializer[Any]):
-    plant_id = serializers.IntegerField()
-    name = serializers.CharField()
-    today = serializers.DateField()
-    forecast = ForecastDayOutput(many=True)
-    production = SavedProductionDayOutput(many=True)

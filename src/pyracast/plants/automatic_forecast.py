@@ -6,7 +6,7 @@ from pyracast.forecasts.coverage import history_day_complete
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.current_forecast import current_forecast
-from pyracast.plants.forecasting import archived_forecast
+from pyracast.plants.forecasting import issued_forecast
 from pyracast.plants.models import CONFIGURATION_PARAMETERS, Plant, PlantConfiguration
 
 
@@ -83,7 +83,7 @@ def reference_transition_forecast(
         )
     ):
         return latest
-    archived = archived_forecast(
+    archived = issued_forecast(
         plant, target_date, resolution_minutes, now, binding_id=previous.binding_id
     )
     archived_payload = cast(dict[str, object] | None, archived["result"])

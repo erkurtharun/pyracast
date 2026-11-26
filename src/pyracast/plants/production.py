@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from math import fsum
 from typing import Any, cast
@@ -125,30 +124,8 @@ def _slots(
     return result
 
 
-@dataclass(frozen=True)
-class NativeSlot:
-    starts_at: datetime
-    ends_at: datetime
-    effective: dict[str, Any] | None
-
-
-@dataclass(frozen=True)
-class NativeProductionDay:
-    date: date
-    total_mwh: float | None
-    complete: bool
-    slots: tuple[NativeSlot, ...]
-
-
-@dataclass(frozen=True)
-class NativeProduction:
-    timezone: str
-    days: tuple[NativeProductionDay, ...]
-
-
-def native_production_days(
-    plant: Plant, start_date: date, end_date: date, now: datetime
-) -> NativeProduction:
+def production_total(plant: Plant, day: date, now: datetime) -> float | None:
+    """The day's production under `MEASUREMENT_POLICY`, or None unless it covers daylight."""
     configuration = (
         PlantConfiguration.objects.select_related("binding__provider_account").get(
             pk=plant.current_configuration_id
@@ -157,31 +134,13 @@ def native_production_days(
         else None
     )
     location = configuration.binding if configuration else plant.region
-    zone = location.timezone
-    range_start, _ = local_day_bounds(start_date, zone)
-    _, range_end = local_day_bounds(end_date, zone)
-    effective = select_production_measurements(
-        plant, configuration, range_start, range_end, now
-    ).selection.effective
-    days = []
-    day = start_date
-    while day <= end_date:
-        start, end = local_day_bounds(day, zone)
-        rows = [row for row in effective if row.starts_at >= start and row.ends_at <= end]
-        daylight = daylight_window(day, zone, location.latitude, location.longitude)
-        days.append(
-            NativeProductionDay(
-                date=day,
-                total_mwh=_total(rows, daylight.windows or ((start, end),)),
-                complete=_coverage(rows, start, end),
-                slots=tuple(
-                    NativeSlot(begin, finish, slot_value(rows, begin, finish))
-                    for begin, finish in _slots(rows, start, end, 60, native_intervals=True)
-                ),
-            )
-        )
-        day += timedelta(days=1)
-    return NativeProduction(zone, tuple(days))
+    start, end = local_day_bounds(day, location.timezone)
+    selected = select_production_measurements(plant, configuration, start, end, now)
+    rows = [
+        row for row in selected.selection.effective if row.starts_at >= start and row.ends_at <= end
+    ]
+    daylight = daylight_window(day, location.timezone, location.latitude, location.longitude)
+    return _total(rows, daylight.windows or ((start, end),))
 
 
 def _role(actor: User | None, plant: Plant) -> str | None:

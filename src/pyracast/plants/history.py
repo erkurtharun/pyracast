@@ -17,29 +17,13 @@ from pyracast.forecasts.actuals import (
     select_archived_actual_source,
 )
 from pyracast.forecasts.faults import stored_data
-from pyracast.forecasts.history import (
-    ARCHIVED,
-    actuals_ready,
-    historical_irradiance,
-    result_state,
-)
-from pyracast.forecasts.outlook import (
-    LIVE_MODES,
-    Policy,
-    is_source,
-    plant_days_include,
-    plant_policy,
-)
+from pyracast.forecasts.history import ARCHIVED, historical_irradiance, result_state
+from pyracast.forecasts.outlook import Policy, is_source, plant_days_include, plant_policy
+from pyracast.forecasts.selection import day_of
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants.automatic_forecast import automatic_forecast
-from pyracast.plants.current_forecast import current_forecast, saved_forecast
-from pyracast.plants.forecasting import (
-    calibration_for_day,
-    forecast_payload,
-    issued_forecast,
-    require_known_cutoff,
-    require_resolution,
-)
+from pyracast.plants.current_forecast import current_forecast
+from pyracast.plants.forecast_choice import forecast_outlook
+from pyracast.plants.forecasting import calibration_for_day, forecast_payload, require_resolution
 from pyracast.plants.measurements import production_identity_current
 from pyracast.plants.models import CalibrationRun, Plant, PlantConfiguration
 from pyracast.plants.transfer import transfer_model
@@ -54,8 +38,8 @@ def plant_outlook(
     *,
     target_date: date,
     resolution_minutes: int,
-    as_of: datetime | None = None,
     source: str = "forecast",
+    forecast_id: int | None = None,
 ) -> dict[str, object]:
     from pyracast.plants.production_diagnostics import production_diagnostic
 
@@ -64,38 +48,22 @@ def plant_outlook(
         region = Region.objects.active().get(pk=region_id, tenant_id=tenant_id)
         plant = Plant.objects.get(pk=plant_id, region=region)
         plant.region = region
+        now = timezone.now()
         result = _plant_outlook(
             plant,
             target_date=target_date,
             resolution_minutes=resolution_minutes,
-            as_of=as_of,
             source=source,
+            forecast_id=forecast_id,
+            now=now,
         )
-        scenario_at = as_of or timezone.now()
         frozen = "outage_scenario" in result
         if not frozen:
-            _evaluate_outage_scenario(result, target_date, resolution_minutes, scenario_at)
+            _evaluate_outage_scenario(result, target_date, resolution_minutes, now)
         result["production_diagnostic"] = (
-            production_diagnostic(result, target_date, scenario_at)
-            if as_of is None and not frozen
-            else None
+            None if frozen else production_diagnostic(result, target_date, now)
         )
         return result
-
-
-def automatic_outlook(
-    plant: Plant, target_date: date, resolution_minutes: int, now: datetime
-) -> dict[str, object]:
-    result = _plant_outlook(
-        plant,
-        target_date=target_date,
-        resolution_minutes=resolution_minutes,
-        as_of=None,
-        source="auto",
-        now=now,
-    )
-    _evaluate_outage_scenario(result, target_date, resolution_minutes, now)
-    return result
 
 
 def _evaluate_outage_scenario(
@@ -130,66 +98,43 @@ def _current_actuals(
 
 
 def _declared_actuals(
-    plant: Plant, target_date: date, cutoff: datetime, as_of: datetime | None
+    plant: Plant, target_date: date, cutoff: datetime
 ) -> tuple[PlantConfiguration | None, ArchivedActualSource | None]:
     configurations = PlantConfiguration.objects.select_related("binding__provider_account").filter(
         plant=plant, created_at__lte=cutoff
     )
-    configuration: PlantConfiguration | None = None
-    if as_of is None:
-        day_start, day_end = local_day_bounds(target_date, plant.region.timezone)
-        configuration = (
-            configurations.filter(created_at__lte=day_start).order_by("-created_at", "-pk").first()
-            or configurations.filter(created_at__lt=day_end).order_by("-created_at", "-pk").first()
-        )
-    if configuration is None:
-        ordering = ("created_at", "pk") if as_of is None else ("-created_at", "-pk")
-        configuration = configurations.order_by(*ordering).first()
+    day_start, day_end = local_day_bounds(target_date, plant.region.timezone)
+    configuration = (
+        configurations.filter(created_at__lte=day_start).order_by("-created_at", "-pk").first()
+        or configurations.filter(created_at__lt=day_end).order_by("-created_at", "-pk").first()
+        or configurations.order_by("created_at", "pk").first()
+    )
     if configuration is None:
         return None, None
     return configuration, select_archived_actual_source(configuration.binding, target_date, cutoff)
 
 
 def _past_actuals(
-    plant: Plant,
-    *,
-    target_date: date,
-    resolution_minutes: int,
-    as_of: datetime | None,
-    fallback: bool,
-    now: datetime,
+    plant: Plant, *, target_date: date, resolution_minutes: int, now: datetime
 ) -> dict[str, object]:
-    cutoff = (as_of or now).astimezone(UTC)
+    cutoff = now.astimezone(UTC)
     configuration: PlantConfiguration | None
     actual_source: ArchivedActualSource | None
     calibration: CalibrationRun | None = None
     irradiance = None
     result = None
     with stored_data("plant", plant.pk, target_date, "estimated_actuals"):
-        selected = _current_actuals(plant, target_date, cutoff) if as_of is None else None
+        selected = _current_actuals(plant, target_date, cutoff)
         if selected is not None:
             configuration, actual_source, calibration = selected
         else:
-            configuration, actual_source = _declared_actuals(plant, target_date, cutoff, as_of)
+            configuration, actual_source = _declared_actuals(plant, target_date, cutoff)
         if configuration is not None and actual_source is not None:
             irradiance = (
                 archived_actual_irradiance(configuration.binding, target_date, actual_source)
                 if actual_source.composition is not None
                 else historical_irradiance(actual_source.snapshot, target_date)
             )
-        ready = (
-            actual_source is not None
-            and irradiance is not None
-            and actuals_ready(actual_source.snapshot, target_date, irradiance)
-        )
-    if fallback and as_of is None and not ready:
-        saved = saved_forecast(plant, target_date, resolution_minutes, now)
-        if saved["result"] is not None:
-            return saved
-    if fallback and actual_source is None and as_of is not None:
-        return issued_forecast(plant, target_date, resolution_minutes, now, as_of=cutoff)
-    if configuration is not None and actual_source is not None:
-        with stored_data("plant", plant.pk, target_date, "estimated_actuals"):
             result = forecast_payload(
                 configuration,
                 actual_source.snapshot,
@@ -202,6 +147,7 @@ def _past_actuals(
                 else None,
             )
             apply_archived_actual_source(result, actual_source)
+    if configuration is not None and result is not None:
         flags = cast(list[str], result["quality_flags"])
         if calibration is not None:
             flags.append("retrospective_calibration")
@@ -227,7 +173,7 @@ def _past_actuals(
 
 
 def _outside(policy: Policy) -> ValidationError:
-    if policy in (Policy.ARCHIVED_ACTUALS, Policy.ACTUALS_THEN_SAVED_FORECAST):
+    if policy is Policy.ARCHIVED_ACTUALS:
         return ValidationError(gettext("Choose a day before today and within the past year."))
     return DomainError(ErrorCode.DATE_OUT_OF_RANGE)
 
@@ -237,33 +183,32 @@ def _plant_outlook(
     *,
     target_date: date,
     resolution_minutes: int,
-    as_of: datetime | None,
     source: str,
-    now: datetime | None = None,
+    forecast_id: int | None,
+    now: datetime,
 ) -> dict[str, object]:
     if not is_source(source):
         raise ValidationError(UNEXPECTED)
     require_resolution(resolution_minutes)
-    now = now or timezone.now()
     today = now.astimezone(ZoneInfo(plant.region.timezone)).date()
-    policy = plant_policy(source, target_date, today, as_of=as_of is not None)
+    policy = plant_policy(source, target_date, today)
     if not plant_days_include(policy, target_date, today):
         raise _outside(policy)
-    require_known_cutoff(as_of, now)
     match policy:
-        case Policy.ARCHIVE | Policy.ISSUANCE:
-            return issued_forecast(plant, target_date, resolution_minutes, now, as_of=as_of)
-        case Policy.AUTOMATIC:
-            return automatic_forecast(plant, target_date, resolution_minutes, now)
-        case Policy.LIVE | Policy.LIVE_ACTUALS:
-            return current_forecast(
-                plant, target_date, resolution_minutes, now, actuals=LIVE_MODES[policy]
+        case Policy.LIVE_ACTUALS:
+            answer = current_forecast(plant, target_date, resolution_minutes, now, actuals="only")
+        case Policy.ARCHIVED_ACTUALS:
+            answer = _past_actuals(
+                plant, target_date=target_date, resolution_minutes=resolution_minutes, now=now
             )
-    return _past_actuals(
-        plant,
-        target_date=target_date,
-        resolution_minutes=resolution_minutes,
-        as_of=as_of,
-        fallback=policy is Policy.ACTUALS_THEN_SAVED_FORECAST,
-        now=now,
-    )
+        case _:
+            return forecast_outlook(
+                plant,
+                target_date,
+                resolution_minutes,
+                day=day_of(target_date, today),
+                policy=policy,
+                forecast_id=forecast_id,
+                now=now,
+            )
+    return answer | {"selection": None}

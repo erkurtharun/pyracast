@@ -114,7 +114,7 @@ def test_region_history_preserves_application_validation_response(
 
     monkeypatch.setattr("pyracast.forecasts.outlook.regional_history", invalid_history)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"
-    response = client.get(path, {"date": DAY.isoformat(), "data_source": "estimated_actuals"})
+    response = client.get(path, {"date": DAY.isoformat(), "data_source": "satellite"})
     assert response.status_code == 400
     assert response.json() == (
         {"code": "invalid_request", "message": "Invalid saved irradiance."}
@@ -131,7 +131,7 @@ def test_region_history_preserves_application_validation_response(
     ("target_date", "source", "code"),
     [
         ("2025-01-01", "forecast", "date_out_of_range"),
-        ("2026-11-10", "estimated_actuals", "completed_day_required"),
+        ("2026-11-10", "satellite", "completed_day_required"),
     ],
 )
 def test_region_outlook_preserves_request_error_codes(
@@ -167,12 +167,12 @@ def test_region_forecast_excludes_vintages_not_yet_available(
     publish_snapshot(
         newer, published_at=cutoff if future_field == "published_at" else newer.collected_at
     )
-    response = client.get(path, {"date": DAY.isoformat(), "data_source": "archived_forecast"})
+    response = client.get(path, {"date": DAY.isoformat(), "data_source": "forecast"})
     assert response.status_code == 200
     assert response.json()["result"]["provenance"]["snapshot_id"] == older.pk
 
 
-def test_region_history_preserves_missing_actuals_and_explicit_forecast_archive(
+def test_region_history_keeps_missing_satellite_data_apart_from_a_late_forecast(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(timezone, "now", lambda: NOW)
@@ -184,24 +184,21 @@ def test_region_history_preserves_missing_actuals_and_explicit_forecast_archive(
     ForecastResult.objects.create(
         snapshot=forecast, payload={"marker": "archive"}, published_at=NOW
     )
-    for source in ("auto", "estimated_actuals"):
-        missing = client.get(path, {"date": DAY.isoformat(), "data_source": source}).json()
-        assert missing["source_kind"] == "estimated_actuals"
-        assert missing["result"] is None
-        assert missing["unavailable_reason"] == "estimated_actuals_unavailable"
+    satellite = {"date": DAY.isoformat(), "data_source": "satellite"}
+    missing = client.get(path, satellite).json()
+    assert missing["source_kind"] == "estimated_actuals"
+    assert missing["result"] is None
+    assert missing["unavailable_reason"] == "estimated_actuals_unavailable"
     actual = actual_for(system)
-    response = client.get(path, {"date": DAY.isoformat(), "data_source": "auto"})
+    response = client.get(path, satellite)
     assert response.status_code == 200
     assert response.json()["source_kind"] == "estimated_actuals"
     assert response.json()["result"]["vintage"]["source_kind"] == "estimated_actuals"
     assert response.json()["collected_at"] == actual.collected_at.isoformat().replace("+00:00", "Z")
-    archive = client.get(path, {"date": DAY.isoformat(), "data_source": "forecast"})
-    assert (archive.status_code, archive.json()["code"]) == (400, "date_out_of_range")
-    assert (
-        client.get(path, {"date": "2026-11-10", "data_source": "estimated_actuals"}).status_code
-        == 400
-    )
-    today = client.get(path, {"date": "2026-11-09", "data_source": "estimated_actuals"})
+    late = client.get(path, {"date": DAY.isoformat(), "data_source": "forecast"}).json()
+    assert (late["result"], late["unavailable_reason"]) == (None, "forecast_unavailable")
+    assert client.get(path, {"date": "2026-11-10", "data_source": "satellite"}).status_code == 400
+    today = client.get(path, {"date": "2026-11-09", "data_source": "satellite"})
     assert today.status_code == 200
     assert today.json()["source_kind"] == "estimated_actuals"
     assert today.json()["result"] is None
@@ -214,7 +211,7 @@ def test_region_history_respects_binding_status_and_tenant(monkeypatch: pytest.M
     client = Client()
     client.force_login(system.member)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"
-    query = {"date": DAY.isoformat(), "data_source": "estimated_actuals"}
+    query = {"date": DAY.isoformat(), "data_source": "satellite"}
     assert client.get(path, query).json()["freshness"] == "archived"
     Region.objects.filter(pk=system.region.pk).update(status="suspended")
     assert client.get(path, query).json()["freshness"] == "archived"

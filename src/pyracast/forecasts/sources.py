@@ -1,4 +1,5 @@
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import cast
 
@@ -7,28 +8,24 @@ from django.db.models import Q, QuerySet
 from pyracast.connections.contracts import ProviderData
 from pyracast.errors import BusyError, ErrorCode
 from pyracast.forecasts.models import CollectionJobStatus, ForecastSnapshot
+from pyracast.forecasts.selection import ForecastOption
 from pyracast.intervals import NormalizedInterval
 from pyracast.irradiance import SourceKind
 
 
-def mark_forecast_fallback(payload: dict[str, object], cutoff: datetime) -> None:
-    flags = payload.get("quality_flags")
-    payload["quality_flags"] = [*(flags if isinstance(flags, list) else []), "forecast_fallback"]
-    provenance = payload.get("provenance")
-    if not isinstance(provenance, dict):
-        provenance = {}
-        payload["provenance"] = provenance
-    provenance.update(
-        fallback_reason="estimated_actuals_unavailable", selection_cutoff=cutoff.isoformat()
-    )
+@dataclass(frozen=True)
+class LaterFetches:
+    """Fetches made after a day's sunrise, with the moment each became known."""
+
+    options: tuple[ForecastOption, ...] = ()
+    known_at: Mapping[int, datetime] = field(default_factory=dict)
 
 
-def current_forecast_snapshots(
-    *, binding_id: int, start: datetime, end: datetime, as_of: datetime
-) -> list[ForecastSnapshot]:
-    return covering_snapshots(
-        ForecastSnapshot.objects.select_related("job")
-        .filter(
+def _known_forecasts(
+    binding_id: int, start: datetime, end: datetime, as_of: datetime
+) -> QuerySet[ForecastSnapshot]:
+    return (
+        ForecastSnapshot.objects.filter(
             binding_id=binding_id,
             job__status=CollectionJobStatus.SUCCEEDED,
             source_kind="forecast",
@@ -39,9 +36,29 @@ def current_forecast_snapshots(
             forecastresult__published_at__lte=as_of,
         )
         .filter(Q(issued_at__isnull=True) | Q(issued_at__lte=as_of))
-        .order_by("-collected_at", "-available_at", "-pk"),
-        start,
-        end,
+        .order_by("-collected_at", "-available_at", "-pk")
+    )
+
+
+def current_forecast_snapshots(
+    *, binding_id: int, start: datetime, end: datetime, as_of: datetime
+) -> list[ForecastSnapshot]:
+    return covering_snapshots(
+        _known_forecasts(binding_id, start, end, as_of).select_related("job"), start, end
+    )
+
+
+def later_fetches(
+    binding_id: int, start: datetime, end: datetime, sunrise: datetime, now: datetime
+) -> LaterFetches:
+    rows = list(
+        _known_forecasts(binding_id, start, end, now)
+        .filter(collected_at__gte=sunrise)
+        .values_list("pk", "collected_at", "forecastresult__published_at")
+    )
+    return LaterFetches(
+        tuple(ForecastOption(pk, collected_at) for pk, collected_at, _ in rows),
+        {pk: published_at for pk, _, published_at in rows},
     )
 
 

@@ -145,10 +145,12 @@ def test_live_outlook_rejects_contaminated_factor_without_rewriting_saved_foreca
     ready = ready_run(system, plant)
     activate_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk, ready.pk)
     target = date(2026, 11, 10)
-    publish_snapshot(snapshot_for(system, target, collected_at=NOW))
+    source = publish_snapshot(snapshot_for(system, target, collected_at=NOW))
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     original = plant_outlook(*scope, target_date=target, resolution_minutes=60)
-    archived = plant_outlook(*scope, target_date=target, resolution_minutes=60, as_of=NOW)
+    archived = plant_outlook(
+        *scope, target_date=target, resolution_minutes=60, forecast_id=source.pk
+    )
     saved = ForecastIssuance.objects.get()
     frozen_payloads = saved.payloads
     assert cast(dict[str, Any], original["result"])["factor"] == 0.5
@@ -161,7 +163,9 @@ def test_live_outlook_rejects_contaminated_factor_without_rewriting_saved_foreca
     assert "uncalibrated" in cast(dict[str, Any], current["result"])["quality_flags"]
     saved.refresh_from_db()
     assert saved.payloads == frozen_payloads
-    historical = plant_outlook(*scope, target_date=target, resolution_minutes=60, as_of=NOW)
+    historical = plant_outlook(
+        *scope, target_date=target, resolution_minutes=60, forecast_id=source.pk
+    )
     assert cast(dict[str, Any], historical["result"])["factor"] == 0.5
     with pytest.raises(ValidationError, match="Outages in its period changed"):
         activate_calibration(*scope, ready.pk)
@@ -202,7 +206,7 @@ def test_outlook_shows_partial_outage_then_single_forecast_after_resolution(
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=1))
     actual_snapshot_for(system, day)
     retrospective = plant_outlook(
-        *scope, target_date=day, resolution_minutes=60, source="estimated_actuals"
+        *scope, target_date=day, resolution_minutes=60, source="satellite"
     )
     assert cast(dict[str, Any], retrospective["outage_scenario"])["result"]["energy_mwh"] == 1222
 

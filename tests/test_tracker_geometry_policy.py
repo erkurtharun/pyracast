@@ -166,13 +166,13 @@ def test_a_stored_v1_issuance_and_its_outage_scenario_replay_unchanged_under_the
     system, plant, _ = _tracking_plant(monkeypatch)
     _default(monkeypatch, MODEL_V1)
     incident(system, plant, NOW - timedelta(hours=1), None)
-    publish_snapshot(snapshot_for(system, DAY, collected_at=NOW))
-    stored = _outlook(system, plant, DAY, as_of=NOW)
+    saved = publish_snapshot(snapshot_for(system, DAY, collected_at=NOW))
+    stored = _outlook(system, plant, DAY, forecast_id=saved.pk)
     normal = cast(dict[str, Any], stored["result"])
     scenario = cast(dict[str, Any], stored["outage_scenario"])["result"]
     assert normal["model_version"] == scenario["model_version"] == MODEL_V1
     _default(monkeypatch, MODEL_V2)
-    assert _outlook(system, plant, DAY, as_of=NOW) == stored
+    assert _outlook(system, plant, DAY, forecast_id=saved.pk) == stored
     assert ForecastIssuance.objects.get().model_version == MODEL_V1
 
 

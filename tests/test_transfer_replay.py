@@ -4,6 +4,7 @@ from typing import Any, cast
 import pytest
 
 from pyracast.connections.models import SiteBinding
+from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.plants.activation import activate_calibration
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration
@@ -22,7 +23,9 @@ def _declare_tracking(system: System, plant: Plant) -> None:
     PlantConfiguration.objects.filter(plant=plant).update(mounting_type="tracking")
 
 
-def _replay(system: System, plant: Plant, resolution_minutes: int) -> dict[str, Any]:
+def _replay(
+    system: System, plant: Plant, resolution_minutes: int, saved: ForecastSnapshot
+) -> dict[str, Any]:
     return plant_outlook(
         system.member,
         system.tenant.pk,
@@ -30,7 +33,7 @@ def _replay(system: System, plant: Plant, resolution_minutes: int) -> dict[str, 
         plant.pk,
         target_date=DAY,
         resolution_minutes=resolution_minutes,
-        as_of=NOW,
+        forecast_id=saved.pk,
     )
 
 
@@ -40,20 +43,20 @@ def test_saved_forecast_keeps_its_calibration_after_the_transfer_model_changes(
     system, plant = make_plant(monkeypatch)
     run = ready_run(system, plant)
     activate_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk)
-    publish_snapshot(snapshot_for(system, DAY, collected_at=NOW))
-    saved = _replay(system, plant, 60)
+    source = publish_snapshot(snapshot_for(system, DAY, collected_at=NOW))
+    saved = _replay(system, plant, 60, source)
     assert saved["calibration_id"] == run.pk
     assert cast(dict[str, Any], saved["result"])["model_version"] == MODEL_VERSION
     _declare_tracking(system, plant)
-    assert _replay(system, plant, 60) == saved
+    assert _replay(system, plant, 60, source) == saved
     assert ForecastIssuance.objects.count() == 1
-    fresh = _replay(system, plant, 30)
+    fresh = _replay(system, plant, 30, source)
     payload = cast(dict[str, Any], fresh["result"])
     assert fresh["calibration_id"] == run.pk
     assert payload["factor"] == 0.5
     assert payload["model_version"] == MODEL_VERSION
     assert "uncalibrated" not in payload["quality_flags"]
-    assert _replay(system, plant, 30) == fresh
+    assert _replay(system, plant, 30, source) == fresh
     assert ForecastIssuance.objects.count() == 1
 
 
@@ -62,18 +65,10 @@ def test_outage_scenario_replays_the_transfer_model_of_its_saved_forecast(
 ) -> None:
     system, plant = make_plant(monkeypatch)
     incident(system, plant, NOW - timedelta(hours=1), None)
-    publish_snapshot(snapshot_for(system, DAY, collected_at=NOW))
-    _replay(system, plant, 60)
+    source = publish_snapshot(snapshot_for(system, DAY, collected_at=NOW))
+    _replay(system, plant, 60, source)
     _declare_tracking(system, plant)
-    result = plant_outlook(
-        system.member,
-        system.tenant.pk,
-        system.region.pk,
-        plant.pk,
-        target_date=DAY,
-        resolution_minutes=60,
-        as_of=NOW,
-    )
+    result = _replay(system, plant, 60, source)
     normal = cast(dict[str, Any], result["result"])
     scenario = cast(dict[str, Any], result["outage_scenario"])["result"]
     assert normal["model_version"] == scenario["model_version"] == MODEL_VERSION

@@ -20,9 +20,8 @@ CURRENT = NOW + timedelta(days=2)
 
 
 @pytest.mark.parametrize("resolution", [30, 60])
-@pytest.mark.parametrize("source", ["forecast", "auto"])
 def test_intraday_update_keeps_archived_morning_in_current_outlook_and_api(
-    monkeypatch: pytest.MonkeyPatch, resolution: int, source: str
+    monkeypatch: pytest.MonkeyPatch, resolution: int
 ) -> None:
     system, plant = make_plant(monkeypatch)
     start, end = local_day_bounds(DAY, system.binding.timezone)
@@ -46,7 +45,7 @@ def test_intraday_update_keeps_archived_morning_in_current_outlook_and_api(
     monkeypatch.setattr(timezone, "now", lambda: CURRENT)
     requests = RequestAttempt.objects.count()
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
-    outlook = plant_outlook(*scope, target_date=DAY, resolution_minutes=resolution, source=source)
+    outlook = plant_outlook(*scope, target_date=DAY, resolution_minutes=resolution)
     payload = cast(dict[str, Any], outlook["result"])
     assert payload["energy_mwh"] == pytest.approx(487.5)
     assert outlook["freshness"] == "stale"
@@ -85,7 +84,7 @@ def test_intraday_update_keeps_archived_morning_in_current_outlook_and_api(
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/"
     response = client.get(
         path,
-        {"date": DAY.isoformat(), "resolution_minutes": str(resolution), "data_source": source},
+        {"date": DAY.isoformat(), "resolution_minutes": str(resolution), "data_source": "forecast"},
     )
     assert response.status_code == 200, response.content
     assert response.json()["result"] == payload
@@ -234,55 +233,7 @@ def test_outage_scenario_and_dropped_calibration_keep_composite_morning(
         assert normal["provenance"]["calibration_assessment"] == "uncalibrated"
 
 
-def test_past_day_fallback_keeps_composite_sources_after_a_late_training_outage(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    system, plant = make_plant(monkeypatch)
-    scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
-    calibration = ready_run(system, plant)
-    activate_calibration(*scope, calibration.pk)
-    old = publish_snapshot(snapshot_for(system, DAY, power_kw=0.1))
-    latest = snapshot_for(system, DAY, power_kw=0.2, collected_at=CURRENT - timedelta(hours=5))
-    latest.normalized_intervals = latest.normalized_intervals[21:]
-    publish_snapshot(latest)
-    monkeypatch.setattr(timezone, "now", lambda: CURRENT + timedelta(days=1))
-    before = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, source="auto")
-    calibrated = cast(dict[str, Any], before["result"])
-    assert calibrated["factor"] == 0.5
-    assert calibrated["energy_mwh"] == pytest.approx(243.75)
-    assert "forecast_fallback" in calibrated["quality_flags"]
-    training_start, _ = local_day_bounds(date(2026, 11, 4), system.binding.timezone)
-    save_incident(
-        *scope,
-        kind="panels",
-        title="Corrected training outage",
-        notes="",
-        starts_at=training_start + timedelta(hours=9),
-        ends_at=training_start + timedelta(hours=10),
-        available_dc_mw=65,
-        available_inverter_mw=None,
-        available_export_mw=None,
-    )
-    after = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, source="auto")
-    normal = cast(dict[str, Any], after["result"])
-    assert after["calibration_id"] is None
-    assert after["outage_scenario"] is None
-    assert normal["factor"] == 1
-    assert normal["energy_mwh"] == pytest.approx(487.5)
-    assert normal["intervals"][9]["mean_power_mw"] == pytest.approx(13)
-    assert normal["intervals"][9]["source_snapshot_ids"] == [old.pk]
-    assert normal["intervals"][13]["mean_power_mw"] == pytest.approx(26)
-    assert normal["intervals"][13]["source_snapshot_ids"] == [latest.pk]
-    assert "calibration_invalidated_by_outage_history" in normal["quality_flags"]
-    assert "forecast_fallback" in normal["quality_flags"]
-    assert normal["provenance"]["selection_policy"] == "latest-forecast-coverage-v2"
-    for key in ("fallback_reason", "selection_cutoff"):
-        assert normal["provenance"][key] == calibrated["provenance"][key]
-    for key in ("source_snapshot_ids", "source_snapshots", "source_segments", "source_intervals"):
-        assert normal["provenance"][key] == calibrated["provenance"][key]
-
-
-def test_explicit_as_of_stays_on_day_ahead_snapshot_without_vintage_composition(
+def test_a_chosen_forecast_stays_on_its_saved_record_without_vintage_composition(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
@@ -292,8 +243,7 @@ def test_explicit_as_of_stays_on_day_ahead_snapshot_without_vintage_composition(
     publish_snapshot(latest)
     monkeypatch.setattr(timezone, "now", lambda: CURRENT)
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
-    cutoff = local_day_bounds(DAY, system.binding.timezone)[0]
-    replay = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, as_of=cutoff)
+    replay = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, forecast_id=first.pk)
     payload = cast(dict[str, Any], replay["result"])
     assert payload["energy_mwh"] == pytest.approx(312)
     assert payload["provenance"]["snapshot_id"] == first.pk

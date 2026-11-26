@@ -60,23 +60,22 @@ def _numbers(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-@pytest.mark.parametrize("source", ["auto", "estimated_actuals"])
 def test_past_region_day_numbers_equal_the_pinned_numbers(
-    monkeypatch: pytest.MonkeyPatch, source: str
-) -> None:
-    system, plant = make_plant(monkeypatch)
-    add_history(system, plant, range(2))
-    response = _read(_history(system), system, source)
-    assert response.status_code == 200
-    assert _numbers(response.json()) == PINNED_ACTUALS
-
-
-def test_region_archived_forecast_is_the_forecast_published_before_the_day(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
     add_history(system, plant, range(2))
-    response = _read(_history(system), system, "archived_forecast")
+    response = _read(_history(system), system, "satellite")
+    assert response.status_code == 200
+    assert _numbers(response.json()) == PINNED_ACTUALS
+
+
+def test_region_past_forecast_is_the_latest_forecast_published_before_the_day(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    add_history(system, plant, range(2))
+    response = _read(_history(system), system, "forecast")
     assert response.status_code == 200
     body = response.json()
     assert body["source_kind"] == "forecast"
@@ -106,15 +105,15 @@ def test_region_archive_skips_a_forecast_issued_after_its_acquisition(
     )
     client = Client()
     client.force_login(system.member)
-    body = _read(client, system, "archived_forecast").json()
+    body = _read(client, system, "forecast").json()
     assert (body["freshness"], body["result"]) == ("missing", None)
 
 
-def test_region_archived_forecast_without_an_issued_forecast_is_missing(
+def test_region_past_forecast_without_a_forecast_published_before_the_day_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, _ = make_plant(monkeypatch)
-    response = _read(_history(system), system, "archived_forecast")
+    response = _read(_history(system), system, "forecast")
     assert response.status_code == 200
     body = response.json()
     assert (body["freshness"], body["unavailable_reason"], body["result"]) == (
@@ -126,7 +125,7 @@ def test_region_archived_forecast_without_an_issued_forecast_is_missing(
 
 @pytest.mark.parametrize(
     ("source", "offset"),
-    [("forecast", -1), ("archived_forecast", 1), ("estimated_actuals", 1)],
+    [("forecast", -367), ("satellite", 1)],
 )
 def test_region_sources_keep_their_date_bounds(
     monkeypatch: pytest.MonkeyPatch, source: str, offset: int
@@ -140,7 +139,7 @@ def test_region_sources_keep_their_date_bounds(
 
 
 @pytest.mark.parametrize("scope", ["plant", "region"])
-def test_forecast_reads_default_to_the_automatic_source(
+def test_forecast_reads_default_to_the_forecast(
     monkeypatch: pytest.MonkeyPatch, scope: str
 ) -> None:
     system, plant = make_plant(monkeypatch)
@@ -151,7 +150,8 @@ def test_forecast_reads_default_to_the_automatic_source(
     url = f"{region}plants/{plant.pk}/forecast/" if scope == "plant" else f"{region}forecast/"
     response = client.get(url, {"date": str(DAY)})
     assert response.status_code == 200
-    assert response.json()["source_kind"] == "estimated_actuals"
+    assert response.json()["source_kind"] == "forecast"
+    assert response.json()["selection"]["mode"] == "auto"
 
 
 def test_a_region_archive_whose_saved_payload_fails_validation_is_missing(
@@ -169,5 +169,5 @@ def test_a_region_archive_whose_saved_payload_fails_validation_is_missing(
     )
     client = Client()
     client.force_login(system.member)
-    body = _read(client, system, "archived_forecast").json()
+    body = _read(client, system, "forecast").json()
     assert (body["freshness"], body["result"]) == ("missing", None)

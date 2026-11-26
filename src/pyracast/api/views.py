@@ -125,10 +125,12 @@ class RegionForecastView(APIView):
             region = tenant_region(tenant_id, region_id)
             query = ForecastQuery(data=request.query_params)
             query.is_valid(raise_exception=True)
+            values = query.validated_data
             result = regional_outlook(
                 region,
-                query.validated_data["date"],
-                query.validated_data["data_source"],
+                values["date"],
+                values["data_source"],
+                values.get("forecast_id"),
                 timezone.now(),
             )
         return Response(ForecastOutput(result).data)

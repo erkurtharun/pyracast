@@ -18,10 +18,9 @@ from tests.support.plant_operations import make_plant
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
-@pytest.mark.parametrize("source", ["auto", "estimated_actuals"])
 @pytest.mark.parametrize("scope", ["region", "plant"])
 def test_completed_day_api_composes_actuals_acquired_during_that_day(
-    monkeypatch: pytest.MonkeyPatch, source: str, scope: str
+    monkeypatch: pytest.MonkeyPatch, scope: str
 ) -> None:
     system, plant = make_plant(monkeypatch)
     morning = acquired_actuals(system, 7, 12, 0.1)
@@ -33,7 +32,7 @@ def test_completed_day_api_composes_actuals_acquired_during_that_day(
     base = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/"
     path = base + (f"plants/{plant.pk}/forecast/" if scope == "plant" else "forecast/")
     attempts = RequestAttempt.objects.count()
-    response = client.get(path, {"date": DAY.isoformat(), "data_source": source})
+    response = client.get(path, {"date": DAY.isoformat(), "data_source": "satellite"})
     assert response.status_code == 200, response.content
     body = response.json()
     assert body["source_kind"] == "estimated_actuals"
@@ -106,7 +105,7 @@ def test_archived_actual_composition_excludes_later_publication_and_other_tenant
     client = Client()
     client.force_login(system.member)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/"
-    response = client.get(path, {"date": DAY.isoformat(), "data_source": "auto"})
+    response = client.get(path, {"date": DAY.isoformat(), "data_source": "satellite"})
     assert response.status_code == 200, response.content
     result = cast(dict[str, Any], response.json()["result"])
     assert result["daylight"]["energy_mwh"] == pytest.approx(214.5)
@@ -115,4 +114,6 @@ def test_archived_actual_composition_excludes_later_publication_and_other_tenant
     assert outsider.pk not in result["provenance"]["source_snapshot_ids"]
     assert other_revision.pk not in result["provenance"]["source_snapshot_ids"]
     client.force_login(other)
-    assert client.get(path, {"date": DAY.isoformat(), "data_source": "auto"}).status_code == 403
+    assert (
+        client.get(path, {"date": DAY.isoformat(), "data_source": "satellite"}).status_code == 403
+    )

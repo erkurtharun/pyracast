@@ -38,7 +38,6 @@ NOT_POLLED = frozenset(
         "api/tenants/<int:tenant_id>/trash/regions/",
         f"{REGION}location-change-requests/",
         f"{REGION}reminders/",
-        f"{PLANT}days/",
         f"{PLANT}outages/",
         f"{PLANT}production-source/",
         f"{PLANT}performance/",

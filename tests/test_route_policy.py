@@ -28,9 +28,8 @@ TENANT = "api/tenants/<int:tenant_id>/"
 REGION = TENANT + "regions/<int:region_id>/"
 PLANT = REGION + "plants/<int:plant_id>/"
 PUBLIC, ACCOUNT, MEMBER, ADMIN = "public", "account", "member", "admin"
-FORECAST, DAYS, CALIBRATION, IMPORT, SUBMISSION, INVITATION = (
+FORECAST, CALIBRATION, IMPORT, SUBMISSION, INVITATION = (
     "forecast",
-    "days",
     "calibration",
     "production_import",
     "submission",
@@ -78,7 +77,6 @@ POLICIES: dict[str, dict[str, tuple[str, str | None]]] = {
     PLANT + "calibrations/<int:calibration_id>/activate/": {"POST": (ADMIN, None)},
     PLANT + "change-requests/incidents/": {"POST": (MEMBER, SUBMISSION)},
     PLANT + "change-requests/production/": {"POST": (MEMBER, IMPORT)},
-    PLANT + "days/": {"GET": (MEMBER, DAYS)},
     PLANT + "forecast/": {"GET": (MEMBER, FORECAST)},
     PLANT + "outages/": {"GET": (MEMBER, None), "POST": (ADMIN, None)},
     PLANT + "outages/<int:incident_id>/": {"PUT": (ADMIN, None)},
@@ -146,7 +144,6 @@ ANSWERS: dict[str, dict[str, tuple[int, str | None]]] = {
     PLANT + "calibrations/<int:calibration_id>/activate/": {"POST": NO_CONFIGURATION},
     PLANT + "change-requests/incidents/": {"POST": INVALID},
     PLANT + "change-requests/production/": {"POST": INVALID},
-    PLANT + "days/": {"GET": OK},
     PLANT + "forecast/": {"GET": OK},
     PLANT + "outages/": {"GET": OK, "POST": INVALID},
     PLANT + "outages/<int:incident_id>/": {"PUT": INVALID},

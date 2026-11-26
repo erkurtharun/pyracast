@@ -111,7 +111,7 @@ def test_provisional_fit_freezes_sources_then_settlement_prepares_a_new_candidat
     moment = NOW + timedelta(minutes=1)
     monkeypatch.setattr(timezone, "now", lambda: moment)
     activate_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk)
-    publish_snapshot(snapshot_for(system, date(2026, 11, 10), collected_at=moment))
+    saved = publish_snapshot(snapshot_for(system, date(2026, 11, 10), collected_at=moment))
     outlook = plant_outlook(
         system.member,
         system.tenant.pk,
@@ -119,7 +119,7 @@ def test_provisional_fit_freezes_sources_then_settlement_prepares_a_new_candidat
         plant.pk,
         target_date=date(2026, 11, 10),
         resolution_minutes=60,
-        as_of=moment,
+        forecast_id=saved.pk,
     )
     numerical = cast(dict[str, Any], outlook["result"])
     assert outlook["calibration_id"] == run.pk
@@ -322,12 +322,9 @@ def test_changed_production_identity_uses_baseline_and_preserves_archived_foreca
         system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk
     )
     target = date(2026, 11, 10)
-    publish_snapshot(snapshot_for(system, target, collected_at=moment))
+    saved = publish_snapshot(snapshot_for(system, target, collected_at=moment))
     args = (system.member, system.tenant.pk, system.region.pk, plant.pk)
-    historical_cutoff = moment
-    archived = plant_outlook(
-        *args, target_date=target, resolution_minutes=60, as_of=historical_cutoff
-    )
+    archived = plant_outlook(*args, target_date=target, resolution_minutes=60, forecast_id=saved.pk)
     live = plant_outlook(*args, target_date=target, resolution_minutes=60)
     assert archived["calibration_id"] == run.pk
     assert live["calibration_id"] == run.pk
@@ -343,10 +340,8 @@ def test_changed_production_identity_uses_baseline_and_preserves_archived_foreca
     assert numerical["energy_mwh"] == 1248
     assert "uncalibrated" in numerical["quality_flags"]
     assert "provisional_production_calibration" not in numerical["quality_flags"]
-    replay = plant_outlook(
-        *args, target_date=target, resolution_minutes=60, as_of=historical_cutoff
-    )
-    assert replay == archived
+    replay = plant_outlook(*args, target_date=target, resolution_minutes=60, forecast_id=saved.pk)
+    assert {**replay, "as_of": archived["as_of"]} == archived
     for offset in range(8):
         reported(connection, configuration, FIRST_DAY + timedelta(days=offset), minute=2)
     replacement = prepare_calibration(plant.pk)

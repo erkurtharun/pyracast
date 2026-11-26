@@ -19,7 +19,7 @@ def test_archive_api_replays_published_source_without_creating_a_plant_forecast(
     client = Client()
     client.force_login(system.member)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/"
-    response = client.get(path, {"date": DAY.isoformat(), "data_source": "archived_forecast"})
+    response = client.get(path, {"date": DAY.isoformat(), "data_source": "forecast"})
     assert response.status_code == 200
     payload = response.json()
     assert payload["source_kind"] == "forecast"
@@ -30,7 +30,7 @@ def test_archive_api_replays_published_source_without_creating_a_plant_forecast(
             path,
             {
                 "date": (NOW.date() + timedelta(days=1)).isoformat(),
-                "data_source": "archived_forecast",
+                "data_source": "satellite",
             },
         ).status_code
         == 400
@@ -38,14 +38,12 @@ def test_archive_api_replays_published_source_without_creating_a_plant_forecast(
     other = Tenant.objects.create(name="Other")
     other_path = f"/api/tenants/{other.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/"
     assert (
-        client.get(
-            other_path, {"date": DAY.isoformat(), "data_source": "archived_forecast"}
-        ).status_code
+        client.get(other_path, {"date": DAY.isoformat(), "data_source": "forecast"}).status_code
         == 403
     )
 
 
-def test_archive_response_as_of_replays_an_issuance_published_after_collection(
+def test_a_chosen_forecast_replays_an_issuance_published_after_collection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
@@ -54,12 +52,13 @@ def test_archive_response_as_of_replays_an_issuance_published_after_collection(
     client = Client()
     client.force_login(system.member)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/"
-    query = {"date": DAY.isoformat(), "data_source": "archived_forecast"}
+    query = {"date": DAY.isoformat(), "data_source": "forecast"}
     response = client.get(path, query)
     assert response.status_code == 200
     original = response.json()
     assert original["result"]["provenance"]["snapshot_id"] == source.pk
     assert original["result"]["provenance"]["collected_at"] == source.collected_at.isoformat()
-    replay = client.get(path, {**query, "as_of": original["as_of"]})
+    replay = client.get(path, {**query, "forecast_id": str(source.pk)})
     assert replay.status_code == 200
-    assert replay.json() == original
+    assert replay.json()["result"] == original["result"]
+    assert replay.json()["selection"]["mode"] == "manual"
