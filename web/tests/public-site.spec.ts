@@ -55,16 +55,13 @@ for (const entry of pages) {
         const context = await browser.newContext({
             baseURL,
             javaScriptEnabled: false,
-            locale: "en-US",
+            locale: entry.language === "en" ? "en-US" : "tr-TR",
             viewport: { width: 320, height: 800 },
             extraHTTPHeaders: {
                 "x-pyracast-language": entry.language === "en" ? "tr" : "en",
             },
         });
         try {
-            await context.addCookies([
-                { name: "pyracast_language", value: "en", url: baseURL! },
-            ]);
             const page = await context.newPage();
             const apiRequests: string[] = [];
             page.on("request", (request) => {
@@ -166,10 +163,12 @@ for (const entry of pages) {
                     `header a[hreflang="${entry.language === "en" ? "tr" : "en"}"]`,
                 )
                 .click();
+            const chosen = entry.language === "en" ? "tr" : "en";
             await expect(page).toHaveURL(entry.alternate);
-            expect((await languageCookieOf(context))?.value).toBe(
-                entry.language === "en" ? "tr" : "en",
-            );
+            expect((await languageCookieOf(context))?.value).toBe(chosen);
+            await page.goto(entry.alternate);
+            await expect(page).toHaveURL(entry.alternate);
+            await expect(page.locator("html")).toHaveAttribute("lang", chosen);
         } finally {
             await context.close();
         }

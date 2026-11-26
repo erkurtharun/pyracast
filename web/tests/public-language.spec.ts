@@ -1,5 +1,10 @@
-import type { APIResponse, Request } from "@playwright/test";
-import { test, expect } from "./support/test";
+import type {
+    APIResponse,
+    BrowserContext,
+    Locator,
+    Request,
+} from "@playwright/test";
+import { test, expect, type Page } from "./support/test";
 import { languageCookieOf } from "./support/language-cookie";
 import negotiation from "./support/language-negotiation.json";
 import { productionServer } from "./support/server";
@@ -173,17 +178,27 @@ test.describe("in a Turkish browser", () => {
     });
 });
 
-test("a signed-in person's choice on the public site is saved as their preference", async ({
-    page,
-    context,
-    baseURL,
-}) => {
+function navigationTo(pathname: string) {
+    return (request: Request) =>
+        request.isNavigationRequest() &&
+        new URL(request.url()).pathname === pathname;
+}
+
+async function signedInOnTurkishPrivacy(
+    page: Page,
+    context: BrowserContext,
+    baseURL: string,
+    sessionAnswered: Promise<void> = Promise.resolve(),
+) {
     await context.addCookies([
-        { name: "pyracast_language", value: "tr", url: baseURL! },
+        { name: "pyracast_language", value: "tr", url: baseURL },
     ]);
-    await page.route("**/api/session/", (route) =>
-        route.fulfill({ json: sessionAnswer(firstAccount, null) }),
-    );
+    const reads: Request[] = [];
+    await page.route("**/api/session/", async (route) => {
+        reads.push(route.request());
+        await sessionAnswered;
+        await route.fulfill({ json: sessionAnswer(firstAccount, null) });
+    });
     const saves: Request[] = [];
     await page.route("**/api/session/language/", (route) => {
         saves.push(route.request());
@@ -193,7 +208,20 @@ test("a signed-in person's choice on the public site is saved as their preferenc
     });
     await page.goto("/privacy/");
     await expect(page).toHaveURL("/tr/privacy/");
-    await page.locator('header a[hreflang="en"]').click();
+    return { reads, saves, link: page.locator('header a[hreflang="en"]') };
+}
+
+test("a signed-in person's choice on the public site is saved as their preference", async ({
+    page,
+    context,
+    baseURL,
+}) => {
+    const { saves, link } = await signedInOnTurkishPrivacy(
+        page,
+        context,
+        baseURL!,
+    );
+    await link.click();
     await expect(page).toHaveURL("/privacy/");
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     expect(saves).toHaveLength(1);
@@ -210,31 +238,101 @@ test("the language link saves a signed-in choice and then follows the link", asy
     context,
     baseURL,
 }) => {
-    await context.addCookies([
-        { name: "pyracast_language", value: "tr", url: baseURL! },
-    ]);
-    await page.route("**/api/session/", (route) =>
-        route.fulfill({ json: sessionAnswer(firstAccount, null) }),
-    );
-    await page.route("**/api/session/language/", (route) =>
-        route.fulfill({
-            json: { ...sessionAnswer(firstAccount, null), language: "en" },
-        }),
-    );
-    await page.goto("/privacy/");
-    await expect(page).toHaveURL("/tr/privacy/");
+    const { link } = await signedInOnTurkishPrivacy(page, context, baseURL!);
     await page.route(
         (url) => url.pathname === "/privacy/",
         (route) => route.fulfill({ status: 204 }),
     );
     const saved = page.waitForRequest("**/api/session/language/");
-    const followed = page.waitForRequest(
-        (request) =>
-            request.isNavigationRequest() &&
-            new URL(request.url()).pathname === "/privacy/",
-    );
-    await page.locator('header a[hreflang="en"]').click();
+    const followed = page.waitForRequest(navigationTo("/privacy/"));
+    await link.click();
     await saved;
     await followed;
     await expect(page).toHaveURL("/tr/privacy/");
+});
+
+const activationsTheBrowserOpens = {
+    "a control click": { modifiers: ["ControlOrMeta"] },
+    "a middle click": { button: "middle" },
+} satisfies Record<string, Parameters<Locator["click"]>[0]>;
+
+for (const [activation, options] of Object.entries(activationsTheBrowserOpens))
+    test(`${activation} on the language link saves a signed-in choice and keeps the page where it is`, async ({
+        page,
+        context,
+        baseURL,
+    }) => {
+        const { saves, link } = await signedInOnTurkishPrivacy(
+            page,
+            context,
+            baseURL!,
+        );
+        const opened = context.waitForEvent("page");
+        const saved = page.waitForRequest("**/api/session/language/");
+        await link.click(options);
+        await (await saved).response();
+        await expect(await opened).toHaveURL("/privacy/");
+        await expect(page).toHaveURL("/tr/privacy/");
+        expect(saves).toHaveLength(1);
+        expect(saves[0]!.postDataJSON()).toEqual({ language: "en" });
+    });
+
+test("two quick clicks on the language link send one save and then follow the link", async ({
+    page,
+    context,
+    baseURL,
+}) => {
+    const sessionAnswered = Promise.withResolvers<void>();
+    const { reads, saves, link } = await signedInOnTurkishPrivacy(
+        page,
+        context,
+        baseURL!,
+        sessionAnswered.promise,
+    );
+    await page.route(
+        (url) => url.pathname === "/privacy/",
+        (route) => route.fulfill({ status: 204 }),
+    );
+    const followed = page.waitForRequest(navigationTo("/privacy/"));
+    await link.click();
+    await link.click();
+    sessionAnswered.resolve();
+    await followed;
+    expect(reads).toHaveLength(1);
+    expect(saves).toHaveLength(1);
+    await expect(page).toHaveURL("/tr/privacy/");
+});
+
+test("a save still pending when the person follows another link does not bring them back", async ({
+    page,
+    context,
+    baseURL,
+}) => {
+    const sessionAnswered = Promise.withResolvers<void>();
+    const { link } = await signedInOnTurkishPrivacy(
+        page,
+        context,
+        baseURL!,
+        sessionAnswered.promise,
+    );
+    const termsAnswered = Promise.withResolvers<void>();
+    await page.route(
+        (url) => url.pathname === "/tr/terms/",
+        async (route) => {
+            await termsAnswered.promise;
+            await route.fallback();
+        },
+    );
+    const read = page.waitForRequest("**/api/session/");
+    await link.click();
+    await read;
+    const terms = page.waitForRequest(navigationTo("/tr/terms/"));
+    await page.locator('footer a[href="/tr/terms/"]').dispatchEvent("click");
+    await terms;
+    const saved = page.waitForRequest("**/api/session/language/");
+    sessionAnswered.resolve();
+    await (await saved).response();
+    termsAnswered.resolve();
+    await expect(page).toHaveURL("/tr/terms/");
+    await expect(page.locator("html")).toHaveAttribute("lang", "tr");
 });
