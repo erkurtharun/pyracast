@@ -436,9 +436,10 @@ test("a read refused after the document adopted another session during this tab'
     Object.assign(globalThis.window.localStorage, {
         setItem: (key: string, value: string) => {
             stored.set(key, value);
-            adopted ??= authRequest("account/providers", "GET").catch(
-                (failure) => failure,
-            );
+            if (key === "pyracast.sessionRevision")
+                adopted ??= authRequest("account/providers", "GET").catch(
+                    (failure) => failure,
+                );
         },
     });
     const ending = signOut().catch((failure) => failure);

@@ -373,6 +373,61 @@ test("a Turn on that waited while another window changed the session changes not
     });
 });
 
+test("a Turn on that waits while another window signs out and finds no figures to remove keeps no figures and reads no days", async ({
+    page,
+    context,
+}) => {
+    const account: AccountState = { current: firstAccount };
+    await onBlankPage(page);
+    await page.evaluate(() =>
+        window.localStorage.setItem("pyracast.saved", "1"),
+    );
+    const other = await context.newPage();
+    const reads: DaysRequest[][] = [];
+    for (const tab of [page, other]) {
+        await supplyRegistration(tab);
+        await signedIn(tab, account);
+        reads.push(await serveDays(tab));
+        await tab.goto("/app/w/1/");
+        await expect(plants(tab)).toBeVisible();
+        await expect(tab.getByText(title, { exact: true })).toBeVisible();
+    }
+    let reach!: () => void;
+    const reached = new Promise<void>((resolve) => (reach = resolve));
+    let answer!: () => void;
+    const answered = new Promise<void>((resolve) => (answer = resolve));
+    await other.route("**/api/auth/browser/v1/auth/session", async (route) => {
+        if (route.request().method() !== "DELETE") return route.fallback();
+        reach();
+        await answered;
+        await route.fallback();
+    });
+    await openSwitch(page);
+    const [mine, theirs] = [await lockClient(page), await lockClient(other)];
+    const lock = await lockTaker(context);
+    await lock.take();
+    await expect.poll(lock.granted).toBe(1);
+    await pauseClock(page);
+    await other.getByRole("button", { name: "Sign out", exact: true }).click();
+    await expect.poll(() => lock.waitingFor(theirs)).toBe(1);
+    await lock.take();
+    await expect.poll(lock.waiting).toBe(1);
+    await page.getByRole("button", { name: "Turn on" }).click();
+    await expect.poll(() => lock.waitingFor(mine)).toBe(1);
+    await lock.release();
+    await reached;
+    await expect.poll(lock.granted).toBe(2);
+    await lock.release();
+    await expect(page.getByRole("button", { name: "Turn on" })).toBeEnabled();
+    expect((await readCopy(page)).holder).toBeUndefined();
+    expect(reads.flat()).toEqual([]);
+    answer();
+    await page.clock.resume();
+    await expect(
+        other.getByRole("heading", { name: "Welcome back" }),
+    ).toBeVisible();
+});
+
 test("a Turn on that commits after another window read the switch shows there once it commits", async ({
     page,
     context,
@@ -517,6 +572,61 @@ test("a run reads a plant once, not again before its hour has passed and not whi
     await expect.poll(() => requests.length).toBe(2);
     const [first, second] = requests.map(({ at }) => at);
     expect((second ?? 0) - (first ?? 0)).toBeGreaterThanOrEqual(60 * minute);
+});
+
+async function readAgainWhileBusy(
+    page: Page,
+    context: BrowserContext,
+    account: AccountState,
+    tag: string,
+) {
+    await heldCopy(page, [
+        heldPlantOf({ refreshedAt: null, attemptedAt: null }),
+    ]);
+    await supplyRegistration(page);
+    await signedIn(page, account);
+    const requests = await serveDays(page);
+    await page.goto("/app/w/1/");
+    await expect(plants(page)).toBeVisible();
+    await expect.poll(() => requests.length).toBe(1);
+    await expect.poll(async () => (await readCopy(page)).days).toBe(2);
+    await expect.poll(() => refreshIdle(page)).toBe(true);
+    const mine = await lockClient(page);
+    const lock = await lockTaker(context);
+    await lock.take();
+    await expect.poll(lock.granted).toBe(1);
+    account.current = { ...firstAccount, tag };
+    await focusWindow(page);
+    await expect.poll(() => lock.waitingFor(mine)).toBe(1);
+    await page.clock.runFor(2_000);
+    await lock.release();
+    return requests;
+}
+
+test("the same session read again while the store is busy past its limit keeps the screen, and the next due read is sent", async ({
+    page,
+    context,
+}) => {
+    const account: AccountState = { current: firstAccount };
+    const requests = await readAgainWhileBusy(page, context, account, "tag-a");
+    await page.clock.fastForward(60 * minute);
+    await expect.poll(() => requests.length).toBe(2);
+    await expect(plants(page)).toBeVisible();
+    await expect(
+        page.getByRole("heading", { name: "Pyracast could not be opened" }),
+    ).toHaveCount(0);
+});
+
+test("a changed session answered while the store is busy past its limit covers the application", async ({
+    page,
+    context,
+}) => {
+    const account: AccountState = { current: firstAccount };
+    await readAgainWhileBusy(page, context, account, "tag-b");
+    await expect(
+        page.getByRole("heading", { name: "Pyracast could not be opened" }),
+    ).toBeVisible();
+    await expect(plants(page)).toHaveCount(0);
 });
 
 test("a window hidden while its run judges the held plants marks no attempt and reads the plant once it is visible again", async ({

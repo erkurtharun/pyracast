@@ -56,6 +56,8 @@ type PreviousEnd = { notice?: "ended" | "changed"; clearInvitation: boolean };
 const savedFlagKey = "pyracast.saved";
 const savedRemovalPrefix = "pyracast.savedRemoval.";
 const savedChangeKey = "pyracast.savedChange";
+// A new value whenever any window begins a sign-out: the session it ends may be the one another window shows.
+const signOutBegunKey = "pyracast.savedSignOut";
 const savedLock = "pyracast.saved-copy";
 const savedLimitMs = 2_000;
 export type SavedStore = typeof import("./saved/store");
@@ -76,6 +78,7 @@ type Flight = Mark & { promise: Promise<Session> };
 let flight: Flight | undefined;
 let generation = 0;
 let adopted: { mark: Mark; session: Session } | undefined;
+let signOutsSeen: string | null | undefined;
 let confirming: Promise<Tag> | undefined;
 let signingOut = false;
 let clearTabInvitation = () => {};
@@ -510,7 +513,8 @@ export function sessionStill(owner: string) {
         sessionOwner(state.session) === owner &&
         isCurrent(state.session) &&
         state.retired === undefined &&
-        state.signOut.status === "idle"
+        state.signOut.status === "idle" &&
+        readStored(signOutBegunKey) === signOutsSeen
     );
 }
 
@@ -627,6 +631,8 @@ async function adoptHandedOver(
 
 function applySession(session: Session, sentAt?: number) {
     const owner = sessionOwner(session) ?? null;
+    if (owner !== (sessionOwner(state.session) ?? null))
+        signOutsSeen = readStored(signOutBegunKey);
     if (documentOwner === undefined) {
         documentOwner = owner;
         const ended = previousEnd(owner);
@@ -671,6 +677,27 @@ function unchangedSince(since: Mark) {
     );
 }
 
+function shownAgain(session: Session) {
+    const owner = sessionOwner(session);
+    return owner !== undefined &&
+        !handoffFailed &&
+        sessionStill(owner) &&
+        adopted?.mark.observed === observation()
+        ? owner
+        : undefined;
+}
+
+// Equal owner and revision leave a removal mark, the language and the 90 days to judge, so the hand-over still runs behind the screen.
+function renewHandoff(session: Session, owner: string) {
+    if (!handOffNeeded(session)) return;
+    const observed = observation();
+    void handOff(
+        session,
+        () => sessionStill(owner) && observation() === observed,
+        Date.now(),
+    );
+}
+
 async function readSession() {
     try {
         return await send<Session>({ method: "GET", url: "/api/session/" });
@@ -698,17 +725,20 @@ function startRead(): Flight {
     const current: Flight = {
         ...started,
         promise: confirmedRead().then(async (session) => {
-            const handoff = handOffNeeded(session)
-                ? await handOff(
-                      session,
-                      () => unchangedSince(started),
-                      Date.now(),
-                  )
-                : "handed";
+            const again = shownAgain(session);
+            const handoff =
+                handOffNeeded(session) && again === undefined
+                    ? await handOff(
+                          session,
+                          () => unchangedSince(started),
+                          Date.now(),
+                      )
+                    : "handed";
             if (unchangedSince(started)) {
                 if (handoff === "unhanded") throw failHandoff();
                 if (handoff === "handed") {
                     applySession(session, sentAt);
+                    if (again !== undefined) renewHandoff(session, again);
                     return session;
                 }
             }
@@ -763,6 +793,7 @@ export async function signOut({ keepInvitation = false } = {}) {
         });
         setSignOut({ status: "pending", keepInvitation });
     }
+    writeStored(signOutBegunKey, randomHex());
     signingOut = true;
     try {
         if (shown) await removeSavedFigures(leaving);
