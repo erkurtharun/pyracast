@@ -389,9 +389,10 @@ A release stops the old web container before the new one serves, so one build an
 open window keeps the build it loaded until it navigates: the next in-app navigation meets an answer
 of another build id and loads a document of the new build, and while a value is unsaved the browser
 asks first (`docs/flows/installed-app.md`). The server accepts the session an old document signed in
-with for at most 90 days after that sign-in, and only while it sends a request at least every 30
-days (the session limits, `src/pyracast/accounts/sessions.py`); a document suspended for longer can
-still send a request later and is refused. While the product is in development no release keeps request shapes, stored
+with for at most 90 days after that sign-in, and only while requests that use the session, from this
+or any other window, come less than 30 days apart (the session limits,
+`src/pyracast/accounts/sessions.py`); a document that sends a request after either limit has passed
+is refused. While the product is in development no release keeps request shapes, stored
 formats or the manifest compatible for such a document: the new release answers its requests as it
 stands, and the next navigation loads the current build. Files of the replaced build
 are not kept.

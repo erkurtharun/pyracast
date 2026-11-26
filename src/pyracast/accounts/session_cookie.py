@@ -49,11 +49,11 @@ def persist(request: HttpRequest) -> None:
 
 
 class SessionCookie(SessionMiddleware):
-    # A response sends the session cookie only when its request created or rotated the key, and
-    # deletes it only when its request ended the stored session the cookie named other than by
-    # expiry; an expired session leaves its key, which names no session. So an answer reaching
-    # the browser late never restores an older key, and an expiry never deletes the key of a
-    # later sign-in.
+    # A response sends the session cookie only when its request created or rotated the key and
+    # the key has lifetime left, and deletes it (an empty value) only when its request ended the
+    # stored session the cookie named other than by expiry; an expired session leaves its key,
+    # which names no session. So an answer reaching the browser late never restores an older key,
+    # and neither an expiry nor a session's last second deletes the key of a later sign-in.
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         super().__init__(get_response)
         if not issubclass(self.SessionStore, SessionStore):
@@ -66,11 +66,11 @@ class SessionCookie(SessionMiddleware):
         cookie = response.cookies.get(name)
         if carried is None or cookie is None:
             return response
-        if cookie["max-age"] == 0:
+        if cookie.value:
+            keep = cookie.value != carried and cookie["max-age"] != 0
+        else:
             session = cast(SessionStore, request.session)
             keep = session.found and not session.lapsed
-        else:
-            keep = cookie.value != carried
         if not keep:
             del response.cookies[name]
         return response

@@ -15,7 +15,7 @@ from django.conf import settings
 from django.contrib.admin.models import LogEntry
 from django.contrib.auth.models import User
 from django.db import connection
-from django.test import Client
+from django.test import Client, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import URLPattern, URLResolver, reverse
 
@@ -47,7 +47,6 @@ REDIRECTS = {"login"}
 SAMPLES = {"app_label": "regions", "url": "unknown/"}
 SESSION_TABLES = ('"django_session"', '"usersessions_usersession"')
 BOUND = settings.ACCOUNT_REAUTHENTICATION_TIMEOUT
-PROOF = settings.PYRACAST_CONSOLE_PROOF_SECONDS
 STALE = ["missing", "expired"]
 
 
@@ -450,6 +449,7 @@ def test_a_refused_write_offers_to_return_to_the_page_it_came_from() -> None:
 
     assert refused(response)
     assert f'name="next" value="{origin}"'.encode() in response.content
+    assert cancel_destination(response) == origin
 
 
 def test_a_language_choice_is_a_confirmed_write_and_signing_out_needs_no_confirmation() -> None:
@@ -475,16 +475,22 @@ def later(monkeypatch: pytest.MonkeyPatch, seconds: float) -> None:
     monkeypatch.setattr(time, "time", lambda: moved)
 
 
+def cancel_destination(response: Any) -> str:
+    found = re.search(rb'<a class="text-link" href="([^"]*)">Cancel</a>', response.content)
+    assert found is not None
+    return found[1].decode()
+
+
 @pytest.mark.parametrize("confirmed", [False, True], ids=["signed in", "confirmed"])
-@pytest.mark.parametrize(
-    ("elapsed", "opens"), [(PROOF - 1, True), (PROOF, False)], ids=["within", "after"]
-)
+@pytest.mark.parametrize(("elapsed", "opens"), [(3599, True), (3600, False), (3601, False)])
 def test_a_console_page_opens_only_within_an_hour_of_the_last_authenticator_proof(
     confirmed: bool, elapsed: int, opens: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    proved = time.time()
+    monkeypatch.setattr(time, "time", lambda: proved)
     client, _ = verified_admin(confirmed=confirmed)
     path = reverse("admin:workspace_settings")
-    later(monkeypatch, elapsed)
+    monkeypatch.setattr(time, "time", lambda: proved + elapsed)
 
     response = client.get(path)
 
@@ -498,21 +504,42 @@ def test_a_console_page_opens_only_within_an_hour_of_the_last_authenticator_proo
 
 
 @CODE_LIMITS
-def test_after_an_hour_the_authenticator_code_opens_the_console_page_that_was_asked_for(
+def test_after_an_hour_the_code_page_cancels_to_the_application_and_a_code_opens_the_page_asked(
     operator: tuple[Client, str, float], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client, secret, now = operator
     path = reverse("admin:workspace_settings")
-    later(monkeypatch, PROOF)
+    confirm = reverse("admin:workspace_confirm")
+    later(monkeypatch, 3600)
 
     asked = client.get(path)
-    confirmed = client.post(
-        reverse("admin:workspace_confirm"), {"code": totp_code(secret, now), "next": path}
-    )
+    wrong = client.post(confirm, {"code": "000000", "next": path})
+    confirmed = client.post(confirm, {"code": totp_code(secret, now), "next": path})
 
     assert refused(asked)
+    assert wrong.status_code == 400
+    for page in (asked, wrong):
+        assert cancel_destination(page) == "/app/"
+        assert f'name="next" value="{path}"'.encode() in page.content
     assert (confirmed.status_code, confirmed["Location"]) == (302, path)
     assert client.get(path).status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("setting", "method"),
+    [("PYRACAST_CONSOLE_PROOF_SECONDS", "get"), ("ACCOUNT_REAUTHENTICATION_TIMEOUT", "post")],
+    ids=["read", "write"],
+)
+def test_a_shortened_proof_window_applies_to_the_next_console_request(
+    setting: str, method: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _ = verified_admin(confirmed=True)
+    path = reverse("admin:workspace_settings")
+    later(monkeypatch, 120)
+
+    assert not refused(getattr(client, method)(path))
+    with override_settings(**{setting: 60}):
+        assert refused(getattr(client, method)(path))
 
 
 @pytest.mark.parametrize(
