@@ -574,13 +574,6 @@ def test_deploy_runs_the_authorized_commit_only_after_proving_it_is_on_main() ->
     assert "refs/heads/main" not in str(deploy["steps"][2:])
 
 
-def test_only_the_first_windows_shard_repeats_the_static_stages() -> None:
-    shards = ci_jobs()["verify_windows_shards"]
-    partition = step(shards, "Run a complete Windows test partition")["run"]
-
-    assert "${{ env.TEST_SHARD != '1' && '--tests-only' || '' }}" in partition
-
-
 def test_the_web_dependency_audit_runs_once_per_ci_run() -> None:
     web = ci_jobs()["web_ubuntu"]
 
@@ -592,8 +585,6 @@ def test_the_web_dependency_audit_runs_once_per_ci_run() -> None:
 RELEASE_TESTED_JOBS = {
     "deployment",
     "verify_ubuntu",
-    "verify_windows_shards",
-    "verify_windows",
     "web_ubuntu",
     "web_windows",
     "web_production",
@@ -945,7 +936,6 @@ def test_every_repository_file_a_workflow_step_names_is_a_pipeline_path() -> Non
         "scripts/ci_result.py",
         "scripts/check_scientific.py",
         "scripts/start_postgres.py",
-        "scripts/start_rabbitmq.py",
         "deploy/release_authorization.py",
         "deploy/scan-images.sh",
         "deploy/systemd/pyracast-backup.timer",

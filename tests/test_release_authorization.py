@@ -342,8 +342,6 @@ RELEASE_START = "Start the release of a proven merge"
 PULL_REQUEST_JOBS = [
     IMAGE_JOB,
     "Verify (ubuntu-latest)",
-    "Windows tests (1/4)",
-    "Verify (windows-latest)",
     "Web (ubuntu-latest)",
     "Scientific (ubuntu-latest)",
     "Dependency audit",
@@ -420,7 +418,7 @@ def early(
             else [
                 {
                     "id": 51,
-                    "name": "pytest-results-Linux-full-1",
+                    "name": "pytest-results-1",
                     "expired": False,
                     "head_sha": HEAD,
                 },
@@ -563,7 +561,7 @@ def test_a_record_made_at_the_first_or_last_second_of_the_record_job_is_evidence
         (early(tested={"conclusion": "failure"}), "did not pass every job"),
         (early(tested={"conclusion": "cancelled"}), "did not pass every job"),
         (early(tested={"status": "in_progress", "conclusion": None}), "did not pass every job"),
-        (early(tested_jobs=jobs_with("Windows tests (1/4)", "failure")), "did not pass every job"),
+        (early(tested_jobs=jobs_with("Web (ubuntu-latest)", "failure")), "did not pass every job"),
         (early(tested_jobs=jobs_with("Dependency audit", "cancelled")), "did not pass every job"),
         (
             early(tested_jobs=jobs_with("Verify (ubuntu-latest)", "skipped")),

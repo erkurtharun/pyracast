@@ -465,8 +465,6 @@ WORKFLOW_FILES = frozenset({"ci.yml", "codeql.yml", "image-rescan.yml", "release
 JOBS_THAT_NEED_EVERY_PATH = frozenset(
     {
         "ci.yml verify_ubuntu",
-        "ci.yml verify_windows_shards",
-        "ci.yml verify_windows",
         "ci.yml web_ubuntu",
         "ci.yml web_windows",
         "ci.yml web_production",
