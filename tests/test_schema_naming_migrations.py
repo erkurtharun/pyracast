@@ -1,13 +1,16 @@
 import json
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from io import StringIO
+from threading import Event
 from typing import Any
 
 import pytest
 from django.apps import apps
 from django.core.management import call_command
-from django.db import connection
+from django.db import connection, connections, transaction
 from psycopg import sql
 
 from pyracast.connections.secrets import api_key_fingerprints, decrypt_api_key
@@ -25,7 +28,7 @@ from tests.support.change_request_boundaries import (
 )
 from tests.support.domain import NOW
 from tests.support.metering import FixtureClient, connect
-from tests.support.migrations import forward, migrate
+from tests.support.migrations import constraints, forward, migrate
 from tests.support.plant_operations import request_run, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -93,6 +96,12 @@ RENAME = re.compile(
     rf"ALTER TABLE {NAME} RENAME (?:COLUMN|CONSTRAINT) {NAME} TO {NAME}"
     rf"|ALTER INDEX {NAME} RENAME TO {NAME}"
 )
+QUOTED = r'"\w+"'
+RENAME_IN_PLACE = re.compile(
+    rf"ALTER TABLE ({QUOTED}) RENAME CONSTRAINT {QUOTED} TO {QUOTED}"
+    rf"|ALTER INDEX {QUOTED} RENAME TO {QUOTED}"
+)
+LOCK = re.compile(rf"LOCK TABLE ({QUOTED}) IN ACCESS EXCLUSIVE MODE")
 
 
 def statements(app: str, name: str, *, backwards: bool = False) -> list[str]:
@@ -104,14 +113,86 @@ def statements(app: str, name: str, *, backwards: bool = False) -> list[str]:
 
 @pytest.mark.parametrize(("app", "name"), NAMING)
 @pytest.mark.parametrize("backwards", [False, True])
-def test_naming_migrations_only_rename(app: str, name: str, backwards: bool) -> None:
+def test_naming_migrations_lock_each_table_before_they_rename_in_it(
+    app: str, name: str, backwards: bool
+) -> None:
     issued = [
         statement
         for statement in statements(app, name, backwards=backwards)
         if statement not in {"BEGIN", "COMMIT"}
     ]
-    assert issued
-    assert [statement for statement in issued if not RENAME.fullmatch(statement)] == []
+    locks = [index for index, statement in enumerate(issued) if LOCK.fullmatch(statement)]
+    in_place = [
+        index for index, statement in enumerate(issued) if RENAME_IN_PLACE.fullmatch(statement)
+    ]
+    assert in_place
+    assert [index + 1 for index in locks] == in_place
+    assert [
+        statement
+        for index, statement in enumerate(issued)
+        if index not in locks and not RENAME.fullmatch(statement)
+    ] == []
+    for index in in_place:
+        renamed_in = RENAME_IN_PLACE.fullmatch(issued[index])
+        locked = LOCK.fullmatch(issued[index - 1])
+        assert renamed_in
+        assert locked
+        assert renamed_in[1] in {None, locked[1]}
+
+
+def lock_requests(pid: int, *relations: int) -> set[tuple[str, str, bool]]:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT relation::regclass::text, mode, granted FROM pg_locks "
+            "WHERE pid = %s AND relation = ANY(%s)",
+            [pid, list(relations)],
+        )
+        return set(cursor.fetchall())
+
+
+def scalar(query: str, *params: int) -> Any:
+    with connection.cursor() as cursor:
+        cursor.execute(query, params)
+        row = cursor.fetchone()
+    assert row is not None
+    return row[0]
+
+
+@pytest.mark.usefixtures("leaf")
+def test_an_index_rename_waits_for_its_table_before_it_locks_the_index() -> None:
+    migrate(("regions", "0002_audit_event_details"))
+    table = scalar("SELECT 'regions_region'::regclass::oid")
+    index = scalar("SELECT 'one_active_region_per_tenant_location'::regclass::oid")
+    started, migrating_pid = Event(), []
+
+    def migrating() -> None:
+        try:
+            migrating_pid.append(scalar("SELECT pg_backend_pid()"))
+            started.set()
+            migrate(("regions", "0003_schema_naming_convention"))
+        finally:
+            connections.close_all()
+
+    with ThreadPoolExecutor(1) as pool:
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute("LOCK TABLE regions_region IN SHARE UPDATE EXCLUSIVE MODE")
+            holder = scalar("SELECT pg_backend_pid()")
+            running = pool.submit(migrating)
+            assert started.wait(timeout=10)
+            waiter = migrating_pid[0]
+            deadline = time.monotonic() + 10
+            while not running.done() and not scalar(
+                "SELECT %s = ANY(pg_blocking_pids(%s))", holder, waiter
+            ):
+                assert time.monotonic() < deadline
+                time.sleep(0.02)
+            assert lock_requests(waiter, table, index) == {
+                ("regions_region", "AccessExclusiveLock", False)
+            }
+        running.result(timeout=20)
+
+    assert "region_tenant_location_uniq" in constraints("regions_region")
 
 
 def columns(table: str) -> set[str]:
