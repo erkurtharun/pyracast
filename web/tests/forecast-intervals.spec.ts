@@ -269,11 +269,7 @@ for (const electrical of [true, false]) {
             await readFile(await file.path(), "utf8"),
             { header: true, skipEmptyLines: true },
         );
-        expect(records.data[0]?.Data).toBe(
-            electrical
-                ? "Production calculated from satellite data"
-                : "Irradiance calculated from satellite data",
-        );
+        expect(records.data[0]?.Data).toBe("Satellite data");
         expect(records.data[1]?.Data).toBe("Forecast");
         if (electrical) expect(records.data[2]?.Data).toBe("Forecast");
         await page.screenshot({

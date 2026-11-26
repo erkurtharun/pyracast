@@ -87,15 +87,24 @@ async function setup(page: Page) {
         }),
     );
     await page.route("**/api/**/forecast/**", (route) => {
-        const target =
-            new URL(route.request().url()).searchParams.get("date") ??
-            "2026-01-08";
+        const query = new URL(route.request().url()).searchParams;
+        const target = query.get("date") ?? "2026-01-08";
+        const chosen = query.get("forecast_id");
         return route.fulfill({
             json: {
                 date: target,
                 timezone: region.timezone,
                 source_kind: "forecast",
                 freshness: "fresh",
+                selection: {
+                    mode: chosen ? "manual" : "auto",
+                    rule: chosen ? null : "closest_to_production",
+                    forecast_id: chosen ? Number(chosen) : 2,
+                    options: [
+                        { forecast_id: 2, fetched_at: "2026-01-08T10:00:00Z" },
+                        { forecast_id: 1, fetched_at: "2026-01-07T14:00:00Z" },
+                    ],
+                },
                 collected_at: "2026-01-08T10:00:00Z",
                 configuration_id: 31,
                 result: {
@@ -380,6 +389,14 @@ for (const width of [320, 390, 768, 1440]) {
             path: testInfo.outputPath("forecast.png"),
             fullPage: true,
         });
+        await page.getByLabel("Forecast time").selectOption("1");
+        await page.getByRole("button", { name: "Back to Auto" }).waitFor();
+        await fits(page, "Plant forecast with a chosen time", audit);
+        await page.screenshot({
+            path: testInfo.outputPath("forecast-chosen-time.png"),
+            fullPage: true,
+        });
+        await page.getByRole("button", { name: "Back to Auto" }).click();
         const settingsTab = page.getByRole("button", {
             name: "Settings",
             exact: true,

@@ -74,7 +74,7 @@ export function PlantWorkspace({
     const forecastView = plantView("forecast", address);
     const [forecastOptions, setForecastOptions] = useState<ForecastOptions>({
         resolution: "60",
-        source: "auto",
+        source: "forecast",
     });
     const [savedPlant, setSavedPlant] = useState<Plant>();
     const currentPlant = latestPlant(plant, savedPlant);

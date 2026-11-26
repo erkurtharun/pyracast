@@ -102,11 +102,11 @@ test("a customer manages one plant site through the real API", async ({
     await page
         .getByLabel("Forecast date")
         .fill(process.env.BROWSER_HISTORY_DATE!);
+    await page.getByRole("radio", { name: "Satellite data" }).check();
     await expect(
-        page.getByRole("heading", {
-            name: "Irradiance calculated from satellite data",
-        }),
+        page.getByRole("heading", { name: "Satellite data" }),
     ).toBeVisible();
+    await page.getByRole("radio", { name: "Forecast" }).check();
     await page
         .getByRole("button", { name: "Generation forecast", exact: true })
         .click();
@@ -136,7 +136,7 @@ test("a customer manages one plant site through the real API", async ({
             params: {
                 date: process.env.BROWSER_DATE!,
                 resolution_minutes: resolution,
-                data_source: "auto",
+                data_source: "forecast",
             },
         });
         expect(response.status()).toBe(200);
@@ -365,10 +365,9 @@ test("a customer manages one plant site through the real API", async ({
     await page
         .getByLabel("Forecast date")
         .fill(process.env.BROWSER_HISTORY_DATE!);
+    await page.getByRole("radio", { name: "Satellite data" }).check();
     await expect(
-        page.getByRole("heading", {
-            name: "Production calculated from satellite data",
-        }),
+        page.getByRole("heading", { name: "Satellite data" }),
     ).toBeVisible();
     await expectTableRows(
         process.env.BROWSER_HISTORY_DATE!,
@@ -379,6 +378,7 @@ test("a customer manages one plant site through the real API", async ({
         path: testInfo.outputPath("plant-history-desktop.png"),
         fullPage: true,
     });
+    await page.getByRole("radio", { name: "Forecast" }).check();
     await page.getByLabel("Forecast date").fill(process.env.BROWSER_DATE!);
     await expectTableRows(process.env.BROWSER_DATE!, "Half-hourly values", 24);
 

@@ -20,9 +20,8 @@ async function pollOnce(page: Page) {
     await polled;
 }
 
-const liveAt = "2026-11-14T03:00:00Z";
-const savedAt = "2026-11-14T09:00:00Z";
-const satelliteAt = "2026-11-15T02:00:00Z";
+const savedAt = "2026-11-14T03:00:00Z";
+const laterAt = "2026-11-14T09:00:00Z";
 const plantTime = (value: string) =>
     new Intl.DateTimeFormat("en", {
         dateStyle: "medium",
@@ -30,43 +29,55 @@ const plantTime = (value: string) =>
         timeZone: region.timezone,
     }).format(new Date(value));
 
-test("the forecast survives midnight and the data choice names satellite data once it arrives", async ({
+test("after midnight the day keeps a forecast saved before its sunrise and names how it was chosen", async ({
     page,
 }) => {
     const beforeMidnight = new Date("2026-11-14T20:59:40Z");
     await page.clock.install({ time: beforeMidnight });
     await mockApi(page);
-    let historicalEstimatesAvailable = false;
-    let completedDay = false;
+    let dayEnded = false;
+    let productionArrived = false;
     await page.route("**/plants/21/forecast/**", async (route) => {
         const url = new URL(route.request().url());
-        expect(url.searchParams.get("data_source")).toBe("auto");
+        expect(url.searchParams.get("data_source")).toBe("forecast");
         const date = url.searchParams.get("date");
-        const actual = date === "2026-11-14" && historicalEstimatesAvailable;
-        const fallback = date === "2026-11-14" && completedDay && !actual;
+        const past = date === "2026-11-14" && dayEnded;
         await route.fulfill({
             json: {
                 date,
                 timezone: region.timezone,
-                freshness: "fresh",
-                source_kind: actual ? "estimated_actuals" : "forecast",
+                freshness: past ? "archived" : "fresh",
+                source_kind: "forecast",
+                selection: past
+                    ? {
+                          mode: "auto",
+                          rule: productionArrived
+                              ? "closest_to_production"
+                              : "latest",
+                          forecast_id: 1,
+                          options: [{ forecast_id: 1, fetched_at: savedAt }],
+                      }
+                    : {
+                          mode: "auto",
+                          rule: "latest",
+                          forecast_id: 2,
+                          options: [
+                              { forecast_id: 2, fetched_at: laterAt },
+                              { forecast_id: 1, fetched_at: savedAt },
+                          ],
+                      },
                 result: {
                     complete: true,
-                    energy_mwh: actual ? 230 : 237.773,
+                    energy_mwh: past ? 230 : 237.773,
                     coverage_fraction: 1,
-                    quality_flags: fallback ? ["forecast_fallback"] : [],
-                    provenance: fallback
-                        ? {
-                              fallback_reason: "estimated_actuals_unavailable",
-                              collected_at: savedAt,
-                          }
-                        : { collected_at: actual ? satelliteAt : liveAt },
+                    quality_flags: [],
+                    provenance: { collected_at: past ? savedAt : laterAt },
                     intervals: [
                         {
                             start: "2026-11-14T09:00:00Z",
                             end: "2026-11-14T10:00:00Z",
-                            mean_power_mw: actual ? 230 : 237.773,
-                            energy_mwh: actual ? 230 : 237.773,
+                            mean_power_mw: past ? 230 : 237.773,
+                            energy_mwh: past ? 230 : 237.773,
                         },
                     ],
                 },
@@ -85,15 +96,23 @@ test("the forecast survives midnight and the data choice names satellite data on
     await page.getByLabel("Forecast date").fill("2026-11-14");
     await requested;
     const generation = page.locator(".stat", { hasText: "Daily total" });
-    const choice = page.getByLabel("Data", { exact: true });
+    const forecast = page.getByRole("radio", { name: "Forecast" });
+    const controls = page.locator(".forecast-controls");
+    const times = page.getByLabel("Forecast time");
     const panel = page.locator("section.panel");
     await expect(generation).toContainText("237.77 MWh");
-    await expect(choice).toHaveValue("forecast");
+    await expect(forecast).toBeChecked();
+    await expect(controls.getByText("Auto: latest forecast")).toBeVisible();
+    await expect(times.locator("option")).toHaveText([
+        "Auto",
+        plantTime(laterAt),
+        plantTime(savedAt),
+    ]);
     await expect(panel.getByText(/^Forecast data: /)).toHaveText(
-        `Forecast data: ${plantTime(liveAt)}`,
+        `Forecast data: ${plantTime(laterAt)}`,
     );
     await page.clock.pauseAt(new Date("2026-11-14T20:59:50Z"));
-    completedDay = true;
+    dayEnded = true;
     await pollOnce(page);
     // The query layer hands an answer to the screen on a zero-delay timer, which a paused clock holds;
     // flowing time releases it but cannot reach the next 30 s poll before the assertion times out.
@@ -101,9 +120,13 @@ test("the forecast survives midnight and the data choice names satellite data on
     await expect(panel.getByText(/^Forecast data: /)).toHaveText(
         `Forecast data: ${plantTime(savedAt)}`,
     );
+    await expect(times.locator("option")).toHaveText([
+        "Auto",
+        plantTime(savedAt),
+    ]);
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-14");
-    await expect(choice).toHaveValue("forecast");
-    await expect(generation).toContainText("237.77 MWh");
+    await expect(forecast).toBeChecked();
+    await expect(generation).toContainText("230");
     await expect(
         panel.getByRole("heading", { name: "Generation forecast" }),
     ).toBeVisible();
@@ -113,20 +136,13 @@ test("the forecast survives midnight and the data choice names satellite data on
         page.getByRole("table", { name: "Hourly values" }),
     ).toBeVisible();
 
-    historicalEstimatesAvailable = true;
+    productionArrived = true;
     await pollOnce(page);
-    await expect(choice).toHaveValue("estimated_actuals");
     await expect(
-        panel.getByRole("heading", {
-            name: "Production calculated from satellite data",
-        }),
+        controls.getByText("Auto: closest to production"),
     ).toBeVisible();
-    await expect(panel.getByText(/^Satellite data: /)).toHaveText(
-        `Satellite data: ${plantTime(satelliteAt)}`,
-    );
-    await expect(panel.getByText(/^Forecast data: /)).toHaveCount(0);
-    await expect(generation).toContainText("230");
-    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-14");
+    await expect(forecast).toBeChecked();
+    await expect(panel.getByText(/^Satellite data: /)).toHaveCount(0);
     await expect(
         page.getByRole("table", { name: "Hourly values" }),
     ).toBeVisible();

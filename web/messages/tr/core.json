@@ -387,7 +387,11 @@
             "fresh": "En yeni tahmin verisi",
             "stale": "Daha yeni tahmin verisi alınamadı.",
             "missing": "Bu gün için tahmin verisi yok.",
-            "archived": "Gün doğumu öncesi son tahmin"
+            "archived": "Kayıtlı tahmin"
+        },
+        "SelectionRule": {
+            "closest_to_production": "Otomatik: üretime en yakın",
+            "latest": "Otomatik: en son tahmin"
         },
         "CalibrationStatus": {
             "pending": "Sırada",

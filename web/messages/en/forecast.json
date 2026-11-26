@@ -1,7 +1,7 @@
 {
     "Forecast": {
         "no_estimated_actuals_for_this_day": "No satellite data for this day.",
-        "estimated_actuals_are_not_available_for_this": "Choose another date or the last forecast before sunrise.",
+        "choose_another_date_or_forecast": "Choose another date or Forecast.",
         "no_configuration_for_this_day": "No technical details for this day.",
         "no_configuration_existed_before_the_selected_day": "Choose a later date.",
         "no_forecast_for_this_day_yet": "No forecast data for this day.",
@@ -90,7 +90,7 @@
         "daily_error_title": "Absolute error by day",
         "daily_error_tooltip": "{date}: {error} MWh",
         "forecast_kind": "Forecast",
-        "satellite_kind": "Production calculated from satellite data",
+        "satellite_kind": "Satellite data",
         "file": "comparison"
     },
     "Calibrations": {
@@ -142,13 +142,13 @@
         "not_effective": "Not applied: the data of its calibration days changed. Forecasts are made without calibration until another calibration is chosen.",
         "review_activation": "Use this calibration",
         "activate_title": "Use calibration No. {id}?",
-        "activate_effect": "Factor {factor} applies to new forecasts and to production calculated from satellite data from {start}, its first calibration day. Forecasts already made keep their calibration.",
+        "activate_effect": "Factor {factor} applies to new forecasts and to satellite data from {start}, its first calibration day. Forecasts already made keep their calibration.",
         "activate_effect_undated": "Factor {factor} applies to new forecasts. Forecasts already made stay as they are.",
         "activation_turns_automation_on": "Automatic calibration will be turned on.",
         "activation_keeps_automation": "Automatic calibration stays on.",
         "confirm_activation": "Use",
         "reset_title": "Use forecasts without calibration?",
-        "reset_effect": "New forecasts and production calculated from satellite data are made without calibration (factor 1). Forecasts already made keep their calibration. Automatic calibration will be turned off.",
+        "reset_effect": "New forecasts and satellite data are calculated without calibration (factor 1). Forecasts already made keep their calibration. Automatic calibration will be turned off.",
         "confirm_reset": "Use forecasts without calibration",
         "cancel": "Cancel",
         "working": "Saving…",
@@ -313,9 +313,11 @@
     "DataSource": {
         "data_source": "Data",
         "forecast": "Forecast",
-        "archived_forecast": "Last forecast before sunrise",
-        "estimated_actuals": "Production calculated from satellite data",
-        "estimated_irradiance": "Irradiance calculated from satellite data"
+        "satellite": "Satellite data",
+        "forecast_time": "Forecast time",
+        "auto": "Auto",
+        "manual": "Manual",
+        "back_to_auto": "Back to Auto"
     },
     "CsvDownload": {
         "download_csv": "Download CSV"

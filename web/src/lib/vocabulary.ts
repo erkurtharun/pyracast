@@ -9,6 +9,7 @@ export const vocabulary = {
     PlantEditBlock: "PlantEditBlockEnum",
     LocationChangeStatus: "LocationChangeStatusEnum",
     Freshness: "FreshnessEnum",
+    SelectionRule: "SelectionRuleEnum",
     CalibrationStatus: "CalibrationStatusEnum",
     CalibrationAssessment: "CalibrationAssessmentEnum",
     SelectionState: "SelectionStateEnum",

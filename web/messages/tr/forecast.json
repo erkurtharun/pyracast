@@ -1,7 +1,7 @@
 {
     "Forecast": {
         "no_estimated_actuals_for_this_day": "Bu gün için uydu verisi yok.",
-        "estimated_actuals_are_not_available_for_this": "Başka bir tarih veya gün doğumu öncesi son tahmini seçin.",
+        "choose_another_date_or_forecast": "Başka bir tarih ya da Tahmin seçin.",
         "no_configuration_for_this_day": "Bu gün için teknik bilgi yok.",
         "no_configuration_existed_before_the_selected_day": "Daha sonraki bir tarih seçin.",
         "no_forecast_for_this_day_yet": "Bu gün için tahmin verisi yok.",
@@ -90,7 +90,7 @@
         "daily_error_title": "Günlere göre mutlak hata",
         "daily_error_tooltip": "{date}: {error} MWh",
         "forecast_kind": "Tahmin",
-        "satellite_kind": "Uydu verisinden hesaplanan üretim",
+        "satellite_kind": "Uydu verisi",
         "file": "karsilastirma"
     },
     "Calibrations": {
@@ -142,13 +142,13 @@
         "not_effective": "Uygulanmıyor: kalibrasyon günlerinin verisi değişti. Başka bir kalibrasyon seçilene kadar tahminler kalibrasyonsuz yapılıyor.",
         "review_activation": "Bu kalibrasyonu kullan",
         "activate_title": "Kalibrasyon No. {id} kullanılsın mı?",
-        "activate_effect": "{factor} katsayısı yeni tahminlere ve ilk kalibrasyon günü olan {start} tarihinden itibaren uydu verisinden hesaplanan üretime uygulanır. Yapılmış tahminler kalibrasyonlarını korur.",
+        "activate_effect": "{factor} katsayısı yeni tahminlere ve ilk kalibrasyon günü olan {start} tarihinden itibaren uydu verisine uygulanır. Yapılmış tahminler kalibrasyonlarını korur.",
         "activate_effect_undated": "{factor} katsayısı yeni tahminlere uygulanır. Yapılmış tahminler olduğu gibi kalır.",
         "activation_turns_automation_on": "Otomatik kalibrasyon açılacak.",
         "activation_keeps_automation": "Otomatik kalibrasyon açık kalır.",
         "confirm_activation": "Kullan",
         "reset_title": "Tahminlerde kalibrasyon kullanılmasın mı?",
-        "reset_effect": "Yeni tahminler ve uydu verisinden hesaplanan üretim kalibrasyonsuz (katsayı 1) hesaplanır. Yapılmış tahminler kalibrasyonlarını korur. Otomatik kalibrasyon kapatılacak.",
+        "reset_effect": "Yeni tahminler ve uydu verisi kalibrasyonsuz (katsayı 1) hesaplanır. Yapılmış tahminler kalibrasyonlarını korur. Otomatik kalibrasyon kapatılacak.",
         "confirm_reset": "Tahminlerde kalibrasyon kullanma",
         "cancel": "Vazgeç",
         "working": "Kaydediliyor…",
@@ -313,9 +313,11 @@
     "DataSource": {
         "data_source": "Veri",
         "forecast": "Tahmin",
-        "archived_forecast": "Gün doğumu öncesi son tahmin",
-        "estimated_actuals": "Uydu verisinden hesaplanan üretim",
-        "estimated_irradiance": "Uydu verisinden hesaplanan ışınım"
+        "satellite": "Uydu verisi",
+        "forecast_time": "Tahmin saati",
+        "auto": "Otomatik",
+        "manual": "Manuel",
+        "back_to_auto": "Otomatiğe dön"
     },
     "CsvDownload": {
         "download_csv": "CSV indir"

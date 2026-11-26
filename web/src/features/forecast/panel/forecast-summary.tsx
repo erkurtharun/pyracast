@@ -59,9 +59,7 @@ export function ForecastSummary({
                 <div>
                     <h2>
                         {satellite
-                            ? electrical
-                                ? choice("estimated_actuals")
-                                : choice("estimated_irradiance")
+                            ? choice("satellite")
                             : electrical
                               ? t("electrical_generation")
                               : t("irradiance")}
@@ -106,9 +104,7 @@ export function ForecastSummary({
                                             : "irradiance_file",
                                     ),
                                     forecast: choice("forecast"),
-                                    satellite: electrical
-                                        ? choice("estimated_actuals")
-                                        : choice("estimated_irradiance"),
+                                    satellite: choice("satellite"),
                                 },
                             })
                         }

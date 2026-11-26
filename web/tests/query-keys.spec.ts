@@ -74,7 +74,7 @@ test("a request key carries its path parameters and query and is the same in eve
         JSON.stringify(
             keys.request("1:a", forecast, {
                 path: scope,
-                query: { date, data_source: "auto" },
+                query: { date, data_source: "forecast" },
             }),
         );
     expect(day("2026-11-20")).not.toBe(day("2026-11-21"));
