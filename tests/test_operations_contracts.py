@@ -398,10 +398,10 @@ def counter_threshold_policies() -> dict[str, str]:
 
 
 def test_every_alert_on_a_count_of_log_lines_is_known() -> None:
-    assert set(counter_threshold_policies()) == {"runtime_restarts", "security"}
+    assert set(counter_threshold_policies()) == {"access_changes", "runtime_restarts", "security"}
 
 
-@pytest.mark.parametrize("policy", ["runtime_restarts", "security"])
+@pytest.mark.parametrize("policy", ["access_changes", "runtime_restarts", "security"])
 def test_an_alert_on_a_count_of_log_lines_closes_once_its_window_holds_no_line(
     policy: str,
 ) -> None:
@@ -420,6 +420,50 @@ def test_an_alert_on_a_count_of_log_lines_closes_once_its_window_holds_no_line(
     assert seconds(retest[1]) == 60
     assert seconds(window[1]) == {"one hour": 3600, "ten minutes": 600}[period[1]] + 60
     assert seconds(closing[1]) >= seconds(window[1])
+
+
+def audit_entry(log: str, service: str, method: str, resource: str) -> dict[str, Any]:
+    """The fields of a Cloud Audit Logs entry that the access metric reads."""
+    return {
+        "logName": f"projects/project/logs/cloudaudit.googleapis.com%2F{log}",
+        "resource": {"type": resource, "labels": {"project_id": "project"}},
+        "protoPayload": {"serviceName": f"{service}.googleapis.com", "methodName": method},
+    }
+
+
+def test_a_change_of_the_projects_access_or_of_a_custom_role_is_alerted() -> None:
+    monitoring = text(TERRAFORM / "monitoring.tf")
+    terms = filter_of(
+        resources(monitoring, "google_logging_metric")["access_changes"],
+        monitoring,
+        {"var.project_id": "project"},
+    )
+    policy = counter_threshold_policies()["access_changes"]
+    changes = [
+        audit_entry("activity", "cloudresourcemanager", "SetIamPolicy", "project"),
+        *(
+            audit_entry("activity", "iam", f"google.iam.admin.v1.{verb}Role", "iam_role")
+            for verb in ("Create", "Update", "Delete", "Undelete")
+        ),
+    ]
+    others = [
+        audit_entry("data_access", "cloudresourcemanager", "SetIamPolicy", "project"),
+        audit_entry("activity", "appengine", "SetIamPolicy", "gae_app"),
+        audit_entry("activity", "iam", "google.iam.admin.v1.SetIAMPolicy", "service_account"),
+        audit_entry("activity", "iam", "google.iam.admin.v1.GetRole", "iam_role"),
+    ]
+
+    assert [matches(terms, entry) for entry in changes] == [True] * 5
+    assert [matches(terms, entry) for entry in others] == [False] * 4
+    assert (
+        'metric.type=\\"logging.googleapis.com/user/'
+        '${google_logging_metric.access_changes.name}\\"", "resource.type=\\"global\\""'
+    ) in policy
+    assert 'comparison = "COMPARISON_GT" threshold_value = 0' in policy
+    assert (
+        "notification_channels = [google_monitoring_notification_channel.operator.name]" in policy
+    )
+    assert "A change made by a reviewed Terraform apply is expected" in policy
 
 
 def test_security_lines_are_kept_a_year_in_their_own_unlocked_bucket_beside_the_default() -> None:
