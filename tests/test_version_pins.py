@@ -610,3 +610,36 @@ def test_every_dependabot_update_waits_out_a_cooldown_before_it_can_release() ->
         for update in updates
         if update.get("cooldown", {}).get("default-days", 0) < 5
     ] == []
+
+
+def dependabot_groups() -> dict[str, list[dict[str, Any]]]:
+    return {
+        update["package-ecosystem"]: list(update.get("groups", {}).values())
+        for update in dependabot_updates()
+    }
+
+
+def test_dependabot_opens_version_updates_once_a_month() -> None:
+    schedules = {update["package-ecosystem"]: update["schedule"] for update in dependabot_updates()}
+
+    assert schedules == {
+        name: {"interval": "monthly", "time": "05:00", "timezone": "Europe/Istanbul"}
+        for name in ["uv", "github-actions", "docker", "gomod", "terraform", "npm"]
+    }
+
+
+def test_dependabot_groups_every_update_of_actions_images_modules_and_providers() -> None:
+    groups = dependabot_groups()
+
+    for name in ["github-actions", "docker", "gomod", "terraform"]:
+        assert groups[name] == [{"patterns": ["*"]}], name
+
+
+def test_dependabot_groups_uv_and_npm_updates_by_dependency_type() -> None:
+    groups = dependabot_groups()
+
+    for name in ["uv", "npm"]:
+        assert groups[name] == [
+            {"dependency-type": "development"},
+            {"dependency-type": "production", "update-types": ["minor", "patch"]},
+        ], name
