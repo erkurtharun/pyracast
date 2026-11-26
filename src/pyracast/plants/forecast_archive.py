@@ -6,11 +6,12 @@ from math import isfinite
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
-from django.db.models import F, Q
+from django.db.models import F, OuterRef, Q
 
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.forecasts.sources import snapshot_rows
+from pyracast.forecasts.timing import approval_job_id
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecasting import (
     calibration_at,
@@ -303,6 +304,19 @@ def select_forecast_issuances(
             "target_date", "-snapshot__collected_at", "-pk"
         ).distinct("target_date")
     }
+
+
+def day_issuances(plant: Plant, day: date, now: datetime) -> list[tuple[ForecastIssuance, bool]]:
+    """Every forecast the plant saved for the day, newest fetch first, each with whether it is
+    the fetch of the job approval made first."""
+    rows = (
+        ForecastIssuance.objects.select_related("configuration__binding", "snapshot__binding")
+        .defer("native_intervals", "snapshot__raw_payload", "snapshot__normalized_intervals")
+        .filter(plant=plant, target_date=day, published_at__lte=now)
+        .annotate(approval_job=approval_job_id(OuterRef("snapshot__binding_id")))
+        .order_by("-snapshot__collected_at", "-pk")
+    )
+    return [(row, row.snapshot.job_id == row.approval_job) for row in rows]
 
 
 def issuance_power_intervals(

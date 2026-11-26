@@ -12,6 +12,7 @@ import { useFormat } from "@/lib/format/use-format";
 import {
     collectedAt,
     dayEnergy,
+    forecastFetchedAt,
     hasFlag,
     type ForecastResult,
     type OutageScenario,
@@ -51,7 +52,9 @@ export function ForecastSummary({
         affectedSummary?.complete !== true &&
         affectedDaylight?.status !== "polar_night";
     const latestShortfall = diagnostic?.latest_day_status === "shortfall";
-    const collected = collectedAt(forecast, result);
+    const collected = satellite
+        ? collectedAt(forecast, result)
+        : forecastFetchedAt(forecast, result);
     const unit = electrical ? "MWh" : "kWh/m²";
     return (
         <>
@@ -59,9 +62,7 @@ export function ForecastSummary({
                 <div>
                     <h2>
                         {satellite
-                            ? electrical
-                                ? choice("estimated_actuals")
-                                : choice("estimated_irradiance")
+                            ? choice("satellite")
                             : electrical
                               ? t("electrical_generation")
                               : t("irradiance")}
@@ -106,9 +107,7 @@ export function ForecastSummary({
                                             : "irradiance_file",
                                     ),
                                     forecast: choice("forecast"),
-                                    satellite: electrical
-                                        ? choice("estimated_actuals")
-                                        : choice("estimated_irradiance"),
+                                    satellite: choice("satellite"),
                                 },
                             })
                         }

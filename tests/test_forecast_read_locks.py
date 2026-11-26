@@ -61,17 +61,15 @@ def test_forecast_reads_do_not_wait_for_row_locks_held_elsewhere(
     ("scope", "params"),
     [
         ("plant", {"date": DAY.isoformat()}),
-        ("plant", {"date": DAY.isoformat(), "data_source": "auto"}),
-        ("plant", {"date": NOW.date().isoformat(), "data_source": "estimated_actuals"}),
+        ("plant", {"date": DAY.isoformat(), "data_source": "forecast"}),
+        ("plant", {"date": NOW.date().isoformat(), "data_source": "satellite"}),
         (
             "plant",
-            {"date": (DAY - timedelta(days=3)).isoformat(), "data_source": "archived_forecast"},
+            {"date": (DAY - timedelta(days=3)).isoformat(), "data_source": "forecast"},
         ),
-        ("plant", {"date": (DAY - timedelta(days=3)).isoformat(), "data_source": "auto"}),
-        ("plant", {"date": DAY.isoformat(), "as_of": NOW.isoformat()}),
         ("region", {"date": DAY.isoformat()}),
-        ("region", {"date": DAY.isoformat(), "data_source": "auto"}),
-        ("region", {"date": (DAY - timedelta(days=3)).isoformat(), "data_source": "auto"}),
+        ("region", {"date": DAY.isoformat(), "data_source": "forecast"}),
+        ("region", {"date": (DAY - timedelta(days=3)).isoformat(), "data_source": "forecast"}),
     ],
 )
 def test_forecast_reads_run_on_one_read_only_snapshot_without_row_locks(

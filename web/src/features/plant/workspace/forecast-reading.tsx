@@ -3,7 +3,7 @@ import { useTranslations } from "next-intl";
 import type { Forecast, PlantScope } from "@/lib/api";
 import { useApiQuery, type Loaded } from "@/lib/api/query";
 import { ForecastPanel } from "@/features/forecast/forecast-panel";
-import type { DataSource } from "@/features/forecast/data-source";
+import type { DataSource } from "@/features/forecast/date-bounds";
 import { Resource } from "@/ui/resource";
 
 export type ForecastQuery = {
@@ -12,11 +12,20 @@ export type ForecastQuery = {
     date: string;
     resolution: 30 | 60;
     source: DataSource;
+    forecastId?: number;
     poll: number | false;
 };
 
 export function useForecastRead(
-    { scope, electrical, date, resolution, source, poll }: ForecastQuery,
+    {
+        scope,
+        electrical,
+        date,
+        resolution,
+        source,
+        forecastId,
+        poll,
+    }: ForecastQuery,
     enabled = true,
 ): Loaded<Forecast> {
     const generation = useApiQuery(
@@ -27,6 +36,7 @@ export function useForecastRead(
                 date,
                 resolution_minutes: resolution,
                 data_source: source,
+                forecast_id: forecastId,
             },
         },
         { poll, enabled: enabled && electrical },
@@ -41,6 +51,7 @@ export function useForecastRead(
             query: {
                 date,
                 data_source: source,
+                forecast_id: forecastId,
             },
         },
         { poll, enabled: enabled && !electrical },

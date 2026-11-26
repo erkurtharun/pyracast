@@ -10,7 +10,7 @@ from pyracast.forecasts.intraday import (
     apply_intraday_source,
 )
 from pyracast.forecasts.models import ForecastSnapshot
-from pyracast.forecasts.sources import mark_forecast_fallback, snapshot_rows
+from pyracast.forecasts.sources import snapshot_rows
 from pyracast.incidents.evidence import IncidentEvidence, select_incidents
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_sources import apply_composition, replay_composition
@@ -161,8 +161,6 @@ def _uncalibrated(
             result["provenance"]["selection_policy"] = provenance["selection_policy"]
         else:
             apply_composition(result, selected_sources[1], selected_sources[0])
-    if provenance.get("fallback_reason") == "estimated_actuals_unavailable":
-        mark_forecast_fallback(result, datetime.fromisoformat(provenance["selection_cutoff"]))
     result["quality_flags"].append("calibration_invalidated_by_outage_history")
     return result
 

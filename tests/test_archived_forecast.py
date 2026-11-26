@@ -2,7 +2,6 @@ from datetime import timedelta
 from typing import Any, cast
 
 import pytest
-from django.core.exceptions import ValidationError
 
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import ForecastResult
@@ -10,7 +9,7 @@ from pyracast.incidents.operations import save_incident
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.activation import activate_calibration, reset_calibration
 from pyracast.plants.forecast_archive import forecast_cutoff
-from pyracast.plants.forecasting import archived_forecast
+from pyracast.plants.forecasting import issued_forecast
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import (
     CalibrationActivation,
@@ -19,7 +18,6 @@ from pyracast.plants.models import (
     PlantConfiguration,
 )
 from tests.support.domain import NOW
-from tests.support.errors import raises_code
 from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 
@@ -49,7 +47,7 @@ def test_archive_replays_previous_binding_without_writing_cache(
     )
     plant.current_configuration = current
     plant.save(update_fields=["current_configuration"])
-    replay = archived_forecast(plant, DAY, 60, NOW)
+    replay = issued_forecast(plant, DAY, 60, NOW)
     result = cast(dict[str, Any], replay["result"])
     assert replay["configuration_id"] == old.pk
     assert replay["snapshot_id"] == snapshot.pk
@@ -86,7 +84,7 @@ def test_archive_requires_a_saved_electrical_issuance(
         ForecastResult.objects.create(
             snapshot=snapshot, payload={}, published_at=snapshot.collected_at
         )
-    replay = archived_forecast(plant, DAY, 30, NOW)
+    replay = issued_forecast(plant, DAY, 30, NOW)
     assert replay["result"] is None
     assert replay["unavailable_reason"] == "forecast_unavailable"
     assert not ForecastIssuance.objects.exists()
@@ -99,16 +97,10 @@ def test_archive_does_not_backdate_a_later_configuration(
     configuration = plant.configurations.get()
     PlantConfiguration.objects.filter(pk=configuration.pk).update(created_at=NOW)
     publish_snapshot(snapshot_for(system, DAY))
-    replay = archived_forecast(plant, DAY, 30, NOW)
+    replay = issued_forecast(plant, DAY, 30, NOW)
     assert replay["result"] is None
     assert replay["unavailable_reason"] == "configuration_unavailable"
     assert not ForecastIssuance.objects.exists()
-
-
-def test_archive_rejects_future_days(monkeypatch: pytest.MonkeyPatch) -> None:
-    _, plant = make_plant(monkeypatch)
-    with raises_code("date_out_of_range"):
-        archived_forecast(plant, NOW.date() + timedelta(days=1), 30, NOW)
 
 
 def test_archive_reuses_frozen_issuance_without_changing_it(
@@ -126,7 +118,7 @@ def test_archive_reuses_frozen_issuance_without_changing_it(
     )
     cached = ForecastIssuance.objects.get()
     before = cached.payloads
-    replay = archived_forecast(plant, DAY, 60, NOW)
+    replay = issued_forecast(plant, DAY, 60, NOW)
     assert (
         cast(dict[str, Any], replay["result"])["energy_mwh"]
         == cast(dict[str, Any], strict["result"])["energy_mwh"]
@@ -136,31 +128,15 @@ def test_archive_reuses_frozen_issuance_without_changing_it(
     assert "archived_forecast" not in cached.payloads["60"]["quality_flags"]
 
 
-@pytest.mark.parametrize("resolution", [True, 15])
-def test_archive_rejects_invalid_resolution(
-    monkeypatch: pytest.MonkeyPatch, resolution: int
-) -> None:
-    _, plant = make_plant(monkeypatch)
-    with pytest.raises(ValidationError, match="Something went wrong"):
-        archived_forecast(plant, DAY, resolution, NOW)
-
-
-@pytest.mark.parametrize("bad_cutoff", [NOW.replace(tzinfo=None), NOW + timedelta(seconds=1)])
-def test_archive_rejects_invalid_cutoff(monkeypatch: pytest.MonkeyPatch, bad_cutoff: Any) -> None:
-    _, plant = make_plant(monkeypatch)
-    with pytest.raises(ValidationError, match="Something went wrong"):
-        archived_forecast(plant, DAY, 30, NOW, as_of=bad_cutoff)
-
-
 def test_archive_uses_frozen_output_after_raw_source_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
     snapshot = publish_snapshot(snapshot_for(system, DAY))
-    original = archived_forecast(plant, DAY, 30, NOW)
+    original = issued_forecast(plant, DAY, 30, NOW)
     snapshot.normalized_intervals[0]["power_kw"] = -1
     stored_again(snapshot)
-    replay = archived_forecast(plant, DAY, 30, NOW)
+    replay = issued_forecast(plant, DAY, 30, NOW)
     assert replay["result"] == original["result"]
     assert replay["calibration_id"] == original["calibration_id"]
 
@@ -181,9 +157,7 @@ def test_archive_preserves_applied_calibration_after_later_outage_and_model_chan
     CalibrationActivation.objects.filter(pk=activation.pk).update(created_at=eligible)
     publish_snapshot(source)
     args = (system.member, system.tenant.pk, system.region.pk, plant.pk)
-    original = plant_outlook(
-        *args, target_date=DAY, resolution_minutes=60, source="archived_forecast"
-    )
+    original = plant_outlook(*args, target_date=DAY, resolution_minutes=60)
     assert cast(dict[str, Any], original["result"])["factor"] == 0.5
     start, _ = local_day_bounds(DAY, system.binding.timezone)
     save_incident(
@@ -204,16 +178,12 @@ def test_archive_preserves_applied_calibration_after_later_outage_and_model_chan
 
     monkeypatch.setattr("pyracast.plants.incident_forecasts.incident_scenario", unavailable)
     monkeypatch.setattr("pyracast.plants.forecasting.power_intervals", unavailable)
-    archived = plant_outlook(
-        *args, target_date=DAY, resolution_minutes=60, source="archived_forecast"
-    )
-    strict = plant_outlook(*args, target_date=DAY, resolution_minutes=60, as_of=NOW)
-    fallback = plant_outlook(
-        *args, target_date=DAY, resolution_minutes=60, source="auto", as_of=NOW
-    )
+    archived = plant_outlook(*args, target_date=DAY, resolution_minutes=60)
+    chosen = plant_outlook(*args, target_date=DAY, resolution_minutes=60, forecast_id=source.pk)
     assert archived == original
-    assert strict == {**original, "as_of": NOW.isoformat()}
-    assert fallback == strict
+    assert {key: value for key, value in chosen.items() if key != "selection"} == {
+        key: value for key, value in original.items() if key != "selection"
+    }
     assert archived["calibration_id"] == run.pk
     assert archived["outage_scenario"] is None
 
@@ -230,14 +200,14 @@ def test_archive_keeps_latest_evening_and_pre_sunrise_updates_separate_from_live
     evening = publish_snapshot(
         snapshot_for(system, day, power_kw=0.2, collected_at=start - timedelta(hours=7))
     )
-    assert archived_forecast(plant, day, 60, NOW)["snapshot_id"] == evening.pk
+    assert issued_forecast(plant, day, 60, NOW)["snapshot_id"] == evening.pk
     night = publish_snapshot(
         snapshot_for(system, day, power_kw=0.3, collected_at=start + timedelta(hours=3))
     )
     midday = publish_snapshot(
         snapshot_for(system, day, power_kw=0.4, collected_at=start + timedelta(hours=10))
     )
-    archive = archived_forecast(plant, day, 60, NOW)
+    archive = issued_forecast(plant, day, 60, NOW)
     assert archive["snapshot_id"] == night.pk
     assert archive["snapshot_id"] != morning.pk
     assert archive["as_of"] == forecast_cutoff(day, system.binding).isoformat()
@@ -269,7 +239,7 @@ def test_archive_excludes_acquisition_or_publication_exactly_at_daylight(
         system, DAY, collected_at=cutoff - timedelta(hours=1) if delay_publication else cutoff
     )
     publish_snapshot(candidate, published_at=cutoff)
-    archive = archived_forecast(plant, DAY, 30, NOW)
+    archive = issued_forecast(plant, DAY, 30, NOW)
     assert archive["snapshot_id"] == previous.pk
     assert not ForecastIssuance.objects.filter(snapshot=candidate, target_date=DAY).exists()
 
@@ -291,7 +261,7 @@ def test_archive_irradiance_uses_target_day_instead_of_collection_job_day(
     published = ForecastResult.objects.get(snapshot=source)
     assert published.payload["energy_kwh_m2"] == pytest.approx(9.6)
     assert published.daily_payloads[DAY.isoformat()]["energy_kwh_m2"] == pytest.approx(4.8)
-    archive = archived_forecast(plant, DAY, 60, NOW)
+    archive = issued_forecast(plant, DAY, 60, NOW)
     assert cast(dict[str, Any], archive["regional_irradiance"])["energy_kwh_m2"] == pytest.approx(
         4.8
     )
@@ -322,7 +292,7 @@ def test_archive_returns_outage_scenario_saved_at_collection_time(
     )
     publish_snapshot(source)
     monkeypatch.setattr("pyracast.incidents.operations.timezone.now", lambda: NOW)
-    original = archived_forecast(plant, DAY, 60, NOW)
+    original = issued_forecast(plant, DAY, 60, NOW)
     scenario = cast(dict[str, Any], original["outage_scenario"])
     assert scenario["evaluated_at"] == source.collected_at.isoformat()
     assert scenario["incidents"][0]["id"] == incident.pk
@@ -336,7 +306,7 @@ def test_archive_returns_outage_scenario_saved_at_collection_time(
         plant.pk,
         target_date=DAY,
         resolution_minutes=60,
-        source="archived_forecast",
+        source="forecast",
     )
     assert replay["outage_scenario"] == scenario
     assert replay["result"] == original["result"]

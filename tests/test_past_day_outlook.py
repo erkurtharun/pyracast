@@ -15,10 +15,8 @@ from tests.support.domain import NOW, System
 from tests.support.invariants import stored_again
 from tests.support.plant_operations import (
     make_plant,
-    publish_snapshot,
     ready_run,
     saved_actuals,
-    snapshot_for,
 )
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -27,7 +25,7 @@ DAY = NOW.date() - timedelta(days=2)
 FAULTS = "pyracast.forecasts.faults"
 
 
-def _past(system: System, plant: Plant, day: date = DAY, **options: Any) -> dict[str, Any]:
+def _past(system: System, plant: Plant, day: date = DAY) -> dict[str, Any]:
     return plant_outlook(
         system.member,
         system.tenant.pk,
@@ -35,8 +33,7 @@ def _past(system: System, plant: Plant, day: date = DAY, **options: Any) -> dict
         plant.pk,
         target_date=day,
         resolution_minutes=60,
-        source="estimated_actuals",
-        **options,
+        source="satellite",
     )
 
 
@@ -108,17 +105,6 @@ def test_each_day_uses_the_newest_calibration_whose_period_had_begun(
     assert _past(system, plant, later_day)["calibration_id"] is None
 
 
-def test_explicit_cutoff_keeps_the_uncalibrated_historical_estimate(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    system, plant, _ = _calibrated(monkeypatch, [DAY.isoformat()])
-    result = _past(system, plant, as_of=NOW)
-    payload = cast(dict[str, Any], result["result"])
-    assert result["calibration_id"] is None
-    assert payload["factor"] == 1
-    assert "retrospective_calibration" not in payload["quality_flags"]
-
-
 def test_calibration_from_a_changed_production_source_is_not_applied(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -164,18 +150,17 @@ def test_plant_without_a_current_declaration_keeps_the_dated_selection(
     assert cast(dict[str, Any], result["result"])["factor"] == 1
 
 
-def _read_with_fallback(system: System, plant: Plant) -> tuple[int, dict[str, Any]]:
+def _satellite_read(system: System, plant: Plant) -> tuple[int, dict[str, Any]]:
     client = Client()
     client.force_login(system.member)
     response = client.get(
         f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/",
-        {"date": DAY.isoformat(), "data_source": "auto", "resolution_minutes": "60"},
+        {"date": DAY.isoformat(), "data_source": "satellite", "resolution_minutes": "60"},
     )
     return response.status_code, cast(dict[str, Any], response.json())
 
 
 def _actuals_with_power(system: System, power: object) -> ForecastSnapshot:
-    publish_snapshot(snapshot_for(system, DAY))
     source = saved_actuals(system, DAY)
     rows = [dict(row) for row in source.normalized_intervals]
     rows[20]["power_kw"] = power
@@ -187,24 +172,26 @@ def _actuals_with_power(system: System, power: object) -> ForecastSnapshot:
     [(True, "ValueError"), ("0.4", "ValueError"), (10**400, "OverflowError")],
     ids=["boolean", "text", "beyond-a-float"],
 )
-def test_a_damaged_estimated_actual_refuses_the_day_instead_of_the_saved_forecast(
+def test_a_damaged_estimated_actual_refuses_the_satellite_read_of_its_day(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, power: object, fault: str
 ) -> None:
     system, plant = make_plant(monkeypatch)
     source = _actuals_with_power(system, power)
     with caplog.at_level(logging.WARNING, logger=FAULTS):
-        status, answer = _read_with_fallback(system, plant)
+        status, answer = _satellite_read(system, plant)
     assert (status, answer["code"]) == (400, "calculation_out_of_range")
     [warning] = [record.getMessage() for record in caplog.records if record.name == FAULTS]
     assert f"record=forecast_snapshot:{source.pk} error={fault}" in warning
 
 
-def test_an_explicitly_missing_estimated_actual_leaves_the_saved_forecast_answering(
-    monkeypatch: pytest.MonkeyPatch,
+def test_an_explicitly_missing_estimated_actual_leaves_its_hour_without_a_value(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     system, plant = make_plant(monkeypatch)
     _actuals_with_power(system, None)
-    status, answer = _read_with_fallback(system, plant)
+    with caplog.at_level(logging.WARNING, logger=FAULTS):
+        status, answer = _satellite_read(system, plant)
     assert status == 200, answer
-    assert answer["source_kind"] == "forecast"
-    assert "forecast_fallback" in answer["result"]["quality_flags"]
+    assert answer["source_kind"] == "estimated_actuals"
+    assert answer["result"]["complete"] is False
+    assert not [record for record in caplog.records if record.name == FAULTS]

@@ -130,25 +130,26 @@ def test_forecast_reads_reject_unknown_keys_and_empty_dates_by_code(
     assert list(body.get("fields", {})) == ([field] if field else [])
 
 
-def test_past_day_plant_forecast_is_the_archived_forecast(
+def test_a_past_day_plant_forecast_is_its_saved_forecast(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    publish_snapshot(snapshot_for(system, DAY))
+    saved = publish_snapshot(snapshot_for(system, DAY))
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=2))
     client = client_for(system.member)
     forecast = client.get(
         plant_path(system, plant), {"date": DAY.isoformat(), "data_source": "forecast"}
     )
-    archived = client.get(
-        plant_path(system, plant), {"date": DAY.isoformat(), "data_source": "archived_forecast"}
+    chosen = client.get(
+        plant_path(system, plant), {"date": DAY.isoformat(), "forecast_id": str(saved.pk)}
     )
-    assert forecast.status_code == archived.status_code == 200
+    assert forecast.status_code == chosen.status_code == 200
     assert forecast.json()["result"] is not None
-    assert forecast.json()["result"] == archived.json()["result"]
+    assert forecast.json()["result"] == chosen.json()["result"]
+    assert forecast.json()["selection"]["forecast_id"] == saved.pk
 
 
-def test_region_reads_explicit_estimated_actuals_for_today(
+def test_region_reads_satellite_data_for_today(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, _ = make_plant(monkeypatch)
@@ -166,7 +167,7 @@ def test_region_reads_explicit_estimated_actuals_for_today(
     publish_snapshot(actual)
     monkeypatch.setattr(timezone, "now", lambda: now)
     response = client_for(system.member).get(
-        region_path(system), {"date": DAY.isoformat(), "data_source": "estimated_actuals"}
+        region_path(system), {"date": DAY.isoformat(), "data_source": "satellite"}
     )
     assert response.status_code == 200
     body = response.json()
@@ -183,6 +184,7 @@ ENVELOPE = {
     "freshness",
     "stale_reason",
     "unavailable_reason",
+    "selection",
     "result",
 }
 REGION_ENVELOPE = ENVELOPE | {"collected_at", "issued_at", "binding_id"}
@@ -206,7 +208,7 @@ def test_each_forecast_read_sends_exactly_its_envelope(monkeypatch: pytest.Monke
     issued = client.get(plant_path(system, plant), {**today, "data_source": "forecast"}).json()
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=2))
     client = client_for(system.member)
-    actuals = {**today, "data_source": "estimated_actuals"}
+    actuals = {**today, "data_source": "satellite"}
     archived = client.get(plant_path(system, plant), {**today, "data_source": "forecast"}).json()
     plant_actuals = client.get(plant_path(system, plant), actuals).json()
     region_actuals = client.get(region_path(system), actuals).json()

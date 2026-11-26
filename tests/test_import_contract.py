@@ -134,7 +134,6 @@ FUNCTION_IMPORTS: dict[tuple[str, str], str] = {
     ): "an import prepares calibrations of its plants",
     ("metering.jobs", "plants.preparation"): "breaks an import cycle",
     ("metering.operations", "metering.scheduler"): "breaks an import cycle",
-    ("plants.current_forecast", "plants.automatic_forecast"): "breaks an import cycle",
     ("plants.forecast_sources", "forecasts.intraday"): "breaks an import cycle",
     ("plants.forecasting", "plants.forecast_archive"): "breaks an import cycle",
     ("plants.forecasting", "plants.incident_policy"): "breaks an import cycle",

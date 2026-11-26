@@ -68,9 +68,7 @@ def test_resolved_total_outage_keeps_zero_power_after_rename_and_tilt_edit(
     assert edited.current_configuration_id != declared
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=1))
     actual_snapshot_for(system, day)
-    outlook = plant_outlook(
-        *scope, target_date=day, resolution_minutes=60, source="estimated_actuals"
-    )
+    outlook = plant_outlook(*scope, target_date=day, resolution_minutes=60, source="satellite")
     assert outlook["configuration_id"] == edited.current_configuration_id
     scenario = cast(dict[str, Any], outlook["outage_scenario"])
     assert scenario["status"] == "estimated"

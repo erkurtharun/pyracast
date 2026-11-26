@@ -1793,6 +1793,11 @@ export interface components {
             affected_mwh: number | null;
             sources: string[] | null;
         };
+        ForecastOptionOutput: {
+            forecast_id: number;
+            /** Format: date-time */
+            fetched_at: string;
+        };
         ForecastOutput: {
             /** Format: date */
             date: string;
@@ -1811,6 +1816,7 @@ export interface components {
                       | components["schemas"]["NullEnum"]
                   )
                 | null;
+            selection: components["schemas"]["ForecastSelectionOutput"] | null;
             result: components["schemas"]["IrradianceResultOutput"] | null;
             /** Format: date-time */
             collected_at: string | null;
@@ -1830,6 +1836,18 @@ export interface components {
             selection_cutoff?: string | null;
             source_snapshot_ids?: number[];
             source_snapshots?: components["schemas"]["SourceSnapshotOutput"][];
+        };
+        /** @description Which forecast the answer shows: chosen automatically by `rule`, or by the reader. */
+        ForecastSelectionOutput: {
+            mode: components["schemas"]["SelectionModeEnum"];
+            rule:
+                | (
+                      | components["schemas"]["SelectionRuleEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+            forecast_id: number | null;
+            options: components["schemas"]["ForecastOptionOutput"][];
         };
         /**
          * @description * `forecast` - forecast
@@ -2689,6 +2707,7 @@ export interface components {
                       | components["schemas"]["NullEnum"]
                   )
                 | null;
+            selection: components["schemas"]["ForecastSelectionOutput"] | null;
             plant_id: number;
             /** Format: date-time */
             as_of: string;
@@ -3278,6 +3297,18 @@ export interface components {
         SeenAllOutput: {
             marked: number;
         };
+        /**
+         * @description * `auto` - auto
+         *     * `manual` - manual
+         * @enum {string}
+         */
+        SelectionModeEnum: "auto" | "manual";
+        /**
+         * @description * `closest_to_production` - closest_to_production
+         *     * `latest` - latest
+         * @enum {string}
+         */
+        SelectionRuleEnum: "closest_to_production" | "latest";
         /**
          * @description * `active` - Active
          *     * `candidate` - Candidate
@@ -4808,17 +4839,12 @@ export interface operations {
         parameters: {
             query: {
                 /**
-                 * @description * `auto` - auto
-                 *     * `forecast` - forecast
-                 *     * `estimated_actuals` - estimated_actuals
-                 *     * `archived_forecast` - archived_forecast
+                 * @description * `forecast` - forecast
+                 *     * `satellite` - satellite
                  */
-                data_source?:
-                    | "auto"
-                    | "forecast"
-                    | "estimated_actuals"
-                    | "archived_forecast";
+                data_source?: "forecast" | "satellite";
                 date: string;
+                forecast_id?: number;
             };
             header?: never;
             path: {
@@ -6089,19 +6115,13 @@ export interface operations {
     tenants_regions_plants_forecast_retrieve: {
         parameters: {
             query: {
-                as_of?: string;
                 /**
-                 * @description * `auto` - auto
-                 *     * `forecast` - forecast
-                 *     * `estimated_actuals` - estimated_actuals
-                 *     * `archived_forecast` - archived_forecast
+                 * @description * `forecast` - forecast
+                 *     * `satellite` - satellite
                  */
-                data_source?:
-                    | "auto"
-                    | "forecast"
-                    | "estimated_actuals"
-                    | "archived_forecast";
+                data_source?: "forecast" | "satellite";
                 date: string;
+                forecast_id?: number;
                 /**
                  * @description * `30` - 30
                  *     * `60` - 60

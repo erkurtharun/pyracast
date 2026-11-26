@@ -13,9 +13,11 @@ from pyracast.api.serializers import (
     FiniteFloat,
     ForecastEnvelope,
     ForecastProvenanceOutput,
+    ForecastQuery,
     InputSerializer,
     IrradianceSummaryOutput,
     PlantName,
+    SelectedForecastEnvelope,
 )
 from pyracast.change_requests.models import ProductionChangeAction
 from pyracast.errors import ENTER_A_VALUE, UNEXPECTED, ErrorCode
@@ -593,13 +595,8 @@ class CalibrationAutomationOutput(serializers.Serializer[dict[str, Any]]):
     last_attempt = AutomaticCalibrationAttemptOutput(allow_null=True)
 
 
-class ForecastQuery(InputSerializer):
-    date = serializers.DateField()
-    data_source = serializers.ChoiceField(
-        choices=("auto", "forecast", "estimated_actuals", "archived_forecast"), default="auto"
-    )
+class PlantForecastQuery(ForecastQuery):
     resolution_minutes = serializers.ChoiceField(choices=(30, 60), default=30)
-    as_of = AwareDateTime(required=False)
 
 
 class PowerIntervalOutput(serializers.Serializer[dict[str, Any]]):
@@ -697,7 +694,7 @@ class ProductionDiagnosticField(serializers.JSONField):
     pass
 
 
-class PlantForecastOutput(ForecastEnvelope):
+class PlantForecastOutput(SelectedForecastEnvelope):
     plant_id = serializers.IntegerField()
     as_of = serializers.DateTimeField()
     configuration_id = serializers.IntegerField(allow_null=True)

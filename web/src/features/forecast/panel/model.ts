@@ -46,6 +46,17 @@ export function collectedAt(
     );
 }
 
+export function forecastFetchedAt(
+    forecast: Pick<Forecast, "collected_at" | "selection">,
+    result: ForecastResult,
+): string | undefined {
+    const selection = forecast.selection;
+    const named = selection?.options.find(
+        (option) => option.forecast_id === selection.forecast_id,
+    );
+    return named?.fetched_at ?? collectedAt(forecast, result);
+}
+
 export function hourly(result: ForecastResult, rows: Interval[]): boolean {
     if ("resolution_minutes" in result && result.resolution_minutes)
         return result.resolution_minutes >= 60;

@@ -13,7 +13,7 @@ export function ForecastUnavailable({
     const t = useTranslations("Forecast");
     return forecast.unavailable_reason === "estimated_actuals_unavailable" ? (
         <Empty title={t("no_estimated_actuals_for_this_day")}>
-            {t("estimated_actuals_are_not_available_for_this")}
+            {t("choose_another_date_or_forecast")}
         </Empty>
     ) : electrical &&
       forecast.unavailable_reason === "configuration_unavailable" ? (

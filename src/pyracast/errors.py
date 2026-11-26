@@ -100,6 +100,7 @@ class ErrorCode(models.TextChoices):
 UNEXPECTED = _("Something went wrong. Try again.")
 FORECAST_UPDATE_DELAYED = _("Forecast update delayed. Pyracast will try again.")
 FUTURE_TIME = _("Choose now or an earlier time.")
+UNKNOWN_FORECAST = _("Choose one of this day's forecast times.")
 TECHNICAL_DETAILS_CHANGED = _(
     "The plant's technical details changed. Reload the page and try again."
 )

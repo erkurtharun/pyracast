@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
-from django.db.models import QuerySet
+from django.db.models import OuterRef, QuerySet, Subquery
 
 from pyracast.collection_window import SLOT_SEARCH_DAYS
 from pyracast.connections.models import ProviderAccount, SiteBinding
@@ -35,16 +35,26 @@ def forecast_time_limit(daily_quota: int) -> int:
     return max(daily_quota - HISTORY_REQUESTS_PER_DAY, 0)
 
 
-def approval_job(binding_id: int) -> tuple[int, datetime] | None:
+def _forecast_jobs_by_creation() -> QuerySet[CollectionJob]:
     # Approval creates a binding's first forecasts job (plants.approval.approve_region)
     # and the binding's schedule starts at its slot. Restored collections are created later
     # with earlier slots, so creation order, not the slot, finds it.
+    return CollectionJob.objects.filter(endpoint=CollectionEndpoint.FORECASTS).order_by(
+        "created_at", "pk"
+    )
+
+
+def approval_job(binding_id: int) -> tuple[int, datetime] | None:
     return (
-        CollectionJob.objects.filter(binding_id=binding_id, endpoint=CollectionEndpoint.FORECASTS)
-        .order_by("created_at", "pk")
+        _forecast_jobs_by_creation()
+        .filter(binding_id=binding_id)
         .values_list("pk", "scheduled_for")
         .first()
     )
+
+
+def approval_job_id(binding: OuterRef) -> Subquery:
+    return Subquery(_forecast_jobs_by_creation().filter(binding_id=binding).values("pk")[:1])
 
 
 def latest_forecast_job(binding_id: int, moment: datetime) -> QuerySet[CollectionJob]:

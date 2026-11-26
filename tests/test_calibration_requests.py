@@ -1,4 +1,4 @@
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -35,7 +35,7 @@ from tests.support.domain import NOW, System
 from tests.support.historical_reference_import import archive, power_file
 from tests.support.incident_calibration import incident
 from tests.support.jobs import publish
-from tests.support.migrations import forward, leaf_nodes, migrate
+from tests.support.migrations import forward, migrate
 from tests.support.plant_operations import half_hours, make_plant
 from tests.support.plant_training import actual_snapshot_for
 from tests.support.production_changes import edit, write
@@ -373,15 +373,6 @@ def test_a_promotion_that_keeps_raising_stops_after_three_recorded_failures(
     assert calls == [run.pk] * 3
     assert automatic_decisions(plant) == [("calibration_automatic_skipped", "promotion_failed")] * 3
     assert not CalibrationActivation.objects.exists()
-
-
-@pytest.fixture
-def leaf() -> Iterator[None]:
-    targets = leaf_nodes()
-    try:
-        yield
-    finally:
-        migrate(*targets)
 
 
 @pytest.mark.usefixtures("leaf")

@@ -10,27 +10,13 @@ TODAY = date(2026, 11, 9)
 DAY = date(2026, 11, 8)
 UNCOVERED = date(2026, 11, 7)
 TOMORROW = TODAY + timedelta(days=1)
-PLANT_READS = (
+READS = (
     ("forecast", TODAY),
-    ("auto", TODAY),
-    ("estimated_actuals", TODAY),
-    ("archived_forecast", TODAY),
+    ("satellite", TODAY),
     ("forecast", TOMORROW),
     ("forecast", DAY),
-    ("auto", DAY),
-    ("estimated_actuals", DAY),
-    ("archived_forecast", DAY),
-    ("auto", UNCOVERED),
-)
-REGION_READS = (
-    ("forecast", TODAY),
-    ("auto", TODAY),
-    ("estimated_actuals", TODAY),
-    ("forecast", TOMORROW),
-    ("archived_forecast", DAY),
-    ("auto", DAY),
-    ("estimated_actuals", DAY),
-    ("auto", UNCOVERED),
+    ("satellite", DAY),
+    ("forecast", UNCOVERED),
 )
 
 

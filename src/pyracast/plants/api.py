@@ -45,7 +45,6 @@ from pyracast.plants.serializers import (
     CalibrationOutput,
     CalibrationSummaryOutput,
     EmptyInput,
-    ForecastQuery,
     ObservationImport,
     ObservationImportOutput,
     PerformanceOutput,
@@ -53,6 +52,7 @@ from pyracast.plants.serializers import (
     PlantConflict,
     PlantDaysOutput,
     PlantForecastOutput,
+    PlantForecastQuery,
     PlantInput,
     PlantOutput,
     PlantRevisionInput,
@@ -274,18 +274,18 @@ class CalibrationAutomationView(ScopedView[Plant]):
 
 
 class PlantForecastView(ScopedView[Plant]):
-    @extend_schema(parameters=[ForecastQuery], responses=PlantForecastOutput)
+    @extend_schema(parameters=[PlantForecastQuery], responses=PlantForecastOutput)
     def get(self, request: Request, **_kwargs: Any) -> Response:
         scope = self.scope()
-        data = ForecastQuery(data=request.query_params)
+        data = PlantForecastQuery(data=request.query_params)
         data.is_valid(raise_exception=True)
         values = data.validated_data
         result = plant_outlook(
             *scope,
             target_date=values["date"],
             resolution_minutes=values["resolution_minutes"],
-            as_of=values.get("as_of"),
             source=values["data_source"],
+            forecast_id=values.get("forecast_id"),
         )
         return Response(PlantForecastOutput(result).data)
 

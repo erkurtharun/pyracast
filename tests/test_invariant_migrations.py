@@ -2,7 +2,7 @@ import json
 import math
 import sys
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -42,7 +42,6 @@ from tests.support.migrations import (
     checks,
     constraints,
     forward,
-    leaf_nodes,
     migrate,
     row_values,
     triggers,
@@ -113,15 +112,6 @@ UNAVAILABLE = {
     "body": "Tomorrow's saved forecast could not be prepared.",
     "prepared_at": NOW.isoformat(),
 }
-
-
-@pytest.fixture
-def leaf() -> Iterator[None]:
-    targets = leaf_nodes()
-    try:
-        yield
-    finally:
-        migrate(*targets)
 
 
 def _installed() -> tuple[set[str], set[str]]:

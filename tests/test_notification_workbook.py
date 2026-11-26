@@ -411,6 +411,18 @@ def test_a_long_name_in_capitals_gets_the_lines_it_needs(name: str, lines: int) 
     assert _title_height(name) >= lines * 19
 
 
+def test_a_long_word_in_capitals_breaks_between_whole_letters() -> None:
+    assert _title_height("KARAMANMERKEZGÜNEŞENERJİSİGENELSANTRAL") == 3 * 19 + 4
+
+
+def test_turkish_subtitle_and_missing_data_note_rows_stay_one_line_high() -> None:
+    missing = _day(date(2026, 5, 10), None, coverage=0.0)
+    sheet = _sheet(_report(_day(date(2026, 5, 9)), missing, electrical=False), "tr")
+    assert sheet["A2"].value == "Güneş \u0131ş\u0131n\u0131m\u0131 tahmini (GHI) · Pyracast"
+    assert sheet["A12"].value == "10 May\u0131s 2026 Pazar: tahmin verisi yok."
+    assert sheet.row_dimensions[2].height == sheet.row_dimensions[12].height == 25
+
+
 def test_a_short_name_keeps_a_one_line_title_row() -> None:
     assert _title_height("North plant") == 23
     assert _title_height("NORTH PLANT") == 23

@@ -1,17 +1,9 @@
 import json
-from datetime import date
 
 import pytest
 from django.test import Client
 
-from tests.support.forecast_history import (
-    PLANT_READS,
-    REGION_READS,
-    TODAY,
-    UNCOVERED,
-    add_history,
-    usable_calibration,
-)
+from tests.support.forecast_history import READS, add_history, usable_calibration
 from tests.support.openapi import components, validate
 from tests.support.performance_history import FIRST, LAST, performance_history
 from tests.support.plant_operations import make_plant
@@ -97,17 +89,10 @@ def test_forecast_schema_declares_freshness_and_typed_payloads() -> None:
 
 
 @pytest.mark.parametrize(
-    ("scope", "component", "reads"),
-    [
-        ("plant", "PlantForecastOutput", PLANT_READS),
-        ("region", "ForecastOutput", REGION_READS),
-    ],
+    ("scope", "component"), [("plant", "PlantForecastOutput"), ("region", "ForecastOutput")]
 )
 def test_every_forecast_branch_matches_its_schema(
-    monkeypatch: pytest.MonkeyPatch,
-    scope: str,
-    component: str,
-    reads: tuple[tuple[str, date], ...],
+    monkeypatch: pytest.MonkeyPatch, scope: str, component: str
 ) -> None:
     system, plant = make_plant(monkeypatch)
     usable_calibration(system, plant)
@@ -117,7 +102,7 @@ def test_every_forecast_branch_matches_its_schema(
     region = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/"
     url = f"{region}plants/{plant.pk}/forecast/" if scope == "plant" else f"{region}forecast/"
     errors = {}
-    for source, day in (*reads, ("auto", UNCOVERED), ("forecast", TODAY)):
+    for source, day in READS:
         response = client.get(url, {"date": str(day), "data_source": source})
         assert response.status_code == 200, (source, day)
         errors[source, day] = validate(component, response.json())

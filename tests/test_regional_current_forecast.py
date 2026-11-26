@@ -15,9 +15,8 @@ from tests.support.plant_operations import publish_snapshot, snapshot_for
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
-@pytest.mark.parametrize("source", ["forecast", "auto"])
 def test_region_current_forecast_composes_saved_horizon_without_republishing(
-    monkeypatch: pytest.MonkeyPatch, source: str
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(timezone, "now", lambda: NOW)
     system = make_system(approved=True)
@@ -36,7 +35,7 @@ def test_region_current_forecast_composes_saved_horizon_without_republishing(
     client = Client()
     client.force_login(system.member)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"
-    response = client.get(path, {"date": day.isoformat(), "data_source": source})
+    response = client.get(path, {"date": day.isoformat(), "data_source": "forecast"})
     assert response.status_code == 200, response.content
     payload = response.json()["result"]
     assert payload["complete"] is True
@@ -165,6 +164,7 @@ def test_region_current_forecast_never_reads_a_superseded_binding(
     assert result["freshness"] == "missing"
     assert result["result"] is None
     assert result["unavailable_reason"] == "forecast_unavailable"
+    assert result["selection"]["forecast_id"] is None
 
 
 @pytest.mark.parametrize("change", ["old_contribution", "invalid_binding"])
