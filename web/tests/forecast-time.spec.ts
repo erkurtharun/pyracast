@@ -246,6 +246,28 @@ test("the best forecast is asked for on past days and today returns to Automatic
     expect(askedBest).toEqual([]);
 });
 
+test("the downloads of Automatic and the best forecast are named by the fetch time each shows", async ({
+    page,
+}) => {
+    const { times, panel } = await openForecast(page, "2026-11-11");
+    const download = async () => {
+        const file = page.waitForEvent("download");
+        await panel.getByRole("button", { name: "Download CSV" }).click();
+        return (await file).suggestedFilename();
+    };
+    const shown = panel.getByText(/^Forecast data: /);
+
+    await expect(shown).toHaveText("Forecast data: 10 Nov 2026, 06:00");
+    expect(await download()).toBe(
+        "pyracast-east-array-2026-11-11-20261110T0600-generation.csv",
+    );
+    await times.selectOption("best");
+    await expect(shown).toHaveText("Forecast data: 10 Nov 2026, 17:00");
+    expect(await download()).toBe(
+        "pyracast-east-array-2026-11-11-20261110T1700-generation.csv",
+    );
+});
+
 test("a time only the irradiance view lists is refused by the generation view, which shows Automatic", async ({
     page,
 }) => {

@@ -322,6 +322,14 @@ export type ForecastFileNames = {
     satellite: string;
 };
 
+// ISO 8601 basic form on the plant's wall clock, such as 20261110T1700.
+function fileTime(value: string | undefined, timeZone: string): string {
+    return (
+        plantTimestamp(value, timeZone)?.slice(0, 16).replaceAll(/[-:]/g, "") ??
+        ""
+    );
+}
+
 export function forecastExport(
     plant: PlantRef,
     forecast: { date?: string; source_kind?: string | null },
@@ -330,7 +338,13 @@ export function forecastExport(
         electrical,
         scenario,
         names,
-    }: { electrical: boolean; scenario: boolean; names: ForecastFileNames },
+        fetchedAt,
+    }: {
+        electrical: boolean;
+        scenario: boolean;
+        names: ForecastFileNames;
+        fetchedAt?: string;
+    },
 ): CsvExport {
     const kind = (kinds: readonly string[] | undefined) =>
         !kinds?.length
@@ -340,7 +354,12 @@ export function forecastExport(
               : names.forecast;
     const day = forecast.source_kind ? [forecast.source_kind] : [];
     return table<ForecastRow>(
-        plantFilename(plant.name, names.file, forecast.date ?? ""),
+        plantFilename(
+            plant.name,
+            names.file,
+            forecast.date ?? "",
+            fileTime(fetchedAt, plant.timezone),
+        ),
         [
             plantColumn(plant),
             [
