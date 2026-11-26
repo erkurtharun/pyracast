@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from io import BytesIO
 from typing import Any, cast
 from zoneinfo import ZoneInfo
@@ -286,6 +286,10 @@ def test_frozen_report_survives_later_input_changes_and_retry(
     assert system.binding.pk == delivery.binding_id
 
 
+def empty(values: list[Any]) -> bool:
+    return all(value is None for value in values)
+
+
 def test_the_sent_workbook_lists_the_daylight_hours_of_both_days_under_the_totals(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -302,16 +306,18 @@ def test_the_sent_workbook_lists_the_daylight_hours_of_both_days_under_the_total
     tomorrow = today + timedelta(days=1)
     totals = {row[0].date(): row[2] for row in cells[:heading] if isinstance(row[0], datetime)}
     hours: dict[date, list[tuple[datetime, datetime, float]]] = {today: [], tomorrow: []}
+    header = ["From", "To", "Forecast (MWh)"]
     day = None
-    for start, end, value, *_ in cells[heading + 1 :]:
-        if start is None or start == "From":
+    for row in cells[heading + 1 :]:
+        start, end, value, *_ = row
+        if empty(row) or row == header:
             continue
-        assert isinstance(start, datetime)
-        if end is None:
+        if isinstance(start, datetime) and start.time() == time() and empty(row[1:]):
             day = start.date()
             continue
-        assert isinstance(end, datetime)
-        assert isinstance(value, int | float)
+        assert isinstance(start, datetime), row
+        assert isinstance(end, datetime), row
+        assert isinstance(value, int | float), row
         assert day is not None
         hours[day].append((start, end, value))
     assert hours[today]

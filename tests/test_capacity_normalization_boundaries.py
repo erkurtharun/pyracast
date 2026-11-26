@@ -337,20 +337,27 @@ def test_a_copy_written_between_reading_and_planning_is_reported_as_reused(
     system, target = scaled_system(monkeypatch)
     actual_snapshot_for(system, date(2026, 11, 7))
     other: list[tuple[int, ...]] = []
-    copied_rows = 'SELECT "forecasts_referencecapacitynormalization"."snapshot_id"'
+    planning_read = 'SELECT "forecasts_forecastsnapshot"."id"'
 
-    def overtaken_after_reading_copies(execute: Any, sql: str, *args: Any) -> Any:
-        result = execute(sql, *args)
-        if not other and sql.startswith(copied_rows):
+    def overtaken_before_planning(execute: Any, sql: str, *args: Any) -> Any:
+        if not other and sql.startswith(planning_read):
             other.append(())
             with ThreadPoolExecutor(max_workers=1) as pool:
                 other[0] = pool.submit(lambda: invoke_elsewhere(system, target)).result(10)
-        return result
+        return execute(sql, *args)
 
-    with connection.execute_wrapper(overtaken_after_reading_copies):
-        ids = normalize(system, target)
+    with connection.execute_wrapper(overtaken_before_planning):
+        outcome = normalize_reference_capacity(
+            system.admin,
+            system.tenant.pk,
+            system.region.pk,
+            system.binding.pk,
+            target.pk,
+            "Same Hobby model at the target's reference scale",
+        )
 
-    assert ids == other[0] != ()
+    assert outcome.created == ()
+    assert outcome.reused == other[0] != ()
     assert ReferenceCapacityNormalization.objects.count() == 1
 
 
