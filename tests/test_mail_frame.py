@@ -1,6 +1,7 @@
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
+from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -62,6 +63,9 @@ MAILS: dict[str, dict[str, Any]] = {
 TEXT = {"h1", "p", "span"}
 VOID = {"br", "hr", "img", "input", "link", "meta"}
 PAINTED = ("color", "background-color")
+HIDING = {"display": "none", "visibility": "hidden", "max-height": "0", "mso-hide": "all"}
+FILLERS = frozenset(map(chr, (0x00AD, 0x034F, 0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF)))
+TEXT_LINK = {"color": "#09383a", "font-size": "16px", "text-decoration": "underline"}
 
 
 def declarations(body: str) -> dict[str, str]:
@@ -198,8 +202,8 @@ def shown(node: Node, prop: str, rules: list[Rule]) -> str:
     return next(value for each in node.lineage() if (value := declared(each, prop, rules)[0]))
 
 
-def hidden(node: Node) -> bool:
-    return any(each.tag == "head" or each.style.get("display") == "none" for each in node.lineage())
+def in_head(node: Node) -> bool:
+    return any(each.tag == "head" for each in node.lineage())
 
 
 def luminance(colour: str) -> float:
@@ -253,7 +257,7 @@ def test_in_dark_mode_every_dark_rule_wins_over_the_inline_colours(template: str
 def test_every_visible_text_is_readable_on_its_background(template: str, dark: bool) -> None:
     html = render_to_string(template, MAILS[template])
     rules = dark_rules(html) if dark else []
-    texts = [node for node in Tree(html).nodes if node.text and not hidden(node)]
+    texts = [node for node in Tree(html).nodes if node.text and not in_head(node)]
     assert texts
     for node in texts:
         pair = shown(node, "background-color", rules), shown(node, "color", rules)
@@ -265,11 +269,14 @@ def test_the_dark_rules_reach_the_code_the_notice_text_and_the_button_link() -> 
         "account/email/login_code_message.html", MAILS["account/email/login_code_message.html"]
     )
     forecast = render_to_string("notifications/forecast.html", MAILS["notifications/forecast.html"])
+    invitation = render_to_string(
+        "mail/workspace_invitation.html", MAILS["mail/workspace_invitation.html"]
+    )
     expected = {
         (code, "p", "mail-code"): ("#0f1a1f", "#e6edf0"),
         (forecast, "td", "mail-notice"): ("#fdf6e7", "#172b36"),
         (forecast, "strong", "mail-notice"): ("#fdf6e7", "#172b36"),
-        (forecast, "a", "mail-button"): ("#d7ebe6", "#09383a"),
+        (invitation, "a", "mail-button"): ("#d7ebe6", "#09383a"),
     }
     for (html, tag, name), pair in expected.items():
         rules = dark_rules(html)
@@ -281,6 +288,37 @@ def test_the_dark_rules_reach_the_code_the_notice_text_and_the_button_link() -> 
             and any(name in each.classes for each in node.lineage())
         ]
         assert (shown(node, "background-color", rules), shown(node, "color", rules)) == pair, tag
+
+
+@pytest.mark.parametrize("template", list(MAILS))
+def test_no_mail_carries_hidden_text_or_invisible_filler(template: str) -> None:
+    html = render_to_string(template, MAILS[template])
+    hiding = [
+        node.attributes
+        for node in Tree(html).nodes
+        if any(node.style.get(prop) == value for prop, value in HIDING.items())
+    ]
+    assert hiding == []
+    assert FILLERS.isdisjoint(unescape(html))
+
+
+@pytest.mark.parametrize("template", list(MAILS))
+def test_every_mail_links_at_most_twice_and_only_into_the_application(template: str) -> None:
+    nodes = Tree(render_to_string(template, MAILS[template])).nodes
+    hrefs = [node.attributes["href"] for node in nodes if node.tag == "a"]
+    assert len(hrefs) <= 2
+    assert all(href.startswith("https://testserver/app/") for href in hrefs), hrefs
+
+
+@pytest.mark.parametrize(
+    "template", ["notifications/forecast.html", "notifications/workspace_event.html"]
+)
+def test_a_notification_mail_links_with_one_underlined_text_link(template: str) -> None:
+    nodes = Tree(render_to_string(template, MAILS[template])).nodes
+    (link,) = [node for node in nodes if node.tag == "a"]
+    assert not any("mail-button" in node.classes for node in link.lineage())
+    assert link.attributes["href"] == URL
+    assert {prop: link.style[prop] for prop in TEXT_LINK} == TEXT_LINK
 
 
 @pytest.mark.parametrize("template", list(MAILS))

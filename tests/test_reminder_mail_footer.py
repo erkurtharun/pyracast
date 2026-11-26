@@ -1,3 +1,5 @@
+from html import unescape
+
 import pytest
 from django.core.mail import EmailMultiAlternatives
 from django.test import override_settings
@@ -10,23 +12,21 @@ from pyracast.notifications.scheduler import enqueue_due
 from pyracast.plants.models import Plant
 from tests.support.domain import NOW, make_system
 from tests.support.notification_transmission import replying
-from tests.support.notifications import SLOT, saved
+from tests.support.notifications import ABSENT_HEADERS, SLOT, saved
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
+KEPT_HEADERS = ("Auto-Submitted", "X-Auto-Response-Suppress", "Content-Language")
 ORIGIN = "https://pyracast.example"
 RECIPIENT = "reader@example.com"
 FOOTERS = {
     "en": (
-        "You receive this email because an administrator of Footer workspace added your "
-        "address to the forecast emails of Kayseri solar park. To stop receiving it, ask a "
-        "workspace administrator to remove your address."
+        "Forecast email of Kayseri solar park in Footer workspace. The workspace's "
+        "administrators manage who receives it."
     ),
     "tr": (
-        "Bu e-postay\u0131, Footer workspace çal\u0131şma alan\u0131n\u0131n bir yöneticisi "
-        "adresinizi Kayseri solar park tahmin e-postalar\u0131na eklediği için "
-        "al\u0131yorsunuz. Almak istemiyorsan\u0131z çal\u0131şma alan\u0131 yöneticisinden "
-        "adresinizin ç\u0131kar\u0131lmas\u0131n\u0131 isteyin."
+        "Footer workspace çal\u0131şma alan\u0131ndaki Kayseri solar park santralinin tahmin "
+        "e-postas\u0131. Al\u0131c\u0131lar\u0131 çal\u0131şma alan\u0131 yöneticileri belirler."
     ),
 }
 
@@ -139,7 +139,7 @@ def test_only_clocks_the_provider_quota_allows_make_a_second_edition(
 
 @pytest.mark.parametrize("kind", ["forecast", "unavailable"])
 @pytest.mark.parametrize("language", ["en", "tr"])
-def test_every_reminder_mail_says_why_it_arrives_and_how_to_stop_it(
+def test_every_reminder_mail_names_its_plant_workspace_and_who_manages_its_recipients(
     monkeypatch: pytest.MonkeyPatch, kind: str, language: str
 ) -> None:
     if kind == "unavailable":
@@ -148,14 +148,14 @@ def test_every_reminder_mail_says_why_it_arrives_and_how_to_stop_it(
 
     message = sent(reminder)
 
-    assert FOOTERS[language] in " ".join(str(message.body).split())
+    assert str(message.body).endswith(f"\n\n--\n{FOOTERS[language]}")
     if kind == "forecast":
-        assert FOOTERS[language] in " ".join(str(message.alternatives[0][0]).split())
-    assert (
-        message.extra_headers["List-Unsubscribe"]
-        == "<mailto:noreply@localhost?subject=unsubscribe>"
-    )
-    assert message.extra_headers["Auto-Submitted"] == "auto-generated"
-    assert message.extra_headers["X-Auto-Response-Suppress"] == "OOF, AutoReply"
-    assert message.extra_headers["Content-Language"] == language
-    assert RECIPIENT not in str(message.body) + message.extra_headers["List-Unsubscribe"]
+        assert FOOTERS[language] in " ".join(unescape(str(message.alternatives[0][0])).split())
+    assert {name: message.extra_headers[name] for name in KEPT_HEADERS} == {
+        "Auto-Submitted": "auto-generated",
+        "X-Auto-Response-Suppress": "OOF, AutoReply",
+        "Content-Language": language,
+    }
+    wire = message.message()
+    assert [name for name in ABSENT_HEADERS if wire[name] is not None] == []
+    assert RECIPIENT not in str(message.body)
