@@ -25,6 +25,28 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          sparse-checkout-cone-mode: false
+          # The output of: python3 deploy/release_scope.py sparse-patterns
+          sparse-checkout: |
+            /*
+            !/docs/
+            !/tests/
+            !/scripts/
+            !/web/tests/
+            !/web/integration/
+            !/web/production-tests/
+            !/.agents/
+            !/AGENTS.md
+            !/CLAUDE.md
+            !/.claude/settings.json
+            !/.codex/hooks.json
+            !/.github/dependabot.yml
+            !/qodana.yaml
+            !/qodana-js.yaml
+            !/sonar-project.properties
+            !/.gitignore
+            !/web/.gitignore
+            !/web/.prettierignore
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           version: 0.13.9

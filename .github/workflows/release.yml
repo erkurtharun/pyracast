@@ -51,6 +51,28 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          sparse-checkout-cone-mode: false
+          # The output of: python3 deploy/release_scope.py sparse-patterns
+          sparse-checkout: |
+            /*
+            !/docs/
+            !/tests/
+            !/scripts/
+            !/web/tests/
+            !/web/integration/
+            !/web/production-tests/
+            !/.agents/
+            !/AGENTS.md
+            !/CLAUDE.md
+            !/.claude/settings.json
+            !/.codex/hooks.json
+            !/.github/dependabot.yml
+            !/qodana.yaml
+            !/qodana-js.yaml
+            !/sonar-project.properties
+            !/.gitignore
+            !/web/.gitignore
+            !/web/.prettierignore
       - name: Collect the CI run of the current main commit
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
@@ -231,7 +253,7 @@ jobs:
           DEPLOYED_SHA: ${{ steps.deployed.outputs.sha }}
           RELEASE_SHA: ${{ steps.decision.outputs.sha }}
           RELEASE_EVENT: ${{ inputs.ci_run_id != '' && 'workflow_run' || github.event_name }}
-        run: python3 deploy/release_scope.py "$RELEASE_EVENT" "$DEPLOYED_SHA" "$RELEASE_SHA"
+        run: python3 deploy/release_scope.py classify "$RELEASE_EVENT" "$DEPLOYED_SHA" "$RELEASE_SHA"
 
   scan:
     needs: authorize
@@ -263,6 +285,28 @@ jobs:
         with:
           ref: ${{ needs.authorize.outputs.sha }}
           persist-credentials: false
+          sparse-checkout-cone-mode: false
+          # The output of: python3 deploy/release_scope.py sparse-patterns
+          sparse-checkout: |
+            /*
+            !/docs/
+            !/tests/
+            !/scripts/
+            !/web/tests/
+            !/web/integration/
+            !/web/production-tests/
+            !/.agents/
+            !/AGENTS.md
+            !/CLAUDE.md
+            !/.claude/settings.json
+            !/.codex/hooks.json
+            !/.github/dependabot.yml
+            !/qodana.yaml
+            !/qodana-js.yaml
+            !/sonar-project.properties
+            !/.gitignore
+            !/web/.gitignore
+            !/web/.prettierignore
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           version: 0.13.9
@@ -410,6 +454,28 @@ jobs:
           ref: refs/heads/main
           fetch-depth: 0
           persist-credentials: false
+          sparse-checkout-cone-mode: false
+          # The output of: python3 deploy/release_scope.py sparse-patterns
+          sparse-checkout: |
+            /*
+            !/docs/
+            !/tests/
+            !/scripts/
+            !/web/tests/
+            !/web/integration/
+            !/web/production-tests/
+            !/.agents/
+            !/AGENTS.md
+            !/CLAUDE.md
+            !/.claude/settings.json
+            !/.codex/hooks.json
+            !/.github/dependabot.yml
+            !/qodana.yaml
+            !/qodana-js.yaml
+            !/sonar-project.properties
+            !/.gitignore
+            !/web/.gitignore
+            !/web/.prettierignore
       - name: Move to the authorized commit, which must be on main
         run: |
           [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]

@@ -112,12 +112,26 @@ def decide(event: str, deployed_sha: str, head_sha: str, root: Path) -> Decision
     )
 
 
+def sparse_patterns(entries: Sequence[str]) -> list[str]:
+    excluded = [
+        f"!/{entry.removesuffix('**')}" if entry.endswith("/**") else f"!/{entry}"
+        for entry in entries
+    ]
+    return ["/*", *excluded]
+
+
 def main(arguments: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("event")
-    parser.add_argument("deployed_sha")
-    parser.add_argument("head_sha")
+    commands = parser.add_subparsers(dest="command", required=True)
+    classify = commands.add_parser("classify")
+    classify.add_argument("event")
+    classify.add_argument("deployed_sha")
+    classify.add_argument("head_sha")
+    commands.add_parser("sparse-patterns")
     values = parser.parse_args(arguments)
+    if values.command == "sparse-patterns":
+        print("\n".join(sparse_patterns(ALLOWLIST)))
+        return
     decision = decide(values.event, values.deployed_sha, values.head_sha, Path.cwd())
     print(decision.reason)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")

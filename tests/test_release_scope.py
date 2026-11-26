@@ -1,14 +1,19 @@
+import functools
 import os
 import posixpath
 import re
 import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
+import yaml
 
 from deploy import release_scope
+from tests.support.workflows import WORKFLOWS
 
 ROOT = Path(__file__).resolve().parents[1]
 GIT = shutil.which("git")
@@ -456,35 +461,278 @@ def test_the_shipped_path_check_sees_every_re_include(
     assert _shipped_samples(context, _ignore_rules("\n".join(lines))) != []
 
 
-def _job(workflow: str, name: str) -> str:
-    lines = workflow.splitlines()
-    start = lines.index(f"  {name}:")
-    end = next(
-        (index for index in range(start + 1, len(lines)) if re.match(r"  \S", lines[index])),
-        len(lines),
-    )
-    return "\n".join(lines[start:end])
-
-
-def test_no_release_input_names_an_allowlisted_path() -> None:
-    workflows = ROOT / ".github" / "workflows"
-    inputs = {
-        "ci.yml deployment job": _job(
-            (workflows / "ci.yml").read_text(encoding="utf-8"), "deployment"
-        ),
-        "release.yml": (workflows / "release.yml").read_text(encoding="utf-8"),
+WORKFLOW_FILES = frozenset({"ci.yml", "codeql.yml", "image-rescan.yml", "release.yml"})
+JOBS_THAT_NEED_EVERY_PATH = frozenset(
+    {
+        "ci.yml verify_ubuntu",
+        "ci.yml verify_windows_shards",
+        "ci.yml verify_windows",
+        "ci.yml web_ubuntu",
+        "ci.yml web_windows",
+        "ci.yml web_production",
+        "ci.yml scientific",
+        "ci.yml audit",
+        "ci.yml sonar",
+        "ci.yml ci_result",
+        "ci.yml pr_tested",
+        "codeql.yml analyze",
     }
+)
+
+
+@functools.cache
+def _derived_patterns() -> list[str]:
+    result = subprocess.run(  # noqa: S603 -- The running interpreter on a tracked script.
+        [sys.executable, str(ROOT / "deploy" / "release_scope.py"), "sparse-patterns"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.splitlines()
+
+
+def _is_checkout(step: dict[str, Any]) -> bool:
+    return str(step.get("uses", "")).lower().startswith("actions/checkout@")
+
+
+def _is_reduced_checkout(step: dict[str, Any]) -> bool:
+    options = step.get("with", {})
+    return (
+        _is_checkout(step)
+        and "if" not in step
+        and "continue-on-error" not in step
+        and options.get("sparse-checkout-cone-mode") is False
+        and str(options.get("sparse-checkout", "")).splitlines() == _derived_patterns()
+    )
+
+
+def _calls_another_workflow(job: dict[str, Any]) -> bool:
+    return "uses" in job
+
+
+def _checks_out_without_the_unshipped_paths(job: dict[str, Any]) -> bool:
+    checkouts = [step for step in job.get("steps", []) if _is_checkout(step)]
+    return (
+        not _calls_another_workflow(job)
+        and len(checkouts) <= 1
+        and all(_is_reduced_checkout(step) for step in checkouts)
+    )
+
+
+def _workflow_files(directory: Path) -> list[Path]:
+    return sorted([*directory.glob("*.yml"), *directory.glob("*.yaml")])
+
+
+def _jobs(directory: Path) -> dict[str, dict[str, Any]]:
+    return {
+        f"{path.name} {identifier}": job
+        for path in _workflow_files(directory)
+        for identifier, job in yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"].items()
+    }
+
+
+def _unknown_workflow_files(directory: Path, known: frozenset[str]) -> list[str]:
+    return [path.name for path in _workflow_files(directory) if path.name not in known]
+
+
+def _jobs_with_an_unreduced_checkout(
+    directory: Path, needing_every_path: frozenset[str]
+) -> list[str]:
+    return [
+        name
+        for name, job in _jobs(directory).items()
+        if name not in needing_every_path and not _checks_out_without_the_unshipped_paths(job)
+    ]
+
+
+def test_every_workflow_file_is_known() -> None:
+    assert _unknown_workflow_files(WORKFLOWS, WORKFLOW_FILES) == []
+
+
+def test_only_the_jobs_that_need_every_path_check_out_the_unshipped_paths() -> None:
+    assert _jobs_with_an_unreduced_checkout(WORKFLOWS, JOBS_THAT_NEED_EVERY_PATH) == []
+    assert _jobs(WORKFLOWS).keys() >= JOBS_THAT_NEED_EVERY_PATH
+
+
+def _reduced_checkout_step() -> dict[str, Any]:
+    patterns = "".join(f"{pattern}\n" for pattern in _derived_patterns())
+    return {
+        "uses": "actions/checkout@v7",
+        "with": {"sparse-checkout-cone-mode": False, "sparse-checkout": patterns},
+    }
+
+
+def _job(steps: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"runs-on": "ubuntu-latest", "steps": steps}
+
+
+def _write_workflow(directory: Path, name: str, jobs: dict[str, dict[str, Any]]) -> None:
+    document = {"on": "push", "jobs": jobs}
+    (directory / name).write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+
+
+def _reported_jobs(directory: Path, job: dict[str, Any]) -> list[str]:
+    _write_workflow(directory, "release.yml", {"build": job})
+    return _jobs_with_an_unreduced_checkout(directory, frozenset())
+
+
+def test_a_job_with_two_reduced_checkouts_is_reported(tmp_path: Path) -> None:
+    steps = [_reduced_checkout_step(), _reduced_checkout_step()]
+
+    assert _reported_jobs(tmp_path, _job(steps)) == ["release.yml build"]
+
+
+def test_a_reduced_checkout_under_a_condition_is_reported(tmp_path: Path) -> None:
+    checkout = {**_reduced_checkout_step(), "if": "github.event_name == 'push'"}
+
+    assert _reported_jobs(tmp_path, _job([checkout])) == ["release.yml build"]
+
+
+def test_a_full_checkout_of_a_job_not_named_as_needing_every_path_is_reported(
+    tmp_path: Path,
+) -> None:
+    steps = [{"uses": "actions/checkout@v7"}, {"run": "make images"}]
+
+    assert _reported_jobs(tmp_path, _job(steps)) == ["release.yml build"]
+
+
+def test_a_full_checkout_in_another_letter_case_is_reported(tmp_path: Path) -> None:
+    steps = [{"uses": "Actions/Checkout@v7"}]
+
+    assert _reported_jobs(tmp_path, _job(steps)) == ["release.yml build"]
+
+
+def test_a_job_that_calls_another_workflow_is_reported(tmp_path: Path) -> None:
+    job = {"uses": "other-owner/other-repository/.github/workflows/build.yml@v1"}
+
+    assert _reported_jobs(tmp_path, job) == ["release.yml build"]
+
+
+def test_a_checkout_with_other_patterns_is_reported(tmp_path: Path) -> None:
+    checkout = _reduced_checkout_step()
+    patterns = checkout["with"]["sparse-checkout"].splitlines()[:-1]
+    checkout["with"]["sparse-checkout"] = "\n".join(patterns)
+
+    assert _reported_jobs(tmp_path, _job([checkout])) == ["release.yml build"]
+
+
+def test_a_workflow_file_the_case_does_not_know_is_reported(tmp_path: Path) -> None:
+    _write_workflow(tmp_path, "release.yml", {})
+    _write_workflow(tmp_path, "build.yaml", {})
+
+    assert _unknown_workflow_files(tmp_path, frozenset({"release.yml"})) == ["build.yaml"]
+
+
+def test_reduced_jobs_named_jobs_and_jobs_without_a_checkout_pass(tmp_path: Path) -> None:
+    jobs = {
+        "build": _job([_reduced_checkout_step(), {"run": "./deploy/build-images.sh"}]),
+        "verify": _job([{"uses": "actions/checkout@v7"}, {"run": "pytest"}]),
+        "analyse": {"uses": "./.github/workflows/codeql.yml"},
+        "cleanup": _job([{"run": "echo done"}]),
+    }
+    _write_workflow(tmp_path, "ci.yml", jobs)
+    named = frozenset({"ci.yml verify", "ci.yml analyse"})
+
+    assert _jobs_with_an_unreduced_checkout(tmp_path, named) == []
+
+
+def test_a_directory_entry_and_an_exact_entry_become_exclusions() -> None:
+    patterns = release_scope.sparse_patterns(("web/tests/**", "AGENTS.md"))
+
+    assert patterns == ["/*", "!/web/tests/", "!/AGENTS.md"]
+
+
+def test_the_command_prints_the_patterns_of_the_allowlist(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    release_scope.main(["sparse-patterns"])
+
+    assert capsys.readouterr().out.splitlines() == release_scope.sparse_patterns(
+        release_scope.ALLOWLIST
+    )
+
+
+LOOK_ALIKES = (
+    "README.md",
+    "AGENTS.md.bak",
+    "src/AGENTS.md",
+    "web/CLAUDE.md",
+    "docsx/a.md",
+    "scriptsx/a.py",
+    "src/scripts/x.py",
+    "web/testsx/a.ts",
+    "web/src/tests/x.ts",
+    "web/integration.ts",
+    "web/production-tests2/a.ts",
+    ".agentsx/a.md",
+    ".claude/settings.local.json",
+    ".claude/hooks/x.py",
+    ".codex/config.toml",
+    ".github/dependabot.yaml",
+    ".github/workflows/ci.yml",
+    "deploy/.gitignore",
+    "web/src/.gitignore",
+    "qodana.yaml.d/x.yaml",
+)
+
+
+def _working_tree(root: Path) -> set[str]:
+    return {
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file() and ".git" not in path.relative_to(root).parts
+    }
+
+
+def _reduced_clone(source: Path, destination: Path) -> None:
+    head = _git(source, "rev-parse", "HEAD")
+    _git(source, "clone", "--quiet", "--shared", "--no-checkout", str(source), str(destination))
+    # What the checkout action does for sparse-checkout-cone-mode false.
+    _git(destination, "config", "core.sparseCheckout", "true")
+    sparse_file = destination / _git(destination, "rev-parse", "--git-path", "info/sparse-checkout")
+    sparse_file.parent.mkdir(parents=True, exist_ok=True)
+    with sparse_file.open("a", encoding="utf-8", newline="") as stream:
+        stream.write("\n" + "\n".join(_derived_patterns()) + "\n")
+    _git(destination, "checkout", "--quiet", "--detach", head)
+
+
+def _shipped_tracked_files(root: Path) -> set[str]:
+    tracked = _git(root, "ls-tree", "-r", "--name-only", "-z", "HEAD").split("\0")
+    return {path for path in tracked if path and not release_scope.unshipped(path)}
+
+
+def test_the_reduced_checkout_of_this_repository_holds_exactly_the_shipped_files(
+    tmp_path: Path,
+) -> None:
+    _reduced_clone(ROOT, tmp_path / "clone")
+
+    assert _working_tree(tmp_path / "clone") == _shipped_tracked_files(ROOT)
+
+
+def test_the_reduced_checkout_keeps_the_look_alikes_of_the_unshipped_paths(
+    repository: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    probes = [
+        entry.removesuffix("**") + "nested/probe" if entry.endswith("/**") else entry
+        for entry in release_scope.ALLOWLIST
+    ]
+    _commit(repository, *probes, *LOOK_ALIKES)
+    clone = tmp_path_factory.mktemp("reduced") / "clone"
+
+    _reduced_clone(repository, clone)
+
+    assert _working_tree(clone) == set(LOOK_ALIKES)
+
+
+def test_no_infrastructure_file_names_an_allowlisted_path() -> None:
     tracked = _git(ROOT, "ls-files", "-z").split("\0")
-    for path in tracked:
-        release_input = path.startswith(("deploy/", "infra/")) or path.endswith("Dockerfile")
-        if release_input and path != "deploy/release_scope.py":
-            inputs[path] = (ROOT / path).read_text(encoding="utf-8", errors="replace")
-    assert "deploy/install-release.sh" in inputs
-    # The early release compares changed paths with these names; it reads none of those files.
-    pipeline = re.compile(r"^PIPELINE_DIRECTORIES = .*?^\)\n", flags=re.DOTALL | re.MULTILINE)
-    gate = inputs["deploy/release_authorization.py"]
-    inputs["deploy/release_authorization.py"] = pipeline.sub("", gate, count=1)
-    assert inputs["deploy/release_authorization.py"] != gate
+    inputs = {
+        path: (ROOT / path).read_text(encoding="utf-8", errors="replace")
+        for path in tracked
+        if path.startswith("infra/")
+    }
+
+    assert "infra/terraform/templates/startup.sh.tftpl" in inputs
     for source, text in inputs.items():
         assert _named_entries(text) == [], source
 
@@ -566,7 +814,7 @@ def test_main_writes_the_decision_and_its_reason(
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(outputs / "summary"))
     monkeypatch.chdir(repository)
 
-    release_scope.main([RUN, deployed, head])
+    release_scope.main(["classify", RUN, deployed, head])
 
     assert (outputs / "output").read_text(encoding="utf-8") == expected
     summary = (outputs / "summary").read_text(encoding="utf-8")
@@ -579,7 +827,7 @@ def test_main_writes_the_decision_without_a_step_summary(
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
 
-    release_scope.main(["workflow_dispatch", "", ""])
+    release_scope.main(["classify", "workflow_dispatch", "", ""])
 
     assert (tmp_path / "output").read_text(encoding="utf-8") == "release=true\n"
     assert capsys.readouterr().out == "Event 'workflow_dispatch' always releases.\n"

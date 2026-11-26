@@ -561,6 +561,8 @@ def test_deploy_runs_the_authorized_commit_only_after_proving_it_is_on_main() ->
         "ref": "refs/heads/main",
         "fetch-depth": 0,
         "persist-credentials": False,
+        "sparse-checkout-cone-mode": False,
+        "sparse-checkout": checkout["with"]["sparse-checkout"],
     }
     assert move["name"] == "Move to the authorized commit, which must be on main"
     assert move["run"].splitlines() == [
@@ -774,7 +776,7 @@ def test_an_early_start_is_classified_like_the_release_after_the_whole_run() -> 
         "${{ inputs.ci_run_id != '' && 'workflow_run' || github.event_name }}"
     )
     assert classify["run"] == (
-        'python3 deploy/release_scope.py "$RELEASE_EVENT" "$DEPLOYED_SHA" "$RELEASE_SHA"'
+        'python3 deploy/release_scope.py classify "$RELEASE_EVENT" "$DEPLOYED_SHA" "$RELEASE_SHA"'
     )
 
 
