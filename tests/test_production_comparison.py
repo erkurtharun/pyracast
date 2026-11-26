@@ -14,7 +14,12 @@ from pyracast.plants.models import Plant
 from pyracast.plants.performance import production_comparison
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, System
-from tests.support.performance_history import FIRST, LAST, performance_history
+from tests.support.performance_history import (
+    FIRST,
+    LAST,
+    estimated_actuals,
+    performance_history,
+)
 from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -110,6 +115,21 @@ def test_days_that_cannot_be_compared_name_their_reason(monkeypatch: pytest.Monk
             date(2026, 11, 7): "incomplete_or_invalid_day",
         },
     }
+
+
+def test_a_satellite_day_without_a_complete_daylight_is_reported_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    performance_history(system, plant)
+    day = date(2026, 11, 6)
+    estimated_actuals(system, day, 0.3, NOW - timedelta(days=2), hours=(0, 10))
+
+    shown = production_comparison(plant, start_date=day, end_date=day, data_source="satellite")
+
+    assert [
+        (row["status"], row["reason"], row["predicted_energy_mwh"]) for row in shown["days"]
+    ] == [("missing", "invalid_forecast_data", None)]
 
 
 def test_accuracy_summarises_the_compared_days(monkeypatch: pytest.MonkeyPatch) -> None:
