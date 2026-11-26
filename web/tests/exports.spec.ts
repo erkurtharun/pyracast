@@ -311,6 +311,47 @@ for (const [language, curtailed] of [
         }
     });
 
+test("a saved source that starts like a formula comes back as saved from the downloaded file in either language", () => {
+    const sources = [
+        "+meter",
+        "=meter",
+        "-meter",
+        "@meter",
+        `+${"m".repeat(199)}`,
+        "'+meter",
+    ];
+    const file = productionExport(
+        plant,
+        "2026-11-10",
+        sources.map((source, hour) =>
+            interval(
+                `2026-11-10T0${hour}:00:00Z`,
+                `2026-11-10T0${hour + 1}:00:00Z`,
+                1,
+                "manual",
+                { source },
+            ),
+        ),
+        "actual-production",
+    );
+    for (const language of ["en", "tr"] as const) {
+        const rows = lines(file, language);
+        expect(rows[1]).toBe(
+            `"2026-11-10T03:00:00+03:00","2026-11-10T04:00:00+03:00",1,"Normal","'+meter"`,
+        );
+        expect(rows[6]).toBe(
+            `"2026-11-10T08:00:00+03:00","2026-11-10T09:00:00+03:00",1,"Normal","''+meter"`,
+        );
+        const parsed = parseProduction(
+            written(file, language),
+            ...csvTexts(language),
+        );
+        expect(parsed.observations.map(({ source }) => source)).toEqual(
+            sources,
+        );
+    }
+});
+
 const half = (start: string, end: string) =>
     `2026-01-01T${start}:00+03:00,2026-01-01T${end}:00+03:00`;
 

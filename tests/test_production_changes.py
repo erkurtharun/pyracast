@@ -1,3 +1,4 @@
+import math
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from threading import Barrier
@@ -124,14 +125,18 @@ def _post(client: Client, path: str, body: dict[str, Any]) -> dict[str, Any]:
     return cast(dict[str, Any], response.json())
 
 
-def _preview(client: Client, base: str, plant: Plant, rows: list[dict[str, Any]]) -> dict[str, Any]:
-    batch = {"configuration_id": plant.current_configuration_id, "unit": "MWh"}
+def _preview(
+    client: Client, base: str, plant: Plant, rows: list[dict[str, Any]], unit: str = "MWh"
+) -> dict[str, Any]:
+    batch = {"configuration_id": plant.current_configuration_id, "unit": unit}
     return _post(client, base + "preview/", batch | {"observations": rows})
 
 
-def _upload(client: Client, base: str, plant: Plant, rows: list[dict[str, Any]]) -> dict[str, Any]:
-    changes = _preview(client, base, plant, rows)["changes"]
-    batch = {"configuration_id": plant.current_configuration_id, "unit": "MWh"}
+def _upload(
+    client: Client, base: str, plant: Plant, rows: list[dict[str, Any]], unit: str = "MWh"
+) -> dict[str, Any]:
+    changes = _preview(client, base, plant, rows, unit)["changes"]
+    batch = {"configuration_id": plant.current_configuration_id, "unit": unit}
     return _post(client, base + "changes/", batch | {"changes": changes, "origin": "csv_import"})
 
 
@@ -193,6 +198,28 @@ def test_status_and_source_cells_are_stored_as_written(
     curtailed = _upload(client, base, plant, [_file_row(slot, 2, "curtailed", word)])
     assert curtailed["created"] == 1
     assert ProductionObservation.objects.get(pk=curtailed["ids"][0]).quality == "curtailed"
+    direct = _post(
+        client,
+        base + "changes/",
+        {
+            "configuration_id": plant.current_configuration_id,
+            "unit": "MWh",
+            "changes": [
+                {
+                    "starts_at": slot.isoformat(),
+                    "ends_at": (slot + timedelta(hours=1)).isoformat(),
+                    "expected_revision_id": curtailed["ids"][0],
+                    "action": "set",
+                    "energy": 2,
+                    "quality": "curtailed",
+                    "source": "meter C",
+                }
+            ],
+        },
+    )
+    assert direct["created"] == 1
+    edited = ProductionObservation.objects.get(pk=direct["ids"][0])
+    assert (edited.source, edited.supersedes_id) == ("meter C", curtailed["ids"][0])
     batch = {"configuration_id": plant.current_configuration_id, "unit": "MWh"}
     for field, value in (("quality_label", True), ("source_label", "manual")):
         row = _file_row(slot, 2, "curtailed", word) | {field: value}
@@ -248,6 +275,36 @@ def test_a_downloaded_day_of_provider_values_with_one_corrected_hour_writes_one_
     assert [row["effective"]["source_kind"] for row in after] == [
         "manual" if index == 10 else "realtime_generation" for index in range(24)
     ]
+
+
+def test_an_energy_in_kilowatt_hours_equals_the_same_energy_in_megawatt_hours(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    config = plant.current_configuration
+    assert config is not None
+    acquisition((config, provider(system, plant)), values=["1.23456"] * 24)
+    day_start, _ = local_day_bounds(DAY, system.binding.timezone)
+    provided, entered = day_start + timedelta(hours=10), day_start + timedelta(hours=11)
+    saved = write(system, plant, [edit(entered, 1.23456)])["ids"][0]
+    client, base = _production_api(system, plant)
+    batch = {"configuration_id": plant.current_configuration_id, "unit": "kWh"}
+    same = client.post(
+        base + "preview/",
+        batch | {"observations": [_file_row(provided, 1234.56, "valid", "Real-time (EPİAŞ)")]},
+        content_type="application/json",
+    )
+    assert same.status_code == 400
+    assert "This file changes no value." in same.content.decode()
+    kept = _upload(client, base, plant, [_file_row(entered, 1234.56, "valid", "meter")], "kWh")
+    assert kept == {"created": 0, "existing": 1, "count": 1, "ids": [saved]}
+    assert _shown(client, base, provided)["effective"]["source_kind"] == "realtime_generation"
+    last_digit = _file_row(provided, 1234.5600000000004, "valid", "Real-time (EPİAŞ)")
+    changed = _upload(client, base, plant, [last_digit], "kWh")
+    assert changed["created"] == 1
+    stored = ProductionObservation.objects.get(pk=changed["ids"][0])
+    assert stored.energy_mwh == math.nextafter(1.23456, 2)
+    assert _shown(client, base, provided)["effective"]["source_kind"] == "manual"
 
 
 def test_batch_rejects_stale_and_overlap_without_partial_changes(

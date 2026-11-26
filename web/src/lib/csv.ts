@@ -113,13 +113,22 @@ function startsFormula(value: string): boolean {
     return false;
 }
 
+// Looks past apostrophes already in front, so unguarded() removes only the one added.
+function guarded(value: string): boolean {
+    const text = value.replace(/^'+/, "");
+    return startsFormula(text) && !PLAIN_NUMBER.test(text);
+}
+
+export function unguarded(value: string): string {
+    return value.startsWith("'") && guarded(value) ? value.slice(1) : value;
+}
+
 function cell(value: CsvValue): string {
     if (value === null) return "";
     if (typeof value === "number")
         return Number.isFinite(value) ? String(value) : "";
     // Quoting alone does not stop a spreadsheet from evaluating a leading formula character.
-    const safe =
-        startsFormula(value) && !PLAIN_NUMBER.test(value) ? `'${value}` : value;
+    const safe = guarded(value) ? `'${value}` : value;
     return `"${safe.replaceAll('"', '""')}"`;
 }
 

@@ -1,6 +1,7 @@
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from itertools import pairwise
 from math import isfinite
 from typing import Any, Literal, TypedDict, cast
@@ -151,7 +152,10 @@ def normalize_observation(
     source = observation.source.strip()
     if not source or len(source) > 200:
         raise ValidationError(UNEXPECTED)
-    return start, end, value / 1000 if unit == "kWh" else value, observation.quality, source
+    if unit == "kWh":
+        # Shift the decimal text, not the binary value, so 1234.56 kWh is stored as 1.23456 MWh.
+        value = float(Decimal(repr(value)).scaleb(-3))
+    return start, end, value, observation.quality, source
 
 
 def lock_production_configuration(

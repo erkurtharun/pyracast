@@ -4,6 +4,7 @@ import { loadCatalogue } from "@/i18n/catalogue";
 import type { english } from "@/i18n/en";
 import { isLanguage, languages } from "@/i18n/language";
 import { DisplayError } from "@/lib/api/errors";
+import { unguarded } from "@/lib/csv";
 import type { components } from "./schema";
 export const QUALITIES = ["valid", "outage", "curtailed", "invalid"] as const;
 export type Quality = (typeof QUALITIES)[number];
@@ -204,7 +205,7 @@ function productionFile(
         const starts_at = cell("start"),
             ends_at = cell("end"),
             rawEnergy = cell("energy"),
-            source = cell("source");
+            source = unguarded(cell("source"));
         const start = Date.parse(starts_at),
             end = Date.parse(ends_at),
             energy = Number(rawEnergy);
