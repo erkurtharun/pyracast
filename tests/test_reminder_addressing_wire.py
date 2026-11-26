@@ -3,6 +3,7 @@ import json
 from collections.abc import Iterator
 from datetime import timedelta
 from email.message import EmailMessage as WireMessage
+from html import unescape
 from typing import Any
 
 import httpx
@@ -431,7 +432,9 @@ def assert_shape(message: WireMessage, shape: str, system: System) -> None:
     assert body.get_content().replace("\r\n", "\n") == expected_text(system, shape)
     html = message.get_body(("html",))
     if html is not None:
-        hrefs = links(html.get_content())
+        content = html.get_content()
+        assert FOOTER in " ".join(unescape(content).split())
+        hrefs = links(content)
         assert 1 <= len(hrefs) <= 2
         assert all(href.startswith("https://testserver/app/") for href in hrefs), hrefs
 

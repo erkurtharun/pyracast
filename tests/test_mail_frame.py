@@ -64,6 +64,8 @@ TEXT = {"h1", "p", "span"}
 VOID = {"br", "hr", "img", "input", "link", "meta"}
 PAINTED = ("color", "background-color")
 HIDING = {"display": "none", "visibility": "hidden", "max-height": "0", "mso-hide": "all"}
+SHRINKING = ("opacity", "max-height", "height", "font-size")
+ZERO = re.compile(r"0*\.?0+[a-z%]*")
 FILLERS = frozenset(map(chr, (0x00AD, 0x034F, 0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF)))
 TEXT_LINK = {"color": "#09383a", "font-size": "16px", "text-decoration": "underline"}
 
@@ -206,6 +208,18 @@ def in_head(node: Node) -> bool:
     return any(each.tag == "head" for each in node.lineage())
 
 
+def conceals(node: Node) -> bool:
+    style = node.style
+    return (
+        "hidden" in node.attributes
+        or node.attributes.get("aria-hidden") == "true"
+        or any(
+            ZERO.fullmatch(style.get(prop, "").removesuffix("!important").strip())
+            for prop in SHRINKING
+        )
+    )
+
+
 def luminance(colour: str) -> float:
     channels = [int(colour[index : index + 2], 16) / 255 for index in (1, 3, 5)]
     red, green, blue = (
@@ -293,12 +307,19 @@ def test_the_dark_rules_reach_the_code_the_notice_text_and_the_button_link() -> 
 @pytest.mark.parametrize("template", list(MAILS))
 def test_no_mail_carries_hidden_text_or_invisible_filler(template: str) -> None:
     html = render_to_string(template, MAILS[template])
+    nodes = Tree(html).nodes
     hiding = [
         node.attributes
-        for node in Tree(html).nodes
+        for node in nodes
         if any(node.style.get(prop) == value for prop, value in HIDING.items())
     ]
     assert hiding == []
+    concealed = [
+        node.attributes
+        for node in nodes
+        if node.text and not in_head(node) and any(map(conceals, node.lineage()))
+    ]
+    assert concealed == []
     assert FILLERS.isdisjoint(unescape(html))
 
 

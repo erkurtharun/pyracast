@@ -466,12 +466,15 @@ def leaves_a_transaction_open_after_a_downgrade() -> None:
 class Phases:
     def __init__(self) -> None:
         self.reported: list[tuple[str | None, str]] = []
+        self.failure = ""
 
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
         self.reported.append((report.when, report.outcome))
+        if report.when == "call":
+            self.failure = report.longreprtext
 
 
-def run_with_leaf(body: Callable[..., None], folder: Path) -> list[tuple[str | None, str]]:
+def run_with_leaf(body: Callable[..., None], folder: Path) -> Phases:
     module = folder / f"test_{body.__name__}.py"
     module.write_text(
         "import pytest\n"
@@ -493,23 +496,28 @@ def run_with_leaf(body: Callable[..., None], folder: Path) -> list[tuple[str | N
         ],
         plugins=[phases],
     )
-    return phases.reported
+    return phases
 
 
 @pytest.mark.usefixtures("leaf")
 @pytest.mark.parametrize(
-    "body",
-    [refuses_stored_rows, leaves_a_transaction_open_after_a_downgrade],
+    ("body", "reason"),
+    [
+        (refuses_stored_rows, "ValueError: notifications_reminderschedule holds 1 row"),
+        (leaves_a_transaction_open_after_a_downgrade, "assert at_leaf(connection)"),
+    ],
     ids=["refused rows", "open transaction"],
 )
 def test_the_leaf_fixture_restores_the_latest_schema_after_a_failing_body(
-    body: Callable[..., None], tmp_path: Path
+    body: Callable[..., None], reason: str, tmp_path: Path
 ) -> None:
-    assert run_with_leaf(body, tmp_path) == [
+    phases = run_with_leaf(body, tmp_path)
+    assert phases.reported == [
         ("setup", "passed"),
         ("call", "failed"),
         ("teardown", "passed"),
     ]
+    assert reason in phases.failure
     fresh = connections.create_connection(DEFAULT_DB_ALIAS)
     try:
         assert at_leaf(fresh)
