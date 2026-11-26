@@ -5,8 +5,7 @@ updates:
   - package-ecosystem: uv
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: '05:00'
       timezone: Europe/Istanbul
     cooldown:
@@ -27,8 +26,7 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: '05:00'
       timezone: Europe/Istanbul
     cooldown:
@@ -39,12 +37,14 @@ updates:
   - package-ecosystem: docker
     directories: [/, /web, /deploy/gateway, /deploy/postgres, /deploy/rabbitmq]
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: '05:00'
       timezone: Europe/Istanbul
     cooldown:
       default-days: 5
+    groups:
+      images:
+        patterns: ['*']
     ignore:
       # Runtime minor/major upgrades require a coordinated compatibility review.
       - dependency-name: python
@@ -54,26 +54,29 @@ updates:
   - package-ecosystem: gomod
     directory: /deploy/gateway
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: '05:00'
       timezone: Europe/Istanbul
     cooldown:
       default-days: 5
+    groups:
+      go-modules:
+        patterns: ['*']
   - package-ecosystem: terraform
     directory: /infra/terraform
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: '05:00'
       timezone: Europe/Istanbul
     cooldown:
       default-days: 5
+    groups:
+      providers:
+        patterns: ['*']
   - package-ecosystem: npm
     directory: /web
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: '05:00'
       timezone: Europe/Istanbul
     cooldown:

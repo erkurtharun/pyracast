@@ -383,8 +383,8 @@ Inspect the host from `/opt/pyracast/current` as root with
   new data directory, so `rotate` refuses them: change them in a planned maintenance
   (`rabbitmqctl change_password` and an application restart for the broker), never by deleting
   a data volume ([encryption-key-rotation](flows/encryption-key-rotation.md)).
-- **Patching:** review the weekly Dependabot pull requests; image digests do not update
-  themselves. The daily `Image rescan` workflow scans images rebuilt from `main`, or the deployed
+- **Patching:** review the monthly Dependabot pull requests and each security update pull
+  request; image digests do not update themselves. The daily `Image rescan` workflow scans images rebuilt from `main`, or the deployed
   `production` digests once `image_rescan_reader = true` is applied and the repository variable
   `GCP_IMAGE_RESCAN` holds `terraform -chdir=infra/terraform output -raw image_rescan_setting`; a
   failed run needs an image update. Review Ubuntu updates and the pinned Docker packages in
