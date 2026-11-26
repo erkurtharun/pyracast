@@ -36,6 +36,10 @@ class ExpiryReason(StrEnum):
     INVALID_MARKER = "invalid_marker"
 
 
+def idle_seconds() -> int:
+    return settings.PYRACAST_SESSION_IDLE_SECONDS
+
+
 def absolute_end(session: SessionBase) -> datetime:
     started = float(session["authenticated_at"])
     return datetime.fromtimestamp(started + settings.PYRACAST_SESSION_ABSOLUTE_SECONDS, UTC)
@@ -62,7 +66,7 @@ def _marker_age(session: SessionBase, marker: str, now: float) -> float | None:
 def expiry_reason(session: SessionBase, now: float) -> ExpiryReason | None:
     limits = (
         ("authenticated_at", settings.PYRACAST_SESSION_ABSOLUTE_SECONDS, ExpiryReason.ABSOLUTE),
-        ("last_activity_at", settings.PYRACAST_SESSION_IDLE_SECONDS, ExpiryReason.IDLE),
+        ("last_activity_at", idle_seconds(), ExpiryReason.IDLE),
     )
     for marker, limit, reason in limits:
         age = _marker_age(session, marker, now)

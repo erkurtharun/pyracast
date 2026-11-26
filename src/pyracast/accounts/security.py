@@ -1,4 +1,5 @@
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum, auto
 from ipaddress import IPv6Address, ip_address
@@ -34,13 +35,13 @@ def strongest_factor(user: AbstractBaseUser) -> Factor:
 
 @dataclass(frozen=True, slots=True)
 class ProofWindow:
-    seconds: int
+    seconds: Callable[[], int]
     sign_in_counts: bool
 
 
 # A sensitive change needs a reauthentication inside allauth's window; a sign-in is not one.
-CONFIRMATION = ProofWindow(account_settings.REAUTHENTICATION_TIMEOUT, sign_in_counts=False)
-CONSOLE_PROOF = ProofWindow(settings.PYRACAST_CONSOLE_PROOF_SECONDS, sign_in_counts=True)
+CONFIRMATION = ProofWindow(lambda: account_settings.REAUTHENTICATION_TIMEOUT, sign_in_counts=False)
+CONSOLE_PROOF = ProofWindow(lambda: settings.PYRACAST_CONSOLE_PROOF_SECONDS, sign_in_counts=True)
 
 
 def _inside(record: dict[str, Any], window: ProofWindow, now: float) -> bool:
@@ -48,7 +49,7 @@ def _inside(record: dict[str, Any], window: ProofWindow, now: float) -> bool:
     return (
         (window.sign_in_counts or bool(record.get("reauthenticated")))
         and isinstance(at, int | float)
-        and 0 <= now - at < window.seconds
+        and 0 <= now - at < window.seconds()
     )
 
 
