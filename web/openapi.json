@@ -10894,6 +10894,9 @@
                         "type": "number",
                         "format": "double"
                     },
+                    "quality": {
+                        "type": "string"
+                    },
                     "source_kind": {
                         "type": "string"
                     },
@@ -10922,6 +10925,7 @@
                     "ends_at",
                     "energy_mwh",
                     "provisional",
+                    "quality",
                     "snapshot_id",
                     "source_kind",
                     "starts_at"

@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import type { Locator } from "@playwright/test";
 import { test, expect, type Page } from "./support/test";
 import { errorBody } from "./support/errors";
@@ -641,6 +642,18 @@ test("the plant CSV is offered with the technical details", async ({
     await expect(
         page.getByRole("button", { name: "Download technical details (CSV)" }),
     ).toBeVisible();
+    const download = page.waitForEvent("download");
+    await page
+        .getByRole("button", { name: "Download technical details (CSV)" })
+        .click();
+    const [header, row] = (
+        await readFile(await (await download).path(), "utf8")
+    )
+        .replace(new RegExp("^\uFEFF"), "")
+        .split("\r\n");
+    expect(header).toContain('"Panel capacity (MWp)"');
+    expect(row).toContain('"East array"');
+    expect(row).toContain(",5,4,,");
     await page.getByRole("button", { name: "Location", exact: true }).click();
     await expect(page.getByText("Current location:")).toBeVisible();
     await expect(

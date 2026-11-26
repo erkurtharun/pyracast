@@ -438,6 +438,7 @@ class ProductionProviderOutput(serializers.Serializer[dict[str, Any]]):
     starts_at = serializers.DateTimeField()
     ends_at = serializers.DateTimeField()
     energy_mwh = serializers.FloatField()
+    quality = serializers.CharField()
     source_kind = serializers.CharField()
     snapshot_id = serializers.IntegerField()
     collected_at = serializers.DateTimeField()
