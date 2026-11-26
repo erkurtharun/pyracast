@@ -90,7 +90,7 @@ export function Portfolio() {
                         {t("plants")}{" "}
                         {sites.data && (
                             <span className="count" aria-hidden="true">
-                                {rows.length}
+                                {format.recorded(rows.length)}
                             </span>
                         )}
                     </h1>

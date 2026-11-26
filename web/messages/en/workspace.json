@@ -440,7 +440,7 @@
         "resolve": "End outage",
         "cancel": "Mark as entered in error",
         "success": "Marked as read.",
-        "pendingContext": "Your change requests waiting for approval: {count}. See them in the Inbox.",
+        "pendingContext": "Your change requests waiting for approval: {count, number}. See them in the Inbox.",
         "manual": "Entered",
         "provider": "EPİAŞ value",
         "beforeChange": "Value when sent",
