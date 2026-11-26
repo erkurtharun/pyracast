@@ -1,5 +1,6 @@
 import json
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -7,12 +8,15 @@ from html import unescape
 from pathlib import Path
 
 import pytest
+from hypothesis import given, strategies
 
-from scripts import check
+from scripts import check, pytest_shard
 from scripts.pytest_shard import (
+    balanced_shards,
     finish_shard,
     parse_shard,
     read_manifest,
+    recorded_durations,
     run_identity,
     selected_nodes,
     validate_shards,
@@ -67,11 +71,11 @@ def test_invalid_shard_configuration_is_rejected(value: str) -> None:
 
 def test_partition_is_complete_deterministic_and_keeps_modules_together() -> None:
     nodes = [f"tests/{file}.py::test_{index}" for file in "abcd" for index in range(3)]
-    first = selected_nodes(nodes, 1, 2)
-    second = selected_nodes(list(reversed(nodes)), 2, 2)
+    first = selected_nodes(nodes, 1, 2, {})
+    second = selected_nodes(list(reversed(nodes)), 2, 2, {})
     assert not set(first) & set(second)
     assert sorted(first + second) == sorted(nodes)
-    assert first == selected_nodes(list(reversed(nodes)), 1, 2)
+    assert first == selected_nodes(list(reversed(nodes)), 1, 2, {})
     assert len(first) == len(second)
     for file in "abcd":
         assert (
@@ -83,6 +87,124 @@ def test_partition_is_complete_deterministic_and_keeps_modules_together() -> Non
         )
 
 
+def test_a_module_runs_in_the_shard_its_recorded_duration_assigns() -> None:
+    nodes = ["tests/a.py::test_slow"] + [
+        f"tests/{file}.py::test_{index}" for file in "bcd" for index in range(3)
+    ]
+    durations = {"tests/a.py": 100.0, "tests/b.py": 1.0, "tests/c.py": 1.0, "tests/d.py": 1.0}
+
+    assert selected_nodes(nodes, 1, 2, durations) == ["tests/a.py::test_slow"]
+    assert selected_nodes(nodes, 2, 2, durations) == sorted(nodes[1:])
+
+
+def test_heavy_modules_spread_until_the_shards_differ_by_at_most_the_heaviest_module() -> None:
+    seconds = {"a": 50.0, "b": 40.0, "c": 30.0, "d": 20.0, "e": 10.0, "f": 10.0}
+    durations = {f"tests/{name}.py": value for name, value in seconds.items()}
+
+    shards = balanced_shards(durations, durations, 3)
+
+    assert shards == [
+        ["tests/a.py", "tests/f.py"],
+        ["tests/b.py", "tests/e.py"],
+        ["tests/c.py", "tests/d.py"],
+    ]
+    loads = [sum(durations[module] for module in shard) for shard in shards]
+    assert max(loads) - min(loads) <= max(durations.values())
+
+
+def test_the_partition_does_not_depend_on_the_order_of_its_input() -> None:
+    durations = {"tests/a.py": 3.5, "tests/b.py": 3.5, "tests/c.py": 0.1, "tests/d.py": 7.0}
+    modules = sorted(durations)
+
+    assert balanced_shards(reversed(modules), dict(reversed(durations.items())), 2) == [
+        ["tests/c.py", "tests/d.py"],
+        ["tests/a.py", "tests/b.py"],
+    ]
+    assert balanced_shards(modules, durations, 2) == balanced_shards(
+        reversed(modules), durations, 2
+    )
+
+
+def test_a_module_without_a_recorded_duration_counts_at_the_mean() -> None:
+    durations = {"tests/a.py": 30.0, "tests/b.py": 20.0, "tests/c.py": 10.0}
+
+    assert balanced_shards([*durations, "tests/new.py"], durations, 2) == [
+        ["tests/a.py", "tests/c.py"],
+        ["tests/b.py", "tests/new.py"],
+    ]
+
+
+def test_without_recorded_durations_every_module_weighs_the_same() -> None:
+    modules = [f"tests/{name}.py" for name in "abcde"]
+
+    assert balanced_shards(modules, {}, 2) == [
+        ["tests/a.py", "tests/c.py", "tests/e.py"],
+        ["tests/b.py", "tests/d.py"],
+    ]
+
+
+def test_more_shards_than_modules_leaves_the_extra_shards_empty() -> None:
+    durations = {"tests/a.py": 5.0, "tests/b.py": 1.0}
+
+    assert balanced_shards(durations, durations, 4) == [["tests/a.py"], ["tests/b.py"], [], []]
+
+
+@given(
+    durations=strategies.dictionaries(
+        strategies.sampled_from([f"tests/test_{index}.py" for index in range(12)]),
+        strategies.floats(min_value=0, max_value=1000, allow_nan=False),
+    ),
+    unknown=strategies.sets(strategies.sampled_from(["tests/test_new.py", "tests/test_other.py"])),
+    count=strategies.integers(min_value=1, max_value=6),
+)
+def test_every_module_lands_in_exactly_one_shard(
+    durations: dict[str, float], unknown: set[str], count: int
+) -> None:
+    modules = [*durations, *unknown]
+
+    shards = balanced_shards(modules, durations, count)
+
+    assert len(shards) == count
+    assert sorted(module for shard in shards for module in shard) == sorted(set(modules))
+
+
+@pytest.mark.parametrize("system", ["Linux", "Windows"])
+def test_the_partition_reads_the_durations_of_its_own_system(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, system: str
+) -> None:
+    durations = tmp_path / "durations.json"
+    durations.write_text(
+        json.dumps({"Linux": {"tests/a.py": 1.5}, "Windows": {"tests/a.py": 2}}), encoding="utf-8"
+    )
+    monkeypatch.setattr(pytest_shard, "DURATIONS", durations)
+
+    assert recorded_durations(system) == {"tests/a.py": {"Linux": 1.5, "Windows": 2.0}[system]}
+    assert recorded_durations("Darwin") == {}
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "[]",
+        '{"Windows": []}',
+        '{"Windows": {"tests/a.py": -1}}',
+        '{"Windows": {"tests/a.py": "1"}}',
+        '{"Windows": {"tests/a.py": true}}',
+        '{"Windows": {"tests/a.py": Infinity}}',
+        '{"Windows": {"tests/a.py": NaN}}',
+    ],
+)
+def test_invalid_recorded_durations_are_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str
+) -> None:
+    durations = tmp_path / "durations.json"
+    durations.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(pytest_shard, "DURATIONS", durations)
+
+    with pytest.raises(ValueError, match="Invalid"):
+        recorded_durations("Windows")
+
+
 def write_shard(root: Path, index: int, nodes: list[str]) -> Path:
     output = root / str(index)
     output.mkdir()
@@ -91,7 +213,7 @@ def write_shard(root: Path, index: int, nodes: list[str]) -> Path:
         "count": 2,
         "identity": run_identity(),
         "collected": nodes,
-        "selected": selected_nodes(nodes, index, 2),
+        "selected": selected_nodes(nodes, index, 2, recorded_durations(platform.system())),
     }
     (output / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     (output / "coverage.dat").write_bytes(b"coverage")
@@ -122,6 +244,20 @@ def test_aggregate_rejects_incomplete_or_unrelated_shards(tmp_path: Path, defect
     if defect not in {"missing", "duplicate"}:
         (outputs[1] / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(ValueError, match=r"shard|inventory"):
+        validate_shards(outputs)
+
+
+def test_aggregate_rejects_shards_partitioned_with_other_durations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    nodes = ["tests/a.py::test_first", "tests/b.py::test_second", "tests/c.py::test_third"]
+    outputs = [write_shard(tmp_path, index, nodes) for index in (1, 2)]
+    durations = tmp_path / "durations.json"
+    figures = {"tests/a.py": 1, "tests/b.py": 1, "tests/c.py": 50}
+    durations.write_text(json.dumps({platform.system(): figures}), encoding="utf-8")
+    monkeypatch.setattr(pytest_shard, "DURATIONS", durations)
+
+    with pytest.raises(ValueError, match="partition"):
         validate_shards(outputs)
 
 

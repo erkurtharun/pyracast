@@ -1,10 +1,15 @@
 import json
+import math
 import os
 import platform
 from collections import defaultdict
+from collections.abc import Iterable, Mapping
 from pathlib import Path
+from statistics import fmean
 
 import pytest
+
+DURATIONS = Path(__file__).resolve().parents[1] / "tests" / "shard-durations.json"
 
 
 def parse_shard(value: str) -> tuple[int, int]:
@@ -14,15 +19,41 @@ def parse_shard(value: str) -> tuple[int, int]:
     return index, count
 
 
-def selected_nodes(nodes: list[str], index: int, count: int) -> list[str]:
-    groups: dict[str, list[str]] = defaultdict(list)
-    for node in sorted(nodes):
-        groups[node.split("::", 1)[0]].append(node)
+def recorded_durations(system: str) -> dict[str, float]:
+    recorded: object = json.loads(DURATIONS.read_text(encoding="utf-8"))
+    if not isinstance(recorded, dict):
+        raise ValueError(f"Invalid test durations: {DURATIONS}")
+    figures: object = recorded.get(system, {})
+    if not isinstance(figures, dict) or not all(
+        isinstance(module, str) and type(seconds) in {int, float} and 0 <= seconds < math.inf
+        for module, seconds in figures.items()
+    ):
+        raise ValueError(f"Invalid {system} test durations: {DURATIONS}")
+    return {module: float(seconds) for module, seconds in figures.items()}
+
+
+def balanced_shards(
+    modules: Iterable[str], durations: Mapping[str, float], count: int
+) -> list[list[str]]:
+    unknown = fmean(durations.values()) if durations else 1.0
+    weights = {module: durations.get(module, unknown) for module in set(modules)}
     shards: list[list[str]] = [[] for _ in range(count)]
-    for _, group in sorted(groups.items(), key=lambda item: (-len(item[1]), item[0])):
-        target = min(range(count), key=lambda slot: (len(shards[slot]), slot))
-        shards[target].extend(group)
-    return sorted(shards[index - 1])
+    loads = [0.0] * count
+    for module in sorted(weights, key=lambda name: (-weights[name], name)):
+        target = min(range(count), key=lambda slot: (loads[slot], len(shards[slot]), slot))
+        shards[target].append(module)
+        loads[target] += weights[module]
+    return [sorted(shard) for shard in shards]
+
+
+def selected_nodes(
+    nodes: list[str], index: int, count: int, durations: Mapping[str, float]
+) -> list[str]:
+    groups: dict[str, list[str]] = defaultdict(list)
+    for node in nodes:
+        groups[node.split("::", 1)[0]].append(node)
+    modules = balanced_shards(groups, durations, count)[index - 1]
+    return sorted(node for module in modules for node in groups[module])
 
 
 def run_identity() -> dict[str, str]:
@@ -41,7 +72,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         return
     index, count = parse_shard(value)
     nodes = sorted(item.nodeid for item in items)
-    selected = selected_nodes(nodes, index, count)
+    selected = selected_nodes(nodes, index, count, recorded_durations(platform.system()))
     if not selected:
         raise pytest.UsageError("The test shard is empty")
     selected_set = set(selected)
@@ -87,6 +118,7 @@ def validate_shards(outputs: list[Path]) -> list[Path]:
         or collected != sorted(set(collected))
     ):
         raise ValueError("Invalid collected test inventory")
+    durations = recorded_durations(platform.system())
     coverage_files = []
     for output, manifest in zip(outputs, manifests, strict=True):
         index = manifest["index"]
@@ -95,7 +127,7 @@ def validate_shards(outputs: list[Path]) -> list[Path]:
             or manifest.get("count") != count
             or manifest.get("identity") != run_identity()
             or manifest.get("collected") != collected
-            or manifest.get("selected") != selected_nodes(collected, index, count)
+            or manifest.get("selected") != selected_nodes(collected, index, count, durations)
         ):
             raise ValueError("Test shard provenance or partition does not match")
         coverage_file = output / "coverage.dat"
