@@ -1,4 +1,3 @@
-from collections.abc import Iterator
 from datetime import timedelta
 
 import pytest
@@ -10,15 +9,6 @@ from django.utils import timezone
 from pyracast.accounts.models import Tenant, WorkspaceInvitation
 
 pytestmark = pytest.mark.django_db(transaction=True)
-
-
-@pytest.fixture
-def leaf() -> Iterator[None]:
-    targets = MigrationExecutor(connection).loader.graph.leaf_nodes()
-    try:
-        yield
-    finally:
-        MigrationExecutor(connection).migrate(targets)
 
 
 def _columns() -> set[str]:

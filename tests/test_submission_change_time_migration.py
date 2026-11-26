@@ -1,4 +1,3 @@
-from collections.abc import Iterator
 from datetime import UTC, datetime
 
 import pytest
@@ -13,15 +12,6 @@ pytestmark = pytest.mark.django_db(transaction=True)
 
 PREVIOUS = ("plants", "0005_calibration_preparation_due_at")
 CREATED = datetime(2026, 11, 1, 9, tzinfo=UTC)
-
-
-@pytest.fixture
-def leaf() -> Iterator[None]:
-    targets = MigrationExecutor(connection).loader.graph.leaf_nodes()
-    try:
-        yield
-    finally:
-        MigrationExecutor(connection).migrate(targets)
 
 
 @pytest.mark.usefixtures("leaf")

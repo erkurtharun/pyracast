@@ -260,6 +260,14 @@ def pyracast_logs(
     return caplog
 
 
+@pytest.fixture
+def leaf() -> Iterator[None]:
+    from tests.support.migrations import reset_to_leaf
+
+    yield
+    reset_to_leaf()
+
+
 @pytest.fixture(name="django_db_modify_db_settings", scope="session")
 def database_maintenance_timeout(django_db_modify_db_settings: None) -> Iterator[None]:
     def set_maintenance_deadline(connection: BaseDatabaseWrapper, **kwargs: object) -> None:
