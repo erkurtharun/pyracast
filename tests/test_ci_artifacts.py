@@ -14,16 +14,10 @@ NEEDS_OUTPUT = re.compile(r"\$\{\{ needs\.(?P<job>[\w-]+)\.outputs\.(?P<key>[\w-
 ENV = re.compile(r"\$\{\{ env\.(?P<name>\w+) \}\}")
 UPLOADED_ID = re.compile(r"steps\.(?P<step>[\w-]+)\.outputs\.artifact-id")
 SHA = "a" * 40
-RUNNER_OS = {"ubuntu-latest": "Linux", "windows-latest": "Windows"}
 
 
 def uses(candidate: dict[str, Any], action: str) -> bool:
     return str(candidate.get("uses", "")).startswith(action)
-
-
-def runs_on_its_runner(job: dict[str, Any], candidate: dict[str, Any]) -> bool:
-    match = re.fullmatch(r"runner\.os == '(\w+)'", str(candidate.get("if", "")))
-    return match is None or RUNNER_OS[job["runs-on"]] == match[1]
 
 
 def uploads() -> list[tuple[str, str, dict[str, Any]]]:
@@ -32,7 +26,7 @@ def uploads() -> list[tuple[str, str, dict[str, Any]]]:
         for path in sorted(WORKFLOWS.glob("*.yml"))
         for identifier, job in workflow(path.name)["jobs"].items()
         for candidate in job["steps"]
-        if uses(candidate, UPLOAD) and runs_on_its_runner(job, candidate)
+        if uses(candidate, UPLOAD)
     ]
 
 

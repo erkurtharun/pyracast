@@ -282,14 +282,14 @@ jobs:
     timeout-minutes: 40
     outputs:
       web-coverage: ${{ steps.web-coverage.outputs.artifact-id }}
-    env: &web-environment
+    env:
       PGHOST: 127.0.0.1
       PGPORT: 55432
       PGUSER: pyracast
       PGDATABASE: pyracast
       PYRACAST_SECRET_KEY: ci-only-key-not-for-deployment
       NEXT_TELEMETRY_DISABLED: '1'
-    steps: &web-steps
+    steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -308,22 +308,12 @@ jobs:
       - run: npm ci --ignore-scripts
         working-directory: web
       - run: npx --no-install playwright install --with-deps chromium
-        if: runner.os == 'Linux'
-        working-directory: web
-      # On Windows, --with-deps only adds Server-Media-Foundation (about 3 minutes); no test plays media.
-      - run: npx --no-install playwright install chromium
-        if: runner.os == 'Windows'
         working-directory: web
       - name: Verify API schema and generated types
         run: uv run --locked --no-sync --no-build python scripts/generate_api_schema.py --check
-      - run: npm run check
-        if: runner.os == 'Windows'
-        working-directory: web
       - run: npm run check:coverage
-        if: runner.os == 'Linux'
         working-directory: web
       - name: Audit web dependencies against dated exceptions
-        if: runner.os == 'Linux'
         run: uv run --locked --no-sync --no-build python scripts/npm_audit.py web
       - name: Run the browser scenarios against Django, PostgreSQL and the production web build
         run: uv run --locked --no-sync --no-build python -m pytest tests/e2e -m browser -n 1 --no-cov
@@ -331,10 +321,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: playwright-results-${{ runner.os }}-${{ github.run_attempt }}
+          name: playwright-results-${{ github.run_attempt }}
           path: |
-            web/test-results/**/trace.zip
-            web/test-results/**/error-context.md
             web/integration-results/**/trace.zip
             web/integration-results/**/error-context.md
             web/coverage/test-results/**/trace.zip
@@ -343,19 +331,11 @@ jobs:
           retention-days: 3
       - id: web-coverage
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: runner.os == 'Linux'
         with:
           name: web-coverage-${{ github.run_attempt }}
           path: web/coverage/lcov.info
           if-no-files-found: error
           retention-days: 7
-
-  web_windows:
-    name: Web (windows-latest)
-    runs-on: windows-latest
-    timeout-minutes: 40
-    env: *web-environment
-    steps: *web-steps
 
   web_production:
     name: Web production build (ubuntu-latest)
@@ -498,7 +478,7 @@ jobs:
 
   ci_result:
     name: CI result
-    needs: [deployment, verify_ubuntu, web_ubuntu, web_windows, web_production, scientific, audit, sonar]
+    needs: [deployment, verify_ubuntu, web_ubuntu, web_production, scientific, audit, sonar]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -515,7 +495,7 @@ jobs:
   # tested base and tree with the squash merge on main. Without it the merge takes the full path.
   pr_tested:
     name: Record the tested tree
-    needs: [deployment, verify_ubuntu, web_ubuntu, web_windows, web_production, scientific, audit, sonar, ci_result]
+    needs: [deployment, verify_ubuntu, web_ubuntu, web_production, scientific, audit, sonar, ci_result]
     if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.ci_result.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

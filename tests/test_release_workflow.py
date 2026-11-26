@@ -575,11 +575,23 @@ def test_deploy_runs_the_authorized_commit_only_after_proving_it_is_on_main() ->
 
 
 def test_the_web_dependency_audit_runs_once_per_ci_run() -> None:
-    web = ci_jobs()["web_ubuntu"]
+    audits = [
+        candidate
+        for job in ci_jobs().values()
+        for candidate in job["steps"]
+        if "scripts/npm_audit.py web" in candidate.get("run", "")
+    ]
 
-    assert step(web, "Audit web dependencies against dated exceptions")["if"] == (
-        "runner.os == 'Linux'"
-    )
+    assert audits == [
+        step(ci_jobs()["web_ubuntu"], "Audit web dependencies against dated exceptions")
+    ]
+    assert "if" not in audits[0]
+
+
+def test_every_workflow_job_runs_on_ubuntu() -> None:
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        for identifier, job in workflow(path.name)["jobs"].items():
+            assert job["runs-on"] == "ubuntu-latest", f"{path.name} {identifier}"
 
 
 def test_the_mocked_browser_suite_runs_against_the_shipped_web_build() -> None:
@@ -605,7 +617,6 @@ RELEASE_TESTED_JOBS = {
     "deployment",
     "verify_ubuntu",
     "web_ubuntu",
-    "web_windows",
     "web_production",
     "scientific",
     "audit",
