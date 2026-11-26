@@ -62,7 +62,7 @@ sequenceDiagram
 
 - Authentication: `SessionAuthentication` with CSRF; `deliver` in `web/src/lib/api/lane.ts` sends `X-CSRFToken` on every change.
 - Route policy (`pyracast.api.permissions.ROUTE_POLICIES`): `sites/` POST and `regions/{r}/plants/` POST are admin routes, admitted only for an active administrator of `tenant_id`; `sites/` POST is throttled under `submission` (30 per hour and user). `PlantsView.post` then resolves the region in the tenant (`plant_queryset`), so an unknown or trashed region is 404.
-- Operation: `authorize_workspace_admin` (`pyracast.accounts.authorization`) in `submit_region` and `create_plant` locks the tenant and re-checks the role; `submit_site` runs both. Only the console passes `platform=True`, which requires an active staff superuser instead of a membership and still locks the tenant. Console POSTs need a recent authenticator confirmation.
+- Operation: `authorize_workspace_admin` (`pyracast.accounts.authorization`) in `submit_region` and `create_plant` locks the tenant and re-checks the role; `submit_site` runs both. Only the console passes `platform=True`, which requires an active staff superuser instead of a membership and still locks the tenant. The console's own gate is in `admin-console-access`.
 - Database: `region_tenant_location_uniq`, `plant_region_uniq`, `plantsubmission_*_chk`, `region_latitude_chk`, `region_longitude_chk`, `region_status_chk`.
 - UI: the button and wizard are admin-only (`canManage`) as a convenience only.
 

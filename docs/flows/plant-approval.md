@@ -68,7 +68,7 @@ sequenceDiagram
 
 ## Authorization
 
-- Console: `PlatformAdminSite.has_permission` (active staff superuser with MFA evidence) wraps every admin route through `admin_view`, which adds CSRF and, for every POST, a recent authenticator confirmation.
+- Console: the console gate (`admin-console-access`): an active staff superuser with MFA evidence, a proof by the authenticator within the last hour for every request and a recent confirmation for every unsafe one. `admin_view` also adds CSRF.
 - Operation: `require_platform_admin` (active staff superuser, no MFA check) first in `approve_region` and `decide_review`. Administrators are not tenant scoped. `resubmit_region` is a workspace-administrator operation (`authorize_workspace_admin`, admin route `regions/{r}/resubmit/` under the `submission` throttle).
 - Database: `region_approved_binding_fk` keeps the binding in the same region, `region_status_chk` limits values, `region_status_approved_binding_chk` ties `approved` to a binding, `collectionjob_binding_endpoint_scheduled_for_uniq` prevents a duplicate job. Nothing ties `approved` to a validated binding; the operation does.
 
@@ -77,7 +77,7 @@ sequenceDiagram
 | Condition | Result |
 | --- | --- |
 | Anonymous, or not active staff superuser with MFA | Admin 302 to the admin login (anonymous to `/app/?next=<console path>`, signed in to `/app/`) |
-| Missing CSRF token; GET on `/decision/`; POST without a recent authenticator confirmation; region missing or trashed | 403; 405; 403 confirmation page, nothing stored; 404 |
+| Missing CSRF token; request without the proof or confirmation of the console gate (`admin-console-access`); GET on `/decision/`; region missing or trashed | 403; 403 confirmation page, nothing stored; 405; 404 |
 | Approve: hidden fields missing | Setup page 400 with field errors |
 | Approve: blocker (binding unvalidated for this credential revision, last validation failed, key rejected, account disabled or unauthorized, settings missing), page of an earlier status, revision or declaration, status not approvable (a rejected plant) | Setup page 400 with that reason; the first blocker is named; after a changed declaration the page shows the current values with their hash, so approving it approves what it shows |
 | Approve: stale binding or key revision, plant without a declaration (`plant_submission_required`) | Setup page 400 with the generic "setup could not be applied" message |

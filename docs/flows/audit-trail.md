@@ -44,7 +44,7 @@ flowchart LR
 
 - Writers inherit the authorization of the operation they belong to. `tenant_membership` and `authorize_workspace_admin` run inside the transaction and lock the tenant. `require_platform_admin` is an in-memory active, staff and superuser check, usually called before the transaction opens (`connect_epias` and `disconnect_epias` repeat it on a locked user row). Audit code adds no check of its own.
 - Worker writers (`prepare_calibration`, training, automation `record_automatic_skip` and automatic activation) run without an actor check; automation instead re-checks that the enabling administrator is still an active workspace administrator (`_authorized`).
-- Console reading: `PlatformAdminSite.has_permission` (`has_platform_admin_session`). `AuditEvent`, `PlantEvent` and both ledgers are also registered as `ReadOnlyAdmin` (no add, change or delete).
+- Console reading: the console gate (`admin-console-access`): an active staff superuser with MFA evidence and a proof by the authenticator within the last hour. `AuditEvent`, `PlantEvent` and both ledgers are also registered as `ReadOnlyAdmin` (no add, change or delete).
 - Customer reading of `last_attempt` requires workspace membership (the route policy and `ScopedView.plant_queryset`) and a non-trashed region and plant.
 - Rows cannot be removed by cascade: every FK is `PROTECT`. Only `trash._purge_region` and `_purge_plant` delete events explicitly.
 

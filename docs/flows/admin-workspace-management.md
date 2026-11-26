@@ -4,7 +4,7 @@ A platform administrator creates a workspace for a customer, optionally inviting
 
 ## Entry points
 
-All routes live in `PlatformAdminSite.get_urls` (`pyracast.platform_admin.site`), views in `pyracast.platform_admin.tenant_views`, forms and read models in `pyracast.platform_admin.tenants`. Actor: platform administrator; unsafe requests need a recent confirmation (`admin-console-access`).
+All routes live in `PlatformAdminSite.get_urls` (`pyracast.platform_admin.site`), views in `pyracast.platform_admin.tenant_views`, forms and read models in `pyracast.platform_admin.tenants`. Actor: platform administrator, through the console gate (`admin-console-access`): a proof by the authenticator within the last hour for every request and a recent confirmation for every unsafe one.
 
 - `GET /admin/workspaces/?q=&needs_administrator=1&page=` -> `workspaces` -> `tenant_list_context`: 20 per page, query matches the workspace name or a member's address, filter for workspaces without an active administrator; shows administrator state (name, invitation pending, none), member and plant counts.
 - `GET|POST /admin/workspaces/new/` -> `new_workspace` -> `WorkspaceForm.apply`: name, optional administrator address, invitation language.
@@ -64,7 +64,7 @@ sequenceDiagram
 | Condition | Result |
 |---|---|
 | Not a platform administrator, no MFA evidence | 302 login hand-off |
-| Unsafe request without recent confirmation | 403 confirmation page, nothing stored |
+| Request without the proof or confirmation of the console gate (`admin-console-access`) | 403 confirmation page, nothing stored |
 | Unknown workspace, or an invitation of another workspace | 404 |
 | Invalid form (blank name, invalid or over 254 character address) | 400, same page with field errors and values kept |
 | Rename from a stale page | 400 with a reload hint; renaming to the current name (also a double submit) reports "is already the workspace name" |
