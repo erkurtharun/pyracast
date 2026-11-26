@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { routes } from "../src/lib/routes";
+import type { components } from "../src/lib/schema";
 import { instant } from "./support/test";
 import {
     savedDatabase,
@@ -24,6 +25,7 @@ const REMOVED = "The saved figures were removed from this device.";
 
 type Language = "en" | "tr";
 type Row = Record<string, unknown>;
+type DaysAnswer = components["schemas"]["PlantDaysOutput"];
 
 const holder = (overrides: Row = {}) => ({
     user: 7,
@@ -1159,6 +1161,86 @@ if (workerState === "figures")
                         "No figures of this kind are saved for this plant yet.",
                     );
                 }
+            });
+
+            test("shows the days of a days-read answer as the backend emits them", async () => {
+                const answer: DaysAnswer = {
+                    plant_id: KEY.plant,
+                    name: "North field",
+                    today: "2026-11-11",
+                    forecast: [
+                        {
+                            date: "2026-11-12",
+                            timezone: "Europe/Istanbul",
+                            source_kind: "forecast",
+                            freshness: "fresh",
+                            stale_reason: null,
+                            unavailable_reason: null,
+                            collected_at: "2026-11-11T06:00:00.123456Z",
+                            total_mwh: 1.5,
+                            partial: false,
+                            affected: null,
+                            rows: energyRows(
+                                "2026-11-11T21:00:00Z",
+                                Array.from({ length: 24 }, (_, hour) =>
+                                    hour === 12 ? 1.5 : 0,
+                                ),
+                            ),
+                        },
+                    ],
+                    production: [
+                        {
+                            date: "2026-11-10",
+                            timezone: "Europe/Istanbul",
+                            total_mwh: 0.5,
+                            complete: false,
+                            rows: intervals("2026-11-09T21:00:00Z", 24).map(
+                                (interval, hour) =>
+                                    hour === 12
+                                        ? {
+                                              ...interval,
+                                              mwh: 0.5,
+                                              quality: "valid",
+                                              source: "epias",
+                                              provisional: false,
+                                          }
+                                        : {
+                                              ...interval,
+                                              mwh: null,
+                                              quality: null,
+                                              source: null,
+                                              provisional: null,
+                                          },
+                            ),
+                        },
+                    ],
+                };
+                const database = copy({
+                    days: [
+                        ...answer.forecast.map((day) => ({
+                            ...KEY,
+                            kind: "forecast",
+                            ...day,
+                        })),
+                        ...answer.production.map((day) => ({
+                            ...KEY,
+                            kind: "production",
+                            ...day,
+                        })),
+                    ],
+                });
+                const forecast = await savedPage(
+                    plantAddress("forecast", "2026-11-12"),
+                    database,
+                );
+                expect(shownDay(forecast)).toBe("2026-11-12");
+                expect(tableRows(forecast)).toHaveLength(24);
+                const production = await savedPage(
+                    plantAddress("production", "2026-11-10"),
+                    database,
+                );
+                expect(shownDay(production)).toBe("2026-11-10");
+                expect(tableRows(production)).toHaveLength(24);
             });
 
             test("shows a day of the most rows a local day has", async () => {

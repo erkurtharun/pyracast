@@ -60,10 +60,24 @@ def plant_outlook(
         frozen = "outage_scenario" in result
         if not frozen:
             _evaluate_outage_scenario(result, target_date, resolution_minutes, now)
-        result["production_diagnostic"] = (
-            None if frozen else production_diagnostic(result, target_date, now)
-        )
+        result["production_diagnostic"] = None if frozen else production_diagnostic(result, now)
         return result
+
+
+def automatic_outlook(
+    plant: Plant, target_date: date, resolution_minutes: int, now: datetime
+) -> dict[str, object]:
+    result = _plant_outlook(
+        plant,
+        target_date=target_date,
+        resolution_minutes=resolution_minutes,
+        source="forecast",
+        forecast_id=None,
+        now=now,
+    )
+    if "outage_scenario" not in result:
+        _evaluate_outage_scenario(result, target_date, resolution_minutes, now)
+    return result
 
 
 def _evaluate_outage_scenario(

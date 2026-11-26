@@ -232,6 +232,7 @@ REST_FRAMEWORK = {
     # refusals show the real need.
     "DEFAULT_THROTTLE_RATES": {
         "forecast": "60/min",
+        "days": "120/hour",
         "calibration": "20/hour",
         "production_import": "120/hour",
         "submission": "30/hour",
@@ -318,6 +319,7 @@ SPECTACULAR_SETTINGS = {
             "forecast_unavailable",
             "estimated_actuals_unavailable",
         ],
+        "DayUnavailableReasonEnum": "pyracast.plants.serializers.DayUnavailableReason",
         "SelectionModeEnum": "pyracast.forecasts.selection.SELECTION_MODES",
         "SelectionRuleEnum": "pyracast.forecasts.selection.SELECTION_RULES",
         "DiagnosticStatusEnum": ["suspected", "normal", "insufficient"],

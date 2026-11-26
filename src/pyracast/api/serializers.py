@@ -310,10 +310,13 @@ class ForecastEnvelope(serializers.Serializer[dict[str, Any]]):
         ),
         allow_null=True,
     )
+
+
+class SelectedForecastEnvelope(ForecastEnvelope):
     selection = ForecastSelectionOutput(allow_null=True)
 
 
-class ForecastOutput(ForecastEnvelope):
+class ForecastOutput(SelectedForecastEnvelope):
     result = IrradianceResultField(allow_null=True)
     collected_at = serializers.DateTimeField(allow_null=True)
     issued_at = serializers.DateTimeField(allow_null=True)

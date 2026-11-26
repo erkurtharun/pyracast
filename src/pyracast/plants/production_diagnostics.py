@@ -2,7 +2,6 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from pyracast.irradiance import local_day_bounds
 from pyracast.plants.incident_policy import incidents_unchanged
 from pyracast.plants.measurements import production_identity_current
 from pyracast.plants.models import CalibrationRun, CalibrationStatus, PlantConfiguration
@@ -10,9 +9,7 @@ from pyracast.plants.numerics import DERATING_POLICY, POLICY_VERSION
 from pyracast.plants.transfer import recorded_transfer
 
 
-def production_diagnostic(
-    outlook: dict[str, Any], target_date: date, known_at: datetime
-) -> dict[str, object] | None:
+def production_diagnostic(outlook: dict[str, Any], known_at: datetime) -> dict[str, object] | None:
     normal: dict[str, Any] | None = outlook.get("result")
     if normal is None or outlook["source_kind"] != "forecast":
         return None
@@ -20,9 +17,6 @@ def production_diagnostic(
         pk=outlook["configuration_id"], plant_id=outlook["plant_id"]
     )
     zone = configuration.binding.timezone
-    _, end = local_day_bounds(target_date, zone)
-    if end <= known_at:
-        return None
     run = (
         CalibrationRun.objects.select_related("configuration", "binding")
         .filter(

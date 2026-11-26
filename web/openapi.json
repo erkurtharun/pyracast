@@ -3496,6 +3496,105 @@
                 }
             }
         },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/days/": {
+            "get": {
+                "operationId": "tenants_regions_plants_days_retrieve",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PlantDaysOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "401": {
+                        "description": "Sign-in is required.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Access was refused.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "The addressed item or page does not exist.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests; Retry-After gives the seconds to wait.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API failure.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/forecast/": {
             "get": {
                 "operationId": "tenants_regions_plants_forecast_retrieve",
@@ -5855,6 +5954,23 @@
                 },
                 "required": ["address", "role"]
             },
+            "AffectedDayOutput": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "$ref": "#/components/schemas/OutageScenarioStatusEnum"
+                    },
+                    "total_mwh": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    },
+                    "partial": {
+                        "type": "boolean"
+                    }
+                },
+                "required": ["partial", "status", "total_mwh"]
+            },
             "ApprovalInput": {
                 "type": "object",
                 "properties": {
@@ -6953,6 +7069,16 @@
                 "type": "string",
                 "description": "* `manual` - manual\n* `automatic` - automatic"
             },
+            "DayUnavailableReasonEnum": {
+                "enum": [
+                    "configuration_unavailable",
+                    "forecast_unavailable",
+                    "estimated_actuals_unavailable",
+                    "calculation_out_of_range"
+                ],
+                "type": "string",
+                "description": "* `configuration_unavailable` - Configuration Unavailable\n* `forecast_unavailable` - Forecast Unavailable\n* `estimated_actuals_unavailable` - Estimated Actuals Unavailable\n* `calculation_out_of_range` - Calculation Out Of Range"
+            },
             "DaylightOutput": {
                 "type": "object",
                 "properties": {
@@ -7446,6 +7572,119 @@
                 "enum": ["current", "stale"],
                 "type": "string",
                 "description": "* `current` - current\n* `stale` - stale"
+            },
+            "ForecastDayOutput": {
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "timezone": {
+                        "type": "string"
+                    },
+                    "source_kind": {
+                        "$ref": "#/components/schemas/ForecastSourceKindEnum"
+                    },
+                    "freshness": {
+                        "$ref": "#/components/schemas/FreshnessEnum"
+                    },
+                    "stale_reason": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/StaleReasonEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "unavailable_reason": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/DayUnavailableReasonEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "collected_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "total_mwh": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    },
+                    "partial": {
+                        "type": "boolean"
+                    },
+                    "affected": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/AffectedDayOutput"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "rows": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ForecastDayRowOutput"
+                        },
+                        "maxItems": 52
+                    }
+                },
+                "required": [
+                    "affected",
+                    "collected_at",
+                    "date",
+                    "freshness",
+                    "partial",
+                    "rows",
+                    "source_kind",
+                    "stale_reason",
+                    "timezone",
+                    "total_mwh",
+                    "unavailable_reason"
+                ]
+            },
+            "ForecastDayRowOutput": {
+                "type": "object",
+                "description": "Energy in MWh on the measurement basis of the plant.",
+                "properties": {
+                    "start": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "end": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "mwh": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    },
+                    "affected_mwh": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    },
+                    "sources": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "nullable": true
+                    }
+                },
+                "required": ["affected_mwh", "end", "mwh", "sources", "start"]
             },
             "ForecastOptionOutput": {
                 "type": "object",
@@ -9542,6 +9781,40 @@
                 },
                 "required": ["code", "current", "message"]
             },
+            "PlantDaysOutput": {
+                "type": "object",
+                "properties": {
+                    "plant_id": {
+                        "type": "integer"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "today": {
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "forecast": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ForecastDayOutput"
+                        }
+                    },
+                    "production": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/SavedProductionDayOutput"
+                        }
+                    }
+                },
+                "required": [
+                    "forecast",
+                    "name",
+                    "plant_id",
+                    "production",
+                    "today"
+                ]
+            },
             "PlantEditBlockEnum": {
                 "enum": ["suspended", "connection_unavailable"],
                 "type": "string",
@@ -10224,6 +10497,44 @@
                     "sunrise",
                     "sunset",
                     "total_mwh"
+                ]
+            },
+            "ProductionDayRowOutput": {
+                "type": "object",
+                "properties": {
+                    "start": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "end": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "mwh": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    },
+                    "quality": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "source": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "provisional": {
+                        "type": "boolean",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "end",
+                    "mwh",
+                    "provisional",
+                    "quality",
+                    "source",
+                    "start"
                 ]
             },
             "ProductionDiagnosticOutput": {
@@ -11359,6 +11670,40 @@
                     }
                 },
                 "required": ["expected_revision"]
+            },
+            "SavedProductionDayOutput": {
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "timezone": {
+                        "type": "string"
+                    },
+                    "total_mwh": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    },
+                    "complete": {
+                        "type": "boolean"
+                    },
+                    "rows": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProductionDayRowOutput"
+                        },
+                        "maxItems": 52
+                    }
+                },
+                "required": [
+                    "complete",
+                    "date",
+                    "rows",
+                    "timezone",
+                    "total_mwh"
+                ]
             },
             "SeenAllOutput": {
                 "type": "object",

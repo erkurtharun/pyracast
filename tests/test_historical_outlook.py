@@ -63,6 +63,26 @@ def test_new_configuration_cannot_reconstruct_a_historical_forecast(
     assert result["outage_scenario"] is None
 
 
+def test_satellite_data_of_a_plant_configured_after_the_read_names_the_missing_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    PlantConfiguration.objects.filter(plant=plant).update(created_at=NOW + timedelta(hours=1))
+    result = plant_outlook(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        target_date=DAY,
+        resolution_minutes=60,
+        source="satellite",
+    )
+    assert result["source_kind"] == "estimated_actuals"
+    assert result["configuration_id"] is None
+    assert result["result"] is None
+    assert result["unavailable_reason"] == "configuration_unavailable"
+
+
 def test_eligible_archived_forecast_survives_a_later_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
