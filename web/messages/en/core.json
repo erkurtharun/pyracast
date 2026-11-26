@@ -389,10 +389,6 @@
             "missing": "No forecast data for this day.",
             "archived": "Saved forecast"
         },
-        "SelectionRule": {
-            "closest_to_production": "Auto: closest to production",
-            "latest": "Auto: latest forecast"
-        },
         "CalibrationStatus": {
             "pending": "Queued",
             "running": "Calculating",

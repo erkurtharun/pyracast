@@ -390,13 +390,13 @@ for (const width of [320, 390, 768, 1440]) {
             fullPage: true,
         });
         await page.getByLabel("Forecast time").selectOption("1");
-        await page.getByRole("button", { name: "Back to Auto" }).waitFor();
+        await page.getByRole("button", { name: "Back to automatic" }).waitFor();
         await fits(page, "Plant forecast with a chosen time", audit);
         await page.screenshot({
             path: testInfo.outputPath("forecast-chosen-time.png"),
             fullPage: true,
         });
-        await page.getByRole("button", { name: "Back to Auto" }).click();
+        await page.getByRole("button", { name: "Back to automatic" }).click();
         const settingsTab = page.getByRole("button", {
             name: "Settings",
             exact: true,

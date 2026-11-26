@@ -1,3 +1,4 @@
+import type { Locator } from "@playwright/test";
 import { expect, test, type Page } from "./support/test";
 import { mockApi, region } from "./support/workspace";
 import { messages } from "../src/i18n/messages";
@@ -6,6 +7,11 @@ const fetches = [
     { forecast_id: 12, fetched_at: "2026-11-10T14:00:00Z", energy: 11.25 },
     { forecast_id: 11, fetched_at: "2026-11-10T03:00:00Z", energy: 12.5 },
 ];
+const irradianceOnly = {
+    forecast_id: 13,
+    fetched_at: "2026-11-10T08:00:00Z",
+    energy: 9.5,
+};
 const satelliteAt = "2026-11-12T01:00:00Z";
 const today = "2026-11-12";
 const plantTime = (value: string) =>
@@ -20,43 +26,65 @@ function answer(url: URL) {
     const chosen = Number(url.searchParams.get("forecast_id")) || undefined;
     if (url.searchParams.get("data_source") === "satellite")
         return {
-            date,
-            timezone: region.timezone,
-            source_kind: "estimated_actuals",
-            freshness: "archived",
-            selection: null,
-            result: {
-                complete: true,
-                energy_mwh: 10,
-                intervals: [],
-                provenance: { collected_at: satelliteAt },
+            json: {
+                date,
+                timezone: region.timezone,
+                source_kind: "estimated_actuals",
+                freshness: "archived",
+                selection: null,
+                result: {
+                    complete: true,
+                    energy_mwh: 10,
+                    intervals: [],
+                    provenance: { collected_at: satelliteAt },
+                },
             },
         };
     const latest = date! >= today;
-    const shown = fetches.find(
+    const offered = url.pathname.includes("/plants/")
+        ? fetches
+        : [fetches[0]!, irradianceOnly, fetches[1]!];
+    const shown = offered.find(
         (fetch) => fetch.forecast_id === (chosen ?? (latest ? 12 : 11)),
-    )!;
+    );
+    if (!shown)
+        return {
+            status: 400,
+            json: {
+                code: "invalid_request",
+                message: "Check the highlighted values and try again.",
+                fields: {
+                    forecast_id: "Choose one of this day's forecast times.",
+                },
+            },
+        };
     return {
-        date,
-        timezone: region.timezone,
-        source_kind: "forecast",
-        freshness: latest ? "fresh" : "archived",
-        selection: {
-            mode: chosen ? "manual" : "auto",
-            rule: chosen ? null : latest ? "latest" : "closest_to_production",
-            forecast_id: shown.forecast_id,
-            options: fetches.map(({ forecast_id, fetched_at }) => ({
-                forecast_id,
-                fetched_at,
-            })),
-        },
-        result: {
-            complete: true,
-            energy_mwh: shown.energy,
-            coverage_fraction: 1,
-            intervals: [],
-            quality_flags: [],
-            provenance: { collected_at: shown.fetched_at },
+        json: {
+            date,
+            timezone: region.timezone,
+            source_kind: "forecast",
+            freshness: latest ? "fresh" : "archived",
+            selection: {
+                mode: chosen ? "manual" : "auto",
+                rule: chosen
+                    ? null
+                    : latest
+                      ? "latest"
+                      : "closest_to_production",
+                forecast_id: shown.forecast_id,
+                options: offered.map(({ forecast_id, fetched_at }) => ({
+                    forecast_id,
+                    fetched_at,
+                })),
+            },
+            result: {
+                complete: true,
+                energy_mwh: shown.energy,
+                coverage_fraction: 1,
+                intervals: [],
+                quality_flags: [],
+                provenance: { collected_at: shown.fetched_at },
+            },
         },
     };
 }
@@ -72,7 +100,7 @@ async function openForecast(page: Page, date: string) {
         (route) => {
             const url = new URL(route.request().url());
             requests.push(url);
-            return route.fulfill({ json: answer(url) });
+            return route.fulfill(answer(url));
         },
     );
     await page.goto("/app/");
@@ -105,7 +133,16 @@ test("the data choice offers Forecast and Satellite data only, with Forecast cho
     await expect(controls.locator("select")).toHaveCount(2);
 });
 
-test("a past day opens on the forecast closest to production and a chosen time is sent and marked manual", async ({
+async function showsAutomatic(controls: Locator, times: Locator) {
+    await expect(times).toHaveValue("");
+    await expect(times.locator("option:checked")).toHaveText("Automatic");
+    await expect(controls.locator(".tag")).toHaveCount(0);
+    await expect(
+        controls.getByRole("button", { name: "Back to automatic" }),
+    ).toHaveCount(0);
+}
+
+test("a past day opens in Automatic with no mark and a chosen time is sent and marked manual", async ({
     page,
 }) => {
     const { last, controls, times, panel } = await openForecast(
@@ -113,15 +150,12 @@ test("a past day opens on the forecast closest to production and a chosen time i
         "2026-11-11",
     );
     const total = panel.locator(".stat strong");
-    await expect(
-        controls.getByText("Auto: closest to production"),
-    ).toBeVisible();
     await expect(times.locator("option")).toHaveText([
-        "Auto",
+        "Automatic",
         plantTime(fetches[0]!.fetched_at),
         plantTime(fetches[1]!.fetched_at),
     ]);
-    await expect(times).toHaveValue("");
+    await showsAutomatic(controls, times);
     await expect(total).toHaveText("12.5 MWh");
     await expect(panel.getByText(/^Forecast data: /)).toHaveText(
         `Forecast data: ${plantTime(fetches[1]!.fetched_at)}`,
@@ -130,7 +164,6 @@ test("a past day opens on the forecast closest to production and a chosen time i
     await times.selectOption("12");
     await expect.poll(() => last().searchParams.get("forecast_id")).toBe("12");
     await expect(controls.getByText("Manual", { exact: true })).toBeVisible();
-    await expect(controls.getByText(/^Auto: /)).toHaveCount(0);
     await expect(times).toHaveValue("12");
     await expect(total).toHaveText("11.25 MWh");
     await expect(panel.getByText(/^Forecast data: /)).toHaveText(
@@ -138,26 +171,54 @@ test("a past day opens on the forecast closest to production and a chosen time i
     );
     await expect(page.locator("section.panel .tag")).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Back to Auto" }).click();
-    await expect(times).toHaveValue("");
-    await expect(
-        controls.getByText("Auto: closest to production"),
-    ).toBeVisible();
-    await expect(controls.getByText("Manual", { exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Back to automatic" }).click();
+    await showsAutomatic(controls, times);
     await expect(total).toHaveText("12.5 MWh");
 });
 
-test("today opens on the latest forecast", async ({ page }) => {
-    const { last, controls, panel } = await openForecast(page, today);
-    await expect(controls.getByText("Auto: latest forecast")).toBeVisible();
+test("today opens in Automatic with no mark", async ({ page }) => {
+    const { last, controls, times, panel } = await openForecast(page, today);
     await expect(panel.getByText(/^Forecast data: /)).toHaveText(
         `Forecast data: ${plantTime(fetches[0]!.fetched_at)}`,
     );
+    await showsAutomatic(controls, times);
     expect(last().searchParams.get("data_source")).toBe("forecast");
     expect(last().searchParams.has("forecast_id")).toBe(false);
 });
 
-test("the irradiance view sends the chosen time and another date returns to Auto", async ({
+test("a time only the irradiance view lists is refused by the generation view, which shows Automatic", async ({
+    page,
+}) => {
+    const { requests, controls, times, panel } = await openForecast(
+        page,
+        "2026-11-11",
+    );
+    const sent = (plant: boolean) =>
+        requests
+            .filter((url) => url.pathname.includes("/plants/") === plant)
+            .map((url) => url.searchParams.get("forecast_id"));
+    const irradiance = page.getByRole("button", {
+        name: "Irradiance forecast",
+        exact: true,
+    });
+    await irradiance.click();
+    await times.selectOption("13");
+    await expect.poll(() => sent(false).at(-1)).toBe("13");
+
+    await page
+        .getByRole("button", { name: "Generation forecast", exact: true })
+        .click();
+    await expect.poll(() => sent(true)).toContain("13");
+    await showsAutomatic(controls, times);
+    await expect(panel.locator(".stat strong")).toHaveText("12.5 MWh");
+
+    await irradiance.click();
+    await expect(times).toHaveValue("13");
+    await expect(controls.getByText("Manual", { exact: true })).toBeVisible();
+    expect(sent(false).at(-1)).toBe("13");
+});
+
+test("the irradiance view sends the chosen time and leaving the date returns to Automatic", async ({
     page,
 }) => {
     const { requests, last, controls, times } = await openForecast(
@@ -182,10 +243,17 @@ test("the irradiance view sends the chosen time and another date returns to Auto
     await page.getByLabel("Forecast date").fill("2026-11-10");
     await expect.poll(() => last().searchParams.get("date")).toBe("2026-11-10");
     expect(last().searchParams.has("forecast_id")).toBe(false);
-    await expect(
-        controls.getByText("Auto: closest to production"),
-    ).toBeVisible();
-    await expect(times).toHaveValue("");
+    await showsAutomatic(controls, times);
+
+    const returned = requests.length;
+    await page.getByLabel("Forecast date").fill("2026-11-11");
+    await expect(page.locator("section.panel")).toContainText("2026-11-11");
+    await showsAutomatic(controls, times);
+    expect(
+        requests
+            .slice(returned)
+            .map((url) => url.searchParams.get("forecast_id")),
+    ).not.toContain("12");
 });
 
 test("Satellite data hides the forecast time and the way back keeps the chosen time", async ({

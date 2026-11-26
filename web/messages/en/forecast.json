@@ -315,9 +315,9 @@
         "forecast": "Forecast",
         "satellite": "Satellite data",
         "forecast_time": "Forecast time",
-        "auto": "Auto",
+        "automatic": "Automatic",
         "manual": "Manual",
-        "back_to_auto": "Back to Auto"
+        "back_to_automatic": "Back to automatic"
     },
     "CsvDownload": {
         "download_csv": "Download CSV"

@@ -4,26 +4,22 @@ import type { Forecast } from "@/lib/api";
 import { useFormat } from "@/lib/format/use-format";
 import { Select } from "@/ui/form";
 import { Tag } from "@/ui/ui";
-import { useLabel } from "@/ui/vocabulary";
 
-type Selection = NonNullable<Forecast["selection"]>;
+type Options = NonNullable<Forecast["selection"]>["options"];
 
 export function ForecastTimeControl({
     timezone,
     options,
-    rule,
     forecastId,
     onChoose,
 }: {
     timezone: string;
-    options: Selection["options"];
-    rule: Selection["rule"] | undefined;
+    options: Options;
     forecastId: number | undefined;
     onChoose: (forecastId: number | undefined) => void;
 }) {
     const t = useTranslations("DataSource");
     const format = useFormat();
-    const label = useLabel();
     return (
         <div className="forecast-time">
             {options.length > 0 && (
@@ -38,7 +34,7 @@ export function ForecastTimeControl({
                         )
                     }
                 >
-                    <option value="">{t("auto")}</option>
+                    <option value="">{t("automatic")}</option>
                     {options.map((option) => (
                         <option
                             key={option.forecast_id}
@@ -49,9 +45,7 @@ export function ForecastTimeControl({
                     ))}
                 </Select>
             )}
-            {forecastId === undefined ? (
-                rule && <Tag>{label("SelectionRule", rule)}</Tag>
-            ) : (
+            {forecastId !== undefined && (
                 <>
                     <Tag tone="warning">{t("manual")}</Tag>
                     <button
@@ -59,7 +53,7 @@ export function ForecastTimeControl({
                         className="button secondary"
                         onClick={() => onChoose(undefined)}
                     >
-                        {t("back_to_auto")}
+                        {t("back_to_automatic")}
                     </button>
                 </>
             )}

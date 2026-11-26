@@ -116,6 +116,21 @@ async function openForecast(
                     timezone: region.timezone,
                     freshness: "fresh",
                     source_kind: mixed ? "mixed" : "forecast",
+                    ...(mixed
+                        ? {
+                              selection: {
+                                  mode: "auto",
+                                  rule: "latest",
+                                  forecast_id: 2,
+                                  options: [
+                                      {
+                                          forecast_id: 2,
+                                          fetched_at: "2026-11-13T18:00:00Z",
+                                      },
+                                  ],
+                              },
+                          }
+                        : {}),
                     result,
                     ...(scenario
                         ? {
@@ -189,7 +204,6 @@ test("a Turkish mixed day stays readable on mobile with only the time and foreca
 });
 
 const internalFlags = [
-    "forecast_fallback",
     "mixed_estimated_actual_vintages",
     "assumed_tracker_geometry",
     "provisional_production_calibration",
@@ -237,7 +251,7 @@ for (const electrical of [true, false]) {
                 dateStyle: "medium",
                 timeStyle: "short",
                 timeZone: region.timezone,
-            }).format(new Date("2026-11-14T10:00:00Z"))}`,
+            }).format(new Date("2026-11-13T18:00:00Z"))}`,
         );
         await expect(panel(page).getByText(/^Satellite data: /)).toHaveCount(0);
         await expect(panel(page).locator(".tag")).toHaveCount(0);

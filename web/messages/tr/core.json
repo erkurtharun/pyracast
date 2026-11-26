@@ -389,10 +389,6 @@
             "missing": "Bu gün için tahmin verisi yok.",
             "archived": "Kayıtlı tahmin"
         },
-        "SelectionRule": {
-            "closest_to_production": "Otomatik: üretime en yakın",
-            "latest": "Otomatik: en son tahmin"
-        },
         "CalibrationStatus": {
             "pending": "Sırada",
             "running": "Hesaplanıyor",

@@ -315,9 +315,9 @@
         "forecast": "Tahmin",
         "satellite": "Uydu verisi",
         "forecast_time": "Tahmin saati",
-        "auto": "Otomatik",
+        "automatic": "Otomatik",
         "manual": "Manuel",
-        "back_to_auto": "Otomatiğe dön"
+        "back_to_automatic": "Otomatiğe dön"
     },
     "CsvDownload": {
         "download_csv": "CSV indir"

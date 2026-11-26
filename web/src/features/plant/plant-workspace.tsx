@@ -85,6 +85,8 @@ export function PlantWorkspace({
     const awaitsFirstApproval = region.status === "pending" && !configuration;
     const [comparisonDays, setComparisonDays] = useState<PlantDays>();
     const forecastDate = address.date ?? plantDay(timezone, 1);
+    if (forecastOptions.chosen && forecastOptions.chosen.date !== forecastDate)
+        setForecastOptions({ ...forecastOptions, chosen: undefined });
     const productionView = plantView("production", address);
     const yesterday = plantDay(timezone, -1);
     const productionDay =

@@ -20,13 +20,10 @@ import {
     type ForecastQuery,
 } from "./forecast-reading";
 
-// A chosen forecast belongs to its day, so another date shows the automatic choice.
-type ChosenForecast = { date: string; forecastId: number };
-
 export type ForecastOptions = {
     resolution: "30" | "60";
     source: DataSource;
-    chosen?: ChosenForecast;
+    chosen?: { date: string; forecastId: number };
 };
 
 export function ForecastSection({
@@ -55,19 +52,21 @@ export function ForecastSection({
     const today = plantDay(timezone);
     const bounds = dateBounds(source, today);
     const leavingGeneration = leaving && view === "generation";
-    const forecastId =
-        source === "forecast" && chosen?.date === date
-            ? chosen.forecastId
-            : undefined;
-    const query: ForecastQuery = {
+    const read: ForecastQuery = {
         scope,
         electrical: view === "generation",
         date,
         resolution: resolution === "30" ? 30 : 60,
         source,
-        forecastId,
         poll: date >= plantDay(timezone, -1) ? cadence.live : false,
     };
+    const chosenId = source === "forecast" ? chosen?.forecastId : undefined;
+    const refused = useForecastRead(
+        { ...read, forecastId: chosenId },
+        false,
+    ).invalidFields.includes("forecast_id");
+    const forecastId = refused ? undefined : chosenId;
+    const query: ForecastQuery = { ...read, forecastId };
     const shown = useForecastRead(query, false).data;
     const automatic = useForecastRead(
         { ...query, forecastId: undefined },
@@ -104,7 +103,6 @@ export function ForecastSection({
                     <ForecastTimeControl
                         timezone={timezone}
                         options={times}
-                        rule={selection?.rule}
                         forecastId={forecastId}
                         onChoose={(next) =>
                             onOptions({
