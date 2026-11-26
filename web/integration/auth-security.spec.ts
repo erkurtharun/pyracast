@@ -262,10 +262,11 @@ test("verified email and a recovery code protect a real browser session", async 
     const verification = page.waitForResponse(
         (response) =>
             response.url().endsWith("/api/auth/browser/v1/auth/email/verify") &&
-            response.request().method() === "POST",
+            response.request().method() === "POST" &&
+            response.status() === 200,
     );
     await emailChange.getByRole("button", { name: "Verify new email" }).click();
-    expect((await verification).status()).toBe(200);
+    await verification;
     await expect(
         emailChange.getByText(`${changedEmail} is now your address.`),
     ).toBeVisible();
