@@ -8,6 +8,7 @@ from django.db.models import Max, Min, Q
 
 from pyracast.forecasts.actuals import select_archived_actual_source
 from pyracast.forecasts.models import CollectionJobStatus, ForecastSnapshot
+from pyracast.forecasts.sources import snapshot_rows
 from pyracast.plants.models import PlantConfiguration
 from pyracast.plants.numerics import PowerInterval
 from pyracast.plants.transfer import reference_power_mw, transfer_model
@@ -35,19 +36,12 @@ def actual_power_intervals(
     source_intervals: Sequence[dict[str, Any]] | None = None,
 ) -> tuple[PowerInterval, ...]:
     result = []
-    for row in snapshot.normalized_intervals if source_intervals is None else source_intervals:
+    for row in snapshot_rows(snapshot) if source_intervals is None else source_intervals:
         power = row.get("power_kw")
-        if (
-            isinstance(power, bool)
-            or not isinstance(power, int | float)
-            or not isfinite(power)
-            or power < 0
-        ):
+        if power is None or power < 0:
             continue
         start = datetime.fromisoformat(row["start"])
         end = datetime.fromisoformat(row["end"])
-        if start.utcoffset() is None or end.utcoffset() is None or end <= start:
-            continue
         result.append(
             PowerInterval(
                 start,

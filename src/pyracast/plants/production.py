@@ -11,6 +11,7 @@ from django.utils.translation import gettext
 
 from pyracast.accounts.models import Membership, WorkspaceRole
 from pyracast.errors import UNEXPECTED
+from pyracast.forecasts.faults import stored_data
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasSnapshot
 from pyracast.plants.availability import (
@@ -146,16 +147,26 @@ class NativeProduction:
     days: tuple[NativeProductionDay, ...]
 
 
-def native_production_days(
-    plant: Plant, start_date: date, end_date: date, now: datetime
-) -> NativeProduction:
-    configuration = (
+def _current_configuration(plant: Plant) -> PlantConfiguration | None:
+    return (
         PlantConfiguration.objects.select_related("binding__provider_account").get(
             pk=plant.current_configuration_id
         )
         if plant.current_configuration_id is not None
         else None
     )
+
+
+def production_timezone(plant: Plant) -> str:
+    """The timezone production days of the plant are counted in."""
+    configuration = _current_configuration(plant)
+    return configuration.binding.timezone if configuration else plant.region.timezone
+
+
+def native_production_days(
+    plant: Plant, start_date: date, end_date: date, now: datetime
+) -> NativeProduction:
+    configuration = _current_configuration(plant)
     location = configuration.binding if configuration else plant.region
     zone = location.timezone
     range_start, _ = local_day_bounds(start_date, zone)
@@ -237,13 +248,7 @@ def production_history(
     native_intervals: bool = False,
     actor: User | None = None,
 ) -> dict[str, Any]:
-    configuration = (
-        PlantConfiguration.objects.select_related("binding__provider_account").get(
-            pk=plant.current_configuration_id
-        )
-        if plant.current_configuration_id is not None
-        else None
-    )
+    configuration = _current_configuration(plant)
     zone = configuration.binding.timezone if configuration else plant.region.timezone
     now = timezone.now()
     first, last = available_date_bounds(configuration, now) if configuration else (None, None)
@@ -262,7 +267,8 @@ def production_history(
         raise ValidationError(gettext("Choose a date range of 1 to 31 days."))
     range_start, _ = local_day_bounds(start_date, zone)
     _, range_end = local_day_bounds(end_date, zone)
-    selected = select_production_measurements(plant, configuration, range_start, range_end, now)
+    with stored_data("plant", plant.pk, start_date, "production"):
+        selected = select_production_measurements(plant, configuration, range_start, range_end, now)
     heads = selected.heads
     observations = [row for row in heads if not row.is_reverted]
     encoded = {row["id"]: row for row in ObservationOutput(observations, many=True).data}
@@ -277,7 +283,8 @@ def production_history(
     while day <= end_date:
         location = configuration.binding if configuration else plant.region
         daylight = daylight_window(day, zone, location.latitude, location.longitude)
-        native = reference_intervals(configuration, day, now) if configuration else ()
+        with stored_data("plant", plant.pk, day, "production"):
+            native = reference_intervals(configuration, day, now) if configuration else ()
         cursor, day_end = local_day_bounds(day, zone)
         day_rows = [row for row in effective if row.starts_at >= cursor and row.ends_at <= day_end]
         complete = _coverage(day_rows, cursor, day_end)

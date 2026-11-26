@@ -10,6 +10,7 @@ from django.db.models import F, OuterRef, Q
 
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.forecasts.sources import snapshot_rows
 from pyracast.forecasts.timing import approval_job_id
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecasting import (
@@ -110,7 +111,7 @@ def _prepare_for_configuration(
         return ()
     if any(
         row.get("source_kind", "forecast") != "forecast" or row.get("source_kinds")
-        for row in snapshot.normalized_intervals
+        for row in snapshot_rows(snapshot)
     ):
         return ()
     calibration = calibration_at(configuration, snapshot.collected_at)

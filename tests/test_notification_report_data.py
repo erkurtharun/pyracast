@@ -102,6 +102,19 @@ def test_report_marks_electricity_unavailable_for_ineligible_inputs(
     assert all(day["normal"] is None for day in cast(list[dict[str, Any]], context["days"]))
 
 
+def test_a_calculation_defect_is_not_left_out_as_an_unavailable_day(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, delivery = report_delivery(monkeypatch)
+
+    def defect(*args: object, **kwargs: object) -> dict[str, object]:
+        raise KeyError("energy_mwh")
+
+    monkeypatch.setattr("pyracast.notifications.report_data.forecast_payload", defect)
+    with pytest.raises(KeyError, match="energy_mwh"):
+        saved_report_context(delivery)
+
+
 def test_partial_source_preserves_missing_totals_and_valid_electrical_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

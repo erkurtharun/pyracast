@@ -12,13 +12,14 @@ from pyracast.forecasts.composition import (
     ForecastVintage,
     compose_forecasts,
 )
+from pyracast.forecasts.faults import decoding
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJobStatus,
     ForecastSnapshot,
     SnapshotSourceKind,
 )
-from pyracast.forecasts.sources import covering_snapshots
+from pyracast.forecasts.sources import covering_snapshots, snapshot_rows
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_sources import apply_composition, compose_snapshots
 from pyracast.solar import Daylight, daylight_energy_windows, daylight_window
@@ -44,17 +45,11 @@ class PreparedIntradaySource:
 def completed_actual_intervals(
     intervals: Sequence[dict[str, Any]], elapsed_cutoff: datetime
 ) -> tuple[dict[str, Any], ...]:
+    """Composed rows, each naming its snapshot, whose native interval ended by the cutoff."""
     rows: list[dict[str, Any]] = []
     for row in sorted(intervals, key=lambda item: datetime.fromisoformat(item["start"])):
-        start, end = (datetime.fromisoformat(row[key]) for key in ("start", "end"))
-        native_start = datetime.fromisoformat(row.get("original_start", row["start"]))
-        native_end = datetime.fromisoformat(row.get("original_end", row["end"]))
-        if (
-            native_start.utcoffset() is None
-            or native_end.utcoffset() is None
-            or not native_start <= start < end <= native_end
-        ):
-            raise ValueError("Native estimated-actual bounds must contain their saved interval")
+        with decoding("forecast_snapshot", row["source_snapshot_id"]):
+            native_end = _native_end(row)
         power = row.get("power_kw")
         if (
             native_end <= elapsed_cutoff
@@ -65,6 +60,19 @@ def completed_actual_intervals(
         ):
             rows.append(row)
     return tuple(rows)
+
+
+def _native_end(row: dict[str, Any]) -> datetime:
+    start, end = (datetime.fromisoformat(row[key]) for key in ("start", "end"))
+    native_start = datetime.fromisoformat(row.get("original_start", row["start"]))
+    native_end = datetime.fromisoformat(row.get("original_end", row["end"]))
+    if (
+        native_start.utcoffset() is None
+        or native_end.utcoffset() is None
+        or not native_start <= start < end <= native_end
+    ):
+        raise ValueError("Native estimated-actual bounds must contain their saved interval")
+    return native_end
 
 
 def _covers(
@@ -222,7 +230,7 @@ def prepare_intraday_source(
             snapshot.pk,
             cast(datetime, snapshot.coverage_start),
             cast(datetime, snapshot.coverage_end),
-            tuple(snapshot.normalized_intervals),
+            snapshot_rows(snapshot),
         )
         for snapshot in forecasts
     )
@@ -318,7 +326,7 @@ def replay_intraday_composition(
         native = next(
             (
                 row
-                for row in snapshot.normalized_intervals
+                for row in snapshot_rows(snapshot)
                 if datetime.fromisoformat(row.get("original_start", row["start"])) == original_start
                 and datetime.fromisoformat(row.get("original_end", row["end"])) == original_end
             ),

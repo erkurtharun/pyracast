@@ -1,7 +1,10 @@
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from typing import Any
 
 from pyracast.connections.models import SiteBinding
+from pyracast.errors import DomainError, ErrorCode
+from pyracast.forecasts.faults import DamagedStoredDataError, log_fault
 from pyracast.forecasts.outlook import Policy, chosen_forecast
 from pyracast.forecasts.selection import (
     Day,
@@ -17,7 +20,7 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.plants.automatic_forecast import automatic_forecast
 from pyracast.plants.current_forecast import current_forecast
 from pyracast.plants.forecast_archive import day_issuances, forecast_cutoff
-from pyracast.plants.forecasting import issuance_outlook, missing_forecast
+from pyracast.plants.forecasting import decoded_issuance, issuance_outlook, missing_forecast
 from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration
 from pyracast.plants.production import production_total
 
@@ -25,6 +28,7 @@ from pyracast.plants.production import production_total
 @dataclass(frozen=True)
 class DayForecasts:
     issuances: dict[int, ForecastIssuance]
+    unreadable: dict[int, DamagedStoredDataError]
     later: LaterFetches
     options: tuple[ForecastOption, ...]
 
@@ -46,6 +50,10 @@ def forecast_outlook(
         production = production_total(plant, target_date, now)
         selection = automatic_selection(forecasts.options, production)
         chosen = forecasts.issuances.get(selection.forecast_id) if selection.forecast_id else None
+        # A day whose every saved forecast is unreadable is refused, never shown without one.
+        if chosen is None and forecasts.unreadable:
+            damage = next(iter(forecasts.unreadable.values()))
+            raise DomainError(ErrorCode.CALCULATION_OUT_OF_RANGE) from damage
         answer = (
             issuance_outlook(plant, chosen, target_date, resolution_minutes, now)
             if chosen is not None
@@ -65,6 +73,9 @@ def _chosen_outlook(
     forecast_id: int,
     now: datetime,
 ) -> dict[str, object]:
+    damage = forecasts.unreadable.get(forecast_id)
+    if damage is not None:
+        raise DomainError(ErrorCode.CALCULATION_OUT_OF_RANGE) from damage
     selection = chosen_forecast(forecasts.options, forecast_id)
     later = forecasts.later.fetches.get(forecast_id)
     answer = (
@@ -82,8 +93,11 @@ def _day_forecasts(
 ) -> DayForecasts:
     saved = day_issuances(plant, target_date, now)
     later = _later_fetches(plant, target_date, now) if offers_later_fetches(day) else LaterFetches()
+    totals, unreadable = _day_totals(plant, target_date, resolution_minutes, saved)
+    readable = [pair for pair in saved if pair[0].snapshot_id in totals]
     bindings = {
-        issuance.configuration.binding_id: issuance.configuration.binding for issuance, _ in saved
+        issuance.configuration.binding_id: issuance.configuration.binding
+        for issuance, _ in readable
     }
     previous_day = target_date - timedelta(days=1)
     previous_sunrise = {
@@ -99,15 +113,37 @@ def _day_forecasts(
                 previous_sunrise[issuance.configuration.binding_id],
                 by_approval=by_approval,
             ),
-            _day_total(issuance.payloads.get(str(resolution_minutes))),
+            totals[issuance.snapshot_id],
         )
-        for issuance, by_approval in saved
+        for issuance, by_approval in readable
     )
     return DayForecasts(
-        {issuance.snapshot_id: issuance for issuance, _ in saved},
+        {issuance.snapshot_id: issuance for issuance, _ in readable},
+        unreadable,
         later,
         day_options(options, later.options),
     )
+
+
+def _day_totals(
+    plant: Plant,
+    target_date: date,
+    resolution_minutes: int,
+    saved: list[tuple[ForecastIssuance, bool]],
+) -> tuple[dict[int, float | None], dict[int, DamagedStoredDataError]]:
+    """By forecast: the day total of each saved forecast, and the damage of each one that
+    cannot be decoded."""
+    totals: dict[int, float | None] = {}
+    unreadable: dict[int, DamagedStoredDataError] = {}
+    for issuance, _ in saved:
+        try:
+            result, _ = decoded_issuance(issuance, str(resolution_minutes))
+        except DamagedStoredDataError as damage:
+            log_fault("plant", plant.pk, target_date, "candidates", damage)
+            unreadable[issuance.snapshot_id] = damage
+        else:
+            totals[issuance.snapshot_id] = _day_total(result)
+    return totals, unreadable
 
 
 def _later_fetches(plant: Plant, target_date: date, now: datetime) -> LaterFetches:
@@ -126,16 +162,12 @@ def _later_fetches(plant: Plant, target_date: date, now: datetime) -> LaterFetch
     return later_fetches(binding.pk, start, end, forecast_cutoff(target_date, binding), now)
 
 
-def _day_total(payload: object) -> float | None:
+def _day_total(result: dict[str, Any]) -> float | None:
     """The day total the answer shows: the daylight energy of a complete day, in MWh."""
-    if not isinstance(payload, dict):
-        return None
-    daylight = payload.get("daylight")
-    summary = daylight if isinstance(daylight, dict) else payload
+    daylight: dict[str, Any] | None = result.get("daylight")
+    summary = daylight if daylight is not None else result
     shown = summary.get("complete") is True or (
-        isinstance(daylight, dict) and daylight.get("status") == "polar_night"
+        daylight is not None and daylight.get("status") == "polar_night"
     )
     energy = summary.get("energy_mwh")
-    if not shown or isinstance(energy, bool) or not isinstance(energy, int | float):
-        return None
-    return float(energy)
+    return float(energy) if shown and energy is not None else None

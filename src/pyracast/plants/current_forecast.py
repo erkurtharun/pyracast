@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import cast
 
-from pyracast.forecasts.faults import FROZEN_PAYLOAD_FAULTS, stored_data
+from pyracast.forecasts.faults import stored_data
 from pyracast.forecasts.history import composed_irradiance, live_state, result_state
 from pyracast.forecasts.intraday import (
     ActualsMode,
@@ -76,7 +76,7 @@ def _composed_forecast(
             as_of=cutoff,
             pinned=chosen,
         )
-        with stored_data("plant", plant.pk, target_date, "actuals", FROZEN_PAYLOAD_FAULTS):
+        with stored_data("plant", plant.pk, target_date, "actuals"):
             source = (
                 prepare_intraday_source(
                     configuration.binding,

@@ -1,12 +1,14 @@
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import cast
+from math import isfinite
+from typing import Any, cast
 
 from django.db.models import Q, QuerySet
 
 from pyracast.connections.contracts import ProviderData
 from pyracast.errors import BusyError, ErrorCode
+from pyracast.forecasts.faults import decoding, snapshot_row
 from pyracast.forecasts.models import CollectionJobStatus, ForecastSnapshot
 from pyracast.forecasts.selection import ForecastOption
 from pyracast.intervals import NormalizedInterval
@@ -140,14 +142,44 @@ def covering_snapshots(
     return selected
 
 
+def snapshot_rows(snapshot: ForecastSnapshot) -> tuple[dict[str, Any], ...]:
+    """The stored interval rows of a snapshot, every one an interval of positive duration with
+    aware bounds and a power a float represents or none."""
+    with decoding("forecast_snapshot", snapshot.pk):
+        rows = snapshot.normalized_intervals
+        if not isinstance(rows, list):
+            raise TypeError("Stored intervals are not an array.")
+        for row in rows:
+            _decoded_row(NormalizedInterval.from_row(row))
+        return tuple(rows)
+
+
+def _decoded_row(interval: NormalizedInterval) -> None:
+    if interval.end <= interval.start:
+        raise ValueError("A stored interval has no duration.")
+    if interval.power_kw is not None and not isfinite(float(interval.power_kw)):
+        raise ValueError("A stored power is not finite.")
+
+
+def stored_intervals(
+    snapshot: ForecastSnapshot, rows: Iterable[object] | None = None
+) -> tuple[NormalizedInterval, ...]:
+    with decoding("forecast_snapshot", snapshot.pk):
+        source = snapshot_rows(snapshot) if rows is None else rows
+        return tuple(_stored_interval(row, snapshot.pk) for row in source)
+
+
+def _stored_interval(row: object, snapshot_id: int) -> NormalizedInterval:
+    with snapshot_row(row, snapshot_id):
+        return NormalizedInterval.from_row(row)
+
+
 def snapshot_data(
     snapshot: ForecastSnapshot, *, intervals: Iterable[Mapping[str, object]] | None = None
 ) -> ProviderData:
     return ProviderData(
         raw_payload=snapshot.raw_payload,
-        intervals=NormalizedInterval.from_rows(
-            snapshot.normalized_intervals if intervals is None else intervals
-        ),
+        intervals=stored_intervals(snapshot, intervals),
         issued_at=snapshot.issued_at,
         collected_at=snapshot.collected_at,
         source_kind=cast(SourceKind, snapshot.source_kind),

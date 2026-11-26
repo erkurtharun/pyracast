@@ -1,8 +1,11 @@
 from dataclasses import dataclass
 from datetime import datetime
+from math import isfinite
+from typing import Any
 
 from django.db.models import OuterRef, Subquery
 
+from pyracast.forecasts.faults import decoding
 from pyracast.incidents.models import IncidentRevision
 
 
@@ -24,28 +27,78 @@ class IncidentEvidence:
     cancelled_at: datetime | None
 
 
-def _moment(value: str | None) -> datetime | None:
-    return datetime.fromisoformat(value) if value else None
+def _instant(value: object) -> datetime:
+    if not isinstance(value, str):
+        raise TypeError("A stored instant is not text.")
+    moment = datetime.fromisoformat(value)
+    if moment.utcoffset() is None:
+        raise ValueError("A stored instant has no UTC offset.")
+    return moment
+
+
+def _moment(value: object) -> datetime | None:
+    return None if value is None else _instant(value)
+
+
+def _capacity(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise TypeError("A stored available capacity is not a number.")
+    if not isfinite(float(value)) or value < 0:
+        raise ValueError("A stored available capacity is not a finite nonnegative number.")
+    return value
+
+
+def _identifier(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("A stored identifier is not an integer.")
+    return value
+
+
+def _text(value: object) -> str:
+    if not isinstance(value, str):
+        raise TypeError("A stored field is not text.")
+    return value
+
+
+def _recorded(revision: IncidentRevision) -> dict[str, Any]:
+    if not isinstance(revision.snapshot, dict):
+        raise TypeError("A stored incident revision is not an object.")
+    return revision.snapshot
 
 
 def _evidence(revision: IncidentRevision) -> IncidentEvidence:
-    data = revision.snapshot
-    return IncidentEvidence(
-        incident_id=revision.incident_id,
-        revision_id=revision.pk,
-        revision=revision.revision,
-        recorded_at=revision.created_at,
-        kind=data["kind"],
-        title=data["title"],
-        notes=data["notes"],
-        starts_at=datetime.fromisoformat(data["starts_at"]),
-        ends_at=_moment(data["ends_at"]),
-        available_dc_mw=data["available_dc_mw"],
-        available_inverter_mw=data["available_inverter_mw"],
-        available_export_mw=data["available_export_mw"],
-        declared_configuration_id=data["declared_configuration_id"],
-        cancelled_at=_moment(data["cancelled_at"]),
-    )
+    with decoding("incident_revision", revision.pk):
+        data = _recorded(revision)
+        return IncidentEvidence(
+            incident_id=revision.incident_id,
+            revision_id=revision.pk,
+            revision=revision.revision,
+            recorded_at=revision.created_at,
+            kind=_text(data["kind"]),
+            title=_text(data["title"]),
+            notes=_text(data["notes"]),
+            starts_at=_instant(data["starts_at"]),
+            ends_at=_moment(data["ends_at"]),
+            available_dc_mw=_capacity(data["available_dc_mw"]),
+            available_inverter_mw=_capacity(data["available_inverter_mw"]),
+            available_export_mw=_capacity(data["available_export_mw"]),
+            declared_configuration_id=_identifier(data["declared_configuration_id"]),
+            cancelled_at=_moment(data["cancelled_at"]),
+        )
+
+
+def _active_within(revision: IncidentRevision, start: datetime, end: datetime) -> bool:
+    """Decodes only what decides whether the revision is a live outage overlapping the range."""
+    with decoding("incident_revision", revision.pk):
+        data = _recorded(revision)
+        if _moment(data["cancelled_at"]) is not None:
+            return False
+        ends_at = _moment(data["ends_at"])
+        if ends_at is not None and ends_at <= start:
+            return False
+        return _instant(data["starts_at"]) < end
 
 
 def pinned_incidents(plant_id: int, revision_ids: list[int]) -> tuple[IncidentEvidence, ...]:
@@ -76,11 +129,6 @@ def select_incidents(
     revisions = IncidentRevision.objects.filter(
         incident__plant_id=plant_id, created_at__lte=known_at, pk=Subquery(latest)
     ).order_by("incident_id")
-    evidence = (_evidence(revision) for revision in revisions)
     return tuple(
-        row
-        for row in evidence
-        if not row.cancelled_at
-        and row.starts_at < end
-        and (row.ends_at is None or row.ends_at > start)
+        _evidence(revision) for revision in revisions if _active_within(revision, start, end)
     )

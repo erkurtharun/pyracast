@@ -2,8 +2,10 @@ from datetime import date, datetime, timedelta
 from typing import Any, TypedDict, cast
 from zoneinfo import ZoneInfo
 
+from pyracast.forecasts.faults import CalculationOutOfRangeError, DamagedStoredDataError
 from pyracast.forecasts.intraday import PreparedIntradaySource, apply_intraday_source
 from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.forecasts.sources import snapshot_rows
 from pyracast.incidents.evidence import pinned_incidents
 from pyracast.irradiance import local_day_bounds
 from pyracast.notifications.models import NotificationDelivery
@@ -55,7 +57,7 @@ def _report_intervals(
     daylight, windows = forecast_daylight(
         configuration,
         day,
-        snapshot.normalized_intervals if source_intervals is None else source_intervals,
+        snapshot_rows(snapshot) if source_intervals is None else source_intervals,
     )
     start, end = local_day_bounds(day, configuration.binding.timezone)
     incidents = pinned_incidents(configuration.plant_id, revision_ids)
@@ -214,7 +216,7 @@ def saved_report_context(
                     context["days"].append(row)
                     continue
                 row = _electrical_day(configuration, day_snapshot, calibration, day, cutoff, source)
-            except ValueError, ArithmeticError, KeyError, TypeError:
+            except DamagedStoredDataError, CalculationOutOfRangeError:
                 # A damaged acquisition cannot become a plausible electrical estimate.
                 pass
         context["days"].append(row)

@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -11,13 +12,15 @@ from pyracast.forecasts.timing import approval_job
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
 from pyracast.plants.forecast_archive import forecast_cutoff
-from pyracast.plants.models import Plant, ProductionObservation
+from pyracast.plants.models import ForecastIssuance, Plant, ProductionObservation
 from pyracast.plants.performance import forecast_performance
 from tests.support.domain import System
 from tests.support.forecast_history import DAY, TODAY
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, publish_snapshot, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
+FAULTS = "pyracast.forecasts.faults"
 
 ZONE = ZoneInfo("Europe/Istanbul")
 PREVIOUS = DAY - timedelta(days=1)
@@ -259,6 +262,32 @@ def test_a_chosen_forecast_is_answered_from_its_saved_record_and_marked_manual(
     assert chosen["snapshot_id"] == fetches["previous 04:00"].pk
     assert chosen["issuance_id"] is not None
     assert chosen["freshness"] == "archived"
+
+
+def test_a_damaged_saved_forecast_is_neither_ranked_nor_offered_and_refused_when_chosen(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    damaged = _fetch(system, _at(PREVIOUS, 10), 0.30)
+    healthy = _fetch(system, _at(PREVIOUS, 17), 0.44)
+    issuance = ForecastIssuance.objects.get(snapshot=damaged)
+    stored_again(issuance, payloads=list(issuance.payloads.values()))
+    client, path = _client(system), _plant_path(system, plant)
+    _manual_production(system, plant, 0)
+
+    with caplog.at_level(logging.WARNING, logger=FAULTS):
+        automatic = _read(client, path)
+        chosen = _read(client, path, forecast_id=healthy.pk)
+        refused = client.get(path, {"date": DAY.isoformat(), "forecast_id": str(damaged.pk)})
+
+    assert _ids(automatic) == _ids(chosen) == [healthy.pk]
+    assert _shown(automatic) == ("auto", "closest_to_production", healthy.pk)
+    assert automatic["snapshot_id"] == chosen["snapshot_id"] == healthy.pk
+    assert (refused.status_code, refused.json()["code"]) == (400, "calculation_out_of_range")
+    warnings = [record.getMessage() for record in caplog.records if record.name == FAULTS]
+    assert [warning.split(" step=")[1].split()[0] for warning in warnings] == ["candidates"] * 3
+    damage = f"record=forecast_issuance:{issuance.pk} error=TypeError"
+    assert all(damage in warning for warning in warnings)
 
 
 def test_a_forecast_that_is_not_an_option_of_the_day_or_comes_with_satellite_is_refused(

@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 from django.db.models import Q, QuerySet
 
 from pyracast.calculation import calculate
+from pyracast.forecasts.faults import CalculationOutOfRangeError, DamagedStoredDataError
 from pyracast.forecasts.intraday import (
     VINTAGE_SCOPE,
     PreparedIntradaySource,
@@ -93,6 +94,6 @@ def saved_report_results(
             cast(dict[str, object], result["vintage"])["scope"] = VINTAGE_SCOPE
             apply_intraday_source(result, source)
             results[0] = result
-    except ValueError, ArithmeticError, KeyError, TypeError:
+    except DamagedStoredDataError, CalculationOutOfRangeError:
         results[0] = None
     return results

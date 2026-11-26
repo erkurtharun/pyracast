@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -5,11 +6,11 @@ import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.test import Client
-from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.connections.models import SiteBinding
-from pyracast.forecasts.actuals import replay_archived_actual_source, select_archived_actual_source
+from pyracast.forecasts.actuals import select_archived_actual_source
+from pyracast.forecasts.faults import DamagedStoredDataError
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.availability import (
     actual_power_intervals,
@@ -97,7 +98,7 @@ def test_history_saves_where_astral_misses_an_event(monkeypatch: pytest.MonkeyPa
     }
 
 
-@pytest.mark.parametrize("power", [None, -1, True, "bad"])
+@pytest.mark.parametrize("power", [None, -1])
 def test_reference_holes_disable_only_affected_slots(
     monkeypatch: pytest.MonkeyPatch, power: Any
 ) -> None:
@@ -112,6 +113,18 @@ def test_reference_holes_disable_only_affected_slots(
     start, _ = local_day_bounds(DAY, system.binding.timezone)
     with raises_code("estimated_actuals_unavailable"):
         upload(system, plant, [ObservationInput(start, start + timedelta(hours=1), 0)])
+
+
+@pytest.mark.parametrize("power", [True, "bad", 10**400], ids=["boolean", "text", "beyond-a-float"])
+def test_a_reference_power_that_is_not_a_number_refuses_the_production_read(
+    monkeypatch: pytest.MonkeyPatch, power: Any
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    source = saved_actuals(system, DAY)
+    source.normalized_intervals[1]["power_kw"] = power
+    stored_again(source)
+    with raises_code("calculation_out_of_range"):
+        production_history(plant, start_date=DAY, end_date=DAY)
 
 
 def test_partial_oldest_day_and_missing_interval_are_unavailable(
@@ -244,6 +257,31 @@ def test_history_api_validates_bounds_and_tenant_scope(monkeypatch: pytest.Monke
     )
 
 
+def test_a_damaged_saved_day_refuses_the_production_read_with_one_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    source = saved_actuals(system, DAY)
+    rows = [dict(row) for row in source.normalized_intervals]
+    rows[3]["start"] = "08.11.2026 03:00"
+    stored_again(source, normalized_intervals=rows)
+    client = Client()
+    client.force_login(system.member)
+    url = (
+        f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/production/"
+    )
+    with caplog.at_level(logging.WARNING, logger="pyracast.forecasts.faults"):
+        response = client.get(url, {"start_date": DAY.isoformat(), "end_date": DAY.isoformat()})
+    assert response.status_code == 400, response.content
+    assert response.json()["code"] == "calculation_out_of_range"
+    [warning] = [r.getMessage() for r in caplog.records if r.name == "pyracast.forecasts.faults"]
+    assert (
+        f"plant {plant.pk} day={DAY.isoformat()} step=production "
+        f"record=forecast_snapshot:{source.pk} error=ValueError"
+    ) in warning
+    assert "08.11.2026" not in warning
+
+
 def test_configless_history_and_source_interval_validation(monkeypatch: pytest.MonkeyPatch) -> None:
     system, plant = make_plant(monkeypatch)
     plant.current_configuration = None
@@ -262,16 +300,17 @@ def test_configless_history_and_source_interval_validation(monkeypatch: pytest.M
     source = saved_actuals(system, DAY)
     source.normalized_intervals[0]["start"] = "2026-11-07T21:00:00"
     stored_again(source)
-    assert len(reference_intervals(configuration, DAY, NOW)) == 47
-    monkeypatch.setattr(timezone, "now", lambda: NOW)
+    with pytest.raises(DamagedStoredDataError) as damage:
+        reference_intervals(configuration, DAY, NOW)
+    assert damage.value.identity == source.pk
 
 
 @pytest.mark.parametrize("invalid_bounds", ["naive_start", "naive_end", "zero", "reversed"])
-def test_invalid_actual_bounds_keep_missingness_and_replay_provenance(
+def test_invalid_actual_bounds_refuse_the_snapshot_instead_of_an_older_one(
     monkeypatch: pytest.MonkeyPatch, invalid_bounds: str
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    older = saved_actuals(system, DAY)
+    saved_actuals(system, DAY)
     latest = saved_actuals(system, DAY)
     first = latest.normalized_intervals[0]
     original_start = first["start"]
@@ -285,33 +324,15 @@ def test_invalid_actual_bounds_keep_missingness_and_replay_provenance(
     else:
         first["end"] = (datetime.fromisoformat(original_start) - timedelta(minutes=30)).isoformat()
     stored_again(latest)
-
-    source = select_archived_actual_source(system.binding, DAY, NOW)
-    assert source is not None
-    assert source.composition is not None
-    assert len(source.intervals) == 47
-    assert all(row["source_snapshot_id"] == latest.pk for row in source.intervals)
-    assert all(row["start"] != original_start for row in source.intervals)
-    assert source.composition.snapshot_ids == (latest.pk,)
-    assert latest.coverage_start is not None
-    assert latest.coverage_end is not None
-    assert source.composition.segments == [
-        {
-            "start": latest.coverage_start.isoformat(),
-            "end": latest.coverage_end.isoformat(),
-            "snapshot_id": latest.pk,
-        }
-    ]
-    assert older.pk not in source.composition.snapshot_ids
-    replay = replay_archived_actual_source(system.binding, DAY, NOW, source.pin)
-    assert replay is not None
-    assert replay.pin == source.pin
-    assert replay.intervals == source.intervals
-    intervals = reference_intervals(plant.configurations.get(), DAY, NOW)
-    assert len(intervals) == 47
-    assert not interval_is_covered(
-        intervals, datetime.fromisoformat(original_start), datetime.fromisoformat(original_end)
-    )
+    for read in (
+        lambda: select_archived_actual_source(system.binding, DAY, NOW),
+        lambda: reference_intervals(plant.configurations.get(), DAY, NOW),
+    ):
+        with pytest.raises(DamagedStoredDataError) as damage:
+            read()
+        assert (damage.value.kind, damage.value.identity) == ("forecast_snapshot", latest.pk)
+    with raises_code("calculation_out_of_range"):
+        production_history(plant, start_date=DAY, end_date=DAY)
     latest.refresh_from_db()
     assert latest.normalized_intervals[0] == first
 
@@ -323,9 +344,12 @@ def test_incomplete_or_invalid_power_never_covers_interval(power: float | None) 
     assert not interval_is_covered((PowerInterval(start, end, power),), start, end)
 
 
-@pytest.mark.parametrize("case", ["nonfinite", "naive_end", "reversed"])
-def test_invalid_source_intervals_remain_missing(
-    monkeypatch: pytest.MonkeyPatch, case: str
+@pytest.mark.parametrize(
+    ("case", "fault"),
+    [("nonfinite", "ValueError"), ("naive_end", "ValueError"), ("reversed", "ValueError")],
+)
+def test_invalid_source_intervals_are_damage_of_their_snapshot(
+    monkeypatch: pytest.MonkeyPatch, case: str, fault: str
 ) -> None:
     system, plant = make_plant(monkeypatch)
     configuration = plant.configurations.get()
@@ -336,12 +360,9 @@ def test_invalid_source_intervals_remain_missing(
         source.normalized_intervals[0]["end"] = "2026-11-07T21:30:00"
     else:
         source.normalized_intervals[0]["end"] = source.normalized_intervals[0]["start"]
-    intervals = actual_power_intervals(source, configuration, model_version=MODEL_VERSION)
-    assert len(intervals) == 47
-    assert all(
-        row.start != datetime.fromisoformat(source.normalized_intervals[0]["start"])
-        for row in intervals
-    )
+    with pytest.raises(DamagedStoredDataError) as damage:
+        actual_power_intervals(source, configuration, model_version=MODEL_VERSION)
+    assert (damage.value.identity, damage.value.fault) == (source.pk, fault)
 
 
 def test_current_incomplete_day_does_not_become_available(monkeypatch: pytest.MonkeyPatch) -> None:

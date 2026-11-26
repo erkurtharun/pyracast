@@ -1,3 +1,5 @@
+import logging
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any, cast
 
@@ -95,7 +97,6 @@ def test_actual_zero_wins_but_missing_negative_and_unfinished_actuals_keep_forec
     actual.normalized_intervals[20]["power_kw"] = 0
     actual.normalized_intervals[21]["power_kw"] = None
     actual.normalized_intervals[22]["power_kw"] = -1
-    actual.normalized_intervals[19]["power_kw"] = True
     del actual.normalized_intervals[23]
     stored_again(actual)
     monkeypatch.setattr(timezone, "now", lambda: now)
@@ -113,9 +114,59 @@ def test_actual_zero_wins_but_missing_negative_and_unfinished_actuals_keep_forec
     )
     assert result["intervals"][20]["mean_power_mw"] == 0
     assert result["intervals"][20]["source_kinds"] == ["estimated_actuals"]
-    for index in (19, 21, 22, 23, 24):
+    for index in (21, 22, 23, 24):
         assert result["intervals"][index]["mean_power_mw"] == pytest.approx(26)
         assert result["intervals"][index]["source_kinds"] == ["forecast"]
+
+
+def damaged_power(rows: list[dict[str, Any]], power: object) -> object:
+    rows[19]["power_kw"] = power
+    return rows
+
+
+def naive_start(rows: list[dict[str, Any]]) -> object:
+    rows[19]["start"] = datetime.fromisoformat(rows[19]["start"]).replace(tzinfo=None).isoformat()
+    return rows
+
+
+@pytest.mark.parametrize(
+    ("damage", "fault"),
+    [
+        (lambda rows: damaged_power(rows, True), "ValueError"),
+        (lambda rows: damaged_power(rows, "0.4"), "ValueError"),
+        (lambda rows: damaged_power(rows, 10**400), "OverflowError"),
+        (naive_start, "ValueError"),
+        (lambda rows: 5, "TypeError"),
+    ],
+    ids=["boolean-power", "text-power", "power-beyond-a-float", "naive-start", "not-an-array"],
+)
+def test_damaged_actuals_refuse_today_instead_of_leaving_the_forecast_to_answer(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    damage: Callable[[list[dict[str, Any]]], object],
+    fault: str,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    start, _ = local_day_bounds(DAY, system.binding.timezone)
+    now = start + timedelta(hours=12, minutes=15)
+    publish_snapshot(snapshot_for(system, DAY, power_kw=0.2))
+    actual = intraday_actuals(system, now - timedelta(minutes=1))
+    stored_again(
+        actual,
+        normalized_intervals=damage([dict(row) for row in actual.normalized_intervals]),
+    )
+    monkeypatch.setattr(timezone, "now", lambda: now)
+    client = Client()
+    client.force_login(system.member)
+    with caplog.at_level(logging.WARNING, logger="pyracast.forecasts.faults"):
+        response = client.get(
+            f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/",
+            {"date": DAY.isoformat(), "data_source": "forecast", "resolution_minutes": "60"},
+        )
+    assert response.status_code == 400, response.content
+    assert response.json()["code"] == "calculation_out_of_range"
+    [warning] = [r.getMessage() for r in caplog.records if r.name == "pyracast.forecasts.faults"]
+    assert f"record=forecast_snapshot:{actual.pk} error={fault}" in warning
 
 
 @pytest.mark.parametrize("ineligible", ["collected", "available", "issued", "failed", "endpoint"])

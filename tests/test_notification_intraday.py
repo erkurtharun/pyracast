@@ -279,6 +279,19 @@ def test_region_results_leave_unavailable_inputs_missing(
         assert results[1] is not None
 
 
+def test_a_calculation_defect_is_not_left_out_as_a_missing_region_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, delivery, _ = intraday_delivery(monkeypatch)
+
+    def defect(*args: object, **kwargs: object) -> dict[str, object]:
+        raise KeyError("energy_kwh_m2")
+
+    monkeypatch.setattr("pyracast.notifications.sources.calculate", defect)
+    with pytest.raises(KeyError, match="energy_kwh_m2"):
+        saved_report_results(delivery, SLOT)
+
+
 def saved_intraday_actuals(
     system: System, cutoff: datetime, *, power_kw: float = 0.3
 ) -> ForecastSnapshot:

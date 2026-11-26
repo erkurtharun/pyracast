@@ -1,19 +1,28 @@
+import logging
 from datetime import date, timedelta
 from typing import Any, cast
 
 import pytest
+from django.test import Client
 
+from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.plants.activation import activate_calibration, reset_calibration
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import CalibrationRun, Plant
 from pyracast.plants.operations import revise_plant
 from pyracast.plants.parameters import PlantParameters
 from tests.support.domain import NOW, System
-from tests.support.plant_operations import make_plant, ready_run, saved_actuals
+from tests.support.invariants import stored_again
+from tests.support.plant_operations import (
+    make_plant,
+    ready_run,
+    saved_actuals,
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
 DAY = NOW.date() - timedelta(days=2)
+FAULTS = "pyracast.forecasts.faults"
 
 
 def _past(system: System, plant: Plant, day: date = DAY) -> dict[str, Any]:
@@ -139,3 +148,50 @@ def test_plant_without_a_current_declaration_keeps_the_dated_selection(
     assert result["configuration_id"] == original
     assert result["calibration_id"] is None
     assert cast(dict[str, Any], result["result"])["factor"] == 1
+
+
+def _satellite_read(system: System, plant: Plant) -> tuple[int, dict[str, Any]]:
+    client = Client()
+    client.force_login(system.member)
+    response = client.get(
+        f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/",
+        {"date": DAY.isoformat(), "data_source": "satellite", "resolution_minutes": "60"},
+    )
+    return response.status_code, cast(dict[str, Any], response.json())
+
+
+def _actuals_with_power(system: System, power: object) -> ForecastSnapshot:
+    source = saved_actuals(system, DAY)
+    rows = [dict(row) for row in source.normalized_intervals]
+    rows[20]["power_kw"] = power
+    return stored_again(source, normalized_intervals=rows)
+
+
+@pytest.mark.parametrize(
+    ("power", "fault"),
+    [(True, "ValueError"), ("0.4", "ValueError"), (10**400, "OverflowError")],
+    ids=["boolean", "text", "beyond-a-float"],
+)
+def test_a_damaged_estimated_actual_refuses_the_satellite_read_of_its_day(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, power: object, fault: str
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    source = _actuals_with_power(system, power)
+    with caplog.at_level(logging.WARNING, logger=FAULTS):
+        status, answer = _satellite_read(system, plant)
+    assert (status, answer["code"]) == (400, "calculation_out_of_range")
+    [warning] = [record.getMessage() for record in caplog.records if record.name == FAULTS]
+    assert f"record=forecast_snapshot:{source.pk} error={fault}" in warning
+
+
+def test_an_explicitly_missing_estimated_actual_leaves_its_hour_without_a_value(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    _actuals_with_power(system, None)
+    with caplog.at_level(logging.WARNING, logger=FAULTS):
+        status, answer = _satellite_read(system, plant)
+    assert status == 200, answer
+    assert answer["source_kind"] == "estimated_actuals"
+    assert answer["result"]["complete"] is False
+    assert not [record for record in caplog.records if record.name == FAULTS]

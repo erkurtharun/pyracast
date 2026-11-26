@@ -8,25 +8,26 @@ from django.utils import timezone
 from pyracast.forecasts.models import ForecastResult, ForecastSnapshot, RequestAttempt
 from pyracast.irradiance import local_day_bounds
 from tests.support.automatic_forecast_selection import reference_transition
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, publish_snapshot, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 14)
 
 
-@pytest.mark.parametrize("error_type", [ValueError, ArithmeticError])
-def test_a_satellite_calculation_failure_is_refused_without_a_provider_request(
-    monkeypatch: pytest.MonkeyPatch, error_type: type[Exception]
+@pytest.mark.parametrize("damage", ["14.11.2026 03:00", None], ids=["start-text", "null-row"])
+def test_damaged_saved_satellite_data_is_refused_without_a_provider_request(
+    monkeypatch: pytest.MonkeyPatch, damage: str | None
 ) -> None:
     system, plant = make_plant(monkeypatch)
     _, end = local_day_bounds(DAY, system.binding.timezone)
-    publish_snapshot(snapshot_for(system, DAY, source_kind="estimated_actuals", collected_at=end))
+    saved = publish_snapshot(
+        snapshot_for(system, DAY, source_kind="estimated_actuals", collected_at=end)
+    )
+    rows: list[Any] = [dict(row) for row in saved.normalized_intervals]
+    rows[3] = None if damage is None else {**rows[3], "start": damage}
+    stored_again(saved, normalized_intervals=rows)
     monkeypatch.setattr(timezone, "now", lambda: end + timedelta(hours=1))
-
-    def fail_calculation(_snapshot: ForecastSnapshot, _date: date) -> dict[str, object]:
-        raise error_type("Saved input cannot be calculated.")
-
-    monkeypatch.setattr("pyracast.plants.history.historical_irradiance", fail_calculation)
     client = Client()
     client.force_login(system.member)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/"

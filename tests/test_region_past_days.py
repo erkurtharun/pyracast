@@ -3,6 +3,7 @@ from typing import Any
 
 import pytest
 from django.test import Client
+from django.utils import timezone
 
 from pyracast.forecasts.models import ForecastResult
 from pyracast.irradiance import local_day_bounds
@@ -154,8 +155,16 @@ def test_forecast_reads_default_to_the_forecast(
     assert response.json()["selection"]["mode"] == "auto"
 
 
-def test_a_region_fetch_without_a_saved_result_for_the_day_is_neither_offered_nor_chosen(
-    monkeypatch: pytest.MonkeyPatch,
+def _another_days_payload(system: System) -> dict[str, Any]:
+    later = publish_snapshot(snapshot_for(system, TODAY, collected_at=timezone.now()))
+    payload: dict[str, Any] = ForecastResult.objects.get(snapshot=later).payload
+    assert payload["local_date"] == TODAY.isoformat()
+    return payload
+
+
+@pytest.mark.parametrize("value", ["none", "null", "another day"])
+def test_a_region_fetch_without_a_usable_result_for_the_day_is_neither_offered_nor_chosen(
+    monkeypatch: pytest.MonkeyPatch, value: str
 ) -> None:
     system, _ = make_plant(monkeypatch)
     start, _ = local_day_bounds(DAY, system.binding.timezone)
@@ -167,8 +176,16 @@ def test_a_region_fetch_without_a_saved_result_for_the_day_is_neither_offered_no
     stored_again(snapshot)
     snapshot.job.status = "succeeded"
     snapshot.job.save(update_fields=["status"])
+    day_values = {
+        "none": {},
+        "null": {DAY.isoformat(): None},
+        "another day": {DAY.isoformat(): _another_days_payload(system)},
+    }
     ForecastResult.objects.create(
-        snapshot=snapshot, payload={"marker": "unvalidated"}, published_at=snapshot.collected_at
+        snapshot=snapshot,
+        payload={"marker": "unvalidated"},
+        daily_payloads=day_values[value],
+        published_at=snapshot.collected_at,
     )
     body = _read(client, system, "forecast").json()
     assert body["freshness"] == "archived"

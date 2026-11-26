@@ -29,7 +29,9 @@ class NormalizedInterval:
     original_end: datetime | None = None
 
     @classmethod
-    def from_row(cls, row: Mapping[str, object]) -> NormalizedInterval:
+    def from_row(cls, row: object) -> NormalizedInterval:
+        if not isinstance(row, Mapping):
+            raise TypeError("A normalized interval is not an object")
         start, end = _timestamp(row.get("start")), _timestamp(row.get("end"))
         power, sunlight = row.get("power_kw"), row.get("sunlight", "unknown")
         if power is not None and (isinstance(power, bool) or not isinstance(power, int | float)):

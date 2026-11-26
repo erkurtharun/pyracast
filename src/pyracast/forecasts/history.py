@@ -1,10 +1,12 @@
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
+from contextlib import closing
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Literal, cast
 
 from django.db.models import F, OuterRef, Q
+from django.db.models.fields.json import KeyTransform
 
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
@@ -18,7 +20,7 @@ from pyracast.forecasts.actuals import (
 )
 from pyracast.forecasts.capacity_normalization import normalization_provenance
 from pyracast.forecasts.composition import ForecastComposition
-from pyracast.forecasts.faults import FROZEN_PAYLOAD_FAULTS, stored_data
+from pyracast.forecasts.faults import stored_data
 from pyracast.forecasts.intraday import (
     VINTAGE_SCOPE,
     ActualsMode,
@@ -32,7 +34,7 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
     SnapshotSourceKind,
 )
-from pyracast.forecasts.projections import saved_day_payload
+from pyracast.forecasts.projections import saved_day_payload, usable_day_payload
 from pyracast.forecasts.selection import ForecastOption, is_day_ahead
 from pyracast.forecasts.sources import (
     LaterFetch,
@@ -40,9 +42,9 @@ from pyracast.forecasts.sources import (
     current_forecast_snapshots,
     later_fetches,
     snapshot_data,
+    stored_intervals,
 )
 from pyracast.forecasts.timing import approval_job_id
-from pyracast.intervals import NormalizedInterval
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_sources import apply_composition, compose_snapshots
 from pyracast.regions.models import Region
@@ -98,13 +100,15 @@ def select_actual_snapshot(
     binding: SiteBinding, target_date: date, as_of: datetime
 ) -> ForecastSnapshot | None:
     start, end = local_day_bounds(target_date, binding.timezone)
-    return first_complete_actuals(
+    candidates = cast(
+        Generator[ForecastSnapshot],
         single_snapshot_actual_queryset(
             binding, start, end, collected_from=end, as_of=as_of
         ).iterator(),
-        target_date,
-        binding.timezone,
     )
+    # A cursor the garbage collector closes during another query of the connection deadlocks.
+    with closing(candidates):
+        return first_complete_actuals(candidates, target_date, binding.timezone)
 
 
 def historical_irradiance(snapshot: ForecastSnapshot, target_date: date) -> dict[str, object]:
@@ -113,7 +117,7 @@ def historical_irradiance(snapshot: ForecastSnapshot, target_date: date) -> dict
         target_date,
         ProviderData(
             raw_payload=snapshot.raw_payload,
-            intervals=NormalizedInterval.from_rows(snapshot.normalized_intervals),
+            intervals=stored_intervals(snapshot),
             issued_at=snapshot.issued_at,
             collected_at=snapshot.collected_at,
             source_kind="estimated_actuals",
@@ -161,11 +165,11 @@ def _region_zone(region: Region) -> str:
 def saved_region_results(region: Region, target_date: date, now: datetime) -> SavedResults:
     from pyracast.plants.forecast_archive import forecast_cutoff
 
-    bindings = list(SiteBinding.objects.filter(region=region))
-    cutoffs = {binding.pk: forecast_cutoff(target_date, binding) for binding in bindings}
+    bindings = {binding.pk: binding for binding in SiteBinding.objects.filter(region=region)}
+    cutoffs = {pk: forecast_cutoff(target_date, binding) for pk, binding in bindings.items()}
     previous = {
-        binding.pk: forecast_cutoff(target_date - timedelta(days=1), binding)
-        for binding in bindings
+        pk: forecast_cutoff(target_date - timedelta(days=1), binding)
+        for pk, binding in bindings.items()
     }
     start, end = local_day_bounds(target_date, _region_zone(region))
     eligible = Q(pk__in=[])
@@ -194,7 +198,10 @@ def saved_region_results(region: Region, target_date: date, now: datetime) -> Sa
             snapshot__coverage_end__gt=start,
             published_at__lte=now,
         )
-        .annotate(approval_job=approval_job_id(OuterRef("snapshot__binding_id")))
+        .annotate(
+            approval_job=approval_job_id(OuterRef("snapshot__binding_id")),
+            day_value=KeyTransform(target_date.isoformat(), "daily_payloads"),
+        )
         .values_list(
             "pk",
             "snapshot_id",
@@ -202,8 +209,15 @@ def saved_region_results(region: Region, target_date: date, now: datetime) -> Sa
             "snapshot__binding_id",
             "snapshot__job_id",
             "approval_job",
+            "day_value",
+            "payload",
         )
     )
+    usable = [
+        (pk, snapshot_id, collected_at, binding_id, job_id, approval)
+        for pk, snapshot_id, collected_at, binding_id, job_id, approval, day_value, payload in rows
+        if usable_day_payload(day_value, payload, bindings[binding_id], target_date) is not None
+    ]
     return SavedResults(
         tuple(
             ForecastOption(
@@ -211,9 +225,9 @@ def saved_region_results(region: Region, target_date: date, now: datetime) -> Sa
                 collected_at,
                 is_day_ahead(collected_at, previous[binding_id], by_approval=job_id == approval),
             )
-            for _, snapshot_id, collected_at, binding_id, job_id, approval in rows
+            for _, snapshot_id, collected_at, binding_id, job_id, approval in usable
         ),
-        {snapshot_id: pk for pk, snapshot_id, *_ in rows},
+        {snapshot_id: pk for pk, snapshot_id, *_ in usable},
     )
 
 
@@ -313,7 +327,7 @@ def regional_composed_forecast(
         snapshots = current_forecast_snapshots(
             binding_id=binding.pk, start=start, end=end, as_of=cutoff, pinned=pinned
         )
-    with stored_data("region", region.pk, target_date, "actuals", FROZEN_PAYLOAD_FAULTS):
+    with stored_data("region", region.pk, target_date, "actuals"):
         source = (
             prepare_intraday_source(
                 binding,

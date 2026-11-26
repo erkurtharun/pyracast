@@ -140,7 +140,7 @@ def test_reference_transition_before_first_new_acquisition_keeps_published_forec
         "no_prior_configuration",
         "not_intraday",
         "unpublished",
-        "invalid_archive",
+        "source_with_a_gap",
     ],
 )
 def test_automatic_does_not_replace_latest_when_reference_transition_is_not_safe(
@@ -171,12 +171,12 @@ def test_automatic_does_not_replace_latest_when_reference_transition_is_not_safe
         PlantConfiguration.objects.filter(pk=plant.current_configuration_id).update(
             created_at=old.collected_at
         )
-    elif change == "unpublished":
+    elif change == "source_with_a_gap":
+        del old.normalized_intervals[len(old.normalized_intervals) // 2]
+        stored_again(old)
+    else:
         ForecastIssuance.objects.filter(snapshot=old).delete()
         ForecastResult.objects.filter(snapshot=old).delete()
-    else:
-        old.normalized_intervals[0]["power_kw"] = "invalid"
-        stored_again(old)
     outlook = plant_outlook(
         system.member,
         system.tenant.pk,
@@ -190,6 +190,23 @@ def test_automatic_does_not_replace_latest_when_reference_transition_is_not_safe
     assert payload["complete"] is False
     assert payload["coverage_fraction"] == pytest.approx(1 / 6)
     assert "reference_transition_fallback" not in payload["quality_flags"]
+
+
+def test_a_damaged_archive_refuses_the_day_instead_of_leaving_the_latest_forecast_to_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant, old_id = reference_transition(monkeypatch)
+    old = ForecastSnapshot.objects.get(pk=old_id)
+    old.normalized_intervals[0]["power_kw"] = "invalid"
+    stored_again(old)
+    client = Client()
+    client.force_login(system.member)
+    response = client.get(
+        f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/",
+        {"date": DAY.isoformat(), "data_source": "forecast", "resolution_minutes": "60"},
+    )
+    assert response.status_code == 400, response.content
+    assert response.json()["code"] == "calculation_out_of_range"
 
 
 def test_partial_archive_cannot_supply_a_complete_automatic_forecast(

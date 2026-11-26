@@ -49,18 +49,19 @@ def plant_outlook(
         plant = Plant.objects.get(pk=plant_id, region=region)
         plant.region = region
         now = timezone.now()
-        result = _plant_outlook(
-            plant,
-            target_date=target_date,
-            resolution_minutes=resolution_minutes,
-            source=source,
-            forecast_id=forecast_id,
-            now=now,
-        )
-        frozen = "outage_scenario" in result
-        if not frozen:
-            _evaluate_outage_scenario(result, target_date, resolution_minutes, now)
-        result["production_diagnostic"] = None if frozen else production_diagnostic(result, now)
+        with stored_data("plant", plant.pk, target_date, "outlook"):
+            result = _plant_outlook(
+                plant,
+                target_date=target_date,
+                resolution_minutes=resolution_minutes,
+                source=source,
+                forecast_id=forecast_id,
+                now=now,
+            )
+            frozen = "outage_scenario" in result
+            if not frozen:
+                _evaluate_outage_scenario(result, target_date, resolution_minutes, now)
+            result["production_diagnostic"] = None if frozen else production_diagnostic(result, now)
         return result
 
 
