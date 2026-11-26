@@ -530,9 +530,10 @@ jobs:
           retention-days: 7
 
   # Outside CI result: a failed start leaves the release to the end of this run.
+  # It waits for web_production: the pull request run does not test the shipped web build.
   release_start:
     name: Start the release of a proven merge
-    needs: deployment
+    needs: [deployment, web_production]
     if: vars.GCP_DEPLOY_ENABLED == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5

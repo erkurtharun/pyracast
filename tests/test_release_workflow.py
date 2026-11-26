@@ -657,6 +657,8 @@ def shipped_build_suite_problems(document: dict[str, Any]) -> list[str]:
         problems.append("suite before the ordinary build")
     if "web_production" not in needed_jobs(jobs["ci_result"]):
         problems.append("result job without the production build")
+    if "web_production" not in needed_jobs(jobs["release_start"]):
+        problems.append("early release without the production build")
     return problems
 
 
@@ -739,6 +741,11 @@ BROKEN_SHAPES: list[tuple[str, Callable[[dict[str, Any]], object], str]] = [
         lambda d: d["jobs"]["ci_result"]["needs"].remove("web_production"),
         "result job without the production build",
     ),
+    (
+        "early release before it",
+        lambda d: d["jobs"]["release_start"].update(needs="deployment"),
+        "early release without the production build",
+    ),
 ]
 
 
@@ -769,13 +776,13 @@ PARENT = "c" * 40
 TREE = "d" * 40
 
 
-def test_ci_asks_release_to_judge_a_push_to_main_once_its_images_are_ready() -> None:
+def test_ci_asks_release_to_judge_a_push_to_main_once_its_images_and_shipped_build_passed() -> None:
     start = ci_jobs()["release_start"]
     (ask,) = start["steps"]
     script = " ".join(ask["with"]["script"].split())
 
     assert start["name"] == release_authorization.RELEASE_START_JOB
-    assert start["needs"] == "deployment"
+    assert start["needs"] == ["deployment", "web_production"]
     assert start["if"] == (
         "vars.GCP_DEPLOY_ENABLED == 'true' && github.event_name == 'push' && "
         "github.ref == 'refs/heads/main'"
