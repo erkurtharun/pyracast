@@ -1,10 +1,18 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { isLanguage } from "@/i18n/language";
+import {
+    defaultLanguage,
+    languageCookie,
+    languageCookieOptions,
+    languageHeader,
+    negotiatedLanguage,
+} from "@/i18n/request-language";
 import { publicPath, publicRoute } from "@/lib/public-metadata";
 
-export function proxy(request: NextRequest) {
-    const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
-    const development = process.env.NODE_ENV === "development";
-    const policy = [
+const languageInputs = "Accept-Language, Cookie, CF-IPCountry";
+
+function contentSecurityPolicy(nonce: string, development: boolean) {
+    return [
         "default-src 'self'",
         `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${development ? " 'unsafe-eval'" : ""}`,
         "style-src 'self'",
@@ -20,6 +28,28 @@ export function proxy(request: NextRequest) {
         "frame-ancestors 'none'",
         "report-uri /api/csp-reports/",
     ].join("; ");
+}
+
+function languageRedirect(request: NextRequest, path: string, search: string) {
+    const response = NextResponse.redirect(
+        new URL(`${path}${search}`, request.url),
+        307,
+    );
+    response.headers.set("Cache-Control", "private, no-store");
+    response.headers.set("Vary", languageInputs);
+    return response;
+}
+
+function withoutChoice(search: string) {
+    const query = new URLSearchParams(search);
+    query.delete("language");
+    return query.size ? `?${query}` : "";
+}
+
+export function proxy(request: NextRequest) {
+    const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
+    const development = process.env.NODE_ENV === "development";
+    const policy = contentSecurityPolicy(nonce, development);
     const route = publicRoute(request.nextUrl.pathname);
     // Read the slash from the raw URL: nextUrl may normalize it under trailingSlash.
     const requested = new URL(request.url);
@@ -31,9 +61,33 @@ export function proxy(request: NextRequest) {
             ),
             308,
         );
+    const choice = requested.searchParams.get("language");
+    if (route && isLanguage(choice)) {
+        const response = languageRedirect(
+            request,
+            publicPath(choice, route.page),
+            withoutChoice(requested.search),
+        );
+        response.cookies.set(
+            languageCookie,
+            choice,
+            languageCookieOptions(!development),
+        );
+        return response;
+    }
+    const language = negotiatedLanguage(
+        request.cookies.get(languageCookie)?.value,
+        request.headers.get("accept-language") ?? "",
+        request.headers.get("cf-ipcountry"),
+    );
+    if (route?.language === defaultLanguage && language !== defaultLanguage)
+        return languageRedirect(
+            request,
+            publicPath(language, route.page),
+            requested.search,
+        );
     const headers = new Headers(request.headers);
-    headers.delete("x-pyracast-public-language");
-    if (route) headers.set("x-pyracast-public-language", route.language);
+    headers.set(languageHeader, route?.language ?? language);
     headers.set("Content-Security-Policy", policy);
     headers.set("x-nonce", nonce);
     const response = NextResponse.next({ request: { headers } });
