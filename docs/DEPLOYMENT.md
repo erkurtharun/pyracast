@@ -245,8 +245,8 @@ HTTPS readiness check. It keeps the serving and the previous release and prunes 
 
 Image artifacts expire after one day. To retry, re-run the failed Release while its artifact
 exists ("Re-run all jobs" for an early start, which refuses a partial re-run), otherwise run
-**Actions → CI → Run workflow → main**. Re-running a failed CI job of a commit that is already
-released starts a Release run that is refused; that refusal needs no action. To redeploy `main`
+**Actions → CI → Run workflow → main**. A Release run refused because its commit has no unexpired
+image artifact needs no action when that commit is already the one serving. To redeploy `main`
 (for example after a key rotation):
 
 1. Run CI on `main`; its automatic Release deploys.
@@ -254,9 +254,9 @@ released starts a Release run that is refused; that refusal needs no action. To 
    commit only in unshipped paths, listed in `deploy/release_scope.py`), run
    **Actions → Release → Run workflow → main** while that CI run's artifact is unexpired.
 
-The checkout action leaves those unshipped paths out of the checkout of every job that builds the
-images or the release bundle and of every Release job (patterns: output of
-`python3 deploy/release_scope.py sparse-patterns`). A pull request's CI builds, scans and
+The checkout action leaves those unshipped paths out of the checkout of every Release job that
+checks out code and of every other workflow job except those that test, analyse or report on the
+whole repository (patterns: output of `python3 deploy/release_scope.py sparse-patterns`). A pull request's CI builds, scans and
 smoke-tests the images from that checkout, so an image build that needs a listed path fails there;
 such a path does not belong on the list. Release's own jobs use the same checkout but first run in
 the release after a merge.
