@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test, expect } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
+import { languageCookieOf } from "./support/language-cookie";
 import { legalCopy } from "../src/features/public-site/legal-copy";
 import { publicMetadata } from "../src/lib/public-metadata";
 import enCore from "../messages/en/core.json";
@@ -54,21 +55,13 @@ for (const entry of pages) {
         const context = await browser.newContext({
             baseURL,
             javaScriptEnabled: false,
-            locale: entry.language === "en" ? "tr-TR" : "en-US",
+            locale: entry.language === "en" ? "en-US" : "tr-TR",
             viewport: { width: 320, height: 800 },
             extraHTTPHeaders: {
-                "x-pyracast-public-language":
-                    entry.language === "en" ? "tr" : "en",
+                "x-pyracast-language": entry.language === "en" ? "tr" : "en",
             },
         });
         try {
-            await context.addCookies([
-                {
-                    name: "pyracast_language",
-                    value: entry.language === "en" ? "tr" : "en",
-                    url: baseURL!,
-                },
-            ]);
             const page = await context.newPage();
             const apiRequests: string[] = [];
             page.on("request", (request) => {
@@ -170,7 +163,12 @@ for (const entry of pages) {
                     `header a[hreflang="${entry.language === "en" ? "tr" : "en"}"]`,
                 )
                 .click();
+            const chosen = entry.language === "en" ? "tr" : "en";
             await expect(page).toHaveURL(entry.alternate);
+            expect((await languageCookieOf(context))?.value).toBe(chosen);
+            await page.goto(entry.alternate);
+            await expect(page).toHaveURL(entry.alternate);
+            await expect(page.locator("html")).toHaveAttribute("lang", chosen);
         } finally {
             await context.close();
         }

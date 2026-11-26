@@ -1,0 +1,58 @@
+{
+    "cookie": {
+        "name": "pyracast_language",
+        "maxAge": 31536000,
+        "path": "/",
+        "httpOnly": true,
+        "sameSite": "Lax",
+        "secure": true
+    },
+    "cases": [
+        { "acceptLanguage": "", "expected": "en" },
+        { "acceptLanguage": "tr-TR,tr;q=0.9,en;q=0.8", "expected": "tr" },
+        { "acceptLanguage": "en-US;q=0.9,tr;q=0.8", "expected": "en" },
+        { "acceptLanguage": "de,TR-tr;q=0.8,en;q=0.7", "expected": "tr" },
+        { "acceptLanguage": "tr;q=0,en;q=0.2", "expected": "en" },
+        { "acceptLanguage": "en;q=0,tr;q=0.2", "expected": "tr" },
+        { "acceptLanguage": "tr;q=0.4,en;q=0.4", "expected": "tr" },
+        { "acceptLanguage": "en;q=0.4,tr;q=0.4", "expected": "en" },
+        { "acceptLanguage": "de-DE,fr;q=0.8", "expected": "en" },
+        { "acceptLanguage": "*", "expected": "en" },
+        { "acceptLanguage": "tr;q=2,en;q=0.2", "expected": "en" },
+        { "acceptLanguage": "tr;q=NaN,en;q=0.2", "expected": "en" },
+        { "acceptLanguage": "tr;q=-1,en;q=0.2", "expected": "en" },
+        { "acceptLanguage": "tr;q=0.1234,en;q=0.2", "expected": "en" },
+        { "acceptLanguage": "tr;q=1;broken,en;q=0.2", "expected": "en" },
+        { "acceptLanguage": "tr_ TR,en;q=0.2", "expected": "en" },
+        { "acceptLanguage": "tr;q=0.000,en;q=1.000", "expected": "en" },
+        { "acceptLanguage": " tr ; q=0.5 , en;q=0.", "expected": "tr" },
+        { "acceptLanguage": "", "country": "TR", "expected": "tr" },
+        { "acceptLanguage": "", "country": "DE", "expected": "en" },
+        { "acceptLanguage": "", "country": "tr", "expected": "en" },
+        { "acceptLanguage": "de-DE", "country": "TR", "expected": "tr" },
+        { "acceptLanguage": "en", "country": "TR", "expected": "en" },
+        { "acceptLanguage": "de,tr;q=0", "country": "TR", "expected": "en" },
+        { "acceptLanguage": "*;q=0", "country": "TR", "expected": "en" },
+        { "acceptLanguage": "tr", "padding": 8190, "expected": "tr" },
+        {
+            "acceptLanguage": "tr",
+            "padding": 8191,
+            "country": "TR",
+            "expected": "en"
+        },
+        {
+            "cookie": "en",
+            "acceptLanguage": "tr",
+            "country": "TR",
+            "expected": "en"
+        },
+        { "cookie": "tr", "acceptLanguage": "en", "expected": "tr" },
+        { "cookie": "TR", "acceptLanguage": "en", "expected": "en" },
+        {
+            "cookie": "de",
+            "acceptLanguage": "",
+            "country": "TR",
+            "expected": "tr"
+        }
+    ]
+}

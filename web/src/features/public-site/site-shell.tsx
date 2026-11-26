@@ -3,6 +3,7 @@ import { publicPath, type PublicPage } from "@/lib/public-metadata";
 import { homeCopy, type PublicLanguage } from "./home-copy";
 import { routes } from "@/lib/routes";
 import { Brand } from "@/ui/brand";
+import { LanguageLink } from "./language-link";
 import styles from "./public-site.module.css";
 
 export function SiteShell({
@@ -37,14 +38,13 @@ export function SiteShell({
                         <a href={`${home}#getting-started`}>{copy.startNav}</a>
                     </nav>
                     <div className={styles.headerActions}>
-                        <a
+                        <LanguageLink
                             className={styles.language}
-                            href={publicPath(other, page)}
-                            hrefLang={other}
-                            lang={other}
+                            href={`${publicPath(other, page)}?language=${other}`}
+                            language={other}
                         >
                             {other === "tr" ? "Türkçe" : "English"}
-                        </a>
+                        </LanguageLink>
                         <a
                             className={styles.login}
                             href={routes.signIn(language)}

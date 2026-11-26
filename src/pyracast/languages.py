@@ -36,6 +36,7 @@ def browser_language(header: str) -> tuple[Language | None, frozenset[str]]:
     return None, frozenset(rejected)
 
 
+# web/src/i18n/request-language.ts applies the same rule before a page renders.
 def negotiated_language(cookie: str | None, accept_language: str, country: str | None) -> Language:
     chosen = explicit_language(cookie)
     if chosen is not None:
