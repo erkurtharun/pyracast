@@ -1500,15 +1500,17 @@ test("performance hides stale CSV while a selected range is loading", async ({
             await responseReady;
         }
         await route.fulfill({
-            json: {
+            json: answer("PerformanceOutput", {
                 start_date: selected ? "2026-11-01" : "2026-10-01",
                 end_date: selected ? "2026-11-02" : "2026-10-02",
+                data_source: "forecast",
                 matched_days: 0,
                 requested_days: 2,
-                metrics: null,
-                baseline_metrics: null,
+                relative_error: null,
+                daily_mae_mwh: null,
+                daily_bias_mwh: null,
                 days: [],
-            },
+            }),
         });
     });
     await page.goto("/app/");

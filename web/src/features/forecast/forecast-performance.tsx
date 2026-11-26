@@ -33,6 +33,7 @@ export function ForecastPerformance({
     timezone: string;
 }) {
     const t = useTranslations("ForecastPerformance");
+    const sourceName = useTranslations("DataSource");
 
     const [start, setStart] = useState(() => plantDay(timezone, -30));
     const [end, setEnd] = useState(() => plantDay(timezone, -1));
@@ -58,8 +59,8 @@ export function ForecastPerformance({
                 label={t("production_comparison")}
                 tabs
                 views={[
-                    ["forecast", t("forecast_kind")],
-                    ["satellite", t("satellite_kind")],
+                    ["forecast", sourceName("forecast")],
+                    ["satellite", sourceName("satellite")],
                 ]}
                 current={source}
                 onSelect={(chosen) => {
@@ -113,6 +114,7 @@ function PerformanceResults({
     query: PerformanceQuery;
 }) {
     const t = useTranslations("ForecastPerformance");
+    const sourceName = useTranslations("DataSource");
     const plant = useExportPlant();
     const format = useFormat();
     const energy = (value: number | null | undefined) =>
@@ -129,9 +131,7 @@ function PerformanceResults({
     const matched =
         resource.data?.days.filter((day) => day.status === "matched") ?? [];
     const mode = resource.data?.data_source ?? "forecast";
-    const modeName = t(
-        mode === "satellite" ? "satellite_kind" : "forecast_kind",
-    );
+    const modeName = sourceName(mode);
     const realtime = matched.some((day) => day.provisional_production);
     const notCompared =
         (resource.data?.requested_days ?? 0) -

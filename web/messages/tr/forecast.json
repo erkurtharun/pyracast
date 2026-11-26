@@ -83,8 +83,6 @@
         "reason_dates": "{reason}: {dates}",
         "daily_error_title": "Günlere göre mutlak hata",
         "daily_error_tooltip": "{date}: {error} MWh",
-        "forecast_kind": "Tahmin",
-        "satellite_kind": "Uydu verisi",
         "file": "karsilastirma"
     },
     "Calibrations": {

@@ -83,8 +83,6 @@
         "reason_dates": "{reason}: {dates}",
         "daily_error_title": "Absolute error by day",
         "daily_error_tooltip": "{date}: {error} MWh",
-        "forecast_kind": "Forecast",
-        "satellite_kind": "Satellite data",
         "file": "comparison"
     },
     "Calibrations": {
