@@ -27,6 +27,7 @@ import {
     sessionState,
     signOut,
     startSavedCopy,
+    subscribeSavedFigures,
     useHandoffFailed,
     useSessionClock,
     useSessionState,
@@ -346,11 +347,15 @@ function useSavedFiguresShown() {
     const [shown, setShown] = useState(false);
     useEffect(() => {
         let active = true;
-        void savedCopyState().then((state) => {
-            if (active) setShown(state === "on");
-        });
+        const read = () =>
+            void savedCopyState().then(({ state }) => {
+                if (active) setShown(state === "on");
+            });
+        read();
+        const unsubscribe = subscribeSavedFigures(read);
         return () => {
             active = false;
+            unsubscribe();
         };
     }, []);
     return shown;

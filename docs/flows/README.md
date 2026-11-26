@@ -24,6 +24,7 @@ sections and a row here.
 | [account-email-change](account-email-change.md) | Change the account email and verify it by code |
 | [app-entry-routing](app-entry-routing.md) | Open the app: session bootstrap and routing |
 | [installed-app](installed-app.md) | Install and run the app: manifest, worker and releases |
+| [saved-figures](saved-figures.md) | Keep figures on a device, refresh them and read them without a connection |
 
 ## Workspace and collaboration
 

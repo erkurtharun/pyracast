@@ -1,6 +1,7 @@
 import { accessibilityViolations } from "../tests/support/accessibility";
+import { workerClock } from "../tests/support/saved-copy";
 import { expect, test, type Page } from "../tests/support/test";
-import { workerWithdrawn } from "../tests/support/worker-state";
+import { workerState } from "../tests/support/worker-state";
 
 const NOTICE_POLICY =
     "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'";
@@ -67,15 +68,6 @@ async function controlled(page: Page) {
     expect(
         await page.evaluate(() => navigator.serviceWorker.controller !== null),
     ).toBe(true);
-}
-
-// The copy's times are read from the worker's own clock, whatever the shared page clock says.
-async function workerClock(page: Page) {
-    const context = page.context();
-    const worker =
-        context.serviceWorkers()[0] ??
-        (await context.waitForEvent("serviceworker"));
-    return worker.evaluate(() => Date.now());
 }
 
 async function seed(page: Page, seeded: Seed) {
@@ -199,7 +191,7 @@ const pageWidth = (page: Page) =>
 
 const fresh: Seed = { confirmedAge: DAY, dates: ["2026-11-11", "2026-11-12"] };
 
-if (!workerWithdrawn)
+if (workerState === "figures")
     test.describe("saved pages of the worker", () => {
         test("a held plant's address shows its saved figures and its links lead to the other held days", async ({
             page,

@@ -422,6 +422,16 @@ writes the copy only to empty it when it expired or the person removed it on a s
   nothing, and a browser holding the previous worker loses its registration at its next successful
   update check and keeps its open window. A revert of the withdrawal commit makes the worker active
   again.
+- **Withdrawal of offline reading alone:** a release that sets `SAVED_FIGURES` in
+  `web/src/lib/saved/feature.ts` to `false` and serves the worker without its reader and saved pages.
+  `web/tests/support/worker-state.ts` reads it as the state "saved figures withdrawn": the round trip
+  of `npm run test:production` is replaced by a case that offers no switch and sends no days read, the
+  saved-pages suites do not run and `web/tests/saved-figures-withdrawn.spec.ts` does.
+  Every document then deletes the copy and forgets its flag when it starts, and the switch, its offer
+  and the refresh render and run nothing. The deletion at start stays for at least one further
+  release, 12 h later, since a window of the withdrawn build can turn the switch on until its session
+  ends. A withdrawal of the worker turns the constant off in the same release
+  (`docs/flows/saved-figures.md`).
 - **Rollback:** a revert of the faulty change through CI and Release, never an older image and
   never a revert of the worker as a whole.
 - **Watch:** CSP reports for `worker-src` and the status of `/app/sw.js` and the manifest. A device
