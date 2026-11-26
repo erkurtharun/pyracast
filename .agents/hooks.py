@@ -51,7 +51,6 @@ PUBLISH_REASON = (
 MARKER_ASSIGNMENT = re.compile(rf"(?:\$env:)?{PUBLISH_MARKER}=1", re.IGNORECASE)
 ASSIGNMENT = re.compile(r"(?:\$env:)?[A-Za-z_]\w*=.*", re.IGNORECASE)
 PUSH_SCOPE_OPTIONS = frozenset({"--all", "--mirror", "--tags"})
-REDIRECTION_CHARACTERS = frozenset("<>&")
 
 
 def _object(value: JsonValue) -> JsonObject:
@@ -271,21 +270,8 @@ def denied_read(payload: JsonObject, root: Path) -> str | None:
     return next(iter(reasons), None)
 
 
-def _without_stream_numbers(command: str, *, windows: bool) -> str:
-    streams = r"\d+|\*" if windows else r"\d+"
-    return re.sub(rf"(?<![^\s;&|()])(?:{streams})(?=[<>])", "", command)
-
-
-def _redirection(token: str) -> bool:
-    return set(token) <= REDIRECTION_CHARACTERS and bool(set(token) & set("<>"))
-
-
 def _segments(command: str, *, windows: bool) -> list[list[str]]:
-    lexer = shlex.shlex(
-        _without_stream_numbers(command, windows=windows).replace("\n", ";"),
-        posix=True,
-        punctuation_chars=True,
-    )
+    lexer = shlex.shlex(command.replace("\n", ";"), posix=True, punctuation_chars=True)
     if windows:
         lexer.escape = ""
     lexer.whitespace_split = True
@@ -294,15 +280,9 @@ def _segments(command: str, *, windows: bool) -> list[list[str]]:
     except ValueError:
         return [_command_tokens(part) for part in re.split(r"&&|\|\||[;|&\n]", command)]
     segments: list[list[str]] = [[]]
-    redirected = False
     for token in tokens:
-        if _redirection(token):
-            redirected = True
-        elif token and set(token) <= set(lexer.punctuation_chars):
-            redirected = False
+        if token and set(token) <= set(lexer.punctuation_chars):
             segments.append([])
-        elif redirected:
-            redirected = False
         else:
             segments[-1].append(token)
     return segments
