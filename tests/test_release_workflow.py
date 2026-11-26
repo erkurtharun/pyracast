@@ -582,6 +582,25 @@ def test_the_web_dependency_audit_runs_once_per_ci_run() -> None:
     )
 
 
+def test_the_mocked_browser_suite_runs_against_the_shipped_web_build() -> None:
+    job = ci_jobs()["web_production"]
+    steps = job["steps"]
+    (build,) = [
+        index
+        for index, candidate in enumerate(steps)
+        if candidate.get("run") == "npm run build" and "env" not in candidate
+    ]
+    suite = step_index(job, "npm test")
+    traces = step(job, "Upload Playwright failure traces")
+
+    assert build < suite
+    assert "env" not in steps[suite]
+    assert traces["if"] == "always()"
+    assert {"web/test-results/**/trace.zip", "web/test-results/**/error-context.md"} <= set(
+        traces["with"]["path"].split()
+    )
+
+
 RELEASE_TESTED_JOBS = {
     "deployment",
     "verify_ubuntu",
