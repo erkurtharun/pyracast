@@ -300,7 +300,7 @@
         "new_mwh": "Sonra (MWh)",
         "exact_interval": "Saat: {start} – {end}",
         "missing": "—",
-        "confirm_import": "{count} değeri içe aktar"
+        "confirm_import": "{count, number} değeri içe aktar"
     },
     "DataSource": {
         "data_source": "Veri",
