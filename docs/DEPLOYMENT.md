@@ -254,9 +254,8 @@ image artifact needs no action when that commit is already the one serving. To r
    commit only in unshipped paths, listed in `deploy/release_scope.py`), run
    **Actions → Release → Run workflow → main** while that CI run's artifact is unexpired.
 
-The checkout action leaves those unshipped paths out of the checkout of every Release job that
-checks out code and of every other workflow job except those that test, analyse or report on the
-whole repository (patterns: output of `python3 deploy/release_scope.py sparse-patterns`). A pull request's CI builds, scans and
+The checkout action leaves those unshipped paths out of the checkout of every workflow job that
+checks out code, except those that test, analyse or report on the whole repository (patterns: output of `python3 deploy/release_scope.py sparse-patterns`). A pull request's CI builds, scans and
 smoke-tests the images from that checkout, so an image build that needs a listed path fails there;
 such a path does not belong on the list. Release's own jobs use the same checkout but first run in
 the release after a merge.
