@@ -17,6 +17,7 @@ from tests.support.workflows import (
     step,
     step_index,
     workflow,
+    workflow_files,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -578,20 +579,21 @@ def test_deploy_runs_the_authorized_commit_only_after_proving_it_is_on_main() ->
 
 def test_the_web_dependency_audit_runs_once_per_ci_run() -> None:
     audits = [
-        candidate
-        for job in ci_jobs().values()
+        (identifier, candidate)
+        for identifier, job in ci_jobs().items()
         for candidate in job["steps"]
         if "scripts/npm_audit.py web" in candidate.get("run", "")
     ]
+    web = ci_jobs()["web_ubuntu"]
 
-    assert audits == [
-        step(ci_jobs()["web_ubuntu"], "Audit web dependencies against dated exceptions")
-    ]
-    assert "if" not in audits[0]
+    assert audits == [("web_ubuntu", step(web, "Audit web dependencies against dated exceptions"))]
+    assert "if" not in audits[0][1]
+    assert "if" not in web
+    assert "matrix" not in web.get("strategy", {})
 
 
 def test_every_workflow_job_runs_on_ubuntu() -> None:
-    for path in sorted(WORKFLOWS.glob("*.yml")):
+    for path in workflow_files():
         for identifier, job in workflow(path.name)["jobs"].items():
             assert job["runs-on"] == "ubuntu-latest", f"{path.name} {identifier}"
 

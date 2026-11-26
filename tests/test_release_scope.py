@@ -13,7 +13,7 @@ import pytest
 import yaml
 
 from deploy import release_scope
-from tests.support.workflows import WORKFLOWS
+from tests.support.workflows import WORKFLOWS, workflow_files
 
 ROOT = Path(__file__).resolve().parents[1]
 GIT = shutil.which("git")
@@ -516,20 +516,16 @@ def _checks_out_without_the_unshipped_paths(job: dict[str, Any]) -> bool:
     )
 
 
-def _workflow_files(directory: Path) -> list[Path]:
-    return sorted([*directory.glob("*.yml"), *directory.glob("*.yaml")])
-
-
 def _jobs(directory: Path) -> dict[str, dict[str, Any]]:
     return {
         f"{path.name} {identifier}": job
-        for path in _workflow_files(directory)
+        for path in workflow_files(directory)
         for identifier, job in yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"].items()
     }
 
 
 def _unknown_workflow_files(directory: Path, known: frozenset[str]) -> list[str]:
-    return [path.name for path in _workflow_files(directory) if path.name not in known]
+    return [path.name for path in workflow_files(directory) if path.name not in known]
 
 
 def _jobs_with_an_unreduced_checkout(

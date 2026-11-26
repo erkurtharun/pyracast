@@ -343,6 +343,7 @@ PULL_REQUEST_JOBS = [
     IMAGE_JOB,
     "Verify (ubuntu-latest)",
     "Web (ubuntu-latest)",
+    "Web production build (ubuntu-latest)",
     "Scientific (ubuntu-latest)",
     "Dependency audit",
     SONAR,
@@ -562,6 +563,10 @@ def test_a_record_made_at_the_first_or_last_second_of_the_record_job_is_evidence
         (early(tested={"conclusion": "cancelled"}), "did not pass every job"),
         (early(tested={"status": "in_progress", "conclusion": None}), "did not pass every job"),
         (early(tested_jobs=jobs_with("Web (ubuntu-latest)", "failure")), "did not pass every job"),
+        (
+            early(tested_jobs=jobs_with("Web production build (ubuntu-latest)", "failure")),
+            "did not pass every job",
+        ),
         (early(tested_jobs=jobs_with("Dependency audit", "cancelled")), "did not pass every job"),
         (
             early(tested_jobs=jobs_with("Verify (ubuntu-latest)", "skipped")),
