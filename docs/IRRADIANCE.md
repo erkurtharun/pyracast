@@ -436,7 +436,7 @@ The latest matched day's status and ratio are reported separately; without enoug
 diagnosis or a capacity estimate; the thresholds are engineering guards.
 
 A plant outlook carries it as `production_diagnostic` only for a `forecast` result without
-`as_of` or a frozen scenario, on a day not yet ended, when the run's configuration, production
+a frozen scenario, on a day not yet ended, when the run's configuration, production
 identity, incidents, factor and transfer model still apply and its latest matched day is before
 today; it is `stale` when that day is more than two days before today. The diagnostic changes
 neither forecast power nor any capacity; only reported operating limits drive the outage scenario.
@@ -444,7 +444,9 @@ neither forecast power nor any capacity; only reported operating limits drive th
 ## Forecast evaluation
 
 The performance endpoint ([forecast-performance](flows/forecast-performance.md)) scores 1 to 90
-completed local days within the past year.
+completed local days within the past year. The forecast screen's past-day forecast, chosen by
+closeness to production (`closest_to_production`, [forecast-view](flows/forecast-view.md)), is
+never scored; Forecast accuracy keeps its own selection below.
 
 - `archived_forecast` scores the immutable issuance published before the target day's first
   astronomical daylight (`latest-published-pre-daylight-issuance-v1`; polar day, polar night and

@@ -58,7 +58,7 @@ sequenceDiagram
 
 ## Authorization
 
-- Console: `PlatformAdminSite.has_permission` requires an active staff superuser and `security.has_mfa_evidence`; `admin_view` adds CSRF, `never_cache`, a recent authenticator confirmation for every unsafe method and `contained`.
+- Console: the console gate (`admin-console-access`): an active staff superuser with MFA evidence for a live authenticator, a proof by the authenticator within the last hour for every request and a recent confirmation for every unsafe one; `admin_view` also adds CSRF, `never_cache` and `contained`.
 - Operations: `require_platform_admin` in `replace_api_key`, `clear_provider_cooldown` and `validate_binding`. The run validates as the operator whose `provider_secret_rotated` event carries the current revision; an operator who lost platform rights, or a missing event, stops it (outcome `stopped`, due time cleared).
 - Database: `provideraccount_encrypted_api_key_chk` requires the `encrypted:v1:` prefix; `provideraccount_api_key_fingerprint_uniq` keeps one key on one account. Accounts are platform-wide, shared across tenants.
 

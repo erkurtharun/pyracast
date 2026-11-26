@@ -4,7 +4,7 @@ A platform administrator (active staff superuser with verified MFA) reviews a su
 
 ## Entry points
 
-- Screen: `regions/templates/admin/regions/region/setup.html`, rendered by `pyracast.platform_admin.plant_review.plant` at `/admin/plants/{id}/`. **Approve plant** (shown while the status is `pending` or `suspended`, disabled unless the view flag `can_approve` holds) posts `action=approve` with hidden revision, binding, credential revision, expected status and declaration fingerprint, checked by `BindingActionForm.current_binding` (`src/pyracast/platform_admin/forms.py`). The page reads the declarations once per render (`plants.approval.declarations`) and shows per plant only the values approval activates: a submission marked "Awaiting approval", else the current configuration. `BindingActionForm.show_declaration` puts their hash (`fingerprint_of`) into the form, also on a page shown again after a refused action.
+- Screen: `regions/templates/admin/regions/region/setup.html`, rendered by `pyracast.platform_admin.plant_review.plant` at `/admin/plants/{id}/`. **Approve plant** (shown while the status is `pending` or `suspended`, disabled unless the view flag `can_approve` holds) posts `action=approve` with hidden revision, binding, credential revision, expected status and declaration fingerprint, checked by `BindingActionForm.current_binding` (`src/pyracast/platform_admin/forms.py`). The page reads the declarations once per render (`plants.approval.declarations`) and shows per plant only the values approval activates: a submission marked "In review", else the current configuration. The review states read In review, Approved, Suspended and Not approved; the page shows no approved or not-approved note; the technical details read Panel capacity (MWp), Inverter capacity (MW AC), Grid export limit (MW), Meter point (Energy delivered to the grid or Inverter output) and Technical details revision. `BindingActionForm.show_declaration` puts their hash (`fingerprint_of`) into the form, also on a page shown again after a refused action.
 - `POST /admin/plants/{id}/decision/` (reject when pending, suspend when approved) -> `plant_review.decision` -> `ReviewDecisionForm` -> `decide_review`; the same form carries the actions of flow `location-change`.
 - Customer: `POST /api/tenants/{t}/regions/{r}/resubmit/` -> `pyracast.api.views.RegionResubmitView` -> `resubmit_region`, shown by `ReviewNotice` (`web/src/features/plant/review-notice.tsx`) on a rejected plant.
 - Operations: `approve_region`, `decide_review`, `resubmit_region` (`pyracast.plants.approval`); `activate_submitted_plants` (`pyracast.plants.operations`); command `fixture_demo`. Customer view: the portfolio polling (`plant-portfolio`); `PlantWorkspace` shows the status tag and `ReviewNotice` for any status other than `approved`.
@@ -68,7 +68,7 @@ sequenceDiagram
 
 ## Authorization
 
-- Console: `PlatformAdminSite.has_permission` (active staff superuser with MFA evidence) wraps every admin route through `admin_view`, which adds CSRF and, for every POST, a recent authenticator confirmation.
+- Console: the console gate (`admin-console-access`): an active staff superuser with MFA evidence, a proof by the authenticator within the last hour for every request and a recent confirmation for every unsafe one. `admin_view` also adds CSRF.
 - Operation: `require_platform_admin` (active staff superuser, no MFA check) first in `approve_region` and `decide_review`. Administrators are not tenant scoped. `resubmit_region` is a workspace-administrator operation (`authorize_workspace_admin`, admin route `regions/{r}/resubmit/` under the `submission` throttle).
 - Database: `region_approved_binding_fk` keeps the binding in the same region, `region_status_chk` limits values, `region_status_approved_binding_chk` ties `approved` to a binding, `collectionjob_binding_endpoint_scheduled_for_uniq` prevents a duplicate job. Nothing ties `approved` to a validated binding; the operation does.
 
@@ -77,7 +77,7 @@ sequenceDiagram
 | Condition | Result |
 | --- | --- |
 | Anonymous, or not active staff superuser with MFA | Admin 302 to the admin login (anonymous to `/app/?next=<console path>`, signed in to `/app/`) |
-| Missing CSRF token; GET on `/decision/`; POST without a recent authenticator confirmation; region missing or trashed | 403; 405; 403 confirmation page, nothing stored; 404 |
+| Missing CSRF token; request without the proof or confirmation of the console gate (`admin-console-access`); GET on `/decision/`; region missing or trashed | 403; 403 confirmation page, nothing stored; 405; 404 |
 | Approve: hidden fields missing | Setup page 400 with field errors |
 | Approve: blocker (binding unvalidated for this credential revision, last validation failed, key rejected, account disabled or unauthorized, settings missing), page of an earlier status, revision or declaration, status not approvable (a rejected plant) | Setup page 400 with that reason; the first blocker is named; after a changed declaration the page shows the current values with their hash, so approving it approves what it shows |
 | Approve: stale binding or key revision, plant without a declaration (`plant_submission_required`) | Setup page 400 with the generic "setup could not be applied" message |

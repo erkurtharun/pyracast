@@ -71,7 +71,7 @@ sequenceDiagram
 ## Authorization
 
 - View: `RoutePolicy` (`src/pyracast/api/permissions.py`) lists the request route as `GET` member and `POST` admin, the withdraw route as `POST` admin; session CSRF applies. `tenant_region` needs a live region of that tenant.
-- Operation: `authorize_workspace_admin` (tenant row lock, active administrator membership) opens request and withdrawal; `require_platform_admin` (active staff superuser) opens approve, reject and `correct_location`. The console adds a verified authenticator session (`PlatformAdminSite.has_permission`) and a recent confirmation for every unsafe request (`_confirmed`).
+- Operation: `authorize_workspace_admin` (tenant row lock, active administrator membership) opens request and withdrawal; `require_platform_admin` (active staff superuser) opens approve, reject and `correct_location`. The console adds its gate (`admin-console-access`): MFA evidence, a proof by the authenticator within the last hour for every request and a recent confirmation for every unsafe one.
 - Database: unique `regionlocationchangerequest_region_uniq` (one pending request per region), check `regionlocationchangerequest_review_chk`, and `region_tenant_location_uniq` (6-decimal rounding, active regions) as backstop.
 
 ## Failure paths

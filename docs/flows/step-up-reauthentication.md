@@ -10,7 +10,7 @@ A signed-in user attempts a sensitive account operation (set or change the passw
 - `POST .../auth/reauthenticate/code/request` -> `headless.RequestReauthenticationCodeView`; `.../code/confirm` -> `ConfirmReauthenticationCodeView`. No resend route exists.
 - `POST /admin/confirm/` -> `platform_admin.access.confirm`: the console's own authenticator confirmation (`ConfirmationForm`), recorded as the same proof.
 - Each of these views (not the console form) accepts only the account's strongest factor (`step_up.StrongestFactor`, `security.strongest_factor`); any other answers 403.
-- Gates that produce the 401: `processes.authorize_credential_write` (via `credential_write`) in the password, address, TOTP, recovery-code, provider and address-completion views; allauth's gate through `AccountAdapter.is_reauthentication_required` (`ACCOUNT_REAUTHENTICATION_*`, `MFA_REAUTHENTICATION_REQUIRED`, `SOCIALACCOUNT_REAUTHENTICATION_REQUIRED` in `src/pyracast/settings.py`); `step_up.require_recent_mfa` over `security.has_mfa_evidence(recent=True)` for TOTP removal, recovery codes, a password change of an account with an authenticator, and every unsafe console request. `step_up.StepUpAnswers` turns allauth's reauthentication answer into the step-up 401.
+- Gates that produce the 401: `processes.authorize_credential_write` (via `credential_write`) in the password, address, TOTP, recovery-code, provider and address-completion views; allauth's gate through `AccountAdapter.is_reauthentication_required` (`ACCOUNT_REAUTHENTICATION_*`, `MFA_REAUTHENTICATION_REQUIRED`, `SOCIALACCOUNT_REAUTHENTICATION_REQUIRED` in `src/pyracast/settings.py`); `step_up.require_recent_mfa` over `security.has_mfa_evidence(within=CONFIRMATION)` for TOTP removal, recovery codes and a password change of an account with an authenticator; every unsafe console request checks the same window in `PlatformAdminSite` (flow `admin-console-access`). `step_up.StepUpAnswers` turns allauth's reauthentication answer into the step-up 401.
 
 ## Sequence
 
@@ -83,7 +83,7 @@ sequenceDiagram
 
 ## Rules and invariants
 
-- Window: 300 s from the latest `reauthenticated` record, not extended by use. Session idle (30 min) and age (12 h) limits still apply; logout drops the records with the session.
+- Window: 300 s from the latest `reauthenticated` record, not extended by use. Session idle (30 days) and age (90 days) limits still apply; logout drops the records with the session.
 - A password, authenticator or console confirmation checks its factor under the account's locks in `processes.confirmation`; the record, the key rotation and a spent recovery code commit together, so a confirmation whose session ended spends nothing. A code confirmation rests on the state its request stamped and ends with any change of it, including the account gaining an authenticator.
 - Email code: 3 minutes (`ACCOUNT_LOGIN_BY_CODE_TIMEOUT`), 3 attempts (the third wrong code ends the state), no resends (`ACCOUNT_LOGIN_BY_CODE_SUPPORTS_RESEND` unset). The request locks the account's rows before validating the address, so a change started meanwhile waits and then ends the code; a request whose `request_login_code` budget for the typed address is spent takes no lock and answers 400.
 - Limits stack: a password check consumes `login_failed` (5/10m and 100/d per key) and keeps a `login_failed_ip` slot (10/10m per IP) when it fails; an authenticator or recovery code consumes `login_failed` under `mfa-auth-user-<pk>` and keeps a `login_failed_ip` slot for a wrong code, released on success.

@@ -65,7 +65,7 @@ sequenceDiagram
 ## Authorization
 
 - API: `SessionLanguageView` is a public route of the route policy (`RoutePolicy`), so no workspace permission applies. DRF views are `csrf_exempt`, so `CsrfViewMiddleware` skips them; the `csrf_protect` decorator on `dispatch` enforces CSRF before DRF runs. The target is always `request.user`, never a payload id.
-- Console: `admin_view` wraps the view in `csrf_protect`, then `has_permission` (active staff superuser with MFA evidence), then the confirmation gate for unsafe methods; `next` is limited to a same-origin console path by `console_destination`.
+- Console: `admin_view` adds CSRF and the console gate (`admin-console-access`): an active staff superuser with MFA evidence, a proof by the authenticator within the last hour for every request and a recent confirmation for every unsafe one; `next` is limited to a same-origin console path by `console_destination`.
 - Database: `userlanguagepreference_language_chk` check constraint, one-to-one `user` key. `proxy.ts` deletes any inbound `x-pyracast-public-language` header, so clients cannot force a public language.
 
 ## Failure paths

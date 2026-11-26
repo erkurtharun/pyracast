@@ -1,10 +1,10 @@
 # Import production from a CSV file
 
-A workspace administrator picks a CSV of completed 30 or 60 minute energy intervals on the Production tab. The browser validates it, the API previews it against the current values and the administrator confirms; the confirmed batch is saved as new immutable observation revisions that override provider values and request a calibration run. The `import_production` command is an older insert-only writer that shares the table but not the rules.
+A workspace administrator picks a CSV of completed 30 or 60 minute energy intervals on the Production tab. The browser validates it, the API previews it against the current values and the administrator confirms; the confirmed batch is saved as new immutable observation revisions that override provider values and request a calibration run. An entered value is saved only for a row that differs from what is shown: the preview leaves out a row equal to the shown provider value, so those slots keep their provider values. The `import_production` command is an older insert-only writer that shares the table but not the rules.
 
 ## Entry points
 
-- Screen: `web/src/features/production/production-import.tsx` `ProductionImport`, mounted by `web/src/features/production/production-history.tsx` `ProductionHistory` only when `canManage` and a current configuration id exist. Parser: `web/src/lib/production.ts` `parseProduction`, which takes its messages from the `ProductionCsv` translator of `ProductionImport`.
+- Screen: `web/src/features/production/production-import.tsx` `ProductionImport`, mounted by `web/src/features/production/production-history.tsx` `ProductionHistory` only when `canManage` and a current configuration id exist. Parser: `ProductionImport` calls `web/src/lib/production.ts` `readProduction`, which loads the reader's catalogue and, only when the header row or a status cell needs them, the other language's names before it reads the rows; its messages come from the `ProductionCsv` translator.
 - `POST /api/tenants/{t}/regions/{r}/plants/{p}/production/preview/` -> `pyracast.plants.api.ProductionPreviewView` -> `production_changes.preview_production`.
 - `POST .../production/changes/` -> `ProductionChangesView` -> `production_changes.change_production` (the commit step; shared with inline edits in `production-history`).
 - Command `import_production` (`--username --plant-id --configuration-id --unit --file`) -> `production_changes.import_observations`. There is no REST endpoint for it.
@@ -18,7 +18,7 @@ sequenceDiagram
     participant V as API views
     participant P as production_changes
     participant DB as PostgreSQL
-    A->>UI: "choose CSV, parseProduction validates, an invalid file stops here"
+    A->>UI: "choose CSV, readProduction validates, an invalid file stops here"
     A->>UI: "Preview import"
     UI->>V: "POST preview/ with the file's unit and observations"
     V->>P: "preview_production"
@@ -66,7 +66,10 @@ sequenceDiagram
 
 | Condition | Result |
 | --- | --- |
-| File over 2 MiB (checked on `file.size` first), wrong header, parse error, 0 or over 2000 rows, naive timestamp, length not 30 or 60 minutes, future end, bad energy, quality `mixed` (an aggregated slot of a production export), other bad quality or source, overlap inside the file | Error notice (`ProductionImport.choose_a_csv_no_larger_than_2` for size, otherwise a `ProductionCsv.*` message for the first problem only), nothing sent |
+| File over 2 MiB (checked on `file.size` first), wrong header, parse error, 0 or over 2000 rows, naive timestamp, length not 30 or 60 minutes, future end, bad energy, quality `mixed` (an aggregated slot of a production export), other bad quality or source, overlap inside the file | Error notice (`ProductionImport.choose_a_csv_no_larger_than_2` for size, otherwise a `ProductionCsv.*` message for the first problem only), nothing sent. A wrong header reads "Use the columns of a file downloaded under Actual production: Start, End, Actual (MWh), Status and Source."; row messages name the column as the file has it and the line where the row starts in the file (blank lines and text quoted over several lines counted); an overlap reads "Rows {first} and {second} cover the same time. Remove one of them or correct its time." |
+| The other language's names cannot be loaded when the file needs them | Refused with "The names of the other language could not be loaded. Try again."; a file without a header record gets the header message without that load |
+| Every row equals the shown provider value | Preview 400 `invalid_request` "This file changes no value."; nothing is saved |
+| A row whose date or time is not valid (30 February, no offset) | 400 "Row {row}: the date or time is not valid."; the command prints it after "Observation import failed: ", the row counted as a line of the file |
 | Not signed in | 401 `not_authenticated` |
 | Viewer; foreign tenant; bad CSRF | 403 `workspace_admin_required`; 403 `membership_required`; 403 `csrf_failed` |
 | Unknown region or plant; unknown configuration id or one of another plant | 404 `not_found` |
@@ -80,14 +83,15 @@ sequenceDiagram
 | Statement over 60 s | 503 `request_timeout` |
 | Preview or commit request fails | Alert above the form or `ActionForm` error; the old preview table stays visible after a failed commit. A lost preview shows the message of a failed read (network, invalid answer, or the request error with its status for a bare gateway status or the maintenance refusal) with Try again, which reads it again |
 | Confirmation whose answer was lost | The "Change not confirmed" alert, with the repeatable text while the same preview is confirmed again (the capacity acknowledgement is the form's checkbox, so unchecking it shows the general text), and the production rows are read again; while the preview read failed the general notice stays beside that failure |
-| Command: no estimated actuals for the interval | "Observation import failed: Matching historical estimates are unavailable. Choose a day with collected data." |
+| Command: no estimated actuals for the interval | "Observation import failed: No satellite data for the selected time range." |
 | Command: any other validation or permission refusal | `CommandError` "Observation import failed: " plus the refusal message; unreadable file, header, row, unknown user or plant gives "Observation import failed: invalid file, input, access, or record." |
 
 ## Rules and invariants
 
 - Commit lock order is tenant, region, plant. Preview runs in one `REPEATABLE READ`, read-only transaction (`pyracast.db.read_snapshot`) and takes no row lock, so it does not wait for a writer.
-- Optimistic concurrency: preview returns `expected_revision_id` per row (null if no head); commit rejects the whole batch on any mismatch. A commit sent again after it was applied is a replay: it answers like the first call and changes nothing. Rows equal to the head (energy, quality, source, reverted flag) count as `existing`: no revision; with no created row there is no event and no calibration request.
-- kWh is divided by 1000 on arrival. The energy column names the unit (`energy_kwh` or `energy_mwh`); the preview echoes `energy` in that unit and the commit sends the same unit. The parser also requires `starts_at`, `ends_at`, `quality` and `source` and allows `timezone`, so a production export imports again unchanged.
+- Optimistic concurrency: preview returns `expected_revision_id` per row (null if no head); commit rejects the whole batch on any mismatch. A commit sent again after it was applied is a replay: it answers like the first call and changes nothing. Rows equal to the head (energy, quality, source, reverted flag) count as `existing` on every write path: no revision; with no created row there is no event and no calibration request.
+- kWh becomes MWh by moving the decimal point of the number as written (1234.56 kWh is 1.23456 MWh), so equal energy is equal in either unit when compared with the shown provider value and the saved value. The preview echoes `energy` in the file's unit and the commit sends the same unit.
+- Each column is accepted under the API name (`starts_at`, `ends_at`, `energy_kwh` or `energy_mwh`, `quality`, `source`, optional `timezone`) or under its exported name in English or Turkish (Start / Başlangıç, End / Bitiş, "Actual (MWh)" or "Actual (kWh)" / "Gerçekleşen (MWh)" or "Gerçekleşen (kWh)", Status / Durum, Source / Kaynak), in any order, so a downloaded file imports again unchanged. A leading byte order mark is removed once before parsing and line counting. Every cell is read literally: a status cell is the status whose code or label (either language) it equals, whatever the header's language; a source cell is stored as written, less the one leading apostrophe the download adds to formula-like text (`unguarded` in `web/src/lib/csv.ts`). The preview leaves out a row equal to the provider value shown for its slot in energy and that value's own status (its source cell is not compared), so a downloaded file never turns provider values into entered ones. The format help shows the exported header and an example row in the reader's language.
 - A value whose mean power exceeds 1.25 times the lower of DC capacity and power limit is warned in the preview (`energy_exceeds_capacity`); the screen then requires an acknowledgement before it sends `confirm_implausible`. The event details record `origin: csv_import`, `file_name` and `file_sha256`.
 - While a chosen file is read, ready or previewed and not yet imported, the import registers with the leave guard (`frontend-data-layer`), so leaving asks first; a choice refused as too large or unreadable, and a cleared choice, do not register.
 - Manual rows of any quality suppress the whole provider hour; the preview warns (`provider_hour_incomplete`) only when a provider hour is partly covered.

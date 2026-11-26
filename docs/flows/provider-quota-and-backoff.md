@@ -78,7 +78,7 @@ sequenceDiagram
 ## Authorization
 
 - Worker path has no user: admission relies on `claim` -> `binding_is_current` (approved region at the binding's revision, enabled and authorized account, binding validated at the current credential revision; `connections/currency.py`), and `reserve_account_request` rechecks `enabled` and `authorized_at` under the lock.
-- Console: `PlatformAdminSite.has_permission` (active staff superuser plus verified MFA); every unsafe request also needs a recent confirmation with the authenticator (`admin_view`). `validate_binding` and `clear_provider_cooldown` call `require_platform_admin`. `BindingActionForm.current_binding` rejects stale region or credential revisions; the validate form also names the validation it saw, so a repeated submit spends no second request. The "provider recovered" checkbox is enforced only by the form.
+- Console: the console gate (`admin-console-access`): an active staff superuser with MFA evidence, a proof by the authenticator within the last hour for every request and a recent confirmation for every unsafe one. `validate_binding` and `clear_provider_cooldown` call `require_platform_admin`. `BindingActionForm.current_binding` rejects stale region or credential revisions; the validate form also names the validation it saw, so a repeated submit spends no second request. The "provider recovered" checkbox is enforced only by the form.
 - Script: shell, database and encryption-key access only, gated by the explicit `--live` flag; no application identity and no audit event. `fixture_demo` needs `DEBUG` and an active staff superuser name.
 - Tenants never write this state; members read only the plant's own request count through the schedule read (member route of `RoutePolicy`).
 
