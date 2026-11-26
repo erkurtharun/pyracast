@@ -2,7 +2,7 @@
 import { useTranslations } from "next-intl";
 import { ScrollRegion } from "@/ui/scroll-region";
 
-import { useState, type SubmitEvent } from "react";
+import { useId, useState, type SubmitEvent } from "react";
 import { ViewNav } from "@/ui/action";
 import type { PlantScope } from "@/lib/api";
 import type { RequestOptions } from "@/lib/api/client";
@@ -34,6 +34,7 @@ export function ForecastPerformance({
 }) {
     const t = useTranslations("ForecastPerformance");
     const sourceName = useTranslations("DataSource");
+    const limitId = useId();
 
     const [start, setStart] = useState(() => plantDay(timezone, -30));
     const [end, setEnd] = useState(() => plantDay(timezone, -1));
@@ -69,20 +70,15 @@ export function ForecastPerformance({
                 }}
             />
             <form className="forecast-controls" onSubmit={load}>
-                <ControlField
-                    label={t("start_date")}
-                    hint={t("daylight_rules")}
-                >
-                    {(describedBy) => (
-                        <input
-                            type="date"
-                            required
-                            value={start}
-                            max={end}
-                            aria-describedby={describedBy}
-                            onChange={(event) => setStart(event.target.value)}
-                        />
-                    )}
+                <ControlField label={t("start_date")}>
+                    <input
+                        type="date"
+                        required
+                        value={start}
+                        max={end}
+                        aria-describedby={limitId}
+                        onChange={(event) => setStart(event.target.value)}
+                    />
                 </ControlField>
                 <ControlField label={t("end_date")}>
                     <input
@@ -90,12 +86,16 @@ export function ForecastPerformance({
                         required
                         value={end}
                         max={plantDay(timezone, -1)}
+                        aria-describedby={limitId}
                         onChange={(event) => setEnd(event.target.value)}
                     />
                 </ControlField>
                 <button className="button secondary" type="submit">
                     {t("load_performance")}
                 </button>
+                <p className="fine" id={limitId}>
+                    {t("range_limit")}
+                </p>
             </form>
             <PerformanceResults
                 key={JSON.stringify(query)}
