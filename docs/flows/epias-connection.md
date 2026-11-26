@@ -57,7 +57,7 @@ sequenceDiagram
 
 ## Authorization
 
-- Console: `PlatformAdminSite.has_permission` needs an active staff superuser with MFA evidence (`pyracast.accounts.security.has_mfa_evidence`); `admin_view` redirects others (302). CSRF is enforced (403). Every unsafe request also needs a recent authenticator confirmation: a stale POST answers 403 with the confirmation form and stores nothing.
+- Console: the console gate (`admin-console-access`): an active staff superuser with MFA evidence for a live authenticator, a proof by the authenticator within the last hour for every request and a recent confirmation for every unsafe one; others are redirected (302). CSRF is enforced (403). A stale POST answers 403 with the confirmation form and stores nothing.
 - REST GET: the route policy requires an active membership, so every role, viewers included, may read; a platform admin without membership gets 403 `membership_required`. `get_epias_status` checks membership again through `member_plant`.
 - Operations: `connect_epias` and `disconnect_epias` call `require_platform_admin` (active staff superuser, no MFA check) before any lookup or provider call and again on the locked user row. No tenant membership is needed: the plant is resolved by ID. Database: only the `OneToOne` plant key and check constraints; no unique constraint on provider plant ID or EIC.
 

@@ -68,7 +68,7 @@ sequenceDiagram
 | `DELETE` on a plant | 405 `method_not_allowed` |
 | Restore at or after `deleted_at + 30 days`, or once a purge has begun (whatever the clock says) | 400 `trash_retention_expired` |
 | Restore a region whose coordinates (rounded to 6 decimals) match an active region | 400 `location_already_exists` |
-| Restore body with any field (`EmptyInput`) | 400 `invalid_request`, "Unknown fields are not accepted." |
+| Restore body with any field (`EmptyInput`) | 400 `invalid_request`, "Something went wrong. Try again." |
 | Row lock wait over 5 s (`lock_timeout`) | 503 `busy`, `Retry-After: 1` |
 | UI error | Delete: the confirmation stays open with the reason. Restore: error notice and a reload of the bin; a failed Undo shows its alert beside the notice |
 

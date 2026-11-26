@@ -58,13 +58,13 @@ sequenceDiagram
 | Table | R/W | What |
 | --- | --- | --- |
 | `notifications_notificationsettings` | R/W | Singleton row `id=1` (`notificationsettings_id_chk`, `notificationsettings_max_recipients_chk`: 1 to 100, `notifications.models.MAX_RECIPIENT_LIMIT`, smallint). GET and the page checks read it without a lock; reminder paths read it `FOR SHARE`; `set_recipient_limit` locks it `FOR UPDATE`, creating it if absent, validates the value with the model's validators (`full_clean`) and updates only `max_recipients`. |
-| `django_admin_log` | W | One `CHANGE` row per effective change: object `1`, repr "Email reminder settings", message "Recipient limit changed from X to Y.", user = actor. |
+| `django_admin_log` | W | One `CHANGE` row per effective change: object `1`, repr "Forecast email settings", message "Recipient limit changed from X to Y.", user = actor. |
 | `notifications_reminderschedule`, `notifications_reminderrecipient`, `accounts_membership`, `regions_region`, `plants_plant` | R | Enabled schedules of live plants, counted as the scheduler counts recipients, for the over-limit list. |
 | `auth_user`, `django_session`, `mfa_authenticator`, `django_content_type` | R | Session user and flags, the session's authenticator record, content type for the log row. The session middleware refreshes session rows at most once a minute. |
 
 ## Authorization
 
-- Gate: `PlatformAdminSite.has_permission` requires an active staff superuser and `security.has_mfa_evidence` (any age). `admin_view` adds CSRF, `never_cache`, a recent authenticator confirmation for every unsafe method and `contained`. A failure redirects to `admin:login`, which `PlatformAdminSite.login` sends to `/app/?next=<console path>` (anonymous) or `/app/`.
+- Gate: the console gate (`admin-console-access`): an active staff superuser with MFA evidence for a live authenticator, a proof by the authenticator within the last hour for every request and a recent confirmation for every unsafe one. `admin_view` also adds CSRF, `never_cache` and `contained`. A failure redirects to `admin:login`, which `PlatformAdminSite.login` sends to `/app/?next=<console path>` (anonymous) or `/app/`.
 - CSRF: `CsrfViewMiddleware` and `admin_view` (`csrf_protect`); a POST without a valid token is 403 before the gate runs, also for anonymous callers.
 - Operation: `set_recipient_limit` repeats `require_platform_admin` (active staff superuser). It checks no authenticator evidence, so it is a second line, not a replacement for `has_permission`.
 - Database: the singleton and range check constraints bound the row even for writers that bypass the form. Tenant scope: none. The setting is platform-wide; customers read it through the reminders API (`recipient_limit`, `recipient_count`, `recipient_limit_exceeded`).
@@ -89,6 +89,7 @@ sequenceDiagram
 
 - Every path that creates, edits or sends reminders against the limit reads it `FOR SHARE` (raw SQL in `recipient_limit(lock=True)`) in the order tenant, `NotificationSettings`, region, delivery (`configure_reminders`, `scheduler._create_slot`, `jobs.process_notification`, `jobs._mark_transmit`). Readers never wait for each other; only `set_recipient_limit` takes `FOR UPDATE`, so it waits for checks under the old limit. Member-removal cleanup (`recipients.remove_member_recipients`) edits lists without it. The settings page takes only the settings lock, so it cannot deadlock with them. The SMTP or API transmission runs after that transaction commits, so it holds no lock and a limit lowered after the check does not stop it.
 - Lowering never edits data. `scheduler.recipient_refusal` compares the effective recipient count with the limit: the scheduler records each due slot as a `skipped` delivery with `recipient_limit_exceeded` and no recipients, and a queued delivery ends `skipped` with the same code in `process_notification` or `_mark_transmit` (via `jobs._authorize`). Raising it again does not revive skipped slots; the scheduler only looks back to yesterday and an existing delivery for a slot blocks re-creation.
+- The page's help says that a lowered limit pauses the forecast email of plants over it and that, once a list is shortened or the limit is raised, the next forecast emails are sent at their scheduled times.
 - The over-limit list and the confirmation check (`newly_paused`) read without a lock, before `set_recipient_limit`, so they can be out of date by the time the limit is saved.
 - `configure_reminders` refuses a list above the limit unless the effective count strictly shrinks or a disabled save is unchanged, so an over-limit plant can still be reduced.
 - Without a row, `recipient_limit()` answers the model default 5 and the first locked read creates it. No migration seeds the row.

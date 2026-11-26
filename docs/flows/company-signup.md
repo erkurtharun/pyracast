@@ -67,7 +67,7 @@ sequenceDiagram
 | Sixth signup attempt in an hour from one IP, or session lock held over 5 s | 429, or 429 `session_busy` with `retry_after` |
 | Address that is not plain (`CompanySignupInput.clean_email`, `accounts.addresses.plain_address`: "Enter a valid email address."), or password under 15 characters, common, over 1024 or similar to the address | 400 `email` or `password`, nothing created |
 | Workspace name blank, over 200, or holding control characters or web or email address text | 400 `company_name`, nothing committed; a name may repeat |
-| Invitation token unknown, expired, used or for another email | 400 non-field "The invitation is invalid or expired." |
+| Invitation token unknown, expired, used or for another email | 400 non-field "This invitation is no longer valid. Ask the workspace administrator for a new one." |
 | Email already registered | 401 `verify_email`, identical to success; the mail is `account_already_exists` |
 | Verification mail allowance of the address spent (1 per minute, 6 per hour), either kind of address | 401 `verify_email` as on success, no mail; only the `signup` limit answers 429 |
 | Mail cannot be delivered | The request is unaffected: 401 `verify_email` as on success, the intent is retried or ends `failed` |

@@ -67,8 +67,8 @@ sequenceDiagram
 
 ## Authorization
 
-- Authentication: allauth `AuthenticatedAPIView` returns 401 with login flows for anonymous requests; the view works only on `request.user`. `CsrfViewMiddleware` checks `X-CSRFToken` (the browser view is not CSRF-exempt); `pyracast.accounts.middleware.SessionLifetime` enforces 12 h absolute and 30 min idle before the view.
-- Knowledge proof: `ChangePasswordInput.clean_current_password` (view input layer) when the account has a usable password, checked against the password as read under the account's locks; recent reauthentication (`ACCOUNT_REAUTHENTICATION_TIMEOUT` 300 s) in allauth's `ChangePasswordView.handle` when it has none, by the strongest factor the account holds. An account with an authenticator also needs a recent MFA reauthentication (`security.has_mfa_evidence(recent=True)`) besides the current password.
+- Authentication: allauth `AuthenticatedAPIView` returns 401 with login flows for anonymous requests; the view works only on `request.user`. `CsrfViewMiddleware` checks `X-CSRFToken` (the browser view is not CSRF-exempt); `pyracast.accounts.middleware.SessionLifetime` enforces 90 days absolute and 30 days idle before the view.
+- Knowledge proof: `ChangePasswordInput.clean_current_password` (view input layer) when the account has a usable password, checked against the password as read under the account's locks; recent reauthentication (`ACCOUNT_REAUTHENTICATION_TIMEOUT` 300 s) in allauth's `ChangePasswordView.handle` when it has none, by the strongest factor the account holds. An account with an authenticator also needs a recent MFA reauthentication (`security.has_mfa_evidence(within=CONFIRMATION)`) besides the current password.
 - Rate limit: allauth `rate_limit(action="change_password")`, `5/10m/user` in `ACCOUNT_RATE_LIMITS` (`PASSWORD_CHANGE_MAX_ATTEMPTS`, `PASSWORD_CHANGE_WINDOW_MINUTES`); it runs after the authority check, the new-password validation of an account without a password and the MFA check, and before the reauthentication check, so that 401 also counts but a refused first password does not. A wrong current password logs `password_change_failed` (user id and client IP) from `ChangePasswordInput.clean_current_password`. No tenant or role check applies to any signed-in user, staff included; the database enforces nothing here.
 
 ## Failure paths
@@ -90,6 +90,7 @@ sequenceDiagram
 
 ## Rules and invariants
 
+- Leave guard (`frontend-data-layer`): a change the server confirmed (2xx, or the 401 with `meta.password_changed`) stops asking before the session is read again; a 401 asking for reauthentication hands the change to the confirmation prompt (`web/src/features/account/account-security.tsx` `changePassword`).
 - The success response is deliberately a 401: the session is gone. Only `ChangePasswordView.post` adds `meta.password_changed`, and `post` runs after validation, so the flag cannot appear on an expiry or reauthentication 401.
 - `processes.credential_write` runs the whole change in one transaction that first locks the account's rows (the order of `account_state`) before any session row, so it is ordered with every revocation and credential change of the account. The mail intent, the revocation and the hash commit together.
 - Set versus change is decided server side from the account as locked: `current_password` is required exactly when `has_usable_password()` is true; an empty one means "set" and queues `password_set` instead of `password_changed`.
