@@ -103,7 +103,7 @@ def select_actual_snapshot(
     candidates = cast(
         Generator[ForecastSnapshot],
         single_snapshot_actual_queryset(
-            binding, start, end, collected_from=end, as_of=as_of
+            (binding,), start, end, collected_from=end, as_of=as_of
         ).iterator(),
     )
     # A cursor the garbage collector closes during another query of the connection deadlocks.

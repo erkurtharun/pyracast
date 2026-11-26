@@ -1500,15 +1500,17 @@ test("performance hides stale CSV while a selected range is loading", async ({
             await responseReady;
         }
         await route.fulfill({
-            json: {
+            json: answer("PerformanceOutput", {
                 start_date: selected ? "2026-11-01" : "2026-10-01",
                 end_date: selected ? "2026-11-02" : "2026-10-02",
+                data_source: "forecast",
                 matched_days: 0,
                 requested_days: 2,
-                metrics: null,
-                baseline_metrics: null,
+                relative_error: null,
+                daily_mae_mwh: null,
+                daily_bias_mwh: null,
                 days: [],
-            },
+            }),
         });
     });
     await page.goto("/app/");
@@ -1553,7 +1555,7 @@ test("performance hides stale CSV while a selected range is loading", async ({
     expect(parsed.data).toEqual([]);
 });
 
-test("forecast performance shows archived metrics, missing days and selected range", async ({
+test("the forecast comparison shows its metrics, days not compared and the selected range", async ({
     page,
 }) => {
     await page.clock.setFixedTime(new Date("2026-11-10T12:00:00Z"));
@@ -1562,18 +1564,14 @@ test("forecast performance shows archived metrics, missing days and selected ran
     await page.route("**/plants/21/performance/**", async (route) => {
         lastQuery = new URL(route.request().url()).search;
         await route.fulfill({
-            json: {
-                comparison: "archived_forecast",
+            json: answer("PerformanceOutput", {
+                data_source: "forecast",
                 start_date: "2026-11-01",
                 end_date: "2026-11-02",
                 matched_days: 1,
                 requested_days: 2,
-                metrics: {
-                    daily_mae_mwh: 1.5,
-                    daily_bias_mwh: -1.5,
-                    source_positive_mae_mw: lastQuery ? null : 0.3,
-                },
-                baseline_metrics: { daily_mae_mwh: 2.5 },
+                daily_mae_mwh: 1.5,
+                daily_bias_mwh: -1.5,
                 days: [
                     {
                         date: "2026-11-01",
@@ -1582,10 +1580,7 @@ test("forecast performance shows archived metrics, missing days and selected ran
                         measured_energy_mwh: 10,
                         predicted_energy_mwh: 8.5,
                         error_mwh: -1.5,
-                        source_kind: "estimated_actuals",
                         provisional_production: false,
-                        provisional_snapshot_ids: [],
-                        calibration_in_sample: false,
                     },
                     {
                         date: "2026-11-02",
@@ -1594,13 +1589,10 @@ test("forecast performance shows archived metrics, missing days and selected ran
                         measured_energy_mwh: null,
                         predicted_energy_mwh: null,
                         error_mwh: null,
-                        source_kind: null,
                         provisional_production: false,
-                        provisional_snapshot_ids: [],
-                        calibration_in_sample: null,
                     },
                 ],
-            },
+            }),
         });
     });
     await page.goto("/app/");
@@ -1641,7 +1633,7 @@ test("forecast performance shows archived metrics, missing days and selected ran
     await expect
         .poll(() => lastQuery)
         .toContain("start_date=2026-11-01&end_date=2026-11-02");
-    await expect.poll(() => lastQuery).toContain("daylight_only=true");
+    await expect.poll(() => lastQuery).toContain("data_source=forecast");
 
     await expect(page.getByRole("cell", { name: "8.5" })).toBeVisible();
     await expect(
@@ -2185,8 +2177,6 @@ test("the plant header names the offset of the day on screen and the present off
                 end_date: "2026-11-09",
                 matched_days: 0,
                 requested_days: 30,
-                metrics: null,
-                baseline_metrics: null,
                 days: [],
             }),
         }),

@@ -2,7 +2,7 @@
 import { useTranslations } from "next-intl";
 import { ScrollRegion } from "@/ui/scroll-region";
 
-import { useState, type SubmitEvent } from "react";
+import { useId, useState, type SubmitEvent } from "react";
 import { ViewNav } from "@/ui/action";
 import type { PlantScope } from "@/lib/api";
 import type { RequestOptions } from "@/lib/api/client";
@@ -17,13 +17,13 @@ import { CsvDownload } from "@/ui/csv-download";
 import { DailyAccuracyChart } from "./daily-accuracy-chart";
 import { useShownDays } from "@/features/plant/shown-days";
 import { useExportPlant } from "@/ui/export-plant";
-import { performanceExport, usedRealtime } from "@/lib/exports";
+import { performanceExport } from "@/lib/exports";
 
 type PerformanceQuery = RequestOptions<
     "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/performance/",
     "get"
 >["query"];
-type Comparison = NonNullable<NonNullable<PerformanceQuery>["comparison"]>;
+type Source = NonNullable<NonNullable<PerformanceQuery>["data_source"]>;
 
 export function ForecastPerformance({
     scope,
@@ -33,30 +33,21 @@ export function ForecastPerformance({
     timezone: string;
 }) {
     const t = useTranslations("ForecastPerformance");
+    const sourceName = useTranslations("DataSource");
+    const limitId = useId();
 
     const [start, setStart] = useState(() => plantDay(timezone, -30));
     const [end, setEnd] = useState(() => plantDay(timezone, -1));
-    const [comparison, setComparison] =
-        useState<Comparison>("archived_forecast");
-    const [issuanceCutoff, setIssuanceCutoff] = useState("");
+    const [source, setSource] = useState<Source>("forecast");
     const [query, setQuery] = useState<PerformanceQuery>({
-        daylight_only: true,
-        comparison: "archived_forecast",
+        data_source: "forecast",
     });
-    function request(mode: Comparison): PerformanceQuery {
-        return {
-            start_date: start,
-            end_date: end,
-            daylight_only: true,
-            comparison: mode,
-            ...(mode === "archived_forecast" && issuanceCutoff
-                ? { issuance_cutoff: issuanceCutoff }
-                : {}),
-        };
+    function request(chosen: Source): PerformanceQuery {
+        return { start_date: start, end_date: end, data_source: chosen };
     }
     function load(event: SubmitEvent) {
         event.preventDefault();
-        setQuery(request(comparison));
+        setQuery(request(source));
     }
     return (
         <section className="panel">
@@ -69,30 +60,25 @@ export function ForecastPerformance({
                 label={t("production_comparison")}
                 tabs
                 views={[
-                    ["archived_forecast", t("forecast_accuracy")],
-                    ["historical_model", t("model_check")],
+                    ["forecast", sourceName("forecast")],
+                    ["satellite", sourceName("satellite")],
                 ]}
-                current={comparison}
-                onSelect={(mode) => {
-                    setComparison(mode);
-                    setQuery(request(mode));
+                current={source}
+                onSelect={(chosen) => {
+                    setSource(chosen);
+                    setQuery(request(chosen));
                 }}
             />
             <form className="forecast-controls" onSubmit={load}>
-                <ControlField
-                    label={t("start_date")}
-                    hint={t("daylight_rules")}
-                >
-                    {(describedBy) => (
-                        <input
-                            type="date"
-                            required
-                            value={start}
-                            max={end}
-                            aria-describedby={describedBy}
-                            onChange={(event) => setStart(event.target.value)}
-                        />
-                    )}
+                <ControlField label={t("start_date")}>
+                    <input
+                        type="date"
+                        required
+                        value={start}
+                        max={end}
+                        aria-describedby={limitId}
+                        onChange={(event) => setStart(event.target.value)}
+                    />
                 </ControlField>
                 <ControlField label={t("end_date")}>
                     <input
@@ -100,26 +86,16 @@ export function ForecastPerformance({
                         required
                         value={end}
                         max={plantDay(timezone, -1)}
+                        aria-describedby={limitId}
                         onChange={(event) => setEnd(event.target.value)}
                     />
                 </ControlField>
                 <button className="button secondary" type="submit">
                     {t("load_performance")}
                 </button>
-                {comparison === "archived_forecast" && (
-                    <details>
-                        <summary>{t("advanced")}</summary>
-                        <ControlField label={t("previousday_cutoff")}>
-                            <input
-                                type="time"
-                                value={issuanceCutoff}
-                                onChange={(event) =>
-                                    setIssuanceCutoff(event.target.value)
-                                }
-                            />
-                        </ControlField>
-                    </details>
-                )}
+                <p className="fine" id={limitId}>
+                    {t("range_limit")}
+                </p>
             </form>
             <PerformanceResults
                 key={JSON.stringify(query)}
@@ -138,6 +114,7 @@ function PerformanceResults({
     query: PerformanceQuery;
 }) {
     const t = useTranslations("ForecastPerformance");
+    const sourceName = useTranslations("DataSource");
     const plant = useExportPlant();
     const format = useFormat();
     const energy = (value: number | null | undefined) =>
@@ -153,10 +130,9 @@ function PerformanceResults({
     useShownDays(resource.data?.start_date, resource.data?.end_date);
     const matched =
         resource.data?.days.filter((day) => day.status === "matched") ?? [];
-    const historical = resource.data?.comparison === "historical_model";
-    const mode = historical ? "historical" : "forecast";
-    const modeName = t(historical ? "model_check" : "forecast_accuracy");
-    const realtime = matched.some(usedRealtime);
+    const mode = resource.data?.data_source ?? "forecast";
+    const modeName = sourceName(mode);
+    const realtime = matched.some((day) => day.provisional_production);
     const notCompared =
         (resource.data?.requested_days ?? 0) -
         (resource.data?.matched_days ?? 0);
@@ -184,8 +160,6 @@ function PerformanceResults({
                                     performanceExport(plant, data, {
                                         file: t("file"),
                                         comparison: modeName,
-                                        forecast: t("forecast_kind"),
-                                        satellite: t("satellite_kind"),
                                     })
                                 }
                             />
@@ -197,7 +171,7 @@ function PerformanceResults({
                                 )}
                             </p>
                         )}
-                        {data.metrics && (
+                        {data.matched_days > 0 && (
                             <>
                                 <div className="stats">
                                     <Stat
@@ -214,15 +188,13 @@ function PerformanceResults({
                                 <div className="stats">
                                     <Stat
                                         label={t("daylight_energy_error")}
-                                        value={energy(
-                                            data.metrics?.daily_mae_mwh,
-                                        )}
+                                        value={energy(data.daily_mae_mwh)}
                                         unit="MWh"
                                     />
                                     <DifferenceStat
                                         label={t("daylight_energy_bias")}
                                         value={format.signed(
-                                            data.metrics?.daily_bias_mwh,
+                                            data.daily_bias_mwh,
                                             2,
                                         )}
                                         meaning={(direction) =>
@@ -235,7 +207,7 @@ function PerformanceResults({
                                 </div>
                             </>
                         )}
-                        {!data.metrics && (
+                        {data.matched_days === 0 && (
                             <Notice>
                                 {t(
                                     "no_complete_production_and_reference_pairs_are",
@@ -267,9 +239,7 @@ function PerformanceResults({
                                                 <th>{t("status")}</th>
                                                 <th>{t("measured_mwh")}</th>
                                                 <th>
-                                                    {historical
-                                                        ? t("model_mwh")
-                                                        : t("predicted_mwh")}
+                                                    {t("shown_mwh", { mode })}
                                                 </th>
                                                 <th>
                                                     {t("error_mwh", { mode })}
@@ -283,7 +253,7 @@ function PerformanceResults({
                                                         {format.day(day.date)}
                                                     </td>
                                                     <td>
-                                                        {usedRealtime(day)
+                                                        {day.provisional_production
                                                             ? t(
                                                                   "provisional_production",
                                                               )

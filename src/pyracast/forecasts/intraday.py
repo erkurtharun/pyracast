@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from math import isfinite
@@ -19,7 +19,7 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
     SnapshotSourceKind,
 )
-from pyracast.forecasts.sources import covering_snapshots, snapshot_rows
+from pyracast.forecasts.sources import covering_snapshots, snapshot_rows, with_normalization
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_sources import apply_composition, compose_snapshots
 from pyracast.solar import Daylight, daylight_energy_windows, daylight_window
@@ -134,7 +134,7 @@ def actual_coverage_complete(
 
 
 def native_actual_queryset(
-    binding: SiteBinding,
+    bindings: Collection[SiteBinding],
     start: datetime,
     end: datetime,
     knowledge_cutoff: datetime,
@@ -147,9 +147,9 @@ def native_actual_queryset(
             actuals_grace_until
         )
     return (
-        ForecastSnapshot.objects.select_related("job", "binding")
+        with_normalization(ForecastSnapshot.objects.select_related("job", "binding"))
         .filter(
-            binding=binding,
+            binding__in=bindings,
             source_kind=SnapshotSourceKind.ESTIMATED_ACTUALS,
             job__endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
             job__reference_import__isnull=True,
@@ -173,7 +173,7 @@ def native_actual_snapshots(
 ) -> list[ForecastSnapshot]:
     return covering_snapshots(
         native_actual_queryset(
-            binding, start, end, knowledge_cutoff, actuals_grace_until=actuals_grace_until
+            (binding,), start, end, knowledge_cutoff, actuals_grace_until=actuals_grace_until
         ),
         start,
         end,

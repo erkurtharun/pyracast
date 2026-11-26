@@ -157,6 +157,11 @@ def _current_configuration(plant: Plant) -> PlantConfiguration | None:
     )
 
 
+def plant_today(plant: Plant, now: datetime) -> date:
+    """The plant's current day in its region's zone, from which every read counts past days."""
+    return now.astimezone(ZoneInfo(plant.region.timezone)).date()
+
+
 def production_timezone(plant: Plant) -> str:
     """The timezone production days of the plant are counted in."""
     configuration = _current_configuration(plant)

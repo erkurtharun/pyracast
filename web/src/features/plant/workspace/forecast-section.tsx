@@ -21,11 +21,28 @@ import {
     type ForecastQuery,
 } from "./forecast-reading";
 
+export type ForecastChoice =
+    | { mode: "auto" }
+    | { mode: "best" }
+    | { mode: "manual"; date: string; forecastId: number };
+
 export type ForecastOptions = {
     resolution: "30" | "60";
     source: DataSource;
-    chosen?: { date: string; forecastId: number };
+    choice: ForecastChoice;
 };
+
+export function keptChoice(
+    choice: ForecastChoice,
+    date: string,
+    today: string,
+): ForecastChoice {
+    const kept =
+        choice.mode === "manual"
+            ? choice.date === date
+            : choice.mode !== "best" || date < today;
+    return kept ? choice : { mode: "auto" };
+}
 
 export function ForecastSection({
     scope,
@@ -50,9 +67,11 @@ export function ForecastSection({
 }) {
     const t = useTranslations("PlantWorkspace");
     const format = useFormat();
-    const { resolution, source, chosen } = options;
+    const { resolution, source, choice } = options;
     const today = plantDay(timezone);
     const bounds = dateBounds(source, today);
+    const offersBest =
+        source === "forecast" && view === "generation" && date < today;
     const leavingGeneration = leaving && view === "generation";
     const read: ForecastQuery = {
         scope,
@@ -62,16 +81,20 @@ export function ForecastSection({
         source,
         poll: date >= plantDay(timezone, -1) ? cadence.live : false,
     };
-    const chosenId = source === "forecast" ? chosen?.forecastId : undefined;
+    const chosenId =
+        source === "forecast" && choice.mode === "manual"
+            ? choice.forecastId
+            : undefined;
     const refused = useForecastRead(
         { ...read, forecastId: chosenId },
         false,
     ).invalidFields.includes("forecast_id");
     const forecastId = refused ? undefined : chosenId;
-    const query: ForecastQuery = { ...read, forecastId };
+    const best = offersBest && choice.mode === "best";
+    const query: ForecastQuery = { ...read, forecastId, best };
     const shown = useForecastRead(query, false).data;
     const automatic = useForecastRead(
-        { ...query, forecastId: undefined },
+        { ...query, forecastId: undefined, best: false },
         false,
     ).data;
     const selection = (shown ?? automatic)?.selection;
@@ -105,14 +128,19 @@ export function ForecastSection({
                     <ForecastTimeControl
                         timezone={timezone}
                         options={times}
-                        forecastId={forecastId}
+                        offersBest={offersBest}
+                        value={forecastId ?? (best ? "best" : "auto")}
                         onChoose={(next) =>
                             onOptions({
                                 ...options,
-                                chosen:
-                                    next === undefined
-                                        ? undefined
-                                        : { date, forecastId: next },
+                                choice:
+                                    typeof next === "number"
+                                        ? {
+                                              mode: "manual",
+                                              date,
+                                              forecastId: next,
+                                          }
+                                        : { mode: next },
                             })
                         }
                     />
@@ -144,7 +172,7 @@ export function ForecastSection({
                 </Notice>
             ) : (
                 <PlantForecast
-                    key={`${view}-${date}-${resolution}-${source}-${forecastId}-${configurationId}`}
+                    key={`${view}-${date}-${resolution}-${source}-${forecastId}-${best}-${configurationId}`}
                     {...query}
                 />
             )}

@@ -692,7 +692,6 @@ erDiagram
         double_precision factor
         jsonb payloads
         jsonb outage_scenarios
-        jsonb native_intervals
         bigint calibration_id FK "nullable; references plants_calibrationrun.id"
         bigint snapshot_id FK "references forecasts_forecastsnapshot.id"
         bigint plant_id FK "references plants_plant.id"

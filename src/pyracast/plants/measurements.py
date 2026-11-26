@@ -1,9 +1,11 @@
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
+from functools import reduce
 from math import isfinite
+from operator import or_
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -26,9 +28,6 @@ from pyracast.plants.forecast_sources import compose_snapshots
 from pyracast.plants.measurement_policy import (
     MEASUREMENT_POLICY as MEASUREMENT_POLICY,
 )
-from pyracast.plants.measurement_policy import (
-    SETTLEMENT_ONLY_MEASUREMENT_POLICY as SETTLEMENT_ONLY_MEASUREMENT_POLICY,
-)
 from pyracast.plants.models import (
     CalibrationRun,
     Plant,
@@ -39,8 +38,6 @@ from pyracast.plants.observations import observation_heads
 
 
 def _source_kinds(policy: str) -> list[str]:
-    if policy == SETTLEMENT_ONLY_MEASUREMENT_POLICY:
-        return ["settlement_injection"]
     if policy == MEASUREMENT_POLICY:
         return ["settlement_injection", "realtime_generation"]
     raise ValueError("Unknown measurement selection policy")
@@ -189,27 +186,6 @@ def select_measurements(
         policy=policy,
     )[configuration.pk]
     return selection.effective, selection.snapshot_ids
-
-
-def select_plant_measurements(
-    configurations: Sequence[PlantConfiguration],
-    start: datetime,
-    end: datetime,
-    cutoff: datetime,
-    *,
-    incident_revision_ids: list[int] | None,
-    policy: str,
-) -> dict[int, list[Measurement]]:
-    """`select_measurements` for several configurations of one plant, one query per source."""
-    selections = _select_sources(
-        configurations,
-        start,
-        end,
-        cutoff,
-        incident_revision_ids=incident_revision_ids,
-        policy=policy,
-    )
-    return {pk: selection.effective for pk, selection in selections.items()}
 
 
 def select_production_measurements(
@@ -530,20 +506,55 @@ def selection_fingerprint(
 
 
 def production_identity_current(run: CalibrationRun) -> bool:
-    if not run.production_snapshot_ids:
-        return True
-    connection = EpiasConnection.objects.filter(plant_id=run.plant_id).first()
-    if connection is None:
-        return False
-    snapshots = list(
-        EpiasSnapshot.objects.filter(
-            pk__in=run.production_snapshot_ids,
-            configuration_id=run.configuration_id,
-            connection=connection,
-            source_kind__in=_source_kinds(run.measurement_selection_policy),
+    return run.pk in current_production_identities((run,))
+
+
+def current_production_identities(runs: Collection[CalibrationRun]) -> set[int]:
+    """The runs whose production evidence still names the plant's EPİAŞ identity, read at once."""
+    current = {run.pk for run in runs if not run.production_snapshot_ids}
+    bound = [run for run in runs if run.production_snapshot_ids]
+    connections = {
+        row.plant_id: row
+        for row in EpiasConnection.objects.filter(plant_id__in={run.plant_id for run in bound})
+    }
+    scoped = [(run, connections[run.plant_id]) for run in bound if run.plant_id in connections]
+    if not scoped:
+        return current
+    snapshots = {
+        row.pk: row
+        for row in EpiasSnapshot.objects.filter(
+            reduce(or_, (_evidence_scope(run, connection) for run, connection in scoped))
         ).select_related("job")
+    }
+    current.update(
+        run.pk for run, connection in scoped if _evidence_current(run, connection, snapshots)
     )
-    return len(snapshots) == len(run.production_snapshot_ids) and all(
+    return current
+
+
+def _evidence_scope(run: CalibrationRun, connection: EpiasConnection) -> Q:
+    return Q(
+        pk__in=run.production_snapshot_ids,
+        configuration_id=run.configuration_id,
+        connection=connection,
+        source_kind__in=_source_kinds(run.measurement_selection_policy),
+    )
+
+
+def _evidence_current(
+    run: CalibrationRun, connection: EpiasConnection, snapshots: dict[int, EpiasSnapshot]
+) -> bool:
+    kinds = _source_kinds(run.measurement_selection_policy)
+    # The batched read holds every run's scope, so each run checks its rows against its own.
+    evidence = {
+        pk: snapshot
+        for pk in run.production_snapshot_ids
+        if (snapshot := snapshots.get(pk)) is not None
+        and snapshot.configuration_id == run.configuration_id
+        and snapshot.connection_id == connection.pk
+        and snapshot.source_kind in kinds
+    }
+    return len(evidence) == len(run.production_snapshot_ids) and all(
         snapshot.provider_plant.get("id") is not None
         and snapshot.provider_plant.get("id")
         == (
@@ -555,7 +566,7 @@ def production_identity_current(run: CalibrationRun) -> bool:
         and snapshot.job.source_kind == snapshot.source_kind
         and snapshot.job.configuration_id == run.configuration_id
         and snapshot.normalization_policy == "hour-start-istanbul-v1"
-        for snapshot in snapshots
+        for snapshot in evidence.values()
     )
 
 

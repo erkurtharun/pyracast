@@ -27,6 +27,7 @@ import { ReviewNotice } from "./review-notice";
 import { ShownDays } from "./shown-days";
 import {
     ForecastSection,
+    keptChoice,
     type ForecastOptions,
 } from "./workspace/forecast-section";
 import { latestPlant } from "./workspace/latest-plant";
@@ -75,6 +76,7 @@ export function PlantWorkspace({
     const [forecastOptions, setForecastOptions] = useState<ForecastOptions>({
         resolution: "60",
         source: "forecast",
+        choice: { mode: "auto" },
     });
     const [savedPlant, setSavedPlant] = useState<Plant>();
     const currentPlant = latestPlant(plant, savedPlant);
@@ -85,8 +87,13 @@ export function PlantWorkspace({
     const awaitsFirstApproval = region.status === "pending" && !configuration;
     const [comparisonDays, setComparisonDays] = useState<PlantDays>();
     const forecastDate = address.date ?? plantDay(timezone, 1);
-    if (forecastOptions.chosen && forecastOptions.chosen.date !== forecastDate)
-        setForecastOptions({ ...forecastOptions, chosen: undefined });
+    const choice = keptChoice(
+        forecastOptions.choice,
+        forecastDate,
+        plantDay(timezone),
+    );
+    if (choice !== forecastOptions.choice)
+        setForecastOptions({ ...forecastOptions, choice });
     const productionView = plantView("production", address);
     const yesterday = plantDay(timezone, -1);
     const productionDay =

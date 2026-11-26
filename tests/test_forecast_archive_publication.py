@@ -54,7 +54,6 @@ def test_collection_publishes_electricity_without_an_archive_read(
     assert issuance.published_at == snapshot.available_at
     assert issuance.published_at == ForecastResult.objects.get(snapshot=snapshot).published_at
     assert issuance.payloads["30"]["energy_mwh"] == issuance.payloads["60"]["energy_mwh"]
-    assert len(issuance.native_intervals) == 48
     assert not RequestAttempt.objects.filter(purpose="forecast").exists()
     original = issuance.payloads
     assert not collect(snapshot.job_id, FakeAdapter(), calculate, NOW)

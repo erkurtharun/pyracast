@@ -236,9 +236,9 @@ def test_the_performance_read_sends_exactly_its_documented_envelope(
     period = {"start_date": DAY.isoformat(), "end_date": DAY.isoformat()}
     required, declared = documented("PerformanceOutput")
     day_required, day_declared = documented("PerformanceDay")
-    for comparison in ("archived_forecast", "historical_model"):
+    for data_source in ("forecast", "satellite"):
         response = client.get(
-            plant_path(system, plant, "performance"), {**period, "comparison": comparison}
+            plant_path(system, plant, "performance"), {**period, "data_source": data_source}
         )
         assert response.status_code == 200
         body = response.json()
