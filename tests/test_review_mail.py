@@ -441,7 +441,7 @@ DECISION_TEXT: dict[tuple[str, str], tuple[str, str, tuple[str, ...], str, str, 
         ("Plant: Kayseri solar park", "Workspace: Tenant", "Approved at: {time} (UTC+3)"),
         "",
         "Open plant",
-        "You receive this email because of your role in Tenant.",
+        "Email about the workspace Tenant, sent to the people with a role in it.",
     ),
     ("approved", "tr"): (
         "Kayseri solar park onayland\u0131",
@@ -453,7 +453,8 @@ DECISION_TEXT: dict[tuple[str, str], tuple[str, str, tuple[str, ...], str, str, 
         ),
         "",
         "Santrali aç",
-        "Bu e-postay\u0131 Tenant çal\u0131şma alan\u0131ndaki rolünüz nedeniyle al\u0131yorsunuz.",
+        "Tenant çal\u0131şma alan\u0131yla ilgili e-posta; "
+        "bu çal\u0131şma alan\u0131nda rolü olan kişilere gönderilir.",
     ),
     ("rejected", "en"): (
         "Kayseri solar park was not approved",
@@ -466,7 +467,7 @@ DECISION_TEXT: dict[tuple[str, str], tuple[str, str, tuple[str, ...], str, str, 
         ),
         "Correct the details and send the plant for approval again.",
         "Open plant",
-        "You receive this email because of your role in Tenant.",
+        "Email about the workspace Tenant, sent to the people with a role in it.",
     ),
     ("rejected", "tr"): (
         "Kayseri solar park onaylanmad\u0131",
@@ -479,7 +480,8 @@ DECISION_TEXT: dict[tuple[str, str], tuple[str, str, tuple[str, ...], str, str, 
         ),
         "\u0130stenen bilgileri düzeltip santrali yeniden onaya gönderin.",
         "Santrali aç",
-        "Bu e-postay\u0131 Tenant çal\u0131şma alan\u0131ndaki rolünüz nedeniyle al\u0131yorsunuz.",
+        "Tenant çal\u0131şma alan\u0131yla ilgili e-posta; "
+        "bu çal\u0131şma alan\u0131nda rolü olan kişilere gönderilir.",
     ),
     ("suspended", "en"): (
         "Kayseri solar park is suspended",
@@ -492,7 +494,7 @@ DECISION_TEXT: dict[tuple[str, str], tuple[str, str, tuple[str, ...], str, str, 
         ),
         "",
         "Open plant",
-        "You receive this email because of your role in Tenant.",
+        "Email about the workspace Tenant, sent to the people with a role in it.",
     ),
     ("suspended", "tr"): (
         "Kayseri solar park ask\u0131ya al\u0131nd\u0131",
@@ -506,7 +508,8 @@ DECISION_TEXT: dict[tuple[str, str], tuple[str, str, tuple[str, ...], str, str, 
         ),
         "",
         "Santrali aç",
-        "Bu e-postay\u0131 Tenant çal\u0131şma alan\u0131ndaki rolünüz nedeniyle al\u0131yorsunuz.",
+        "Tenant çal\u0131şma alan\u0131yla ilgili e-posta; "
+        "bu çal\u0131şma alan\u0131nda rolü olan kişilere gönderilir.",
     ),
 }
 
@@ -582,7 +585,7 @@ def test_the_role_mails_say_which_role_each_person_now_has(recorder: type[Record
             "Pyracast made you the workspace administrator and withdrew the pending invitations. "
             "Check the members and invite again where needed.",
             f"Open members: {ORIGIN}/app/w/{tenant.pk}/members/",
-            "You receive this email because of your role in Role workspace.",
+            "Email about the workspace Role workspace, sent to the people with a role in it.",
         ]
     )
     assert messages["former@example.com"].body == "\n\n".join(
@@ -592,7 +595,7 @@ def test_the_role_mails_say_which_role_each_person_now_has(recorder: type[Record
             "Pyracast çal\u0131şma alan\u0131 yöneticisi rolünü başka bir üyeye devretti. "
             "Art\u0131k çal\u0131şma alan\u0131nda üyesiniz.",
             f"Çal\u0131şma alan\u0131n\u0131 aç: {ORIGIN}/app/w/{tenant.pk}/",
-            "Bu e-postay\u0131 Role workspace "
-            "çal\u0131şma alan\u0131ndaki rolünüz nedeniyle al\u0131yorsunuz.",
+            "Role workspace çal\u0131şma alan\u0131yla ilgili e-posta; "
+            "bu çal\u0131şma alan\u0131nda rolü olan kişilere gönderilir.",
         ]
     )

@@ -260,9 +260,9 @@ def normalize_reference_capacity(
             ProviderAccount.objects.select_for_update().get(pk=target.provider_account_id)
             source, target = _bindings(region, source.pk, target.pk, lock=True)
             _checked_factor(source, target)
-            copied = dict(
+            copied = set(
                 copies.filter(source_snapshot__in=[copy.source.pk for copy in planned]).values_list(
-                    "source_snapshot_id", "snapshot_id"
+                    "source_snapshot_id", flat=True
                 )
             )
             planned = [copy for copy in planned if copy.source.pk not in copied]
