@@ -7,7 +7,6 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
-from allauth.account import app_settings as account_settings
 from allauth.account.internal.flows.email_verification_by_code import (
     EMAIL_VERIFICATION_CODE_SESSION_KEY,
     EmailVerificationProcess,
@@ -34,6 +33,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from django.utils.crypto import salted_hmac
 from django.utils.http import base36_to_int
 
+from pyracast.accounts.security import CONFIRMATION
 from pyracast.accounts.session_cookie import persist
 
 PROVIDER_SIGNUP_SESSION_KEY = "socialaccount_sociallogin"
@@ -276,7 +276,7 @@ def live_confirmations(request: HttpRequest, user: AbstractBaseUser) -> list[dic
         if record.get("reauthenticated")
         and isinstance(at := record.get("at"), int | float)
         and math.isfinite(at)
-        and now - at < account_settings.REAUTHENTICATION_TIMEOUT
+        and now - at < CONFIRMATION.seconds()
     ]
 
 

@@ -222,6 +222,11 @@ def operator(monkeypatch: pytest.MonkeyPatch) -> tuple[Client, str, float]:
     return client, secret, now
 
 
+def wrong_code(secret: str, now: float) -> str:
+    # allauth's tolerance is zero, so the pinned clock accepts only the current step's code.
+    return "000001" if totp_code(secret, now) == "000000" else "000000"
+
+
 CODE_LIMITS = pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
 
 
@@ -234,7 +239,7 @@ def test_confirming_with_the_authenticator_allows_console_writes(
     settings_path = reverse("admin:workspace_settings")
 
     page = client.get(confirm, {"next": settings_path})
-    wrong = client.post(confirm, {"code": "000000", "next": settings_path})
+    wrong = client.post(confirm, {"code": wrong_code(secret, now), "next": settings_path})
     still = client.post(settings_path, {})
     right = client.post(confirm, {"code": totp_code(secret, now), "next": settings_path})
 
@@ -513,7 +518,7 @@ def test_after_an_hour_the_code_page_cancels_to_the_application_and_a_code_opens
     later(monkeypatch, 3600)
 
     asked = client.get(path)
-    wrong = client.post(confirm, {"code": "000000", "next": path})
+    wrong = client.post(confirm, {"code": wrong_code(secret, now), "next": path})
     confirmed = client.post(confirm, {"code": totp_code(secret, now), "next": path})
 
     assert refused(asked)
