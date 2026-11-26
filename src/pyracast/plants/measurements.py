@@ -3,7 +3,9 @@ import json
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
+from functools import reduce
 from math import isfinite
+from operator import or_
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -509,31 +511,41 @@ def production_identity_current(run: CalibrationRun) -> bool:
 
 def current_production_identities(runs: Collection[CalibrationRun]) -> set[int]:
     """The runs whose production evidence still names the plant's EPİAŞ identity, read at once."""
-    bound = [run for run in runs if run.production_snapshot_ids]
     current = {run.pk for run in runs if not run.production_snapshot_ids}
-    if not bound:
-        return current
+    bound = [run for run in runs if run.production_snapshot_ids]
     connections = {
         row.plant_id: row
         for row in EpiasConnection.objects.filter(plant_id__in={run.plant_id for run in bound})
     }
+    scoped = [(run, connections[run.plant_id]) for run in bound if run.plant_id in connections]
+    if not scoped:
+        return current
     snapshots = {
         row.pk: row
         for row in EpiasSnapshot.objects.filter(
-            pk__in={pk for run in bound for pk in run.production_snapshot_ids}
+            reduce(or_, (_evidence_scope(run, connection) for run, connection in scoped))
         ).select_related("job")
     }
-    for run in bound:
-        connection = connections.get(run.plant_id)
-        if connection is not None and _evidence_current(run, connection, snapshots):
-            current.add(run.pk)
+    current.update(
+        run.pk for run, connection in scoped if _evidence_current(run, connection, snapshots)
+    )
     return current
+
+
+def _evidence_scope(run: CalibrationRun, connection: EpiasConnection) -> Q:
+    return Q(
+        pk__in=run.production_snapshot_ids,
+        configuration_id=run.configuration_id,
+        connection=connection,
+        source_kind__in=_source_kinds(run.measurement_selection_policy),
+    )
 
 
 def _evidence_current(
     run: CalibrationRun, connection: EpiasConnection, snapshots: dict[int, EpiasSnapshot]
 ) -> bool:
     kinds = _source_kinds(run.measurement_selection_policy)
+    # The batched read holds every run's scope, so each run checks its rows against its own.
     evidence = {
         pk: snapshot
         for pk in run.production_snapshot_ids

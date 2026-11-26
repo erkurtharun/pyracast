@@ -867,6 +867,10 @@ fieldset {
     max-width: 240px;
     margin: 0;
 }
+.forecast-controls > .fine {
+    flex-basis: 100%;
+    margin: 0;
+}
 .choice-group legend {
     margin-bottom: var(--space-2);
     padding: 0;
@@ -1926,9 +1930,6 @@ details details {
     .forecast-controls .field {
         max-width: none;
         flex: 1 1 calc(50% - 5px);
-    }
-    .forecast-controls > .fine {
-        flex-basis: 100%;
     }
     .archive-date-nav {
         flex-basis: 100%;

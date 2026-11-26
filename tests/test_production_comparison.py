@@ -6,18 +6,25 @@ import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import connection
+from django.db.models.signals import post_init
 from django.test import Client
 from django.test.utils import CaptureQueriesContext
 
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.connections.models import SiteBinding
+from pyracast.forecasts.models import ReferenceCapacityNormalization
 from pyracast.forecasts.outlook import SOURCES, Source
+from pyracast.forecasts.validation import validate_binding
 from pyracast.irradiance import local_day_bounds
-from pyracast.metering.models import EpiasConnection
+from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
+from pyracast.plants.approval import approve_region
 from pyracast.plants.models import CalibrationRun, Plant, PlantConfiguration, ProductionObservation
+from pyracast.plants.operations import create_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.performance import production_comparison
 from pyracast.regions.models import Region
-from tests.support.domain import NOW, System
+from pyracast.regions.operations import configure_binding, submit_region
+from tests.support.domain import NOW, FakeAdapter, System
 from tests.support.forecast_performance import publish
 from tests.support.performance_history import (
     FIRST,
@@ -100,10 +107,108 @@ def _other_location(system: System, plant: Plant, declared_at: datetime) -> Syst
     return replace(system, binding=binding)
 
 
-def _populated(system: System, plant: Plant, data_source: Source, first: date) -> None:
-    """Production on every day to `LAST` and the source's data: two saved forecasts a day, or a
-    satellite day on the current location, the first five days on an earlier one, with three
-    calibrations whose production evidence comes from EPİAŞ."""
+def _connection(system: System, plant: Plant, provider_plant_id: int = 2) -> EpiasConnection:
+    return EpiasConnection.objects.create(
+        plant=plant,
+        provider_plant_id=provider_plant_id,
+        settlement_plant_id=77,
+        eic="EIC",
+        name="Plant",
+        connected_by=system.member,
+    )
+
+
+def _other_plant(system: System) -> Plant:
+    """A plant of the same workspace on another approved location."""
+    region = submit_region(
+        system.member,
+        system.tenant.pk,
+        name="Other site",
+        latitude=41,
+        longitude=30,
+        timezone="Europe/Istanbul",
+    )
+    binding = configure_binding(
+        system.admin,
+        region.pk,
+        provider_account_id=system.account.pk,
+        site_id="other-site",
+        capacity_kw=1,
+        capacity_semantics_verified=True,
+    )
+    validate_binding(system.admin, binding.pk, FakeAdapter(), NOW - timedelta(hours=1))
+    approve_region(system.admin, region.pk, binding.pk, NOW)
+    return create_plant(
+        system.member,
+        system.tenant.pk,
+        region.pk,
+        PlantParameters(name="Other", dc_capacity_mw=130, export_limit_mw=100),
+    )
+
+
+def _evidence(epias: EpiasConnection, day: date) -> EpiasSnapshot:
+    """Real-time production of `day` collected under the connection's identity."""
+    configuration = epias.plant.current_configuration
+    assert configuration is not None
+    provider = {"id": epias.provider_plant_id, "eic": epias.eic}
+    _, stamp = local_day_bounds(day, "Europe/Istanbul")
+    job = EpiasCollectionJob.objects.create(
+        plant_id=epias.plant_id,
+        connection=epias,
+        configuration=configuration,
+        connection_revision=epias.revision,
+        provider_plant=provider,
+        source_kind="realtime_generation",
+        target_date=day,
+        scheduled_for=stamp,
+        available_at=stamp,
+        status="succeeded",
+    )
+    return EpiasSnapshot.objects.create(
+        job=job,
+        attempt=1,
+        connection=epias,
+        configuration=configuration,
+        provider_plant=provider,
+        target_date=day,
+        source_kind="realtime_generation",
+        collected_at=stamp,
+        available_at=stamp,
+        readings=[],
+        raw_payload={},
+        content_sha256="a" * 64,
+    )
+
+
+def _normalized_actuals(system: System, source: System, day: date) -> None:
+    """Satellite data of `day` on the plant's location as a capacity-normalized copy of the
+    satellite data of another location."""
+    _, end = local_day_bounds(day, system.binding.timezone)
+    collected = end + timedelta(hours=1)
+    original = estimated_actuals(source, day, 0.2, collected)
+    copy = estimated_actuals(system, day, 0.4, collected)
+    copy.job.endpoint = "scaled_estimated_actuals"
+    copy.job.save(update_fields=("endpoint",))
+    ReferenceCapacityNormalization.objects.create(
+        source_snapshot=original,
+        snapshot=copy,
+        target_binding=system.binding,
+        source_capacity_kw=1,
+        target_capacity_kw=2,
+        factor=2,
+        authorized_by=system.admin,
+        authorization_reference="Same model at twice the capacity",
+        created_at=collected,
+    )
+
+
+def _populated(
+    system: System, plant: Plant, data_source: Source, first: date
+) -> list[CalibrationRun]:
+    """Production on every day to `LAST` and the source's data: two saved forecasts a day, or
+    satellite data on an earlier location for the first five days and normalized copies on the
+    current one after them, with three calibrations whose production evidence comes from
+    EPİAŞ; returns the calibrations."""
     days = [first + timedelta(days=offset) for offset in range((LAST - first).days + 1)]
     for day in days:
         _production(system, plant, day, 30)
@@ -116,26 +221,25 @@ def _populated(system: System, plant: Plant, data_source: Source, first: date) -
                         system, day, power_kw=power, collected_at=start - timedelta(hours=hours)
                     )
                 )
-        return
+        return []
     earlier = _other_location(system, plant, local_day_bounds(days[5], "Europe/Istanbul")[0])
     configuration = PlantConfiguration.objects.get(plant=plant, revision=1)
     for offset, day in enumerate(days):
-        location = earlier if offset < 5 else system
-        _, end = local_day_bounds(day, location.binding.timezone)
-        estimated_actuals(location, day, 0.4, end + timedelta(hours=1))
-    EpiasConnection.objects.create(
-        plant=plant,
-        provider_plant_id=2,
-        settlement_plant_id=77,
-        eic="EIC",
-        name="Plant",
-        connected_by=system.member,
-    )
+        if offset < 5:
+            _, end = local_day_bounds(day, earlier.binding.timezone)
+            estimated_actuals(earlier, day, 0.4, end + timedelta(hours=1))
+        else:
+            _normalized_actuals(system, earlier, day)
+    epias = _connection(system, plant)
+    runs = []
     for offset, training in enumerate((days[5], days[35], days[65])):
         run = activated_calibration(
             system, configuration, 0.9, training, NOW - timedelta(days=3 - offset)
         )
-        CalibrationRun.objects.filter(pk=run.pk).update(production_snapshot_ids=[offset + 1])
+        evidence = _evidence(epias, training)
+        CalibrationRun.objects.filter(pk=run.pk).update(production_snapshot_ids=[evidence.pk])
+        runs.append(run)
+    return runs
 
 
 @pytest.mark.parametrize("data_source", SOURCES)
@@ -316,8 +420,8 @@ def test_a_populated_range_is_read_within_a_fixed_number_of_queries(
 ) -> None:
     system, plant = make_plant(monkeypatch)
     first = LAST - timedelta(days=89)
-    _populated(system, plant, data_source, first)
-    counts = {}
+    runs = _populated(system, plant, data_source, first)
+    counts, calibrations = {}, {}
     for start in (first, LAST - timedelta(days=9)):
         with CaptureQueriesContext(connection) as queries:
             result = production_comparison(
@@ -325,9 +429,46 @@ def test_a_populated_range_is_read_within_a_fixed_number_of_queries(
             )
         assert result["matched_days"] == result["requested_days"]
         counts[result["requested_days"]] = len(queries)
+        calibrations[result["requested_days"]] = {day["calibration_id"] for day in result["days"]}
 
     assert counts[90] <= QUERY_CEILINGS[data_source]
     assert counts[10] <= QUERY_CEILINGS[data_source]
+    if data_source == "satellite":
+        assert calibrations[90] == {None, *(run.pk for run in runs)}
+        assert calibrations[10] == {runs[-1].pk}
+
+
+def test_a_calibration_naming_another_plants_evidence_is_not_used_and_that_row_never_loaded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    other = _other_plant(system)
+    _, end = local_day_bounds(DAY, system.binding.timezone)
+    estimated_actuals(system, DAY, 0.4, end + timedelta(hours=1))
+    _production(system, plant, DAY, 30)
+    assert plant.current_configuration is not None
+    run = activated_calibration(
+        system, plant.current_configuration, 0.8, DAY - timedelta(days=6), NOW - timedelta(days=1)
+    )
+    own = _evidence(_connection(system, plant), DAY - timedelta(days=6))
+    foreign = _evidence(_connection(system, other, 3), DAY - timedelta(days=6))
+    CalibrationRun.objects.filter(pk=run.pk).update(production_snapshot_ids=[own.pk, foreign.pk])
+    loaded: list[int] = []
+
+    def record(instance: EpiasSnapshot, **_: object) -> None:
+        loaded.append(instance.pk)
+
+    post_init.connect(record, sender=EpiasSnapshot)
+    try:
+        [day] = production_comparison(plant, start_date=DAY, end_date=DAY, data_source="satellite")[
+            "days"
+        ]
+    finally:
+        post_init.disconnect(record, sender=EpiasSnapshot)
+
+    assert (day["status"], day["calibration_id"]) == ("matched", None)
+    assert foreign.pk not in loaded
+    assert own.pk in loaded
 
 
 def test_the_comparison_keeps_its_access_rules_and_date_range(

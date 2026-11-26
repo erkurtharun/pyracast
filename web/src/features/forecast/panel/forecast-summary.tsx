@@ -15,6 +15,7 @@ import {
     dayEnergy,
     forecastFetchedAt,
     hasFlag,
+    shownFetch,
     type ForecastResult,
     type OutageScenario,
     type ProductionDiagnostic,
@@ -103,6 +104,7 @@ export function ForecastSummary({
                             forecastExport(plant, forecast, rows, {
                                 electrical,
                                 scenario: Boolean(scenario),
+                                fetchedAt: shownFetch(forecast),
                                 names: {
                                     file: t(
                                         electrical

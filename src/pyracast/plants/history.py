@@ -150,10 +150,10 @@ def _plant_outlook(
     require_resolution(resolution_minutes)
     today = plant_today(plant, now)
     policy = plant_policy(source, target_date, today)
-    if not plant_days_include(policy, target_date, today):
-        raise _outside(policy)
     if mode == "best" and policy is not Policy.DAY_AHEAD:
         raise ValidationError({"selection_mode": [UNEXPECTED]})
+    if not plant_days_include(policy, target_date, today):
+        raise _outside(policy)
     match policy:
         case Policy.LIVE_ACTUALS:
             answer = current_forecast(plant, target_date, resolution_minutes, now, actuals="only")

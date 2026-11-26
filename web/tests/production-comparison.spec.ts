@@ -1,5 +1,5 @@
 import { expect, test } from "./support/test";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { accessibilityViolations } from "./support/accessibility";
 import {
     accountWith,
@@ -162,6 +162,31 @@ test("available satellite data days appear without empty grid rows", async ({
     expect(
         await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(320);
+});
+
+test("the two dates and the button sit on one line with the range's limit under them", async ({
+    page,
+}) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await mockApi(page);
+    const comparison = await openComparison(page);
+    const start = comparison.getByLabel("Start date");
+    const end = comparison.getByLabel("End date");
+    const limit = comparison.getByText("Up to 90 days.", { exact: true });
+    await expect(start).toHaveAccessibleDescription("Up to 90 days.");
+    await expect(end).toHaveAccessibleDescription("Up to 90 days.");
+    await expect(limit).toHaveCount(1);
+
+    const box = async (element: Locator) => (await element.boundingBox())!;
+    const bottom = async (element: Locator) => {
+        const { y, height } = await box(element);
+        return y + height;
+    };
+    const show = comparison.getByRole("button", { name: "Show", exact: true });
+    const line = await bottom(start);
+    expect(await bottom(end)).toBeCloseTo(line, 0);
+    expect(await bottom(show)).toBeCloseTo(line, 0);
+    expect((await box(limit)).y).toBeGreaterThanOrEqual(line);
 });
 
 test("the comparison offers the forecast screen's two data names in Turkish", async ({

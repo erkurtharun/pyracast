@@ -69,7 +69,7 @@
         "error_mwh": "{mode, select, satellite {Satellite data − actual (MWh)} other {Forecast − actual (MWh)}}",
         "provisional_production": "Real-time (EPİAŞ)",
         "matched": "Compared",
-        "daylight_rules": "Up to 90 days.",
+        "range_limit": "Up to 90 days.",
         "daily_comparison": "Days compared ({count, number})",
         "date_range": "{mode} · {start} – {end}",
         "unavailable_dates": "Days not compared ({count, number})",
