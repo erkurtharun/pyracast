@@ -308,40 +308,6 @@ def test_tomorrow_leads_with_two_grouped_decimals_and_today_follows(
 
 
 @pytest.mark.parametrize(
-    ("language", "preheader"),
-    [
-        ("en", "Tomorrow 2.50\u00a0MWh · Today 1.25\u00a0MWh"),
-        ("tr", "Yar\u0131n 2,50\u00a0MWh · Bugün 1,25\u00a0MWh"),
-    ],
-)
-def test_the_preheader_carries_both_totals_and_hides_the_rest_of_the_preview(
-    language: str, preheader: str
-) -> None:
-    html = rendered(context(payload()), language)["html"]
-    hidden = html.index('<div aria-hidden="true"')
-    assert html.index("<body") < hidden < html.index("<table")
-    assert f">{preheader}&#847;&zwnj;&nbsp;&#847;" in html
-
-
-@pytest.mark.parametrize(
-    ("tomorrow", "today", "language", "preheader"),
-    [
-        ("incomplete", "figure", "en", ">Tomorrow&#x27;s forecast is incomplete · Today 2.50"),
-        ("missing", "figure", "en", ">No forecast for tomorrow · Today 2.50"),
-        ("figure", "missing", "en", ">Tomorrow 2.50\u00a0MWh&#847;"),
-        ("incomplete", "missing", "tr", ">Yar\u0131n\u0131n tahmini eksik&#847;"),
-        ("missing", "incomplete", "tr", ">Yar\u0131n\u0131n tahmini haz\u0131rlanamad\u0131&#847;"),
-    ],
-)
-def test_the_preheader_leaves_out_a_day_without_a_total(
-    tomorrow: str, today: str, language: str, preheader: str
-) -> None:
-    days = {"figure": payload(), "incomplete": payload(missing=True), "missing": empty()}
-    message = rendered(context(days[tomorrow], today=days[today]), language)
-    assert preheader in message["html"]
-
-
-@pytest.mark.parametrize(
     ("kind", "language", "subject"),
     [
         ("usual", "en", "Example solar plant: forecast for Mon 16 Nov"),
@@ -578,9 +544,11 @@ def test_the_mail_follows_the_frame_and_stays_small() -> None:
     assert "text-transform" not in html
     assert "#475569" not in html
     assert ">Hourly values are in the attached Excel file.</p>" in html
-    assert 'class="mail-button" bgcolor="#09383a" style="mso-padding-alt:12px 22px;' in html
-    assert 'text-align:center;">\n    <a href="' in html
-    assert 'style="display:block;padding:12px 22px;' in html
+    assert 'class="mail-button"' not in html
+    assert (
+        f'<a href="{PLANT_URL}?date=2026-11-16" style="font-family:Arial,Helvetica,sans-serif;'
+        'font-size:16px;color:#09383a;text-decoration:underline;">Open forecast in Pyracast</a>'
+    ) in html
 
 
 @pytest.mark.parametrize(
@@ -639,15 +607,12 @@ def stored_cells(message: dict[str, str], references: tuple[str, ...]) -> list[s
 
 
 @pytest.mark.parametrize(
-    ("language", "figure", "without", "preheader"),
-    [
-        ("en", "24.13", "30.13", "Tomorrow 24.13\u00a0MWh · Today 1.25\u00a0MWh"),
-        ("tr", "24,13", "30,13", "Yar\u0131n 24,13\u00a0MWh · Bugün 1,25\u00a0MWh"),
-    ],
+    ("language", "figure", "without"),
+    [("en", "24.13", "30.13"), ("tr", "24,13", "30,13")],
 )
 @pytest.mark.parametrize("below", [False, True], ids=["half cent", "just below half cent"])
 def test_a_half_cent_rounds_up_in_the_mail_as_the_file_displays_it(
-    language: str, figure: str, without: str, preheader: str, below: bool
+    language: str, figure: str, without: str, below: bool
 ) -> None:
     tomorrow, outage = (nextafter(value, 0) if below else value for value in (24.125, 30.125))
     source = context(payload(total=outage), payload(total=tomorrow), status="estimated")
@@ -657,7 +622,6 @@ def test_a_half_cent_rounds_up_in_the_mail_as_the_file_displays_it(
     assert f"{figure} MWh" in message["body"]
     assert f"{without}\u00a0MWh." in message["html"]
     assert f"{without} MWh." in message["body"]
-    assert f">{preheader}&#847;" in message["html"]
     book = load_workbook(BytesIO(b64decode(message["attachment_base64"])))
     summary = book.worksheets[0]
     assert [summary.cell(11, column).value for column in (3, 4)] == [24.125, 30.125]

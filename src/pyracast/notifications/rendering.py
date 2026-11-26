@@ -120,19 +120,6 @@ def _day(day: ReportDay, word: str, unit: str) -> dict[str, object]:
     }
 
 
-def _preheader(report: ForecastReport) -> str:
-    today, tomorrow = (figure(day) for day in report.days)
-    if tomorrow.value is not None:
-        parts = [f"{_('Tomorrow')} {_amount(tomorrow.value, report.unit, NBSP)}"]
-    elif tomorrow.gap == "incomplete":
-        parts = [_("Tomorrow's forecast is incomplete")]
-    else:
-        parts = [_("No forecast for tomorrow")]
-    if today.value is not None:
-        parts.append(f"{_('Today')} {_amount(today.value, report.unit, NBSP)}")
-    return " · ".join(parts)
-
-
 def _data_line(report: ForecastReport) -> str:
     if report.collected_at is None:
         return ""
@@ -151,7 +138,6 @@ def render_no_forecast(
         "heading": heading,
         "kind": kind,
         "plant": plant,
-        "preheader": _("No forecast for tomorrow"),
         "no_data": no_forecast_sentence(tomorrow),
         "action_label": _("Open plant in Pyracast"),
         "url": mail.plant_url,
@@ -196,7 +182,6 @@ def render_forecast(
         "heading": heading,
         "kind": kind_line(report.electrical),
         "plant": report.plant_name,
-        "preheader": _preheader(report),
         "days": days,
         "unit": report.unit,
         "stale": _("Newer forecast data was not available.") if report.stale else "",

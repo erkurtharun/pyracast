@@ -1,3 +1,4 @@
+import re
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -267,6 +268,13 @@ def mailboxes(message: ParsedMessage, name: str) -> list[str]:
     """The addr-spec of every mailbox the standard library's parser reads in the header."""
     header = message[name]
     return [] if header is None else [address.addr_spec for address in header.addresses]
+
+
+ABSENT_HEADERS = ("List-Unsubscribe", "List-Unsubscribe-Post", "List-Id", "Precedence", "Reply-To")
+
+
+def links(html: str) -> list[str]:
+    return re.findall(r'href="([^"]*)"', html)
 
 
 LOCAL_MAIL = {"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}

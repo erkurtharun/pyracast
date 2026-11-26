@@ -13,13 +13,11 @@ msgstr "Desteklenen bir hatırlatıcı dili seçilmelidir."
 
 #, python-format
 msgid ""
-"You receive this email because an administrator of %(workspace)s added your "
-"address to the forecast emails of %(plant)s. To stop receiving it, ask a "
-"workspace administrator to remove your address."
+"Forecast email of %(plant)s in %(workspace)s. The workspace's administrators "
+"manage who receives it."
 msgstr ""
-"Bu e-postayı, %(workspace)s çalışma alanının bir yöneticisi adresinizi "
-"%(plant)s tahmin e-postalarına eklediği için alıyorsunuz. Almak istemiyorsanız "
-"çalışma alanı yöneticisinden adresinizin çıkarılmasını isteyin."
+"%(workspace)s çalışma alanındaki %(plant)s santralinin tahmin e-postası. "
+"Alıcıları çalışma alanı yöneticileri belirler."
 
 msgctxt "forecast mail day"
 msgid "D j M Y"
@@ -80,12 +78,6 @@ msgstr "Yarın"
 
 msgid "Today"
 msgstr "Bugün"
-
-msgid "Tomorrow's forecast is incomplete"
-msgstr "Yarının tahmini eksik"
-
-msgid "No forecast for tomorrow"
-msgstr "Yarının tahmini hazırlanamadı"
 
 #, python-format
 msgid "Includes the recorded outage. Without it: %(energy)s."

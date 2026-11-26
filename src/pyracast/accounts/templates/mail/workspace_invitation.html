@@ -1,7 +1,6 @@
 {% extends "mail/base.html" %}{% load i18n %}
 {% block title %}{% translate "Workspace invitation" %}{% endblock %}
 {% block label %}{% translate "Pyracast workspace invitation" %}{% endblock %}
-{% block preheader %}{% blocktranslate %}You are invited to {{ workspace }}.{% endblocktranslate %}{% endblock %}
 {% block content %}
 <h1 style="font-family:Arial,Helvetica,sans-serif;margin:0 0 16px;font-size:22px;line-height:1.3;">{% translate "Workspace invitation" %}</h1>
 <p style="font-family:Arial,Helvetica,sans-serif;margin:0 0 12px;">{% blocktranslate %}You are invited to {{ workspace }}.{% endblocktranslate %}</p>

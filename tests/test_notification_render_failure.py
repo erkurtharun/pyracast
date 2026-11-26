@@ -71,9 +71,8 @@ def test_a_broken_html_template_still_sends_the_same_frozen_plain_notice_on_retr
         "The forecast for Wednesday 11 November 2026 could not be prepared. This email contains "
         "no figures.\n\nOpen plant in Pyracast:\n"
         f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/w/{region.tenant_id}/plants/{region.pk}/forecast/"
-        "\n\n--\nYou receive this email because an administrator of Tenant added your address "
-        "to the forecast emails of Site. To stop receiving it, ask a workspace administrator to "
-        "remove your address."
+        "\n\n--\nForecast email of Site in Tenant. The workspace's administrators manage who "
+        "receives it."
     )
     load = loader.get_template
 

@@ -38,10 +38,12 @@ from pyracast.regions.models import AuditEvent
 from tests.support.domain import NOW, System, make_system
 from tests.support.notification_groups import member
 from tests.support.notifications import (
+    ABSENT_HEADERS,
     SENDER,
     SLOT,
     chosen,
     confirmed_put,
+    links,
     mailboxes,
     moved,
     parsed,
@@ -361,10 +363,9 @@ AUTOMATIC = {
 
 def assert_automatic(message: WireMessage) -> None:
     assert {name: message[name] for name in AUTOMATIC} == AUTOMATIC
-    assert message["List-Unsubscribe"] == "<mailto:reminders@example.com?subject=unsubscribe>"
     assert message["Message-ID"].startswith("<reminder.")
-    for name in ("In-Reply-To", "References", "Thread-Topic", "Thread-Index"):
-        assert message[name] is None
+    for name in ("In-Reply-To", "References", "Thread-Topic", "Thread-Index", *ABSENT_HEADERS):
+        assert message[name] is None, name
 
 
 SHAPES = {
@@ -397,11 +398,7 @@ NO_FIGURES = (
     "The forecast for Wednesday 11 November 2026 could not be prepared. "
     "This email contains no figures."
 )
-FOOTER = (
-    "You receive this email because an administrator of Tenant added your address to the "
-    "forecast emails of Site. To stop receiving it, ask a workspace administrator to remove "
-    "your address."
-)
+FOOTER = "Forecast email of Site in Tenant. The workspace's administrators manage who receives it."
 
 
 def expected_text(system: System, shape: str) -> str:
@@ -432,6 +429,11 @@ def assert_shape(message: WireMessage, shape: str, system: System) -> None:
     body = message.get_body(("plain",))
     assert body is not None
     assert body.get_content().replace("\r\n", "\n") == expected_text(system, shape)
+    html = message.get_body(("html",))
+    if html is not None:
+        hrefs = links(html.get_content())
+        assert 1 <= len(hrefs) <= 2
+        assert all(href.startswith("https://testserver/app/") for href in hrefs), hrefs
 
 
 @pytestdb

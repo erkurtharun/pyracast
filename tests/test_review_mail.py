@@ -32,6 +32,7 @@ from pyracast.regions.operations import submit_region
 from tests.support.account_mail import TIME_FORMATS, TURKIYE
 from tests.support.api import verified_admin
 from tests.support.domain import FakeAdapter, System, make_system
+from tests.support.notifications import ABSENT_HEADERS, links
 from tests.support.outbox import deliver_mail
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -550,6 +551,22 @@ def test_a_decision_mail_lists_the_plant_its_workspace_and_the_plant_time_in_bot
             escape(footer),
         ],
     )
+
+
+def test_a_decision_mail_carries_no_list_header_and_links_the_plant_once_as_text(
+    recorder: type[Recorder],
+) -> None:
+    system = plant_system()
+    approve(system)
+    assert deliver_mail() == 1
+
+    (message,) = recorder.sent
+    wire = message.message()
+    assert [name for name in ABSENT_HEADERS if wire[name] is not None] == []
+    html = str(cast(EmailMultiAlternatives, message).alternatives[0][0])
+    plant = f"{ORIGIN}/app/w/{system.tenant.pk}/plants/{system.region.pk}/forecast/"
+    assert links(html) == [plant]
+    assert 'class="mail-button"' not in html
 
 
 def test_the_role_mails_say_which_role_each_person_now_has(recorder: type[Recorder]) -> None:
