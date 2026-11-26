@@ -1,5 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from pyracast.forecasts.selection import (
     ForecastOption,
     automatic_selection,
@@ -9,6 +11,7 @@ from pyracast.forecasts.selection import (
     manual_selection,
     offers_later_fetches,
 )
+from pyracast.forecasts.sources import supplying_fetches
 
 SUNRISE = datetime(2026, 11, 7, 4, tzinfo=UTC)
 
@@ -105,3 +108,35 @@ def test_the_approval_fetch_and_fetches_before_the_previous_sunrise_are_not_day_
     assert is_day_ahead(SUNRISE, SUNRISE, by_approval=False)
     assert not is_day_ahead(SUNRISE - timedelta(seconds=1), SUNRISE, by_approval=False)
     assert not is_day_ahead(SUNRISE + timedelta(hours=6), SUNRISE, by_approval=True)
+
+
+COLLECTED = "2026-11-07T07:00:00+00:00"
+
+
+def test_the_fetches_an_answer_shows_are_read_from_its_provenance() -> None:
+    members = [
+        {"snapshot_id": 1, "collected_at": COLLECTED},
+        {"snapshot_id": 2, "collected_at": COLLECTED, "source_kind": "satellite"},
+    ]
+
+    shown = supplying_fetches({"provenance": {"source_snapshots": members}})
+    single = supplying_fetches({"provenance": members[0]})
+
+    assert [fetch.forecast_id for fetch in shown] == [1]
+    assert [fetch.forecast_id for fetch in single] == [1]
+    assert shown[0].fetched_at == datetime(2026, 11, 7, 7, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        None,
+        {"provenance": None},
+        {"provenance": {"source_snapshots": [None]}},
+        {"provenance": {"snapshot_id": 1}},
+        {"provenance": {"snapshot_id": "1", "collected_at": COLLECTED}},
+        {"provenance": {"snapshot_id": 1, "collected_at": "not a time"}},
+    ],
+)
+def test_an_answer_whose_provenance_cannot_be_read_shows_no_fetch(result: object) -> None:
+    assert supplying_fetches(result) == ()
