@@ -76,7 +76,7 @@ sequenceDiagram
 |---|---|
 | Wrong code, or rate limited (`login_failed` under `mfa-auth-user-<pk>`: 5 per 10 min and 100 per day; no per-client allowance for enrolment) | 400, message on `code`; checked after the confirmation. A refusal by the limit keeps no slot; a refused code check after the limit writes `second_factor_locked` |
 | No confirmation on GET or POST totp | 401 with the strongest factor's flow; the UI asks, and an activation then asks for a fresh code instead of replaying |
-| No MFA proof on DELETE totp or recovery codes | 401 `mfa_reauthentication_required`, message "Confirm with your authenticator to continue."; password proof of an account with an authenticator is refused 403 at the reauthentication |
+| No MFA proof on DELETE totp or recovery codes | 401 `mfa_reauthentication_required`, message "Enter your authenticator code or a recovery code."; password proof of an account with an authenticator is refused 403 at the reauthentication |
 | Staff GET, POST or DELETE totp | 403 |
 | Unverified address | 409 on GET totp, 400 on POST totp |
 | Stored secret cannot be read | 403 `permission_denied`; line `mfa_secret_unreadable` |

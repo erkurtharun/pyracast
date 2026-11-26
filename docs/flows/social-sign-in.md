@@ -4,7 +4,7 @@ An anonymous visitor on the `/app/` sign-in screen clicks a provider button; a n
 
 ## Entry points
 
-- Screen: `web/src/features/auth/auth.tsx` `Auth` (rendered by `RequireUser` when the session has no user) with `social-provider-buttons.tsx` `SocialProviderButtons` (`process="login"`, modes `login` and `register`) and `useSocialProviders`. Mode `socialSignup` is the completion form; its exit "Use another sign-in method" ends the pending provider login on the server (`DELETE auth/session`). On return `Auth` strips the callback marker and calls `completeProviderLogin`; a signed-in browser is sent to the account page by `features/session/entry.tsx` (flow `linked-accounts`).
+- Screen: `web/src/features/auth/auth.tsx` `Auth` (rendered by `RequireUser` when the session has no user) with `social-provider-buttons.tsx` `SocialProviderButtons` ("Sign in with Google" or "Sign in with Microsoft" in mode `login`, "Sign up with ..." in mode `register`; both post `process=login`) and `useSocialProviders`. Mode `socialSignup` is the completion form; its exit "Use another sign-in method" ends the pending provider login on the server (`DELETE auth/session`). On return `Auth` strips the callback marker and calls `completeProviderLogin`; a signed-in browser is sent to the account page by `features/session/entry.tsx` (flow `linked-accounts`).
 - Workspace return: `web/src/features/auth/provider-return.ts`. A provider sign-in started at an address under `/app/w/` keeps that path and query in the tab's `sessionStorage` (`pyracast.providerReturn`) when the provider form is submitted (a submission elsewhere only removes it), and the provider return reads and removes it. Only a value that begins with `/app/w/`, has no `..` segment (also encoded), backslash or control character and stays at most 2,000 characters, also as the parsed same-origin path and query, is written or read (`localPath` in `web/src/lib/routes.ts`). The return holds it in memory; a step answered authenticated (completion, second factor, provider sign-up) confirms it, and the address replaces `/app/` just before the document reloads for the new session, so the session read keeps `/app/` until then; a stored invitation wins. A failed or refused return, a failed session read, email verification, the ordinary form and "Use another sign-in method" drop it; a write that throws leaves no value, so the start address chooses. While a successful return completes, `Auth` shows the launch card.
 - `GET /api/auth/browser/v1/config` -> allauth `ConfigView` (provider list through `SocialAccountAdapter.list_providers` and `list_apps`; a failed request hides the buttons silently).
 - `POST /api/auth/browser/v1/auth/provider/redirect` (form-encoded native post, shared with `linked-accounts`) -> `pyracast.accounts.social_views.RedirectToProviderView`.
@@ -24,7 +24,7 @@ sequenceDiagram
     participant D as PostgreSQL
     W->>V: "GET config"
     V-->>W: "providers with environment credentials"
-    U->>W: "Continue with Google or Microsoft"
+    U->>W: "Sign in with Google or Microsoft (Sign up with ... on the registration screen)"
     W->>V: "form POST auth/provider/redirect process=login"
     alt "callback_url is not the pinned public URL, unknown provider or invalid process"
         V-->>U: "302 app with error=invalid_request"

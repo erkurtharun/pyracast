@@ -13,6 +13,7 @@ All routes live in `PlatformAdminSite.get_urls` (`pyracast.platform_admin.site`)
 - `GET|POST .../invitations/new/` -> `new_invitation` -> `InvitationForm.apply` -> `accounts.invitations.invite_workspace_member(platform=True)`; `POST .../invitations/{i}/reissue/` and `.../revocation/` -> `invitation_reissue`, `invitation_revocation` -> `reissue_workspace_invitation`, `revoke_workspace_invitation`.
 - `GET|POST .../members/{user}/removal/` -> `member_removal` (confirmation page) -> `accounts.operations.remove_workspace_member(platform=True)`.
 - Elsewhere: `.../administrator/` (`workspace-admin-reassignment`), `.../plants/new/` (`site-onboarding`).
+- Labels: roles read "Workspace administrator" and "Member"; invitation delivery reads Sending, Sent, Not sent or Not known whether sent; the actions read "Withdraw" and "Remove from workspace"; an empty workspace list says only "No workspaces yet."
 - Templates: `tenants.html`, `workspace_new.html`, `tenant.html`, `workspace_name.html`, `invitation_new.html`, `member_removal.html` in `pyracast/regions/templates/admin/workspace/`.
 
 ## Sequence

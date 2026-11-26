@@ -4,8 +4,8 @@ The workspace administrator opens the Inbox, lists pending, decided or own chang
 
 ## Entry points
 
-- `web/src/features/workspace/workspace-shell.tsx` shows the Inbox nav item to every member with a badge of `pending_review_count` (admin only) plus `unread_outcome_count` from `GET /api/tenants/` (`pyracast.api.views.TenantsView`, polled every 120 s; see `workspace-switching`). The Inbox route (`workspace-pages.tsx`) renders `web/src/features/inbox/operational-inbox.tsx` `OperationalInbox` at `/app/w/<tenant>/inbox/`, keyed by tenant id and role. After a decision `OperationalInbox` refetches the workspace queries (`useRefresh().workspace`), counters included.
-- `OperationalInbox` -> its list component `InboxPage` -> `RequestDetail` (with `ProductionProposal`, `IncidentProposal`). Admins pick scope `pending`, `history` or `mine`; members are forced to `mine`.
+- `web/src/features/workspace/workspace-shell.tsx` shows the Inbox nav item to every member, with a count and the accessible name "Inbox, {unread} unread, {pending} to review" (each part only above zero) from `pending_review_count` (admin only) and `unread_outcome_count` from `GET /api/tenants/` (`pyracast.api.views.TenantsView`, polled every 120 s; see `workspace-switching`). The Inbox route (`workspace-pages.tsx`) renders `web/src/features/inbox/operational-inbox.tsx` `OperationalInbox` at `/app/w/<tenant>/inbox/`, keyed by tenant id and role. After a decision `OperationalInbox` refetches the workspace queries (`useRefresh().workspace`), counters included.
+- `OperationalInbox` -> its list component `InboxPage` -> `RequestDetail` (with `ProductionProposal`, `IncidentProposal`). Admins pick scope `pending`, `history` or `mine`; members are forced to `mine`. The detail shows "Requested value", "Value when sent", "Value at decision" and "Current value", "Approve" and "Withdraw change request", with no configuration id and no withdraw help; a revert reads "Use EPİAŞ value ({value})" or "Remove entered value" with "The interval will have no value.".
 - `GET /api/tenants/{t}/change-requests/?scope=&page=` -> `pyracast.change_requests.api.InboxView` (`queries.inbox`, `queries.request_summaries`), polled every 30 s. The optional `plant_id` filter is sent only by `OwnPendingRequests` (`change-request-submission`).
 - `GET /api/tenants/{t}/change-requests/{q}/` -> `DetailView` (`queries.request_detail`), fetched when Details opens and on "Refresh details"; not polled.
 - `POST .../{q}/approve/ {review_fingerprint}` -> `ApproveView` (`operations.approve_request`). Actor: workspace administrator.
@@ -101,7 +101,7 @@ Rejection takes the Tenant, Region, Plant and ChangeRequest locks and the same s
 | Not signed in | 401 `not_authenticated` with `WWW-Authenticate: Session` |
 | POST without a valid CSRF token | 403 `csrf_failed` |
 | Not a member of the tenant (GET or POST), platform staff included | 403 `membership_required` |
-| Viewer posts approve or reject | 403 `workspace_admin_required`, "Workspace administrator required." |
+| Viewer posts approve or reject | 403 `workspace_admin_required`, "Only the workspace administrator can do this." |
 | Request in another tenant, another member's request, location in the trash | 404 `not_found` |
 | `page` past the last page or not a number | 404 `not_found`; the pager stays, so Previous works |
 | Unknown query or body field, bad `scope`, `plant_id` below 1, missing or over-long `review_fingerprint`, blank or over-long reject reason | 400 `invalid_request` |

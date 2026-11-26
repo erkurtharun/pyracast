@@ -6,7 +6,7 @@ A verified platform administrator opens the Django admin console, browses worksp
 
 - `GET /admin/workspaces/` -> `pyracast.platform_admin.tenant_views.workspaces` -> `pyracast.platform_admin.tenants.tenant_list_context`. Query `q` (trimmed to 200 characters) matches the workspace name or a member's email; `needs_administrator=1` keeps workspaces without an active administrator; `page` selects 20-row pages.
 - `GET /admin/workspaces/{id}/` -> `tenant_views.workspace`: read-only; each active member links to the form with `?member=` preselected.
-- `GET|POST /admin/workspaces/{id}/administrator/` -> `tenant_views.workspace_administrator` -> `WorkspaceAdministratorForm.apply` -> `pyracast.accounts.operations.reassign_workspace_admin`. POST fields: `administrator` (user id), hidden `expected_admin_id`. The page lists the consequences (`reassignment_impact`): who becomes a viewer, which plants lose automatic calibration, which invitations are revoked.
+- `GET|POST /admin/workspaces/{id}/administrator/` -> `tenant_views.workspace_administrator` -> `WorkspaceAdministratorForm.apply` -> `pyracast.accounts.operations.reassign_workspace_admin`. POST fields: `administrator` (user id), hidden `expected_admin_id`. The page lists the consequences (`reassignment_impact`): who becomes a member ("New role of {member}: Member"), which plants lose automatic calibration, which invitations are revoked.
 - Actor: active staff superuser with authenticator evidence in the session. Routes live in `PlatformAdminSite.get_urls`, mounted at `admin/` in `pyracast.urls`. No command, script or background trigger.
 
 ## Sequence
@@ -84,7 +84,7 @@ sequenceDiagram
 | `administrator` missing, inactive, or not a member of this tenant; non-integer `expected_admin_id` | 400, field error, form re-rendered |
 | Target deactivated or removed between form check and lock | 400, "Choose an active member of this workspace." |
 | Target already administrator (checked before the stale check) | 302, "<member> is already the workspace administrator.", nothing written |
-| `expected_admin_id` differs from stored admin (blank counts as none) | 400, "The workspace administrator changed. Reload before saving." with a reload link |
+| `expected_admin_id` differs from stored admin (blank counts as none) | 400, "The workspace administrator changed. Reload the page and try again." with a reload link |
 | Lock timeout (5 s), deadlock or statement timeout | Nothing saved; retry message and redirect to the referring console page; JSON callers get 503 |
 | Session already running another request | 503 page, `Retry-After: 1`; a write is never replayed |
 | Tenant deleted between view lookup and lock (abandoned-signup reclaim only) | Unhandled `Tenant.DoesNotExist`, 500 |

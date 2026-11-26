@@ -90,6 +90,7 @@ sequenceDiagram
 
 ## Rules and invariants
 
+- Leave guard (`frontend-data-layer`): a change the server confirmed (2xx, or the 401 with `meta.password_changed`) stops asking before the session is read again; a 401 asking for reauthentication hands the change to the confirmation prompt (`web/src/features/account/account-security.tsx` `changePassword`).
 - The success response is deliberately a 401: the session is gone. Only `ChangePasswordView.post` adds `meta.password_changed`, and `post` runs after validation, so the flag cannot appear on an expiry or reauthentication 401.
 - `processes.credential_write` runs the whole change in one transaction that first locks the account's rows (the order of `account_state`) before any session row, so it is ordered with every revocation and credential change of the account. The mail intent, the revocation and the hash commit together.
 - Set versus change is decided server side from the account as locked: `current_password` is required exactly when `has_usable_password()` is true; an empty one means "set" and queues `password_set` instead of `password_changed`.

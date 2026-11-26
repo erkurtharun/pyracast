@@ -4,9 +4,9 @@ A workspace administrator submits an email address on the Members screen. The ba
 
 ## Entry points
 
-- `web/src/features/workspace/workspace-members.tsx` `WorkspaceMembers` at `/app/w/<tenant>/members/` (administrators only) composes `web/src/features/workspace/members/invite-member.tsx` `InviteMember` (form and the `plants_at_recipient_limit` warning) and `web/src/features/workspace/members/pending-invitations.tsx` `PendingInvitations` (state, delivery hints, "Send again", "Cancel invitation").
+- `web/src/features/workspace/workspace-members.tsx` `WorkspaceMembers` at `/app/w/<tenant>/members/` (administrators only) composes `web/src/features/workspace/members/invite-member.tsx` `InviteMember` ("Invite member", and the `plants_at_recipient_limit` warning) and `web/src/features/workspace/members/pending-invitations.tsx` `PendingInvitations` (state, delivery hints, "Send again", "Withdraw invitation").
 - `GET|POST /api/tenants/{t}/invitations/` -> `pyracast.api.workspaces.WorkspaceInvitationsView`; `DELETE .../invitations/{i}/` -> `WorkspaceInvitationView`; `POST .../invitations/{i}/resend/` -> `WorkspaceInvitationResendView` (`src/pyracast/urls.py`). Actor: workspace administrator. They call `pyracast.accounts.invitations.invite_workspace_member`, `reissue_workspace_invitation` and `revoke_workspace_invitation`, as does the platform console with `platform=True` (`/admin/workspaces/{id}/invitations/...`, `pyracast.platform_admin.tenant_views`) and workspace creation, which can invite the first administrator.
-- Mail templates `src/pyracast/accounts/templates/mail/workspace_invitation.txt` and `.html`. The intent is an `OutboundMail` row; the `send_outbound_mail` actor (`pyracast.notifications.outbox`) sends through `pyracast.mail.send.send` (flow `email-transport`).
+- Mail templates `src/pyracast/accounts/templates/mail/workspace_invitation.txt` and `.html`: the mail lists "Invited role" and "Invitation expires" (the stored deadline in Türkiye time with its offset). The intent is an `OutboundMail` row; the `send_outbound_mail` actor (`pyracast.notifications.outbox`) sends through `pyracast.mail.send.send` (flow `email-transport`).
 
 ## Sequence
 
@@ -40,7 +40,7 @@ sequenceDiagram
     UI->>V: "GET invitations/ (refetch after each action)"
     V->>DB: "open invitations, newest first"
     V-->>UI: "200 invitations"
-    A->>UI: "Send again or Cancel invitation"
+    A->>UI: "Send again or Withdraw invitation"
     UI->>V: "POST invitations/{i}/resend/ or DELETE invitations/{i}/"
     V->>Op: "reissue_workspace_invitation or revoke_workspace_invitation"
     Op->>DB: "lock tenant, check admin; resend invites the same address again, cancel locks the row and stores revoked_at"
@@ -72,11 +72,11 @@ sequenceDiagram
 | Missing or wrong CSRF token (`POST`, `DELETE`) | 403 `csrf_failed` |
 | Foreign tenant, any method | 403 `membership_required` |
 | Viewer, any method | 403 `workspace_admin_required` |
-| Unknown JSON field such as `role`, an address that is not plain (`InvitationInput.validate_email`, `accounts.addresses.plain_address`) | 400 `invalid_request` with "Unknown fields are not accepted." or the field error "Enter a valid email address."; nothing is created. `invite_workspace_member` refuses it too, on the stripped, lower-cased value it stores, so the console's invitation and workspace-creation forms show it as a form error |
+| Unknown JSON field such as `role`, an address that is not plain (`InvitationInput.validate_email`, `accounts.addresses.plain_address`) | 400 `invalid_request` with "Something went wrong. Try again." or the field error "Enter a valid email address."; nothing is created. `invite_workspace_member` refuses it too, on the stripped, lower-cased value it stores, so the console's invitation and workspace-creation forms show it as a form error |
 | Email already a member (case-insensitive, inactive users included) | 400 `invitation_member_exists` |
 | A budget is used up (see Rules) | 429 `invitation_rate_limited`, `Retry-After` equal to the wait of the largest violated budget |
 | Row lock not acquired within 5 s; same-session request still running after 5 s | 503 `busy` / 429 `session_busy`, both `Retry-After: 1` |
-| Cancel or resend with an unknown id, another tenant's id or an accepted invitation; resend of a closed one | 400 `invitation_unavailable` |
+| Cancel or resend with an unknown id, another tenant's id or an accepted invitation; resend of a closed one | 400 `invitation_unavailable`; for an invitation accepted meanwhile "This invitation was already accepted. Reload the list." |
 | Cancel of an invitation already cancelled or superseded | 204, nothing changes |
 | Mail not sent or not confirmed | Still 201; the worker ends the intent with `failed` or `uncertain` |
 

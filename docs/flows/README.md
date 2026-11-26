@@ -81,7 +81,7 @@ sections and a row here.
 | Flow | Covers |
 | --- | --- |
 | [calibration-run](calibration-run.md) | Prepare or request a calibration run and fit it in a worker |
-| [calibration-activation](calibration-activation.md) | Review calibration runs, activate one or reset to baseline |
+| [calibration-activation](calibration-activation.md) | Review calibrations, use one or use forecasts without calibration |
 | [calibration-automation](calibration-automation.md) | Automatic calibration: toggle, daily check and promotion |
 
 ## Outages
@@ -94,7 +94,7 @@ sections and a row here.
 
 | Flow | Covers |
 | --- | --- |
-| [reminder-configuration](reminder-configuration.md) | Configure forecast email reminders for a site |
+| [reminder-configuration](reminder-configuration.md) | Configure the forecast email of a site |
 | [reminder-delivery](reminder-delivery.md) | Schedule, prepare and send forecast reminder emails |
 
 ## Configuration and lifecycle
