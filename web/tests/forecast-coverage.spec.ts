@@ -342,10 +342,11 @@ test("outage comparison CSV writes both scenarios per interval without provenanc
     const download = await downloadPromise;
     const csv = await readFile(await download.path(), "utf8");
     const [header, row] = csv.replace(/^\uFEFF/, "").split("\r\n");
-    expect(header).toContain('"normal_mean_power_mw","normal_energy_mwh"');
-    expect(header).not.toContain("snapshot");
+    expect(header).toBe(
+        '"Plant","Data","Start","End","Without outage (MWh)","With outage (MWh)","Average power without outage (MW)","Average power with outage (MW)"',
+    );
     expect(row).toContain(
-        '"2026-11-11T07:00:00+03:00","2026-11-11T07:30:00+03:00",1,0.5',
+        '"Forecast","2026-11-11T07:00:00+03:00","2026-11-11T07:30:00+03:00",0.5,0.5,1,1',
     );
 });
 
@@ -466,9 +467,9 @@ for (const state of [
             await (await downloadPromise).path(),
             "utf8",
         );
-        expect(csv).toContain("mean_power_mw");
+        expect(csv).toContain('"Average power (MW)"');
         expect(csv).not.toContain("production_diagnostic");
-        expect(csv).not.toContain("affected_energy_mwh");
+        expect(csv).not.toContain("With outage");
         expect(csv).not.toContain("derating_scenario");
     });
 }

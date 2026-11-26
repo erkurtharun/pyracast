@@ -453,12 +453,14 @@ test("all translated messages are valid ICU and preserve keys and interpolation 
 test("CSV validation is localized while ISO timestamps, units and values remain unchanged", () => {
     const csv =
         "starts_at,ends_at,energy_kwh,quality,source\n2026-01-01T09:00:00+03:00,2026-01-01T10:00:00+03:00,1234.5,valid,meter";
-    expect(parseProduction(csv, csvTexts("tr"))).toEqual(
-        parseProduction(csv, csvTexts("en")),
+    expect(parseProduction(csv, ...csvTexts("tr"))).toEqual(
+        parseProduction(csv, ...csvTexts("en")),
     );
     expect(() =>
-        parseProduction(csv.replace("1234.5", "-1"), csvTexts("tr")),
-    ).toThrow("Satır 2: enerjiyi sıfır veya pozitif bir sayı olarak yazın.");
+        parseProduction(csv.replace("1234.5", "-1"), ...csvTexts("tr")),
+    ).toThrow(
+        "Satır 2: energy_kwh sütununa sıfır veya pozitif bir sayı yazın.",
+    );
 });
 
 test("Turkish plant search and capacity formatting follow the selected language", async ({

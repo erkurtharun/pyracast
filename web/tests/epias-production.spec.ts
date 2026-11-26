@@ -100,6 +100,7 @@ async function productionApi(page: Page, viewer = false) {
                                   starts_at,
                                   ends_at,
                                   energy_mwh: energy,
+                                  quality: "valid",
                                   source_kind: "settlement_injection",
                                   snapshot_id: 1,
                                   collected_at: "2026-11-10T00:00:00Z",
@@ -313,16 +314,15 @@ test("actual production defaults to generation hours and full day restores every
         { header: true, skipEmptyLines: true },
     ).data;
     expect(records).toHaveLength(23);
-    expect(records.map((record) => record.starts_at)).not.toContain(
+    expect(records.map((record) => record.Start)).not.toContain(
         "2026-11-09T08:00:00+03:00",
     );
     expect(records[0]).toEqual({
-        starts_at: "2026-11-09T00:00:00+03:00",
-        ends_at: "2026-11-09T01:00:00+03:00",
-        energy_mwh: "0",
-        quality: "valid",
-        source: "epias",
-        timezone: region.timezone,
+        Start: "2026-11-09T00:00:00+03:00",
+        End: "2026-11-09T01:00:00+03:00",
+        "Actual (MWh)": "0",
+        Status: "Normal",
+        Source: "UEVM",
     });
 });
 
@@ -1157,6 +1157,7 @@ test("native timeline preserves half-hour and offset-hour corrections with their
             starts_at: at(start),
             ends_at: at(end),
             energy_mwh: energy,
+            quality: "valid",
             source_kind: "settlement_injection",
             snapshot_id,
         });
@@ -1385,8 +1386,8 @@ test("a saved correction cannot be exported before the day it changed is reloade
     ).data;
     expect(
         records.find(
-            (record) => record.starts_at === "2026-11-09T08:00:00+03:00",
-        )?.energy_mwh,
+            (record) => record.Start === "2026-11-09T08:00:00+03:00",
+        )?.["Actual (MWh)"],
     ).toBe("2.5");
 });
 
@@ -1457,6 +1458,151 @@ test("source details keep the cached source with a retry when its refresh fails"
         .click();
     await expect(failure).toHaveCount(0);
     await expect(details.getByText("G4-BOR-1 GES · Connected")).toBeVisible();
+});
+
+for (const [language, texts] of [
+    [
+        "en",
+        {
+            tab: "Production",
+            download: "Download CSV",
+            import: "Import CSV",
+            file: "CSV file",
+            read: "corrected.csv · 1 row read",
+            preview: "Preview",
+            curtailed: "Production curtailed",
+        },
+    ],
+    [
+        "tr",
+        {
+            tab: "Üretim",
+            download: "CSV indir",
+            import: "CSV içe aktar",
+            file: "CSV dosyası",
+            read: "corrected.csv · 1 satır okundu",
+            preview: "Önizle",
+            curtailed: "Üretim kısıldı",
+        },
+    ],
+] as const)
+    test(`a production file downloaded in ${language} is imported again after a value is corrected`, async ({
+        page,
+    }) => {
+        const state = await productionApi(page);
+        if (language === "tr") {
+            state.account.current = accountWith({ language_preference: "tr" });
+            await page.route("**/api/session/", (route) =>
+                route.fulfill({
+                    json: {
+                        ...sessionIdentity(state.account.current),
+                        language: "tr",
+                    },
+                }),
+            );
+        }
+        let observations: unknown;
+        await page.route("**/production/preview/", (route) => {
+            observations = route.request().postDataJSON().observations;
+            return route.fulfill({
+                json: { changes: [], preview: [], warnings: [] },
+            });
+        });
+        await page.goto("/app/");
+        await page
+            .getByRole("button", { name: /East array|Antalya solar park/ })
+            .click();
+        await page
+            .getByRole("button", { name: texts.tab, exact: true })
+            .click();
+        const download = page.waitForEvent("download");
+        await page.getByRole("button", { name: texts.download }).click();
+        const lines = (
+            await readFile(await (await download).path(), "utf8")
+        ).split("\r\n");
+        const hour = lines.find((line) =>
+            line.startsWith('"2026-11-09T10:00:00+03:00"'),
+        )!;
+        const corrected = hour
+            .replace(",1,", ",1.5,")
+            .replace('"Normal"', `"${texts.curtailed}"`);
+        expect(corrected).not.toBe(hour);
+        await page.getByRole("button", { name: texts.import }).click();
+        await page.getByLabel(texts.file, { exact: true }).setInputFiles({
+            name: "corrected.csv",
+            mimeType: "text/csv",
+            buffer: Buffer.from([lines[0], corrected].join("\r\n")),
+        });
+        await expect(page.getByText(texts.read)).toBeVisible();
+        await page
+            .getByRole("button", { name: texts.preview, exact: true })
+            .click();
+        await expect
+            .poll(() => observations)
+            .toEqual([
+                {
+                    starts_at: "2026-11-09T10:00:00+03:00",
+                    ends_at: "2026-11-09T11:00:00+03:00",
+                    energy: 1.5,
+                    quality: "curtailed",
+                    source: "UEVM",
+                },
+            ]);
+    });
+
+test("a file in the screen's language or with earlier column names is read while the other language's column names cannot be loaded", async ({
+    page,
+}) => {
+    await productionApi(page);
+    const turkish = "**/_next/static/**/*.js";
+    await page.route(turkish, async (route) => {
+        const response = await route.fetch();
+        const body = await response.text();
+        if (body.includes("Tahminlerde kalibrasyon kullanma"))
+            return route.abort("internetdisconnected");
+        return route.fulfill({ response, body });
+    });
+    await openProduction(page);
+    await page.getByRole("button", { name: "Import CSV", exact: true }).click();
+    const file = page.getByLabel("CSV file", { exact: true });
+    const half = "2026-11-09T08:00:00+03:00,2026-11-09T08:30:00+03:00,0.25";
+    const choose = (name: string, text: string) =>
+        file.setInputFiles({
+            name,
+            mimeType: "text/csv",
+            buffer: Buffer.from(text),
+        });
+    await choose("empty.csv", "");
+    await expect(
+        page.getByText(
+            "Use the columns of a file downloaded under Actual production: Start, End, Actual (MWh), Status and Source.",
+        ),
+    ).toBeVisible();
+    for (const [name, text] of [
+        [
+            "earlier.csv",
+            `starts_at,ends_at,energy_mwh,quality,source\n${half},valid,meter`,
+        ],
+        [
+            "english.csv",
+            `Start,End,Actual (MWh),Status,Source\n${half},Normal,Entered`,
+        ],
+    ] as const) {
+        await choose(name, text);
+        await expect(page.getByText(`${name} · 1 row read`)).toBeVisible();
+    }
+    const turkishFile = `Başlangıç,Bitiş,Gerçekleşen (MWh),Durum,Kaynak\n${half},Normal,Girilen`;
+    await choose("turkish.csv", turkishFile);
+    await expect(
+        page.getByText(
+            "The names of the other language could not be loaded. Try again.",
+        ),
+    ).toBeVisible();
+    await page.unroute(turkish);
+    await choose("turkish-again.csv", turkishFile);
+    await expect(
+        page.getByText("turkish-again.csv · 1 row read"),
+    ).toBeVisible();
 });
 
 test("Turkish production at 320px keeps native corrections, decimal commas and import review usable", async ({

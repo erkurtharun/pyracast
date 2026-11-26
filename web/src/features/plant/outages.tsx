@@ -66,6 +66,7 @@ export function Outages({
     configuration?: Configuration | null;
 }) {
     const t = useTranslations("Outages");
+    const csvFile = useTranslations("CsvFile");
     const reason = useCodeLabel("Outages.proposalReasons");
     const label = useLabel();
     const proposals = useTranslations("ChangeRequests");
@@ -309,7 +310,11 @@ export function Outages({
                                     label={t("downloadOutagesCSV")}
                                     pending={reloads > 0}
                                     build={() =>
-                                        outagesExport(plant, list.results)
+                                        outagesExport(
+                                            plant,
+                                            list.results,
+                                            csvFile("files.outages"),
+                                        )
                                     }
                                 />
                             </div>

@@ -158,6 +158,7 @@ export function CalibrationRunDetail({
                         plant,
                         run,
                         t("detail_file", { id: run.id }),
+                        inUse,
                     )
                 }
             />
