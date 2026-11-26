@@ -47,8 +47,17 @@ def _quoted(value: str) -> str:
     return '"' + _clean(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def _quarters(character: str) -> int:
+    if character in "MWmw@":
+        return 6
+    return 5 if character.isupper() else 4
+
+
 def _lines(text: str, characters: int) -> int:
-    return sum(len(wrap(line, characters)) or 1 for line in text.split("\n"))
+    return sum(
+        len(wrap("".join(c * _quarters(c) for c in line), characters * 4)) or 1
+        for line in text.split("\n")
+    )
 
 
 def _row(

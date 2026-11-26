@@ -390,6 +390,36 @@ def test_a_long_plant_name_wraps_in_a_row_tall_enough_to_show_it(name: str, line
     assert min(409, lines * 18) <= sheet.row_dimensions[1].height <= 409
 
 
+def _title_height(name: str) -> float:
+    return cast(float, _sheet(replace(_report(), plant_name=name)).row_dimensions[1].height)
+
+
+def test_a_name_of_wide_letters_gets_a_taller_title_row_than_one_of_narrow_letters() -> None:
+    assert _title_height("W" * 100) > _title_height("i" * 100)
+    assert _title_height("W" * 100) >= 6 * 19
+
+
+@pytest.mark.parametrize(
+    ("name", "lines"),
+    [
+        ("KARAMAN GÜNEŞ ENERJİSİ ÜRETİM SANTRALİ MERKEZ", 2),
+        ("WESTMOOR MEADOW WIND AND SOLAR POWER PARK", 2),
+    ],
+    ids=["turkish capitals", "english capitals"],
+)
+def test_a_long_name_in_capitals_gets_the_lines_it_needs(name: str, lines: int) -> None:
+    assert _title_height(name) >= lines * 19
+
+
+def test_a_short_name_keeps_a_one_line_title_row() -> None:
+    assert _title_height("North plant") == 23
+    assert _title_height("NORTH PLANT") == 23
+
+
+def test_a_very_long_name_of_wide_letters_stops_at_the_tallest_row() -> None:
+    assert _title_height("W" * 2000) == 409
+
+
 def test_values_keep_full_precision_and_a_missing_value_is_never_zero() -> None:
     precise = _day(TODAY, 1234567.891234, intervals=(_interval(10, 1234.5678912),))
     sheet = _sheet(_report(precise, _day(TOMORROW, None, coverage=0)))
