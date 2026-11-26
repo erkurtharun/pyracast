@@ -9,9 +9,10 @@ from pyracast.forecasts.selection import (
     automatic_selection,
     day_options,
     is_day_ahead,
+    live_selection,
     offers_later_fetches,
 )
-from pyracast.forecasts.sources import LaterFetches, later_fetches
+from pyracast.forecasts.sources import LaterFetches, later_fetches, supplying_fetches
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.automatic_forecast import automatic_forecast
 from pyracast.plants.current_forecast import current_forecast
@@ -43,7 +44,7 @@ def forecast_outlook(
         return _chosen_outlook(plant, target_date, resolution_minutes, forecasts, forecast_id, now)
     if policy is Policy.DAY_AHEAD:
         production = production_total(plant, target_date, now)
-        selection = automatic_selection(day, forecasts.options, production)
+        selection = automatic_selection(forecasts.options, production)
         chosen = forecasts.issuances.get(selection.forecast_id) if selection.forecast_id else None
         answer = (
             issuance_outlook(plant, chosen, target_date, resolution_minutes, now)
@@ -51,9 +52,9 @@ def forecast_outlook(
             else missing_forecast(plant, target_date, now)
         )
         return answer | {"selection": selection}
-    selection = automatic_selection(day, forecasts.options, None)
     answer = automatic_forecast(plant, target_date, resolution_minutes, now)
-    return answer | {"selection": selection}
+    suppliers = supplying_fetches(answer["result"])
+    return answer | {"selection": live_selection(forecasts.options, suppliers)}
 
 
 def _chosen_outlook(
@@ -65,10 +66,10 @@ def _chosen_outlook(
     now: datetime,
 ) -> dict[str, object]:
     selection = chosen_forecast(forecasts.options, forecast_id)
-    known_at = forecasts.later.known_at.get(forecast_id)
+    later = forecasts.later.fetches.get(forecast_id)
     answer = (
-        current_forecast(plant, target_date, resolution_minutes, now, known_at=known_at)
-        if known_at is not None
+        current_forecast(plant, target_date, resolution_minutes, now, chosen=later)
+        if later is not None
         else issuance_outlook(
             plant, forecasts.issuances[forecast_id], target_date, resolution_minutes, now
         )
@@ -81,12 +82,13 @@ def _day_forecasts(
 ) -> DayForecasts:
     saved = day_issuances(plant, target_date, now)
     later = _later_fetches(plant, target_date, now) if offers_later_fetches(day) else LaterFetches()
+    bindings = {
+        issuance.configuration.binding_id: issuance.configuration.binding for issuance, _ in saved
+    }
     previous_day = target_date - timedelta(days=1)
     previous_sunrise = {
-        issuance.configuration.binding_id: forecast_cutoff(
-            previous_day, issuance.configuration.binding
-        )
-        for issuance, _ in saved
+        binding_id: forecast_cutoff(previous_day, binding)
+        for binding_id, binding in bindings.items()
     }
     options = (
         ForecastOption(

@@ -5,10 +5,12 @@ from zoneinfo import ZoneInfo
 import pytest
 from django.test import Client
 
+from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
 from pyracast.forecasts.timing import approval_job
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
+from pyracast.plants.forecast_archive import forecast_cutoff
 from pyracast.plants.models import Plant, ProductionObservation
 from pyracast.plants.performance import forecast_performance
 from tests.support.domain import System
@@ -264,10 +266,12 @@ def test_a_forecast_that_is_not_an_option_of_the_day_or_comes_with_satellite_is_
 ) -> None:
     system, plant = make_plant(monkeypatch)
     fetches = _owners_example(system)
+    other_day = _fetch(system, _at(DAY - timedelta(days=3), 4), 0.40, day=DAY - timedelta(days=3))
     client = _client(system)
 
     for path in (_plant_path(system, plant), _region_path(system)):
         queries: tuple[dict[str, str | int], ...] = (
+            {"forecast_id": other_day.pk},
             {"forecast_id": fetches["day 10:00"].pk},
             {"forecast_id": fetches["day 04:00"].pk, "data_source": "satellite"},
         )
@@ -294,6 +298,63 @@ def test_today_shows_the_newest_fetch_and_a_chosen_later_fetch_without_satellite
         assert _shown(chosen) == ("manual", None, later.pk)
         assert chosen["source_kind"] == "forecast"
         assert chosen["result"]["provenance"]["snapshot_id"] == later.pk
+
+
+def test_today_offers_a_fetch_collected_before_sunrise_and_published_after_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    client = _client(system)
+    published: dict[date, ForecastSnapshot] = {}
+    for day in (DAY, TODAY):
+        sunrise = forecast_cutoff(day, system.binding)
+        published[day] = publish_snapshot(
+            snapshot_for(system, day, collected_at=sunrise - timedelta(minutes=30)),
+            published_at=sunrise + timedelta(minutes=30),
+        )
+
+    for path in (_plant_path(system, plant), _region_path(system)):
+        today = _read(client, path, TODAY)
+        chosen = _read(client, path, TODAY, forecast_id=published[TODAY].pk)
+        assert _ids(today) == [published[TODAY].pk]
+        assert _shown(chosen) == ("manual", None, published[TODAY].pk)
+        assert _ids(_read(client, path)) == []
+
+
+def test_a_chosen_later_fetch_is_never_answered_by_a_fetch_collected_after_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    earlier = snapshot_for(system, TODAY, power_kw=0.40, collected_at=_at(TODAY, 10))
+    later = snapshot_for(
+        system, TODAY, power_kw=0.46, collected_at=_at(TODAY, 10) + timedelta(minutes=1)
+    )
+    publish_snapshot(later, published_at=_at(TODAY, 10) + timedelta(minutes=5))
+    publish_snapshot(earlier, published_at=_at(TODAY, 10) + timedelta(minutes=10))
+    client = _client(system)
+
+    for path in (_plant_path(system, plant), _region_path(system)):
+        chosen = _read(client, path, TODAY, forecast_id=earlier.pk)
+        assert _shown(chosen) == ("manual", None, earlier.pk)
+        assert chosen["result"]["provenance"]["snapshot_id"] == earlier.pk
+        assert later.pk not in chosen["result"]["provenance"]["source_snapshot_ids"]
+
+
+def test_the_previous_sunrise_is_computed_once_per_configuration_of_the_day(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    _owners_example(system)
+    days: list[date] = []
+
+    def counted(day: date, binding: SiteBinding) -> datetime:
+        days.append(day)
+        return forecast_cutoff(day, binding)
+
+    monkeypatch.setattr("pyracast.plants.forecast_choice.forecast_cutoff", counted)
+    _read(_client(system), _plant_path(system, plant))
+
+    assert days.count(PREVIOUS) == 1
 
 
 def test_a_past_day_never_offers_or_shows_a_fetch_made_after_its_sunrise(

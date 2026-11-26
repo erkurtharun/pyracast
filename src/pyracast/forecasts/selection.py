@@ -8,6 +8,8 @@ type SelectionMode = Literal["auto", "manual"]
 type SelectionRule = Literal["closest_to_production", "latest"]
 SELECTION_MODES: tuple[str, ...] = get_args(SelectionMode.__value__)
 SELECTION_RULES: tuple[str, ...] = get_args(SelectionRule.__value__)
+# Distances to production are compared to the watt-hour, so float noise never decides a tie.
+DISTANCE_DECIMALS = 6
 
 
 @dataclass(frozen=True)
@@ -56,16 +58,28 @@ def day_options(
 
 
 def automatic_selection(
-    day: Day, options: tuple[ForecastOption, ...], production_mwh: float | None
+    options: tuple[ForecastOption, ...], production_mwh: float | None
 ) -> ForecastSelection:
-    """`options` come newest first, as `day_options` returns them."""
-    if day != "past":
-        return _auto(options, "latest", _newest(options))
+    """A past day's choice; `options` come newest first, as `day_options` returns them."""
     eligible = tuple(option for option in options if option.day_ahead)
     closest = _closest(eligible, production_mwh)
     if closest is not None:
         return _auto(options, "closest_to_production", closest)
     return _auto(options, "latest", _newest(eligible) or _newest(options))
+
+
+def live_selection(
+    options: tuple[ForecastOption, ...], suppliers: Iterable[ForecastOption]
+) -> ForecastSelection:
+    """Today and later days name the newest fetch that supplied the shown figures, when the day
+    offers it."""
+    newest = max(
+        suppliers, key=lambda option: (option.fetched_at, option.forecast_id), default=None
+    )
+    offered = newest is not None and any(
+        option.forecast_id == newest.forecast_id for option in options
+    )
+    return _auto(options, "latest", newest if offered else None)
 
 
 def manual_selection(
@@ -82,7 +96,7 @@ def _closest(
     if production_mwh is None:
         return None
     distances = [
-        (abs(option.total_mwh - production_mwh), option)
+        (round(abs(option.total_mwh - production_mwh), DISTANCE_DECIMALS), option)
         for option in options
         if option.total_mwh is not None
     ]

@@ -154,11 +154,14 @@ def test_forecast_reads_default_to_the_forecast(
     assert response.json()["selection"]["mode"] == "auto"
 
 
-def test_a_region_archive_whose_saved_payload_fails_validation_is_missing(
+def test_a_region_fetch_without_a_saved_result_for_the_day_is_neither_offered_nor_chosen(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, _ = make_plant(monkeypatch)
     start, _ = local_day_bounds(DAY, system.binding.timezone)
+    client = Client()
+    client.force_login(system.member)
+    older = publish_snapshot(snapshot_for(system, DAY, collected_at=start - timedelta(hours=5)))
     snapshot = snapshot_for(system, DAY, collected_at=start - timedelta(hours=3))
     snapshot.available_at = snapshot.collected_at
     stored_again(snapshot)
@@ -167,7 +170,13 @@ def test_a_region_archive_whose_saved_payload_fails_validation_is_missing(
     ForecastResult.objects.create(
         snapshot=snapshot, payload={"marker": "unvalidated"}, published_at=snapshot.collected_at
     )
-    client = Client()
-    client.force_login(system.member)
     body = _read(client, system, "forecast").json()
-    assert (body["freshness"], body["result"]) == ("missing", None)
+    assert body["freshness"] == "archived"
+    assert body["result"]["provenance"]["snapshot_id"] == older.pk
+    assert body["selection"]["forecast_id"] == older.pk
+    assert [option["forecast_id"] for option in body["selection"]["options"]] == [older.pk]
+    refused = client.get(
+        f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/",
+        {"date": str(DAY), "forecast_id": str(snapshot.pk)},
+    )
+    assert list(refused.json()["fields"]) == ["forecast_id"]

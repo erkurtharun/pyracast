@@ -1,6 +1,6 @@
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import cast
 
 from django.db.models import Q, QuerySet
@@ -14,11 +14,24 @@ from pyracast.irradiance import SourceKind
 
 
 @dataclass(frozen=True)
-class LaterFetches:
-    """Fetches made after a day's sunrise, with the moment each became known."""
+class LaterFetch:
+    forecast_id: int
+    collected_at: datetime
+    published_at: datetime
 
-    options: tuple[ForecastOption, ...] = ()
-    known_at: Mapping[int, datetime] = field(default_factory=dict)
+
+@dataclass(frozen=True)
+class LaterFetches:
+    """Fetches of a day collected or published from its sunrise on: no forecast saved before it
+    holds them."""
+
+    fetches: Mapping[int, LaterFetch] = field(default_factory=dict)
+
+    @property
+    def options(self) -> tuple[ForecastOption, ...]:
+        return tuple(
+            ForecastOption(fetch.forecast_id, fetch.collected_at) for fetch in self.fetches.values()
+        )
 
 
 def _known_forecasts(
@@ -41,25 +54,54 @@ def _known_forecasts(
 
 
 def current_forecast_snapshots(
-    *, binding_id: int, start: datetime, end: datetime, as_of: datetime
+    *,
+    binding_id: int,
+    start: datetime,
+    end: datetime,
+    as_of: datetime,
+    pinned: LaterFetch | None = None,
 ) -> list[ForecastSnapshot]:
-    return covering_snapshots(
-        _known_forecasts(binding_id, start, end, as_of).select_related("job"), start, end
-    )
+    """`pinned` answers as that fetch: only it and fetches collected before it take part."""
+    snapshots = _known_forecasts(binding_id, start, end, as_of).select_related("job")
+    if pinned is not None:
+        snapshots = snapshots.filter(
+            Q(collected_at__lt=pinned.collected_at) | Q(pk=pinned.forecast_id)
+        )
+    return covering_snapshots(snapshots, start, end)
 
 
 def later_fetches(
     binding_id: int, start: datetime, end: datetime, sunrise: datetime, now: datetime
 ) -> LaterFetches:
-    rows = list(
+    rows = (
         _known_forecasts(binding_id, start, end, now)
-        .filter(collected_at__gte=sunrise)
+        .filter(Q(collected_at__gte=sunrise) | Q(forecastresult__published_at__gte=sunrise))
         .values_list("pk", "collected_at", "forecastresult__published_at")
     )
-    return LaterFetches(
-        tuple(ForecastOption(pk, collected_at) for pk, collected_at, _ in rows),
-        {pk: published_at for pk, _, published_at in rows},
-    )
+    return LaterFetches({row[0]: LaterFetch(*row) for row in rows})
+
+
+def supplying_fetches(result: object) -> tuple[ForecastOption, ...]:
+    """The forecast fetches whose figures an answer's result shows, as its provenance names them;
+    none when a saved provenance cannot be read."""
+    provenance = result.get("provenance") if isinstance(result, Mapping) else None
+    if not isinstance(provenance, Mapping):
+        return ()
+    try:
+        return tuple(
+            _supplier(source)
+            for source in provenance.get("source_snapshots", [provenance])
+            if source.get("source_kind", "forecast") == "forecast"
+        )
+    except AttributeError, KeyError, OverflowError, TypeError, ValueError:
+        return ()
+
+
+def _supplier(source: Mapping[str, object]) -> ForecastOption:
+    identifier, collected_at = source["snapshot_id"], source["collected_at"]
+    if not isinstance(identifier, int) or not isinstance(collected_at, str):
+        raise TypeError("A supplying fetch needs an integer id and a collection time")
+    return ForecastOption(identifier, datetime.fromisoformat(collected_at).astimezone(UTC))
 
 
 def covering_ids(

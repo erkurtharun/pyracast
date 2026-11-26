@@ -35,6 +35,7 @@ from pyracast.forecasts.models import (
 from pyracast.forecasts.projections import saved_day_payload
 from pyracast.forecasts.selection import ForecastOption, is_day_ahead
 from pyracast.forecasts.sources import (
+    LaterFetch,
     LaterFetches,
     current_forecast_snapshots,
     later_fetches,
@@ -180,9 +181,13 @@ def saved_region_results(region: Region, target_date: date, now: datetime) -> Sa
                 snapshot__issued_at__lte=F("snapshot__collected_at"),
             )
         )
+    saved_for_day = Q(daily_payloads__has_key=target_date.isoformat()) | Q(
+        payload__local_date=target_date.isoformat()
+    )
     rows = list(
         ForecastResult.objects.filter(
             eligible,
+            saved_for_day,
             snapshot__source_kind=SnapshotSourceKind.FORECAST,
             snapshot__job__status=CollectionJobStatus.SUCCEEDED,
             snapshot__coverage_start__lt=end,
@@ -299,13 +304,14 @@ def regional_composed_forecast(
     binding: SiteBinding | None,
     *,
     actuals: ActualsMode = "none",
+    pinned: LaterFetch | None = None,
 ) -> dict[str, object]:
     actuals_only = actuals == "only"
     start, end = local_day_bounds(target_date, binding.timezone if binding else region.timezone)
     snapshots: list[ForecastSnapshot] = []
     if binding is not None:
         snapshots = current_forecast_snapshots(
-            binding_id=binding.pk, start=start, end=end, as_of=cutoff
+            binding_id=binding.pk, start=start, end=end, as_of=cutoff, pinned=pinned
         )
     with stored_data("region", region.pk, target_date, "actuals", FROZEN_PAYLOAD_FAULTS):
         source = (

@@ -163,6 +163,7 @@ def test_region_current_forecast_never_reads_a_superseded_binding(
     assert result["freshness"] == "missing"
     assert result["result"] is None
     assert result["unavailable_reason"] == "forecast_unavailable"
+    assert result["selection"]["forecast_id"] is None
 
 
 @pytest.mark.parametrize("change", ["old_contribution", "invalid_binding"])

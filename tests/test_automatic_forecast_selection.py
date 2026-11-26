@@ -26,9 +26,15 @@ def test_today_automatic_uses_complete_original_forecast_after_reference_transit
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     count = RequestAttempt.objects.count()
     automatic = plant_outlook(*scope, target_date=DAY, resolution_minutes=60)
-    newest = cast(ForecastSelection, automatic["selection"]).options[0].forecast_id
+    selection = cast(ForecastSelection, automatic["selection"])
+    newest = selection.options[0].forecast_id
     current = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, forecast_id=newest)
+    named = plant_outlook(
+        *scope, target_date=DAY, resolution_minutes=60, forecast_id=selection.forecast_id
+    )
     assert cast(dict[str, Any], current["result"])["coverage_fraction"] == pytest.approx(1 / 6)
+    assert selection.forecast_id == old_id
+    assert cast(dict[str, Any], named["result"])["energy_mwh"] == pytest.approx(312)
     result = cast(dict[str, Any], automatic["result"])
     assert automatic["source_kind"] == "forecast"
     assert result["complete"] is True

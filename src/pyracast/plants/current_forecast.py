@@ -9,7 +9,7 @@ from pyracast.forecasts.intraday import (
     prepare_intraday_source,
 )
 from pyracast.forecasts.models import ForecastSnapshot
-from pyracast.forecasts.sources import current_forecast_snapshots
+from pyracast.forecasts.sources import LaterFetch, current_forecast_snapshots
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_sources import SELECTION_POLICY, apply_composition, compose_snapshots
 from pyracast.plants.forecasting import calibration_at, forecast_payload
@@ -26,9 +26,9 @@ def current_forecast(
     now: datetime,
     *,
     actuals: ActualsMode = "none",
-    known_at: datetime | None = None,
+    chosen: LaterFetch | None = None,
 ) -> dict[str, object]:
-    """`known_at` answers the forecast known at that moment, as a chosen fetch of today."""
+    """`chosen` answers a chosen fetch of today as it was known at its publication."""
     configuration = (
         PlantConfiguration.objects.select_related("binding__provider_account")
         .filter(pk=plant.current_configuration_id, plant=plant, created_at__lte=now)
@@ -42,10 +42,10 @@ def current_forecast(
         plant,
         target_date,
         resolution_minutes,
-        known_at or now,
         now,
         configuration,
         actuals=actuals,
+        chosen=chosen,
     )
 
 
@@ -53,12 +53,13 @@ def _composed_forecast(
     plant: Plant,
     target_date: date,
     resolution_minutes: int,
-    cutoff: datetime,
     now: datetime,
     configuration: PlantConfiguration | None,
     *,
     actuals: ActualsMode = "none",
+    chosen: LaterFetch | None = None,
 ) -> dict[str, object]:
+    cutoff = chosen.published_at if chosen is not None else now
     actuals_only = actuals == "only"
     snapshot = None
     calibration = None
@@ -69,7 +70,11 @@ def _composed_forecast(
     if configuration is not None:
         start, end = local_day_bounds(target_date, configuration.binding.timezone)
         snapshots = current_forecast_snapshots(
-            binding_id=configuration.binding_id, start=start, end=end, as_of=cutoff
+            binding_id=configuration.binding_id,
+            start=start,
+            end=end,
+            as_of=cutoff,
+            pinned=chosen,
         )
         with stored_data("plant", plant.pk, target_date, "actuals", FROZEN_PAYLOAD_FAULTS):
             source = (

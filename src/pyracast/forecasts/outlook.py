@@ -22,10 +22,11 @@ from pyracast.forecasts.selection import (
     automatic_selection,
     day_of,
     day_options,
+    live_selection,
     manual_selection,
     offers_later_fetches,
 )
-from pyracast.forecasts.sources import LaterFetches
+from pyracast.forecasts.sources import LaterFetches, supplying_fetches
 from pyracast.regions.models import Region
 
 type Source = Literal["forecast", "satellite"]
@@ -136,17 +137,22 @@ def _region_forecast(
     options = day_options(saved.options, later.options)
     if forecast_id is not None:
         selection = chosen_forecast(options, forecast_id)
-        known_at = later.known_at.get(forecast_id)
-        if known_at is None:
+        chosen = later.fetches.get(forecast_id)
+        if chosen is None:
             return _saved(region, target_date, saved, selection)
         answer = regional_composed_forecast(
-            region, target_date, known_at, now, region.approved_binding
+            region,
+            target_date,
+            chosen.published_at,
+            now,
+            region.approved_binding,
+            pinned=chosen,
         )
         return answer | {"selection": selection}
-    selection = automatic_selection(day, options, None)
     if policy is Policy.DAY_AHEAD:
-        return _saved(region, target_date, saved, selection)
-    return _live(region, target_date, now, policy) | {"selection": selection}
+        return _saved(region, target_date, saved, automatic_selection(options, None))
+    answer = _live(region, target_date, now, policy)
+    return answer | {"selection": live_selection(options, supplying_fetches(answer["result"]))}
 
 
 def _saved(

@@ -60,5 +60,7 @@ def test_a_chosen_forecast_replays_an_issuance_published_after_collection(
     assert original["result"]["provenance"]["collected_at"] == source.collected_at.isoformat()
     replay = client.get(path, {**query, "forecast_id": str(source.pk)})
     assert replay.status_code == 200
-    assert replay.json()["result"] == original["result"]
-    assert replay.json()["selection"]["mode"] == "manual"
+    replayed = replay.json()
+    assert replayed.pop("selection")["mode"] == "manual"
+    assert original.pop("selection")["mode"] == "auto"
+    assert replayed == original
