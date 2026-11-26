@@ -18,10 +18,12 @@ from pyracast.api.serializers import (
     IrradianceSummaryOutput,
     PlantName,
     SelectedForecastEnvelope,
+    SingleChoice,
 )
 from pyracast.change_requests.models import ProductionChangeAction
 from pyracast.errors import ENTER_A_VALUE, UNEXPECTED, ErrorCode
 from pyracast.forecasts.outlook import SOURCES
+from pyracast.forecasts.selection import REQUESTED_MODES
 from pyracast.plants.activation import ActivationBlocker, SelectionState, selection_state
 from pyracast.plants.automation_state import AutomationCause
 from pyracast.plants.day_reason import DayReason
@@ -328,7 +330,7 @@ class ProductionQuery(InputSerializer):
 class PerformanceQuery(InputSerializer):
     start_date = serializers.DateField(required=False)
     end_date = serializers.DateField(required=False)
-    data_source = serializers.ChoiceField(choices=SOURCES, default="forecast")
+    data_source = SingleChoice(choices=SOURCES, default="forecast")
 
 
 class PerformanceDay(serializers.Serializer[dict[str, Any]]):
@@ -549,6 +551,12 @@ class CalibrationAutomationOutput(serializers.Serializer[dict[str, Any]]):
 
 class PlantForecastQuery(ForecastQuery):
     resolution_minutes = serializers.ChoiceField(choices=(30, 60), default=30)
+    selection_mode = SingleChoice(choices=REQUESTED_MODES, required=False)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if "forecast_id" in attrs and "selection_mode" in attrs:
+            raise serializers.ValidationError({"selection_mode": [UNEXPECTED]})
+        return super().validate(attrs)
 
 
 class PowerIntervalOutput(serializers.Serializer[dict[str, Any]]):

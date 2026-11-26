@@ -4,10 +4,12 @@ from datetime import date, datetime
 from typing import Literal, get_args
 
 type Day = Literal["past", "today", "future"]
-type SelectionMode = Literal["auto", "manual"]
+type SelectionMode = Literal["auto", "best", "manual"]
+type RequestedMode = Literal["auto", "best"]
 type SelectionRule = Literal["closest_to_production", "latest"]
 SELECTION_MODES: tuple[str, ...] = get_args(SelectionMode.__value__)
 SELECTION_RULES: tuple[str, ...] = get_args(SelectionRule.__value__)
+REQUESTED_MODES: tuple[str, ...] = get_args(RequestedMode.__value__)
 # Distances to production are compared to the watt-hour, so float noise never decides a tie.
 DISTANCE_DECIMALS = 6
 
@@ -64,8 +66,18 @@ def automatic_selection(
     eligible = tuple(option for option in options if option.day_ahead)
     closest = _closest(eligible, production_mwh)
     if closest is not None:
-        return _auto(options, "closest_to_production", closest)
-    return _auto(options, "latest", _newest(eligible) or _newest(options))
+        return _selection("auto", options, "closest_to_production", closest)
+    return _selection("auto", options, "latest", _newest(eligible) or _newest(options))
+
+
+def best_selection(
+    options: tuple[ForecastOption, ...], production_mwh: float | None
+) -> ForecastSelection:
+    """A past day's best forecast: every saved option competes; `options` come newest first."""
+    closest = _closest(options, production_mwh)
+    if closest is not None:
+        return _selection("best", options, "closest_to_production", closest)
+    return _selection("best", options, "latest", _newest(options))
 
 
 def live_selection(
@@ -79,7 +91,7 @@ def live_selection(
     offered = newest is not None and any(
         option.forecast_id == newest.forecast_id for option in options
     )
-    return _auto(options, "latest", newest if offered else None)
+    return _selection("auto", options, "latest", newest if offered else None)
 
 
 def manual_selection(
@@ -108,7 +120,10 @@ def _newest(options: tuple[ForecastOption, ...]) -> ForecastOption | None:
     return options[0] if options else None
 
 
-def _auto(
-    options: tuple[ForecastOption, ...], rule: SelectionRule, shown: ForecastOption | None
+def _selection(
+    mode: SelectionMode,
+    options: tuple[ForecastOption, ...],
+    rule: SelectionRule,
+    shown: ForecastOption | None,
 ) -> ForecastSelection:
-    return ForecastSelection("auto", rule, shown.forecast_id if shown else None, options)
+    return ForecastSelection(mode, rule, shown.forecast_id if shown else None, options)

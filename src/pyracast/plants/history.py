@@ -1,6 +1,5 @@
 from datetime import UTC, date, datetime
 from typing import cast
-from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
@@ -14,11 +13,12 @@ from pyracast.forecasts.actuals import archived_actual_irradiance
 from pyracast.forecasts.faults import stored_data
 from pyracast.forecasts.history import ARCHIVED, historical_irradiance, result_state
 from pyracast.forecasts.outlook import Policy, is_source, plant_days_include, plant_policy
-from pyracast.forecasts.selection import day_of
+from pyracast.forecasts.selection import RequestedMode, day_of
 from pyracast.plants.current_forecast import current_forecast
 from pyracast.plants.forecast_choice import forecast_outlook
 from pyracast.plants.forecasting import require_resolution
 from pyracast.plants.models import Plant
+from pyracast.plants.production import plant_today
 from pyracast.plants.satellite_data import satellite_data, satellite_result
 from pyracast.regions.models import Region
 
@@ -33,6 +33,7 @@ def plant_outlook(
     resolution_minutes: int,
     source: str = "forecast",
     forecast_id: int | None = None,
+    mode: RequestedMode = "auto",
 ) -> dict[str, object]:
     from pyracast.plants.production_diagnostics import production_diagnostic
 
@@ -49,6 +50,7 @@ def plant_outlook(
                 resolution_minutes=resolution_minutes,
                 source=source,
                 forecast_id=forecast_id,
+                mode=mode,
                 now=now,
             )
             frozen = "outage_scenario" in result
@@ -67,6 +69,7 @@ def automatic_outlook(
         resolution_minutes=resolution_minutes,
         source="forecast",
         forecast_id=None,
+        mode="auto",
         now=now,
     )
     if "outage_scenario" not in result:
@@ -139,15 +142,18 @@ def _plant_outlook(
     resolution_minutes: int,
     source: str,
     forecast_id: int | None,
+    mode: RequestedMode,
     now: datetime,
 ) -> dict[str, object]:
     if not is_source(source):
         raise ValidationError(UNEXPECTED)
     require_resolution(resolution_minutes)
-    today = now.astimezone(ZoneInfo(plant.region.timezone)).date()
+    today = plant_today(plant, now)
     policy = plant_policy(source, target_date, today)
     if not plant_days_include(policy, target_date, today):
         raise _outside(policy)
+    if mode == "best" and policy is not Policy.DAY_AHEAD:
+        raise ValidationError({"selection_mode": [UNEXPECTED]})
     match policy:
         case Policy.LIVE_ACTUALS:
             answer = current_forecast(plant, target_date, resolution_minutes, now, actuals="only")
@@ -163,6 +169,7 @@ def _plant_outlook(
                 day=day_of(target_date, today),
                 policy=policy,
                 forecast_id=forecast_id,
+                mode=mode,
                 now=now,
             )
     return answer | {"selection": None}

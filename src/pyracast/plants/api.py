@@ -286,6 +286,7 @@ class PlantForecastView(ScopedView[Plant]):
             resolution_minutes=values["resolution_minutes"],
             source=values["data_source"],
             forecast_id=values.get("forecast_id"),
+            mode=values.get("selection_mode", "auto"),
         )
         return Response(PlantForecastOutput(result).data)
 

@@ -444,14 +444,19 @@ neither forecast power nor any capacity; only reported operating limits drive th
 ## Forecast evaluation
 
 The comparison endpoint ([forecast-performance](flows/forecast-performance.md)) compares 1 to 90
-completed local days within the past year. Each day's actual production is the day total the
+past days within the past year; like the forecast read it counts a plant's past days from its
+day in the region's zone (`plants.production.plant_today`), while each saved interval is read in
+the zone of the location that owns it. Each day's actual production is the day total the
 forecast screen uses (`manual-over-settlement-over-provisional-hour-v2`, complete daylight
 coverage required; a day resting on real-time readings is marked), and each day's figure is the
-one the forecast screen shows for that day and source in automatic mode, at 60 minutes:
+one the forecast screen shows for that day and source, at 60 minutes:
 
-- `forecast`: among the day's day-ahead saved forecasts, the one whose daylight total is nearest
-  to the actual production (the past-day rule of the forecast screen). A day without one is
-  `forecast_not_available`.
+- `forecast`: the best forecast (the screen's "Best forecast" choice): among every forecast saved
+  for the day before its sunrise, the approval fetch included, the one whose daylight total is
+  nearest to the actual production, the later fetch on a tie. A day without a saved forecast is
+  `forecast_not_available`; a day whose saved forecasts are all unreadable, or none has a complete
+  daylight total, is `invalid_forecast_data`. The screen's Automatic choice keeps the day-ahead rule
+  (nearest among the forecasts fetched since the previous day's sunrise).
 - `satellite`: the satellite data of the day, calibrated with the activated calibration whose
   training period had begun by that day (as the forecast screen shows it).
 

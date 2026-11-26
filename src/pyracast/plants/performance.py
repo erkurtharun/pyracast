@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -12,15 +11,15 @@ from pyracast.forecasts.outlook import Source
 from pyracast.plants.day_reason import DayReason
 from pyracast.plants.forecast_choice import (
     DayForecasts,
+    best_forecast,
     day_total,
-    past_day_forecast,
     saved_forecasts,
 )
 from pyracast.plants.models import Plant
 from pyracast.plants.production import (
     NativeProductionDay,
     native_production_days,
-    production_timezone,
+    plant_today,
 )
 from pyracast.plants.satellite_data import SatelliteData, satellite_data, satellite_result
 
@@ -44,22 +43,21 @@ def production_comparison(
     data_source: Source = "forecast",
 ) -> dict[str, Any]:
     """Each past day's production beside the figure the forecast screen shows for that day and
-    source in automatic mode."""
-    zone = production_timezone(plant)
+    source: the best saved forecast, or the satellite figure."""
     now = timezone.now()
-    first, last = _validated_range(start_date, end_date, now.astimezone(ZoneInfo(zone)).date())
+    first, last = _validated_range(start_date, end_date, plant_today(plant, now))
     with stored_data("plant", plant.pk, first, "production"):
-        production = native_production_days(plant, first, last, now).days
+        production = native_production_days(plant, first, last, now)
     figures = (
-        _forecast_figures(plant, first, last, production, now)
+        _forecast_figures(plant, first, last, production.days, now)
         if data_source == "forecast"
-        else _satellite_figures(plant, first, last, production, now)
+        else _satellite_figures(plant, first, last, production.days, now)
     )
-    days = [_day(row, figures[row.date]) for row in production]
+    days = [_day(row, figures[row.date]) for row in production.days]
     return {
         "plant_id": plant.pk,
         "configuration_id": plant.current_configuration_id,
-        "timezone": zone,
+        "timezone": production.timezone,
         "start_date": first,
         "end_date": last,
         "evaluated_at": now,
@@ -95,20 +93,15 @@ def _forecast_figures(
 
 
 def _forecast_figure(forecasts: DayForecasts, production_mwh: float | None) -> Figure:
-    selection, chosen = past_day_forecast(forecasts, production_mwh)
-    if chosen is None or selection.rule != "closest_to_production":
-        return Figure(
-            None,
-            DayReason.INVALID_FORECAST_DATA
-            if forecasts.unreadable
-            else DayReason.FORECAST_NOT_AVAILABLE,
-        )
-    total = next(
-        option.total_mwh
-        for option in forecasts.options
-        if option.forecast_id == selection.forecast_id
+    best = best_forecast(forecasts, production_mwh)
+    if isinstance(best.shown, DayReason):
+        return Figure(None, best.shown)
+    return Figure(
+        best.total_mwh,
+        DayReason.INVALID_FORECAST_DATA if best.total_mwh is None else None,
+        best.shown.snapshot_id,
+        best.shown.calibration_id,
     )
-    return Figure(total, forecast_id=chosen.snapshot_id, calibration_id=chosen.calibration_id)
 
 
 def _satellite_figures(

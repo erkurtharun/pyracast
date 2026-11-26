@@ -3222,10 +3222,11 @@ export interface components {
         };
         /**
          * @description * `auto` - auto
+         *     * `best` - best
          *     * `manual` - manual
          * @enum {string}
          */
-        SelectionModeEnum: "auto" | "manual";
+        SelectionModeEnum: "auto" | "best" | "manual";
         /**
          * @description * `closest_to_production` - closest_to_production
          *     * `latest` - latest
@@ -6051,6 +6052,11 @@ export interface operations {
                  *     * `60` - 60
                  */
                 resolution_minutes?: 30 | 60;
+                /**
+                 * @description * `auto` - auto
+                 *     * `best` - best
+                 */
+                selection_mode?: "auto" | "best";
             };
             header?: never;
             path: {

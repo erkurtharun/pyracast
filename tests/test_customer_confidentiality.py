@@ -320,6 +320,7 @@ CUSTOMER_FIELDS = {
     "scope",
     "selection",
     "selection_cutoff",
+    "selection_mode",
     "selection_policy",
     "selection_state",
     "sent_at",

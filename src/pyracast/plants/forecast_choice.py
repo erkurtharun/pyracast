@@ -10,7 +10,9 @@ from pyracast.forecasts.selection import (
     Day,
     ForecastOption,
     ForecastSelection,
+    RequestedMode,
     automatic_selection,
+    best_selection,
     day_options,
     is_day_ahead,
     live_selection,
@@ -20,6 +22,7 @@ from pyracast.forecasts.sources import LaterFetches, later_fetches, supplying_fe
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.automatic_forecast import automatic_forecast
 from pyracast.plants.current_forecast import current_forecast
+from pyracast.plants.day_reason import DayReason
 from pyracast.plants.forecast_archive import forecast_cutoff, saved_issuances
 from pyracast.plants.forecasting import decoded_issuance, issuance_outlook, missing_forecast
 from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration
@@ -34,6 +37,15 @@ class DayForecasts:
     options: tuple[ForecastOption, ...]
 
 
+@dataclass(frozen=True)
+class PastDayForecast:
+    """The saved forecast a past day shows and its day total, or the reason it has none."""
+
+    selection: ForecastSelection
+    shown: ForecastIssuance | DayReason
+    total_mwh: float | None = None
+
+
 def forecast_outlook(
     plant: Plant,
     target_date: date,
@@ -42,35 +54,53 @@ def forecast_outlook(
     day: Day,
     policy: Policy,
     forecast_id: int | None,
+    mode: RequestedMode,
     now: datetime,
 ) -> dict[str, object]:
     forecasts = _day_forecasts(plant, target_date, resolution_minutes, day, now)
     if forecast_id is not None:
         return _chosen_outlook(plant, target_date, resolution_minutes, forecasts, forecast_id, now)
     if policy is Policy.DAY_AHEAD:
-        selection, chosen = past_day_forecast(forecasts, production_total(plant, target_date, now))
+        production = production_total(plant, target_date, now)
+        past = (
+            best_forecast(forecasts, production)
+            if mode == "best"
+            else _past_day(forecasts, automatic_selection(forecasts.options, production))
+        )
         # A day whose every saved forecast is unreadable is refused, never shown without one.
-        if chosen is None and forecasts.unreadable:
+        if past.shown is DayReason.INVALID_FORECAST_DATA:
             damage = next(iter(forecasts.unreadable.values()))
             raise DomainError(ErrorCode.CALCULATION_OUT_OF_RANGE) from damage
         answer = (
-            issuance_outlook(plant, chosen, target_date, resolution_minutes, now)
-            if chosen is not None
+            issuance_outlook(plant, past.shown, target_date, resolution_minutes, now)
+            if isinstance(past.shown, ForecastIssuance)
             else missing_forecast(plant, target_date, now)
         )
-        return answer | {"selection": selection}
+        return answer | {"selection": past.selection}
     answer = automatic_forecast(plant, target_date, resolution_minutes, now)
     suppliers = supplying_fetches(answer["result"])
     return answer | {"selection": live_selection(forecasts.options, suppliers)}
 
 
-def past_day_forecast(
-    forecasts: DayForecasts, production_mwh: float | None
-) -> tuple[ForecastSelection, ForecastIssuance | None]:
-    """The saved forecast a past day shows automatically, and the selection that names it."""
-    selection = automatic_selection(forecasts.options, production_mwh)
-    chosen = forecasts.issuances.get(selection.forecast_id) if selection.forecast_id else None
-    return selection, chosen
+def best_forecast(forecasts: DayForecasts, production_mwh: float | None) -> PastDayForecast:
+    return _past_day(forecasts, best_selection(forecasts.options, production_mwh))
+
+
+def _past_day(forecasts: DayForecasts, selection: ForecastSelection) -> PastDayForecast:
+    shown = forecasts.issuances.get(selection.forecast_id) if selection.forecast_id else None
+    if shown is not None:
+        total = next(
+            option.total_mwh
+            for option in forecasts.options
+            if option.forecast_id == selection.forecast_id
+        )
+        return PastDayForecast(selection, shown, total)
+    reason = (
+        DayReason.INVALID_FORECAST_DATA
+        if forecasts.unreadable
+        else DayReason.FORECAST_NOT_AVAILABLE
+    )
+    return PastDayForecast(selection, reason)
 
 
 def saved_forecasts(

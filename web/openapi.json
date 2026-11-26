@@ -3654,6 +3654,16 @@
                         "description": "* `30` - 30\n* `60` - 60"
                     },
                     {
+                        "in": "query",
+                        "name": "selection_mode",
+                        "schema": {
+                            "enum": ["auto", "best"],
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "description": "* `auto` - auto\n* `best` - best"
+                    },
+                    {
                         "in": "path",
                         "name": "tenant_id",
                         "schema": {
@@ -11479,9 +11489,9 @@
                 "required": ["marked"]
             },
             "SelectionModeEnum": {
-                "enum": ["auto", "manual"],
+                "enum": ["auto", "best", "manual"],
                 "type": "string",
-                "description": "* `auto` - auto\n* `manual` - manual"
+                "description": "* `auto` - auto\n* `best` - best\n* `manual` - manual"
             },
             "SelectionRuleEnum": {
                 "enum": ["closest_to_production", "latest"],
