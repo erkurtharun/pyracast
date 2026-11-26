@@ -67,12 +67,13 @@ class SatelliteData:
         return run if run is not None and run.pk in self._identities else None
 
     def _declared(self, day: date) -> PlantConfiguration | None:
-        """The declaration valid at the day's start, else one made during it, else the first."""
+        """The declaration valid at the day's start, else one made during it, else the first;
+        each declaration's day is counted in its own location's zone."""
         declared = [row for row in self.configurations if row.created_at <= self.cutoff]
-        start, end = local_day_bounds(day, self.plant.region.timezone)
+        bounds = {row.pk: local_day_bounds(day, row.binding.timezone) for row in declared}
         return (
-            next((row for row in reversed(declared) if row.created_at <= start), None)
-            or next((row for row in reversed(declared) if row.created_at < end), None)
+            next((row for row in reversed(declared) if row.created_at <= bounds[row.pk][0]), None)
+            or next((row for row in reversed(declared) if row.created_at < bounds[row.pk][1]), None)
             or next(iter(declared), None)
         )
 
