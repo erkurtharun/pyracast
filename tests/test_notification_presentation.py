@@ -652,7 +652,7 @@ def test_a_half_cent_rounds_up_in_the_mail_as_the_file_displays_it(
     tomorrow, outage = (nextafter(value, 0) if below else value for value in (24.125, 30.125))
     source = context(payload(total=outage), payload(total=tomorrow), status="estimated")
     message = rendered(source, language)
-    assert stored_cells(message, ("B11", "C11")) == ["24.125", "30.125"]
+    assert stored_cells(message, ("C11", "D11")) == ["24.125", "30.125"]
     assert f">{figure}&nbsp;<span" in message["html"]
     assert f"{figure} MWh" in message["body"]
     assert f"{without}\u00a0MWh." in message["html"]
@@ -660,5 +660,5 @@ def test_a_half_cent_rounds_up_in_the_mail_as_the_file_displays_it(
     assert f">{preheader}&#847;" in message["html"]
     book = load_workbook(BytesIO(b64decode(message["attachment_base64"])))
     summary = book.worksheets[0]
-    assert [summary.cell(11, column).value for column in (2, 3)] == [24.125, 30.125]
-    assert {summary.cell(11, column).number_format for column in (2, 3)} == {"#,##0.00"}
+    assert [summary.cell(11, column).value for column in (3, 4)] == [24.125, 30.125]
+    assert {summary.cell(11, column).number_format for column in (3, 4)} == {"#,##0.00"}

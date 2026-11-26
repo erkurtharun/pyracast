@@ -83,7 +83,7 @@ def test_saved_delivery_pins_vintage_recipient_and_never_fetches() -> None:
     sheet = attached_sheet(message)
     for day in (10, 11):
         row = next(cell.row for cell in sheet["A"] if cell.value == datetime(2026, 11, day))
-        assert sheet.cell(row, 2).value is None
+        assert sheet.cell(row, 3).value is None
     assert sheet["A12"].value == "Tue 10 Nov 2026: data is missing for some hours; no daily total."
     assert len(message.alternatives) == len(message.attachments) == 1
     assert RequestAttempt.objects.count() == requests
@@ -414,7 +414,7 @@ def test_full_summary_preserves_units_and_escapes_html() -> None:
     summary = ForecastResult.objects.get(snapshot=snapshot).daily_payloads["2026-11-11"]["daylight"]
     sheet = attached_sheet(message)
     row = next(cell.row for cell in sheet["A"] if cell.value == datetime(2026, 11, 11))
-    assert sheet.cell(row, 2).value == pytest.approx(summary["energy_kwh_m2"])
+    assert sheet.cell(row, 3).value == pytest.approx(summary["energy_kwh_m2"])
     html = message.alternatives[0][0]
     assert isinstance(html, str)
     assert "<script>" not in html
