@@ -335,6 +335,52 @@ def test_the_released_check_needs_a_readable_start_of_the_ci_run() -> None:
     assert released_since([deployment()], MAIN, STARTED, {"success"})
 
 
+def released_before_the_run(state: str = "success", **changes: Any) -> dict[str, Any]:
+    status = {"id": 301, "state": state, "created_at": BEFORE_RUN}
+    return deployment(created_at=BEFORE_RUN, statuses=[status], **changes)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {},
+        {"event": "workflow_dispatch", "requested_run": {"id": 7001, "attempt": 2}},
+    ],
+)
+def test_an_automatic_release_of_a_released_commit_whose_images_were_removed_is_superseded(
+    changes: dict[str, Any],
+) -> None:
+    decision = decide(facts(artifacts=[], deployments=[released_before_the_run()], **changes))
+
+    assert decision == Superseded(
+        f"{MAIN} is already released; that release removed the images of CI run 7001."
+    )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"deployments": []},
+        {"deployments": None},
+        {"deployments": [released_before_the_run("failure")]},
+        {"deployments": [released_before_the_run("in_progress")]},
+        {"deployments": [released_before_the_run(sha=OLDER)]},
+        {"deployments": [{"sha": MAIN}]},
+        {"deployments": [released_before_the_run()], "artifacts": [images(2, expired=True)]},
+        {"deployments": [released_before_the_run()], "event": "workflow_dispatch"},
+    ],
+)
+def test_a_release_without_images_is_refused_unless_a_release_of_the_commit_removed_them(
+    changes: dict[str, Any],
+) -> None:
+    with pytest.raises(RefusedError, match="Run CI again to produce an unexpired image artifact"):
+        decide(facts(**{"artifacts": [], **changes}))
+
+
+def test_a_run_that_rebuilt_the_images_of_a_released_commit_deploys_them() -> None:
+    assert decide(facts(deployments=[released_before_the_run()])) == authorized()
+
+
 IMAGE_JOB = "Deployment configuration and containers"
 SONAR = "Sonar quality gate"
 RECORD = "Record the tested tree"

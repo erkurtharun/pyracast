@@ -218,8 +218,35 @@ def _decide_whole_run(
             f"{main} is already released from the images of CI run {run['id']} before its "
             "repeated jobs ended."
         )
+    if automatic and _images_removed_by_a_release(facts, main, int(run["run_attempt"])):
+        return Superseded(
+            f"{main} is already released; that release removed the images of CI run {run['id']}."
+        )
     attempt, artifact = _newest_images(facts["artifacts"], main, int(run["run_attempt"]))
     return Authorized(main, int(run["id"]), attempt, artifact, since)
+
+
+def _images_removed_by_a_release(facts: Mapping[str, Any], sha: str, run_attempt: int) -> bool:
+    # The cleanup deletes the artifacts it releases, while an expired artifact stays listed.
+    listed = any(
+        (match := IMAGE_ARTIFACT.fullmatch(artifact["name"]))
+        and match["sha"] == sha
+        and int(match["attempt"]) <= run_attempt
+        for artifact in facts["artifacts"]
+    )
+    return not listed and _deployed_successfully(facts.get("deployments"), sha)
+
+
+def _deployed_successfully(records: object, sha: str) -> bool:
+    if not isinstance(records, list):
+        return False
+    try:
+        return any(
+            record["sha"] == sha and _newest_state(record["statuses"]) == "success"
+            for record in records
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 def _release_baseline(
