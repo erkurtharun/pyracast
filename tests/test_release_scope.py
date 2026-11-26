@@ -461,17 +461,23 @@ def test_the_shipped_path_check_sees_every_re_include(
     assert _shipped_samples(context, _ignore_rules("\n".join(lines))) != []
 
 
-REDUCED_JOBS = {
-    "ci.yml deployment",
-    "image-rescan.yml rescan",
-    "release.yml authorize",
-    "release.yml scan",
-    "release.yml deploy",
-}
-BUILD_COMMAND = re.compile(
-    r"\bdocker\s+(?:buildx\s+)?build\b|\bdocker(?:\s+|-)compose\b.*\s(?:--)?build\b|\bgit\s+archive\b"
+WORKFLOW_FILES = frozenset({"ci.yml", "codeql.yml", "image-rescan.yml", "release.yml"})
+JOBS_THAT_NEED_EVERY_PATH = frozenset(
+    {
+        "ci.yml verify_ubuntu",
+        "ci.yml verify_windows_shards",
+        "ci.yml verify_windows",
+        "ci.yml web_ubuntu",
+        "ci.yml web_windows",
+        "ci.yml web_production",
+        "ci.yml scientific",
+        "ci.yml audit",
+        "ci.yml sonar",
+        "ci.yml ci_result",
+        "ci.yml pr_tested",
+        "codeql.yml analyze",
+    }
 )
-SCRIPT = re.compile(r"(?<![\w./-])[\w-][\w./-]*\.(?:sh|py|mjs|js|ps1)\b")
 
 
 @functools.cache
@@ -500,28 +506,9 @@ def _is_reduced_checkout(step: dict[str, Any]) -> bool:
     )
 
 
-def _builds(step: dict[str, Any], root: Path) -> bool:
-    command = str(step.get("run", ""))
-    scripts = [root / name for name in SCRIPT.findall(command)]
-    return (
-        str(step.get("uses", "")).startswith("docker/build-push-action@")
-        or BUILD_COMMAND.search(command) is not None
-        or any(
-            script.is_file()
-            and BUILD_COMMAND.search(script.read_text(encoding="utf-8", errors="replace"))
-            for script in scripts
-        )
-    )
-
-
-def _works_without_the_unshipped_paths(steps: list[dict[str, Any]], root: Path) -> bool:
-    checkouts = [index for index, step in enumerate(steps) if _is_checkout(step)]
-    builds = [index for index, step in enumerate(steps) if _builds(step, root)]
-    return (
-        len(checkouts) == 1
-        and _is_reduced_checkout(steps[checkouts[0]])
-        and all(checkouts[0] < build for build in builds)
-    )
+def _checks_out_without_the_unshipped_paths(steps: list[dict[str, Any]]) -> bool:
+    checkouts = [step for step in steps if _is_checkout(step)]
+    return len(checkouts) <= 1 and all(_is_reduced_checkout(step) for step in checkouts)
 
 
 def _workflow_files(directory: Path) -> list[Path]:
@@ -536,27 +523,27 @@ def _jobs(directory: Path) -> dict[str, list[dict[str, Any]]]:
     }
 
 
-def _unreduced_jobs(directory: Path, root: Path) -> list[str]:
+def _unknown_workflow_files(directory: Path, known: frozenset[str]) -> list[str]:
+    return [path.name for path in _workflow_files(directory) if path.name not in known]
+
+
+def _jobs_with_an_unreduced_checkout(
+    directory: Path, needing_every_path: frozenset[str]
+) -> list[str]:
     return [
         job
         for job, steps in _jobs(directory).items()
-        if (
-            any(_builds(step, root) for step in steps)
-            or (job.startswith("release.yml ") and any(_is_checkout(step) for step in steps))
-        )
-        and not _works_without_the_unshipped_paths(steps, root)
+        if job not in needing_every_path and not _checks_out_without_the_unshipped_paths(steps)
     ]
 
 
-def test_every_job_that_builds_a_release_input_checks_out_without_the_unshipped_paths() -> None:
-    reduced = {
-        job
-        for job, steps in _jobs(WORKFLOWS).items()
-        if any(_is_reduced_checkout(step) for step in steps)
-    }
+def test_every_workflow_file_is_known() -> None:
+    assert _unknown_workflow_files(WORKFLOWS, WORKFLOW_FILES) == []
 
-    assert reduced == REDUCED_JOBS
-    assert _unreduced_jobs(WORKFLOWS, ROOT) == []
+
+def test_only_the_jobs_that_need_every_path_check_out_the_unshipped_paths() -> None:
+    assert _jobs_with_an_unreduced_checkout(WORKFLOWS, JOBS_THAT_NEED_EVERY_PATH) == []
+    assert _jobs(WORKFLOWS).keys() >= JOBS_THAT_NEED_EVERY_PATH
 
 
 def _reduced_checkout_step() -> dict[str, Any]:
@@ -567,61 +554,63 @@ def _reduced_checkout_step() -> dict[str, Any]:
     }
 
 
-def _write_workflow(directory: Path, name: str, steps: list[dict[str, Any]]) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
-    document = {"on": "push", "jobs": {"build": {"runs-on": "ubuntu-latest", "steps": steps}}}
+def _write_workflow(directory: Path, name: str, jobs: dict[str, list[dict[str, Any]]]) -> None:
+    document = {
+        "on": "push",
+        "jobs": {job: {"runs-on": "ubuntu-latest", "steps": steps} for job, steps in jobs.items()},
+    }
     (directory / name).write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
 
 
-@pytest.mark.parametrize(
-    "build",
-    [
-        {"run": "docker build --tag app ."},
-        {"run": "docker buildx build --load web"},
-        {"run": "docker compose -f deploy/compose.yml build"},
-        {"run": "docker compose up --build --detach"},
-        {"run": "bash deploy/build-images.sh"},
-        {"uses": "docker/build-push-action@v7", "with": {"context": "."}},
-        {"run": "git archive --output=bundle.tar HEAD deploy"},
-    ],
-)
-def test_a_build_from_a_checkout_without_the_reduction_is_reported(
-    tmp_path: Path, build: dict[str, Any]
-) -> None:
-    script = tmp_path / "deploy" / "build-images.sh"
-    script.parent.mkdir()
-    script.write_text("docker buildx build --load .\n", encoding="utf-8")
-    _write_workflow(tmp_path / "workflows", "build.yml", [{"uses": "actions/checkout@v7"}, build])
-
-    assert _unreduced_jobs(tmp_path / "workflows", tmp_path) == ["build.yml build"]
+def _reported_jobs(directory: Path, steps: list[dict[str, Any]]) -> list[str]:
+    _write_workflow(directory, "release.yml", {"build": steps})
+    return _jobs_with_an_unreduced_checkout(directory, frozenset())
 
 
-def test_a_build_after_the_reduced_checkout_passes(tmp_path: Path) -> None:
-    build = {"run": "docker build --tag app ."}
-    _write_workflow(tmp_path, "build.yml", [_reduced_checkout_step(), build])
+def test_a_reduced_job_with_a_second_checkout_is_reported(tmp_path: Path) -> None:
+    steps = [_reduced_checkout_step(), {"uses": "actions/checkout@v7"}]
 
-    assert _unreduced_jobs(tmp_path, tmp_path) == []
+    assert _reported_jobs(tmp_path, steps) == ["release.yml build"]
 
 
-def test_a_reduction_under_a_condition_is_reported(tmp_path: Path) -> None:
+def test_a_reduced_checkout_under_a_condition_is_reported(tmp_path: Path) -> None:
     checkout = {**_reduced_checkout_step(), "if": "github.event_name == 'push'"}
-    _write_workflow(tmp_path, "build.yml", [checkout, {"run": "docker build ."}])
 
-    assert _unreduced_jobs(tmp_path, tmp_path) == ["build.yml build"]
-
-
-def test_a_second_checkout_after_the_reduced_one_is_reported(tmp_path: Path) -> None:
-    steps = [_reduced_checkout_step(), {"uses": "actions/checkout@v7"}, {"run": "docker build ."}]
-    _write_workflow(tmp_path, "build.yml", steps)
-
-    assert _unreduced_jobs(tmp_path, tmp_path) == ["build.yml build"]
+    assert _reported_jobs(tmp_path, [checkout]) == ["release.yml build"]
 
 
-def test_a_workflow_with_the_long_extension_is_read(tmp_path: Path) -> None:
-    steps = [{"uses": "actions/checkout@v7"}, {"run": "docker build ."}]
-    _write_workflow(tmp_path, "build.yaml", steps)
+def test_a_full_checkout_of_a_job_not_named_as_needing_every_path_is_reported(
+    tmp_path: Path,
+) -> None:
+    steps = [{"uses": "actions/checkout@v7"}, {"run": "make images"}]
 
-    assert _unreduced_jobs(tmp_path, tmp_path) == ["build.yaml build"]
+    assert _reported_jobs(tmp_path, steps) == ["release.yml build"]
+
+
+def test_a_checkout_with_other_patterns_is_reported(tmp_path: Path) -> None:
+    checkout = _reduced_checkout_step()
+    patterns = checkout["with"]["sparse-checkout"].splitlines()[:-1]
+    checkout["with"]["sparse-checkout"] = "\n".join(patterns)
+
+    assert _reported_jobs(tmp_path, [checkout]) == ["release.yml build"]
+
+
+def test_a_workflow_file_the_case_does_not_know_is_reported(tmp_path: Path) -> None:
+    _write_workflow(tmp_path, "release.yml", {})
+    _write_workflow(tmp_path, "build.yaml", {})
+
+    assert _unknown_workflow_files(tmp_path, frozenset({"release.yml"})) == ["build.yaml"]
+
+
+def test_reduced_jobs_named_jobs_and_jobs_without_a_checkout_pass(tmp_path: Path) -> None:
+    jobs = {
+        "build": [_reduced_checkout_step(), {"run": "./deploy/build-images.sh"}],
+        "verify": [{"uses": "actions/checkout@v7"}, {"run": "pytest"}],
+        "cleanup": [{"run": "echo done"}],
+    }
+    _write_workflow(tmp_path, "ci.yml", jobs)
+
+    assert _jobs_with_an_unreduced_checkout(tmp_path, frozenset({"ci.yml verify"})) == []
 
 
 def test_a_directory_entry_and_an_exact_entry_become_exclusions() -> None:
