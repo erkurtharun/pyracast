@@ -687,7 +687,7 @@ test("mobile admin reviews current context, refreshes a conflict and approves ex
     ).toBeVisible();
     await detail.getByText("EPİAŞ values", { exact: true }).click();
     await expect(detail.locator("details li")).toHaveText(
-        /09:00 AM GMT\+3: 1 MWh/,
+        /09:00 \(UTC\+3\): 1\sMWh/,
     );
     await expect(detail.getByText("0.5 MWh", { exact: true })).toHaveCount(0);
     await detail.getByRole("button", { name: "Approve", exact: true }).click();
@@ -2227,7 +2227,7 @@ for (const route of ["answers", "fails"] as const)
         await showDay(page, "2026-11-09");
         await expect(day).toHaveValue("2026-11-09");
         await expect(staged).toContainText(
-            "This change request is for 2026-11-08. Return to that day to send it, or discard it.",
+            "This change request is for 8 Nov 2026. Return to that day to send it, or discard it.",
         );
         await expect(send).toBeDisabled();
         const routerRequests: string[] = [];
@@ -2253,7 +2253,7 @@ for (const route of ["answers", "fails"] as const)
             void dialog.dismiss();
         });
         await staged
-            .getByRole("button", { name: "Return to 2026-11-08", exact: true })
+            .getByRole("button", { name: "Return to 8 Nov 2026", exact: true })
             .click();
         await expect(day).toHaveValue("2026-11-08");
         await expect(page).toHaveURL(/date=2026-11-08/);
@@ -2282,7 +2282,7 @@ test("a draft stays with its day when a link shows another day", async ({
     await showDay(page, "2026-11-07");
     await expect(day).toHaveValue("2026-11-07");
     await expect(staged).toContainText(
-        "This change request is for 2026-11-09. Return to that day to send it, or discard it.",
+        "This change request is for 9 Nov 2026. Return to that day to send it, or discard it.",
     );
     await expect(
         staged.getByRole("button", { name: "Send for approval", exact: true }),

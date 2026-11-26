@@ -368,7 +368,7 @@ test("the calibration exports wait for the runs reloaded after a request", async
         .click();
     await page
         .getByRole("button", {
-            name: "Calculate new calibration for 2026-01-01 – 2026-01-10",
+            name: "Calculate new calibration for 1 Jan 2026 – 10 Jan 2026",
         })
         .click();
     await reload;
@@ -1046,7 +1046,7 @@ test("activating a candidate states its effect before it is confirmed", async ({
         name: "Use calibration No. 40?",
     });
     await expect(confirmation).toContainText(
-        "Factor 1.1 applies to new forecasts and to satellite data from 2026-01-03, its first calibration day. Forecasts already made keep their calibration.",
+        "Factor 1.1 applies to new forecasts and to satellite data from 3 Jan 2026, its first calibration day. Forecasts already made keep their calibration.",
     );
     await expect(confirmation).toContainText(
         "Automatic calibration will be turned on.",
@@ -1227,7 +1227,7 @@ for (const [blocker, explanation] of blockers)
         ).toHaveCount(blocker === "configuration_changed" ? 0 : 1);
         await page
             .getByRole("button", {
-                name: "Calculate new calibration for 2026-01-01 – 2026-01-10",
+                name: "Calculate new calibration for 1 Jan 2026 – 10 Jan 2026",
             })
             .click();
         await expect(
@@ -1361,7 +1361,7 @@ test("a blocked run states no request reason until the calibration status is loa
     release();
     await expect(
         page.getByRole("button", {
-            name: "Calculate new calibration for 2026-01-01 – 2026-01-10",
+            name: "Calculate new calibration for 1 Jan 2026 – 10 Jan 2026",
         }),
     ).toBeVisible();
 });

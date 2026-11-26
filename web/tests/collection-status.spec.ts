@@ -116,7 +116,7 @@ const collecting = {
     en: {
         state: "Updating automatically",
         next: "Next planned update",
-        time: "Jan 2, 2026, 12:00 AM",
+        time: "2 Jan 2026, 00:00",
         absent: [
             "Forecast data requests today (UTC)",
             "Recent update jobs",
@@ -128,7 +128,7 @@ const collecting = {
     tr: {
         state: "Otomatik güncelleniyor",
         next: "Planlanan sonraki güncelleme",
-        time: "2 Oca 2026 00:00",
+        time: "2 Ocak 2026, 00:00",
         absent: [
             "Bugünkü tahmin verisi istekleri (UTC)",
             "Son güncelleme işleri",
@@ -164,12 +164,12 @@ for (const language of ["en", "tr"] as const)
 const lastUpdate = {
     en: {
         label: "Last update",
-        time: "Jan 1, 2026, 12:05 PM",
+        time: "1 Jan 2026, 12:05",
         forecastData: "Forecast data",
     },
     tr: {
         label: "Son güncelleme",
-        time: "1 Oca 2026 12:05",
+        time: "1 Ocak 2026, 12:05",
         forecastData: "Tahmin verisi",
     },
 };
@@ -441,5 +441,5 @@ for (const [cause, jobs] of [
             "Forecasts are not being updated right now.",
         );
         await expect(status.getByText("Next planned update")).toHaveCount(0);
-        await expect(status.getByText("Jan 2, 2026, 12:00 AM")).toHaveCount(0);
+        await expect(status.getByText("2 Jan 2026, 00:00")).toHaveCount(0);
     });

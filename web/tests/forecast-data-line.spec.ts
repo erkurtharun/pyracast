@@ -2,11 +2,7 @@ import { expect, test, type Page } from "./support/test";
 import { mockApi, region } from "./support/workspace";
 
 const collected = "2026-11-14T06:00:00Z";
-const shown = new Intl.DateTimeFormat("en", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: region.timezone,
-}).format(new Date(collected));
+const shown = "14 Nov 2026, 09:00";
 
 async function openForecast(
     page: Page,
@@ -45,7 +41,7 @@ test("a current forecast shows only its data line under the heading", async ({
     page,
 }) => {
     const lines = await openForecast(page, { freshness: "fresh" });
-    await expect(lines).toHaveText(["2026-11-14", `Forecast data: ${shown}`]);
+    await expect(lines).toHaveText(["14 Nov 2026", `Forecast data: ${shown}`]);
     await expect(page.locator("section.panel .tag")).toHaveCount(0);
 });
 
@@ -57,7 +53,7 @@ test("a forecast whose newer data did not come says so above its data line", asy
         stale_reason: "collection_overdue",
     });
     await expect(lines).toHaveText([
-        "2026-11-14",
+        "14 Nov 2026",
         "Newer forecast data was not available.",
         `Forecast data: ${shown}`,
     ]);
@@ -72,7 +68,7 @@ test("a plant whose forecast data stopped arriving names whom to write to", asyn
         stale_reason: "connection_inactive",
     });
     await expect(lines).toHaveText([
-        "2026-11-14",
+        "14 Nov 2026",
         "No new forecast data is arriving for this plant. Write to Pyracast: info@pyracast.app",
         `Forecast data: ${shown}`,
     ]);
@@ -90,5 +86,5 @@ test("a day from satellite data names it in the heading and the data line", asyn
             name: "Satellite data",
         }),
     ).toBeVisible();
-    await expect(lines).toHaveText(["2026-11-14", `Satellite data: ${shown}`]);
+    await expect(lines).toHaveText(["14 Nov 2026", `Satellite data: ${shown}`]);
 });

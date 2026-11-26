@@ -156,6 +156,7 @@ test("a customer manages one plant site through the real API", async ({
     }
     const hourlyDaylight = await daylightForecast(60);
     const daylightEnergy = new Intl.NumberFormat("en", {
+        minimumFractionDigits: 2,
         maximumFractionDigits: 2,
     }).format(hourlyDaylight.energy_mwh);
     await expect(
@@ -252,7 +253,7 @@ test("a customer manages one plant site through the real API", async ({
             .locator(".stat")
             .filter({ hasText: /^With outage/ })
             .locator("strong"),
-    ).toHaveText("0 MWh");
+    ).toHaveText("0.00 MWh");
     const outageDownload = page.waitForEvent("download");
     await page
         .getByRole("button", { name: "Download CSV", exact: true })

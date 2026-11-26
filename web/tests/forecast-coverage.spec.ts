@@ -285,7 +285,7 @@ for (const width of [320, 390]) {
             .getByRole("button", { name: "Irradiance forecast", exact: true })
             .click();
         await expect(
-            page.getByText("Forecast data: Nov 11, 2026, 8:00 AM", {
+            page.getByText("Forecast data: 11 Nov 2026, 08:00", {
                 exact: true,
             }),
         ).toBeVisible();
@@ -442,7 +442,7 @@ for (const state of [
             );
         else
             await expect(page.getByRole("status")).toHaveText(
-                `Production was ${state === "zero" ? 100 : 14}% below expected during the hours compared on 2026-11-13.`,
+                `Production was ${state === "zero" ? 100 : 14}% below expected during the hours compared on 13 Nov 2026.`,
             );
         await expect(
             page.getByText("If derating persists", { exact: true }),

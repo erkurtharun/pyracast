@@ -487,7 +487,7 @@ test("Turkish plant search and capacity formatting follow the selected language"
     await page.goto("/app/");
     await page.getByRole("searchbox", { name: "Santral ara" }).fill("ışık");
     await expect(page.getByRole("heading", { name: "IŞIK GES" })).toBeVisible();
-    await expect(page.getByText("1.235 MWp", { exact: true })).toBeVisible();
+    await expect(page.getByText("1.234,5 MWp", { exact: true })).toBeVisible();
 });
 
 test("coded forecast errors are explained in the selected language", async ({
@@ -526,12 +526,12 @@ test.describe("the session end notice", () => {
         [
             "en",
             "Plants",
-            "Automatic sign-out at 10:00 PM GMT+3. Save your work.",
+            "Automatic sign-out at 22:00 (UTC+3). Save your work.",
         ],
         [
             "tr",
             "Santraller",
-            "Otomatik çıkış saati: 22:00 GMT+3. Çalışmanızı kaydedin.",
+            "Otomatik çıkış saati: 22:00 (UTC+3). Çalışmanızı kaydedin.",
         ],
     ] as const) {
         test(`appears five minutes before the session ends in ${language}`, async ({

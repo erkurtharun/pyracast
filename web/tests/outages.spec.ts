@@ -1069,9 +1069,7 @@ test.describe("in a browser zone west of the plant", () => {
             .getByLabel("Start", { exact: true })
             .fill("2026-11-11T11:00");
         await page.getByRole("button", { name: "Save", exact: true }).click();
-        await expect(
-            page.getByText(/Start: Nov 11, 2026, 11:00\sAM/),
-        ).toBeVisible();
+        await expect(page.getByText(/Start: 11 Nov 2026, 11:00/)).toBeVisible();
         expect(state.incident()).toMatchObject({
             starts_at: "2026-11-11T08:00:00.000Z",
         });
