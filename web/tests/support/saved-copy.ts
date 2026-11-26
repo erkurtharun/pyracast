@@ -477,7 +477,6 @@ function transpiled(name: string) {
     }).outputText;
 }
 
-// The store module and its deadline as source in a blank page of the origin, with the withdrawal constant set.
 export async function loadStore(page: Page, savedFigures: boolean) {
     await onBlankPage(page);
     await page.evaluate(

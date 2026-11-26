@@ -8,6 +8,7 @@ import {
 import { serveSession } from "../tests/support/session";
 import {
     daysAnswer,
+    holderOf,
     readCopy,
     readHeld,
     refuseClears,
@@ -77,11 +78,14 @@ async function signedInWithWorker(
     page: Page,
     account: AccountState,
     served: Served,
+    prepare: (now: number) => Promise<unknown> = async () => {},
 ) {
     await application(page, account, served);
     await page.goto("/app/");
     await page.evaluate(() => navigator.serviceWorker.ready);
-    await page.clock.setSystemTime(await workerClock(page));
+    const now = await workerClock(page);
+    await prepare(now);
+    await page.clock.setSystemTime(now);
     account.current = firstAccount;
     await page.goto("/app/w/1/");
     await expect(
@@ -207,12 +211,20 @@ if (workerState === "figuresWithdrawn")
     }) => {
         const account: AccountState = { current: null };
         const reads: string[] = [];
-        await seedCopy(page);
-        await refuseClears(page);
         page.on("request", (request) => {
             if (DAYS.test(request.url())) reads.push(request.url());
         });
-        await signedInWithWorker(page, account, { answer: daysAnswer() });
+        await signedInWithWorker(
+            page,
+            account,
+            { answer: daysAnswer() },
+            async (now) => {
+                await seedCopy(page, {
+                    holder: holderOf({ confirmedAt: now }),
+                });
+                await refuseClears(page);
+            },
+        );
         expect(await readCopy(page)).toMatchObject({ plants: 1 });
         for (let step = 0; step < 12; step += 1)
             await page.clock.fastForward(5 * MINUTE);
