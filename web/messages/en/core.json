@@ -387,7 +387,7 @@
             "fresh": "Newest forecast data",
             "stale": "Newer forecast data was not available.",
             "missing": "No forecast data for this day.",
-            "archived": "Last forecast before sunrise"
+            "archived": "Saved forecast"
         },
         "CalibrationStatus": {
             "pending": "Queued",

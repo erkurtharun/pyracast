@@ -87,7 +87,7 @@ test("a day from satellite data names it in the heading and the data line", asyn
     });
     await expect(
         page.locator("section.panel").getByRole("heading", {
-            name: "Production calculated from satellite data",
+            name: "Satellite data",
         }),
     ).toBeVisible();
     await expect(lines).toHaveText(["2026-11-14", `Satellite data: ${shown}`]);

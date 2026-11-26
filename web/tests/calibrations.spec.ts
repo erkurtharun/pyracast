@@ -785,7 +785,7 @@ test("automatic status reloads after manual activation and reset", async ({
         .click();
     await expect(
         page.getByText(
-            "New forecasts and production calculated from satellite data are made without calibration (factor 1). Forecasts already made keep their calibration. Automatic calibration will be turned off.",
+            "New forecasts and satellite data are calculated without calibration (factor 1). Forecasts already made keep their calibration. Automatic calibration will be turned off.",
         ),
     ).toBeVisible();
     await page
@@ -1046,7 +1046,7 @@ test("activating a candidate states its effect before it is confirmed", async ({
         name: "Use calibration No. 40?",
     });
     await expect(confirmation).toContainText(
-        "Factor 1.1 applies to new forecasts and to production calculated from satellite data from 2026-01-03, its first calibration day. Forecasts already made keep their calibration.",
+        "Factor 1.1 applies to new forecasts and to satellite data from 2026-01-03, its first calibration day. Forecasts already made keep their calibration.",
     );
     await expect(confirmation).toContainText(
         "Automatic calibration will be turned on.",

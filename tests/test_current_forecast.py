@@ -23,9 +23,8 @@ pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 10)
 
 
-@pytest.mark.parametrize("source", ["forecast", "auto"])
 def test_daily_acquisitions_refresh_live_outlook_and_keep_day_ahead_replay(
-    monkeypatch: pytest.MonkeyPatch, source: str
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
@@ -38,7 +37,7 @@ def test_daily_acquisitions_refresh_live_outlook_and_keep_day_ahead_replay(
             snapshot_for(system, DAY, power_kw=power, collected_at=acquired)
         )
         snapshots.append(snapshot)
-        result = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, source=source)
+        result = plant_outlook(*scope, target_date=DAY, resolution_minutes=60)
         payload = cast(dict[str, Any], result["result"])
         assert result["as_of"] == acquired.isoformat()
         assert payload["provenance"]["snapshot_id"] == snapshot.pk
@@ -46,7 +45,7 @@ def test_daily_acquisitions_refresh_live_outlook_and_keep_day_ahead_replay(
         assert payload["intervals"][9]["mean_power_mw"] == pytest.approx(power * 130)
     assert payload["provenance"]["selection_policy"] == "latest-forecast-coverage-v2"
     archived = plant_outlook(
-        *scope, target_date=DAY, resolution_minutes=60, source=source, as_of=acquired
+        *scope, target_date=DAY, resolution_minutes=60, forecast_id=snapshots[-1].pk
     )
     archived_payload = cast(dict[str, Any], archived["result"])
     assert archived_payload["provenance"]["snapshot_id"] == snapshots[-1].pk
@@ -57,15 +56,8 @@ def test_daily_acquisitions_refresh_live_outlook_and_keep_day_ahead_replay(
     assert archived_payload["energy_mwh"] == pytest.approx(936)
     assert ForecastIssuance.objects.count() == 3
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=2))
-    past = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, source=source)
-    if source == "auto":
-        assert past["source_kind"] == "forecast"
-        past_payload = cast(dict[str, Any], past["result"])
-        assert past_payload["energy_mwh"] == pytest.approx(936)
-        assert past_payload["provenance"]["snapshot_id"] == snapshots[-1].pk
-        assert "forecast_fallback" in past_payload["quality_flags"]
-    else:
-        assert past["result"] == archived_payload
+    past = plant_outlook(*scope, target_date=DAY, resolution_minutes=60)
+    assert past["result"] == archived_payload
     assert RequestAttempt.objects.count() == requests
 
 
@@ -79,8 +71,9 @@ def test_today_uses_latest_collection_without_changing_midnight_replay(
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     current = plant_outlook(*scope, target_date=today, resolution_minutes=30)
     assert cast(dict[str, Any], current["result"])["provenance"]["snapshot_id"] == latest.pk
-    cutoff = local_day_bounds(today, system.binding.timezone)[0]
-    archived = plant_outlook(*scope, target_date=today, resolution_minutes=30, as_of=cutoff)
+    archived = plant_outlook(
+        *scope, target_date=today, resolution_minutes=30, forecast_id=original.pk
+    )
     assert cast(dict[str, Any], archived["result"])["provenance"]["snapshot_id"] == original.pk
 
 

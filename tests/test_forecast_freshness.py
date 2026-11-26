@@ -26,12 +26,10 @@ def _get(system: System, scope: str, plant_id: int, source: str, day: Any) -> di
 @pytest.mark.parametrize(
     ("scope", "source", "day"),
     [
-        ("plant", "archived_forecast", DAY),
-        ("plant", "archived_forecast", TODAY),
-        ("plant", "estimated_actuals", DAY),
-        ("plant", "auto", DAY),
-        ("region", "estimated_actuals", DAY),
-        ("region", "auto", DAY),
+        ("plant", "forecast", DAY),
+        ("plant", "satellite", DAY),
+        ("region", "forecast", DAY),
+        ("region", "satellite", DAY),
     ],
 )
 def test_a_frozen_or_completed_day_reports_archived(

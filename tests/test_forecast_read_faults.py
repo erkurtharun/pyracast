@@ -47,13 +47,11 @@ def _client(system: System) -> Client:
 
 
 @pytest.mark.parametrize("scope", ["plant", "region"])
-@pytest.mark.parametrize("source", ["estimated_actuals", "auto"])
 @DAMAGES
 def test_damaged_estimated_actuals_fail_the_past_read_cleanly_with_one_warning(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     scope: str,
-    source: str,
     damage: object,
 ) -> None:
     system, plant = make_plant(monkeypatch)
@@ -61,7 +59,7 @@ def test_damaged_estimated_actuals_fail_the_past_read_cleanly_with_one_warning(
     region = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/"
     url = f"{region}plants/{plant.pk}/forecast/" if scope == "plant" else f"{region}forecast/"
     with caplog.at_level(logging.WARNING, logger=FAULTS):
-        response = _client(system).get(url, {"date": str(DAY), "data_source": source})
+        response = _client(system).get(url, {"date": str(DAY), "data_source": "satellite"})
     assert response.status_code == 400
     assert response.json()["code"] == "calculation_out_of_range"
     [record] = _warnings(caplog)
@@ -83,7 +81,7 @@ def test_a_damaged_archived_issuance_fails_cleanly_with_one_warning(
     stored_again(issuance, payloads={"60": issuance.payloads["60"]})
     url = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/"
     with caplog.at_level(logging.WARNING, logger=FAULTS):
-        response = _client(system).get(url, {"date": str(DAY), "data_source": "archived_forecast"})
+        response = _client(system).get(url, {"date": str(DAY), "data_source": "forecast"})
     assert response.status_code == 400
     assert response.json()["code"] == "calculation_out_of_range"
     [record] = _warnings(caplog)

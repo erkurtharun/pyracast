@@ -9,7 +9,6 @@ from rest_framework import serializers
 
 from pyracast.api.serializers import InputSerializer
 from pyracast.errors import DomainError
-from pyracast.plants.forecasting import require_known_cutoff
 from pyracast.plants.models import MountingType
 from pyracast.plants.operations import EDIT_BLOCK_MESSAGES, PlantEditBlock
 from pyracast.plants.parameters import PlantParameters
@@ -40,12 +39,8 @@ def unzoned_production() -> None:
     normalize_observation(observation, "MWh", ZoneInfo("Europe/Istanbul"), NOW)
 
 
-def unzoned_cutoff() -> None:
-    require_known_cutoff(datetime(2026, 5, 1, 10), NOW)
-
-
 @pytest.mark.parametrize("language", ["en", "tr"])
-@pytest.mark.parametrize("guard", [unzoned_production, unzoned_cutoff])
+@pytest.mark.parametrize("guard", [unzoned_production])
 def test_input_only_a_broken_client_sends_answers_the_generic_sentence(
     guard: Callable[[], None], language: str
 ) -> None:

@@ -109,7 +109,8 @@ def test_region_keeps_its_selected_coverage_when_a_source_is_revoked_during_the_
         return execute(sql, params, many, context)
 
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"
-    params = {"date": day.isoformat(), "data_source": source_kind}
+    source = "satellite" if source_kind == "estimated_actuals" else "forecast"
+    params = {"date": day.isoformat(), "data_source": source}
     with ThreadPoolExecutor(max_workers=1) as pool:
         writer = pool.submit(revoke_source)
         with connection.execute_wrapper(interleave_payload_read):

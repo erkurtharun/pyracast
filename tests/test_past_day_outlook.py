@@ -16,7 +16,7 @@ pytestmark = pytest.mark.django_db(transaction=True)
 DAY = NOW.date() - timedelta(days=2)
 
 
-def _past(system: System, plant: Plant, day: date = DAY, **options: Any) -> dict[str, Any]:
+def _past(system: System, plant: Plant, day: date = DAY) -> dict[str, Any]:
     return plant_outlook(
         system.member,
         system.tenant.pk,
@@ -24,8 +24,7 @@ def _past(system: System, plant: Plant, day: date = DAY, **options: Any) -> dict
         plant.pk,
         target_date=day,
         resolution_minutes=60,
-        source="estimated_actuals",
-        **options,
+        source="satellite",
     )
 
 
@@ -95,17 +94,6 @@ def test_each_day_uses_the_newest_calibration_whose_period_had_begun(
     reset_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk)
     assert _past(system, plant)["calibration_id"] is None
     assert _past(system, plant, later_day)["calibration_id"] is None
-
-
-def test_explicit_cutoff_keeps_the_uncalibrated_historical_estimate(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    system, plant, _ = _calibrated(monkeypatch, [DAY.isoformat()])
-    result = _past(system, plant, as_of=NOW)
-    payload = cast(dict[str, Any], result["result"])
-    assert result["calibration_id"] is None
-    assert payload["factor"] == 1
-    assert "retrospective_calibration" not in payload["quality_flags"]
 
 
 def test_calibration_from_a_changed_production_source_is_not_applied(

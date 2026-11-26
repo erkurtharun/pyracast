@@ -17,9 +17,8 @@ from pyracast.regions.models import Region
 from tests.support.domain import NOW, System
 from tests.support.forecast_history import DAY, TODAY, add_history, usable_calibration
 
-SOURCES = ("auto", "forecast", "estimated_actuals", "archived_forecast")
+SOURCES = ("forecast", "satellite")
 DAYS = (-367, -366, -2, -1, 0, 1, 14, 15)
-CUTOFFS = {"none": None, "hour-ago": NOW - timedelta(hours=1), "ahead": NOW + timedelta(seconds=1)}
 FAMILIES: dict[str, type[Model]] = {
     "snapshot": ForecastSnapshot,
     "binding": SiteBinding,
@@ -33,6 +32,7 @@ FAMILIES: dict[str, type[Model]] = {
 }
 IDENTIFIERS = {
     "snapshot_id": "snapshot",
+    "forecast_id": "snapshot",
     "source_snapshot_id": "snapshot",
     "source_snapshot_ids": "snapshot",
     "snapshot_ids": "snapshot",
@@ -122,24 +122,16 @@ def answer(client: Client, url: str, query: dict[str, str], names: dict[str, Any
 
 
 def plant_reads() -> dict[str, dict[str, str]]:
-    reads = {}
-    for source in SOURCES:
-        for offset in DAYS:
-            for cutoff, as_of in CUTOFFS.items():
-                query = {
-                    "date": str(TODAY + timedelta(days=offset)),
-                    "data_source": source,
-                    "resolution_minutes": "60",
-                }
-                if as_of is not None:
-                    query["as_of"] = as_of.isoformat()
-                reads[f"{source} {offset:+d} {cutoff}"] = query
-    return reads | boundary_reads(
-        {
-            "resolution 15": {"resolution_minutes": "15"},
-            "naive as_of": {"as_of": NOW.replace(tzinfo=None).isoformat()},
+    reads = {
+        f"{source} {offset:+d}": {
+            "date": str(TODAY + timedelta(days=offset)),
+            "data_source": source,
+            "resolution_minutes": "60",
         }
-    )
+        for source in SOURCES
+        for offset in DAYS
+    }
+    return reads | boundary_reads({"resolution 15": {"resolution_minutes": "15"}})
 
 
 def region_reads() -> dict[str, dict[str, str]]:
@@ -161,6 +153,8 @@ def boundary_reads(extra: dict[str, dict[str, str]]) -> dict[str, dict[str, str]
         "unknown source": day | {"data_source": "unknown"},
         "empty date": {"date": ""},
         "unknown key": day | {"other": "1"},
+        "removed source": day | {"data_source": "auto"},
+        "removed as_of": day | {"as_of": NOW.isoformat()},
     }
     return reads | {name: day | values for name, values in extra.items()}
 

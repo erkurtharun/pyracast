@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import ForecastResult, ForecastSnapshot, RequestAttempt
+from pyracast.forecasts.selection import ForecastSelection
 from pyracast.incidents.operations import save_incident
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.history import plant_outlook
@@ -23,10 +24,17 @@ def test_today_automatic_uses_complete_original_forecast_after_reference_transit
 ) -> None:
     system, plant, old_id = reference_transition(monkeypatch)
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
-    current = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, source="forecast")
-    assert cast(dict[str, Any], current["result"])["coverage_fraction"] == pytest.approx(1 / 6)
     count = RequestAttempt.objects.count()
-    automatic = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, source="auto")
+    automatic = plant_outlook(*scope, target_date=DAY, resolution_minutes=60)
+    selection = cast(ForecastSelection, automatic["selection"])
+    newest = selection.options[0].forecast_id
+    current = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, forecast_id=newest)
+    named = plant_outlook(
+        *scope, target_date=DAY, resolution_minutes=60, forecast_id=selection.forecast_id
+    )
+    assert cast(dict[str, Any], current["result"])["coverage_fraction"] == pytest.approx(1 / 6)
+    assert selection.forecast_id == old_id
+    assert cast(dict[str, Any], named["result"])["energy_mwh"] == pytest.approx(312)
     result = cast(dict[str, Any], automatic["result"])
     assert automatic["source_kind"] == "forecast"
     assert result["complete"] is True
@@ -42,7 +50,7 @@ def test_today_automatic_uses_complete_original_forecast_after_reference_transit
     client.force_login(system.member)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/"
     response = client.get(
-        path, {"date": DAY.isoformat(), "resolution_minutes": "60", "data_source": "auto"}
+        path, {"date": DAY.isoformat(), "resolution_minutes": "60", "data_source": "forecast"}
     )
     assert response.status_code == 200
     assert response.json()["result"]["coverage_fraction"] == 1
@@ -74,7 +82,6 @@ def test_reference_fallback_keeps_current_known_outage_visible(
         plant.pk,
         target_date=DAY,
         resolution_minutes=60,
-        source="auto",
     )
     assert cast(dict[str, Any], outlook["result"])["complete"] is True
     scenario = cast(dict[str, Any], outlook["outage_scenario"])
@@ -85,12 +92,12 @@ def test_reference_fallback_keeps_current_known_outage_visible(
     assert scenario["result"]["intervals"][12]["mean_power_mw"] == pytest.approx(6.5)
 
 
-def test_past_automatic_labels_saved_forecast_when_solcast_actuals_are_missing(
+def test_a_past_day_forecast_is_the_saved_forecast_without_satellite_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
     day = timezone.now().date() - timedelta(days=1)
-    publish_snapshot(snapshot_for(system, day))
+    saved = publish_snapshot(snapshot_for(system, day))
     result = plant_outlook(
         system.member,
         system.tenant.pk,
@@ -98,11 +105,10 @@ def test_past_automatic_labels_saved_forecast_when_solcast_actuals_are_missing(
         plant.pk,
         target_date=day,
         resolution_minutes=60,
-        source="auto",
     )
     assert result["source_kind"] == "forecast"
-    payload = cast(dict[str, Any], result["result"])
-    assert payload["provenance"]["fallback_reason"] == "estimated_actuals_unavailable"
+    assert (result["freshness"], result["snapshot_id"]) == ("archived", saved.pk)
+    assert result["issuance_id"] is not None
     assert result["unavailable_reason"] is None
 
 
@@ -117,7 +123,6 @@ def test_reference_transition_before_first_new_acquisition_keeps_published_forec
         plant.pk,
         target_date=DAY,
         resolution_minutes=60,
-        source="auto",
     )
     payload = cast(dict[str, Any], result["result"])
     assert payload["complete"] is True
@@ -179,7 +184,6 @@ def test_automatic_does_not_replace_latest_when_reference_transition_is_not_safe
         plant.pk,
         target_date=DAY,
         resolution_minutes=60,
-        source="auto",
     )
     assert outlook["configuration_id"] == plant.current_configuration_id
     payload = cast(dict[str, Any], outlook["result"])
@@ -199,7 +203,6 @@ def test_partial_archive_cannot_supply_a_complete_automatic_forecast(
         plant.pk,
         target_date=DAY,
         resolution_minutes=60,
-        source="auto",
     )
     assert outlook["configuration_id"] == plant.current_configuration_id
     payload = cast(dict[str, Any], outlook["result"])
@@ -223,7 +226,6 @@ def test_new_reference_internal_missing_values_remain_authoritative(
         plant.pk,
         target_date=DAY,
         resolution_minutes=60,
-        source="auto",
     )
     assert outlook["configuration_id"] == plant.current_configuration_id
     payload = cast(dict[str, Any], outlook["result"])
@@ -277,7 +279,6 @@ def test_reference_transition_selects_archive_for_the_previous_binding(
         plant.pk,
         target_date=DAY,
         resolution_minutes=60,
-        source="auto",
     )
     payload = cast(dict[str, Any], outlook["result"])
     assert payload["provenance"]["snapshot_id"] == original_snapshot_id
@@ -289,9 +290,7 @@ def test_reference_fallback_drops_invalidated_calibration_without_changing_archi
 ) -> None:
     system, plant, source_id = reference_transition(monkeypatch, calibrated=True)
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
-    archived = plant_outlook(
-        *scope, target_date=DAY, resolution_minutes=60, source="archived_forecast"
-    )
+    archived = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, forecast_id=source_id)
     original = cast(dict[str, Any], archived["result"])
     assert archived["calibration_id"] is not None
     assert original["factor"] == 0.5
@@ -310,7 +309,7 @@ def test_reference_fallback_drops_invalidated_calibration_without_changing_archi
         available_inverter_mw=None,
         available_export_mw=None,
     )
-    live = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, source="auto")
+    live = plant_outlook(*scope, target_date=DAY, resolution_minutes=60)
     normal = cast(dict[str, Any], live["result"])
     assert live["configuration_id"] == archived["configuration_id"]
     assert live["calibration_id"] is None
@@ -320,9 +319,7 @@ def test_reference_fallback_drops_invalidated_calibration_without_changing_archi
     assert normal["provenance"]["snapshot_id"] == source_id
     assert "source_segments" not in normal["provenance"]
     assert "calibration_invalidated_by_outage_history" in normal["quality_flags"]
-    replay = plant_outlook(
-        *scope, target_date=DAY, resolution_minutes=60, source="archived_forecast"
-    )
+    replay = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, forecast_id=source_id)
     assert replay == archived
     issuance.refresh_from_db()
     assert issuance.payloads == payloads_before

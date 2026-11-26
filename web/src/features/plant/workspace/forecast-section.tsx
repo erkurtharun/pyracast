@@ -7,10 +7,9 @@ import { DataSourceControl } from "@/features/forecast/data-source";
 import {
     clampDate,
     dateBounds,
-    shownChoice,
-    sourceOf,
     type DataSource,
 } from "@/features/forecast/date-bounds";
+import { ForecastTimeControl } from "@/features/forecast/forecast-time";
 import { ViewNav } from "@/ui/action";
 import { plantDay } from "@/lib/format/time";
 import { ControlField, Select } from "@/ui/form";
@@ -21,7 +20,11 @@ import {
     type ForecastQuery,
 } from "./forecast-reading";
 
-export type ForecastOptions = { resolution: "30" | "60"; source: DataSource };
+export type ForecastOptions = {
+    resolution: "30" | "60";
+    source: DataSource;
+    chosen?: { date: string; forecastId: number };
+};
 
 export function ForecastSection({
     scope,
@@ -45,22 +48,32 @@ export function ForecastSection({
     show: (next: PlantAddress) => void;
 }) {
     const t = useTranslations("PlantWorkspace");
-    const { resolution, source } = options;
+    const { resolution, source, chosen } = options;
     const today = plantDay(timezone);
     const bounds = dateBounds(source, today);
     const leavingGeneration = leaving && view === "generation";
-    const query: ForecastQuery = {
+    const read: ForecastQuery = {
         scope,
         electrical: view === "generation",
         date,
         resolution: resolution === "30" ? 30 : 60,
         source,
-        poll:
-            source !== "archived_forecast" && date >= plantDay(timezone, -1)
-                ? cadence.live
-                : false,
+        poll: date >= plantDay(timezone, -1) ? cadence.live : false,
     };
+    const chosenId = source === "forecast" ? chosen?.forecastId : undefined;
+    const refused = useForecastRead(
+        { ...read, forecastId: chosenId },
+        false,
+    ).invalidFields.includes("forecast_id");
+    const forecastId = refused ? undefined : chosenId;
+    const query: ForecastQuery = { ...read, forecastId };
     const shown = useForecastRead(query, false).data;
+    const automatic = useForecastRead(
+        { ...query, forecastId: undefined },
+        false,
+    ).data;
+    const selection = (shown ?? automatic)?.selection;
+    const times = source === "forecast" ? (selection?.options ?? []) : [];
     return (
         <>
             <ViewNav
@@ -83,12 +96,25 @@ export function ForecastSection({
                     />
                 </ControlField>
                 <DataSourceControl
-                    value={shownChoice(source, shown)}
-                    electrical={query.electrical}
-                    onChange={(next) =>
-                        onOptions({ ...options, source: sourceOf(next) })
-                    }
+                    value={source}
+                    onChange={(next) => onOptions({ ...options, source: next })}
                 />
+                {(times.length > 0 || forecastId !== undefined) && (
+                    <ForecastTimeControl
+                        timezone={timezone}
+                        options={times}
+                        forecastId={forecastId}
+                        onChoose={(next) =>
+                            onOptions({
+                                ...options,
+                                chosen:
+                                    next === undefined
+                                        ? undefined
+                                        : { date, forecastId: next },
+                            })
+                        }
+                    />
+                )}
                 {view === "generation" && (
                     <Select
                         label={t("resolution")}
@@ -111,7 +137,7 @@ export function ForecastSection({
                 <Notice>{t("selectDateInRange", bounds)}</Notice>
             ) : (
                 <PlantForecast
-                    key={`${view}-${date}-${resolution}-${source}-${configurationId}`}
+                    key={`${view}-${date}-${resolution}-${source}-${forecastId}-${configurationId}`}
                     {...query}
                 />
             )}

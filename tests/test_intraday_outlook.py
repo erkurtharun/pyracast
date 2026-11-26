@@ -41,7 +41,7 @@ def intraday_actuals(system: System, when: datetime, *, power_kw: float = 0.4) -
     return publish_snapshot(snapshot)
 
 
-def test_today_auto_combines_completed_actuals_with_forecast_without_provider_calls(
+def test_today_forecast_combines_completed_actuals_without_provider_calls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
@@ -52,7 +52,7 @@ def test_today_auto_combines_completed_actuals_with_forecast_without_provider_ca
     monkeypatch.setattr(timezone, "now", lambda: now)
     requests = RequestAttempt.objects.count()
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
-    outlook = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, source="auto")
+    outlook = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, source="forecast")
     result = cast(dict[str, Any], outlook["result"])
     assert outlook["source_kind"] == "mixed"
     assert result["energy_mwh"] == pytest.approx(936)
@@ -62,11 +62,13 @@ def test_today_auto_combines_completed_actuals_with_forecast_without_provider_ca
     assert result["intervals"][12]["source_kinds"] == ["forecast"]
     assert result["provenance"]["source_snapshot_ids"] == [actual.pk, forecast.pk]
     assert result["provenance"]["selection_policy"] == INTRADAY_POLICY
-    explicit = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, source="forecast")
+    explicit = plant_outlook(
+        *scope, target_date=DAY, resolution_minutes=60, forecast_id=forecast.pk
+    )
     assert explicit["source_kind"] == "forecast"
     assert cast(dict[str, Any], explicit["result"])["energy_mwh"] == pytest.approx(624)
     system.region.refresh_from_db()
-    regional = regional_outlook(system.region, DAY, "auto", now)
+    regional = regional_outlook(system.region, DAY, "forecast", None, now)
     assert regional["source_kind"] == "mixed"
     assert cast(dict[str, Any], regional["result"])["intervals"][0]["source_kinds"] == [
         "estimated_actuals"
@@ -75,7 +77,7 @@ def test_today_auto_combines_completed_actuals_with_forecast_without_provider_ca
     client.force_login(system.member)
     response = client.get(
         f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/",
-        {"date": DAY.isoformat(), "data_source": "auto", "resolution_minutes": "60"},
+        {"date": DAY.isoformat(), "data_source": "forecast", "resolution_minutes": "60"},
     )
     assert response.status_code == 200, response.content
     assert response.json()["source_kind"] == "mixed"
@@ -106,7 +108,7 @@ def test_actual_zero_wins_but_missing_negative_and_unfinished_actuals_keep_forec
             plant.pk,
             target_date=DAY,
             resolution_minutes=30,
-            source="auto",
+            source="forecast",
         )["result"],
     )
     assert result["intervals"][20]["mean_power_mw"] == 0
@@ -146,7 +148,7 @@ def test_current_actuals_respect_knowledge_and_native_source_boundaries(
     assert prepared.composition.snapshot_ids == (forecast.pk,)
 
 
-def test_explicit_today_actuals_and_auto_complete_daylight_need_no_forecast(
+def test_today_satellite_data_and_a_forecast_with_complete_daylight_need_no_forecast(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
@@ -155,7 +157,7 @@ def test_explicit_today_actuals_and_auto_complete_daylight_need_no_forecast(
     actual = intraday_actuals(system, now - timedelta(minutes=1))
     monkeypatch.setattr(timezone, "now", lambda: now)
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
-    for source in ("auto", "estimated_actuals"):
+    for source in ("forecast", "satellite"):
         outlook = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, source=source)
         result = cast(dict[str, Any], outlook["result"])
         assert outlook["source_kind"] == "estimated_actuals"
@@ -176,7 +178,7 @@ def test_explicit_today_actuals_and_auto_complete_daylight_need_no_forecast(
             52 * (last - first).total_seconds() / 3600
         )
     system.region.refresh_from_db()
-    regional = regional_outlook(system.region, DAY, "estimated_actuals", now)
+    regional = regional_outlook(system.region, DAY, "satellite", None, now)
     assert regional["source_kind"] == "estimated_actuals"
 
 
@@ -216,7 +218,7 @@ def test_outage_replays_pinned_mixed_sources_and_invalidated_calibration(
         plant.pk,
         target_date=DAY,
         resolution_minutes=60,
-        source="auto",
+        source="forecast",
     )
     normal = cast(dict[str, Any], outlook["result"])
     scenario = cast(dict[str, Any], outlook["outage_scenario"])["result"]
@@ -458,7 +460,7 @@ def test_mixed_native_means_are_limited_before_hourly_aggregation_and_replay(
         plant.pk,
         target_date=DAY,
         resolution_minutes=60,
-        source="auto",
+        source="forecast",
     )
     result = cast(dict[str, Any], outlook["result"])
     assert result["intervals"][10]["mean_power_mw"] == pytest.approx(76)
@@ -496,7 +498,7 @@ def test_intraday_actual_configuration_assumption_follows_contributing_native_in
         plant.pk,
         target_date=DAY,
         resolution_minutes=60,
-        source="estimated_actuals",
+        source="satellite",
     )
     result = cast(dict[str, Any], outlook["result"])
     assert ("historical_configuration_assumed" in result["quality_flags"]) is before_configuration
@@ -614,7 +616,7 @@ def test_mixed_replay_preserves_a_calendar_clipped_forecasts_original_native_bou
         plant.pk,
         target_date=DAY,
         resolution_minutes=60,
-        source="auto",
+        source="forecast",
     )
     result = cast(dict[str, Any], outlook["result"])
     assert outlook["source_kind"] == "mixed"
@@ -655,11 +657,11 @@ def test_intraday_rejects_damaged_original_native_bounds(
             plant.pk,
             target_date=DAY,
             resolution_minutes=60,
-            source="auto",
+            source="forecast",
         )
     system.region.refresh_from_db()
     with raises_code("calculation_out_of_range"):
-        regional_outlook(system.region, DAY, "auto", now)
+        regional_outlook(system.region, DAY, "forecast", None, now)
 
 
 def test_intraday_missing_inputs_stay_unavailable_and_naive_cutoffs_are_rejected(
@@ -676,7 +678,7 @@ def test_intraday_missing_inputs_stay_unavailable_and_naive_cutoffs_are_rejected
         plant.pk,
         target_date=DAY,
         resolution_minutes=60,
-        source="estimated_actuals",
+        source="satellite",
     )
     assert outlook["result"] is None
     assert outlook["unavailable_reason"] == "estimated_actuals_unavailable"

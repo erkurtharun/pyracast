@@ -1738,17 +1738,12 @@
                         "in": "query",
                         "name": "data_source",
                         "schema": {
-                            "enum": [
-                                "auto",
-                                "forecast",
-                                "estimated_actuals",
-                                "archived_forecast"
-                            ],
+                            "enum": ["forecast", "satellite"],
                             "type": "string",
-                            "default": "auto",
+                            "default": "forecast",
                             "minLength": 1
                         },
-                        "description": "* `auto` - auto\n* `forecast` - forecast\n* `estimated_actuals` - estimated_actuals\n* `archived_forecast` - archived_forecast"
+                        "description": "* `forecast` - forecast\n* `satellite` - satellite"
                     },
                     {
                         "in": "query",
@@ -1758,6 +1753,14 @@
                             "format": "date"
                         },
                         "required": true
+                    },
+                    {
+                        "in": "query",
+                        "name": "forecast_id",
+                        "schema": {
+                            "type": "integer",
+                            "minimum": 1
+                        }
                     },
                     {
                         "in": "path",
@@ -3598,27 +3601,14 @@
                 "parameters": [
                     {
                         "in": "query",
-                        "name": "as_of",
-                        "schema": {
-                            "type": "string",
-                            "format": "date-time"
-                        }
-                    },
-                    {
-                        "in": "query",
                         "name": "data_source",
                         "schema": {
-                            "enum": [
-                                "auto",
-                                "forecast",
-                                "estimated_actuals",
-                                "archived_forecast"
-                            ],
+                            "enum": ["forecast", "satellite"],
                             "type": "string",
-                            "default": "auto",
+                            "default": "forecast",
                             "minLength": 1
                         },
-                        "description": "* `auto` - auto\n* `forecast` - forecast\n* `estimated_actuals` - estimated_actuals\n* `archived_forecast` - archived_forecast"
+                        "description": "* `forecast` - forecast\n* `satellite` - satellite"
                     },
                     {
                         "in": "query",
@@ -3628,6 +3618,14 @@
                             "format": "date"
                         },
                         "required": true
+                    },
+                    {
+                        "in": "query",
+                        "name": "forecast_id",
+                        "schema": {
+                            "type": "integer",
+                            "minimum": 1
+                        }
                     },
                     {
                         "in": "path",
@@ -7688,6 +7686,19 @@
                 },
                 "required": ["affected_mwh", "end", "mwh", "sources", "start"]
             },
+            "ForecastOptionOutput": {
+                "type": "object",
+                "properties": {
+                    "forecast_id": {
+                        "type": "integer"
+                    },
+                    "fetched_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                },
+                "required": ["fetched_at", "forecast_id"]
+            },
             "ForecastOutput": {
                 "type": "object",
                 "properties": {
@@ -7726,6 +7737,14 @@
                             }
                         ]
                     },
+                    "selection": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ForecastSelectionOutput"
+                            }
+                        ],
+                        "nullable": true
+                    },
                     "result": {
                         "allOf": [
                             {
@@ -7756,6 +7775,7 @@
                     "freshness",
                     "issued_at",
                     "result",
+                    "selection",
                     "source_kind",
                     "stale_reason",
                     "timezone",
@@ -7803,6 +7823,37 @@
                         }
                     }
                 }
+            },
+            "ForecastSelectionOutput": {
+                "type": "object",
+                "description": "Which forecast the answer shows: chosen automatically by `rule`, or by the reader.",
+                "properties": {
+                    "mode": {
+                        "$ref": "#/components/schemas/SelectionModeEnum"
+                    },
+                    "rule": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/SelectionRuleEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "forecast_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "options": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ForecastOptionOutput"
+                        }
+                    }
+                },
+                "required": ["forecast_id", "mode", "options", "rule"]
             },
             "ForecastSourceKindEnum": {
                 "enum": ["forecast", "estimated_actuals", "mixed"],
@@ -9829,6 +9880,14 @@
                             }
                         ]
                     },
+                    "selection": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ForecastSelectionOutput"
+                            }
+                        ],
+                        "nullable": true
+                    },
                     "plant_id": {
                         "type": "integer"
                     },
@@ -9894,6 +9953,7 @@
                     "plant_id",
                     "regional_irradiance",
                     "result",
+                    "selection",
                     "source_kind",
                     "stale_reason",
                     "timezone",
@@ -11653,6 +11713,16 @@
                     }
                 },
                 "required": ["marked"]
+            },
+            "SelectionModeEnum": {
+                "enum": ["auto", "manual"],
+                "type": "string",
+                "description": "* `auto` - auto\n* `manual` - manual"
+            },
+            "SelectionRuleEnum": {
+                "enum": ["closest_to_production", "latest"],
+                "type": "string",
+                "description": "* `closest_to_production` - closest_to_production\n* `latest` - latest"
             },
             "SelectionStateEnum": {
                 "enum": [

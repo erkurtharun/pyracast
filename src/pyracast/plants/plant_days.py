@@ -94,14 +94,14 @@ def plant_days(actor: User, tenant_id: int, region_id: int, plant_id: int) -> Pl
             name=plant.name,
             today=today,
             forecast=tuple(
-                _forecast_day(plant, today + timedelta(days=offset), today, now)
+                _forecast_day(plant, today + timedelta(days=offset), now)
                 for offset in range(-FORECAST_DAYS_BEFORE, FORECAST_DAYS_AFTER + 1)
             ),
             production=_production_days(plant, today, now),
         )
 
 
-def _forecast_day(plant: Plant, day: date, today: date, now: datetime) -> ForecastDay:
+def _forecast_day(plant: Plant, day: date, now: datetime) -> ForecastDay:
     try:
         with stored_data("plant", plant.pk, day, "days", FROZEN_PAYLOAD_FAULTS):
             return _projected(
@@ -110,7 +110,7 @@ def _forecast_day(plant: Plant, day: date, today: date, now: datetime) -> Foreca
     except DomainError as refusal:
         if refusal.code != ErrorCode.CALCULATION_OUT_OF_RANGE:
             raise
-        return _refused_day(plant, day, today)
+        return _refused_day(plant, day)
 
 
 def _projected(day: date, outlook: dict[str, Any]) -> ForecastDay:
@@ -132,11 +132,11 @@ def _projected(day: date, outlook: dict[str, Any]) -> ForecastDay:
     )
 
 
-def _refused_day(plant: Plant, day: date, today: date) -> ForecastDay:
+def _refused_day(plant: Plant, day: date) -> ForecastDay:
     return ForecastDay(
         date=day,
         timezone=plant.region.timezone,
-        source_kind="estimated_actuals" if day < today else "forecast",
+        source_kind="forecast",
         freshness="missing",
         stale_reason=None,
         unavailable_reason=ErrorCode.CALCULATION_OUT_OF_RANGE,

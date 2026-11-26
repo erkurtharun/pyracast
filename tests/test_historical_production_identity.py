@@ -1,8 +1,6 @@
 from datetime import datetime, timedelta
 
 import pytest
-from django.test import Client
-from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
 from pyracast.irradiance import local_day_bounds
@@ -12,67 +10,16 @@ from pyracast.metering.models import (
     EpiasConnectionRevision,
     EpiasSnapshot,
 )
-from pyracast.plants.activation import activate_calibration
 from pyracast.plants.measurements import production_identity_at, production_identity_current
 from pyracast.plants.models import CalibrationRun, Plant
 from pyracast.regions.models import Region
 from tests.support.domain import NOW
 from tests.support.historical_production_identity import record_identity
 from tests.support.invariants import stored_again
-from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
+from tests.support.plant_operations import make_plant
 from tests.support.provisional_measurements import acquisition
 
 pytestmark = pytest.mark.django_db(transaction=True)
-
-
-@pytest.mark.parametrize("after_cutoff", [False, True])
-def test_automatic_forecast_keeps_the_day_end_factor_across_midnight(
-    monkeypatch: pytest.MonkeyPatch, after_cutoff: bool
-) -> None:
-    system, plant = make_plant(monkeypatch)
-    configuration = plant.current_configuration
-    assert configuration is not None
-    connection = EpiasConnection.objects.create(
-        plant=plant,
-        provider_plant_id=2,
-        eic="EIC",
-        name="Plant",
-        connected_by=system.member,
-    )
-    record_identity(monkeypatch, connection, NOW)
-    production = acquisition((configuration, connection))
-    run = ready_run(system, plant)
-    run.production_snapshot_ids = [production.pk]
-    run.save(update_fields=("production_snapshot_ids",))
-    activate_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk)
-    day = NOW.date()
-    publish_snapshot(snapshot_for(system, day, power_kw=0.1, collected_at=NOW))
-    _, end = local_day_bounds(day, configuration.binding.timezone)
-    cutoff = end - timedelta(microseconds=1)
-    if not after_cutoff:
-        connection.provider_plant_id = 3
-        connection.revision += 1
-        record_identity(monkeypatch, connection, cutoff - timedelta(minutes=30))
-    client = Client()
-    client.force_login(system.member)
-    path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/"
-    query = {"date": day.isoformat(), "data_source": "auto"}
-    monkeypatch.setattr(timezone, "now", lambda: cutoff)
-    before = client.get(path, query)
-    assert before.status_code == 200, before.content
-    expected_factor = 0.5 if after_cutoff else 1
-    assert before.json()["result"]["factor"] == expected_factor
-    if after_cutoff:
-        connection.provider_plant_id = 3
-        connection.revision += 1
-        record_identity(monkeypatch, connection, end + timedelta(minutes=30))
-    monkeypatch.setattr(timezone, "now", lambda: end + timedelta(hours=1))
-    after = client.get(path, query)
-    assert after.status_code == 200, after.content
-    assert after.json()["source_kind"] == "forecast"
-    assert after.json()["result"]["factor"] == expected_factor
-    assert after.json()["result"]["intervals"] == before.json()["result"]["intervals"]
-    assert "forecast_fallback" in after.json()["result"]["quality_flags"]
 
 
 def historical_source(

@@ -387,7 +387,7 @@
             "fresh": "En yeni tahmin verisi",
             "stale": "Daha yeni tahmin verisi alınamadı.",
             "missing": "Bu gün için tahmin verisi yok.",
-            "archived": "Gün doğumu öncesi son tahmin"
+            "archived": "Kayıtlı tahmin"
         },
         "CalibrationStatus": {
             "pending": "Sırada",
