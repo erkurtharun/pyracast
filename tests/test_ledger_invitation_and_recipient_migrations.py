@@ -1,11 +1,13 @@
 import json
 from collections.abc import Callable
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import pytest
-from django.db import connection, models
+from django.db import DEFAULT_DB_ALIAS, connection, connections, models
+from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.migrations.executor import MigrationExecutor
 from django.db.models import F
 from psycopg import sql
@@ -39,7 +41,7 @@ from tests.support.invariants import (
     REVOKED_RECIPIENTS_RULE,
     violations,
 )
-from tests.support.migrations import constraints, leaf_nodes, migrate, reset_to_leaf
+from tests.support.migrations import constraints, leaf_nodes, migrate
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -442,16 +444,74 @@ def test_migrations_refuse_rows_no_writer_stores_and_change_nothing(
     assert broken_rules() == {}
 
 
-@pytest.mark.usefixtures("leaf")
-def test_the_schema_returns_to_the_leaf_from_a_migration_that_refused_stored_rows(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def at_leaf(database: BaseDatabaseWrapper) -> bool:
+    with database.cursor() as cursor:
+        cursor.execute("SELECT app, name FROM django_migrations")
+        return set(leaf_nodes()) <= set(cursor.fetchall())
+
+
+def refuses_stored_rows(monkeypatch: pytest.MonkeyPatch) -> None:
     case = make_request_case(monkeypatch)
     migrate(*PREVIOUS.values())
     schedule_shape(recipient_memberships={ADDRESS: 1})(case)
-    with pytest.raises(ValueError, match=r"notifications_reminderschedule holds 1 row"):
-        migrate(*through_checks())
+    migrate(*through_checks())
 
-    reset_to_leaf()
 
-    assert MigrationExecutor(connection).migration_plan(leaf_nodes()) == []
+def leaves_a_transaction_open_after_a_downgrade() -> None:
+    migrate(*PREVIOUS.values())
+    connection.set_autocommit(False)
+    assert at_leaf(connection)
+
+
+class Phases:
+    def __init__(self) -> None:
+        self.reported: list[tuple[str | None, str]] = []
+
+    def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
+        self.reported.append((report.when, report.outcome))
+
+
+def run_with_leaf(body: Callable[..., None], folder: Path) -> list[tuple[str | None, str]]:
+    module = folder / f"test_{body.__name__}.py"
+    module.write_text(
+        "import pytest\n"
+        "from tests.conftest import leaf\n"
+        f"from {__name__} import {body.__name__} as test_body\n"
+        'pytestmark = pytest.mark.usefixtures("leaf")\n',
+        encoding="utf-8",
+    )
+    settings = folder / "pytest.ini"
+    settings.write_text("[pytest]\n", encoding="utf-8")
+    phases = Phases()
+    pytest.main(
+        [
+            str(module),
+            f"--config-file={settings}",
+            "--import-mode=importlib",
+            *("-p", "no:django", "-p", "no:xdist", "-p", "no:xdist.looponfail"),
+            *("-p", "no:pytest_cov", "-p", "no:cacheprovider", "-p", "no:faulthandler"),
+        ],
+        plugins=[phases],
+    )
+    return phases.reported
+
+
+@pytest.mark.usefixtures("leaf")
+@pytest.mark.parametrize(
+    "body",
+    [refuses_stored_rows, leaves_a_transaction_open_after_a_downgrade],
+    ids=["refused rows", "open transaction"],
+)
+def test_the_leaf_fixture_restores_the_latest_schema_after_a_failing_body(
+    body: Callable[..., None], tmp_path: Path
+) -> None:
+    assert run_with_leaf(body, tmp_path) == [
+        ("setup", "passed"),
+        ("call", "failed"),
+        ("teardown", "passed"),
+    ]
+    fresh = connections.create_connection(DEFAULT_DB_ALIAS)
+    try:
+        assert at_leaf(fresh)
+    finally:
+        fresh.close()
