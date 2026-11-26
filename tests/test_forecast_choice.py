@@ -539,6 +539,21 @@ def test_best_is_refused_where_it_is_not_offered(monkeypatch: pytest.MonkeyPatch
     assert (refused.status_code, refused.json()["code"]) == (400, "invalid_request")
 
 
+def test_best_beyond_the_forecast_days_is_refused_as_best_and_without_it_as_out_of_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    client, path = _client(system), _plant_path(system, plant)
+    beyond = {"date": (TODAY + timedelta(days=15)).isoformat()}
+
+    best = client.get(path, {**beyond, "selection_mode": "best"})
+    automatic = client.get(path, beyond)
+
+    assert (best.status_code, best.json()["code"]) == (400, "invalid_request")
+    assert list(best.json()["fields"]) == ["selection_mode"]
+    assert (automatic.status_code, automatic.json()["code"]) == (400, "date_out_of_range")
+
+
 def test_a_blank_or_repeated_data_source_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     system, plant = make_plant(monkeypatch)
     client = _client(system)
