@@ -1,4 +1,6 @@
+import json
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from threading import Barrier
 from typing import Any
 
@@ -14,13 +16,16 @@ from django.utils import translation
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.language import RequestLanguage, save_user_language
 from pyracast.accounts.models import UserLanguagePreference
-from pyracast.languages import LANGUAGE_COOKIE, Language, browser_language
+from pyracast.languages import LANGUAGE_COOKIE, Language, browser_language, negotiated_language
 from pyracast.platform_admin.read_models import recent_activity_context
 from pyracast.regions.models import AuditEvent
 from tests.support.admin_setup import admin_system
 from tests.support.api import verified_admin
 from tests.support.company_registration import signup
 from tests.support.outbox import deliver_mail
+
+CASE_TABLE = Path(__file__).resolve().parents[1] / "web/tests/support/language-negotiation.json"
+NEGOTIATION = json.loads(CASE_TABLE.read_text(encoding="utf-8"))
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 
@@ -35,25 +40,18 @@ def choose(client: Client, language: object, **extra: Any) -> Any:
     )
 
 
+@pytest.mark.parametrize("case", NEGOTIATION["cases"])
+def test_negotiation_follows_the_shared_case_table(case: dict[str, Any]) -> None:
+    header = " " * case.get("padding", 0) + case["acceptLanguage"]
+    assert negotiated_language(case.get("cookie"), header, case.get("country")) == case["expected"]
+
+
 @pytest.mark.parametrize(
     ("header", "expected"),
     [
-        ("", "en"),
-        ("tr-TR,tr;q=0.9,en;q=0.8", "tr"),
-        ("en-US;q=0.9,tr;q=0.8", "en"),
-        ("de,TR-tr;q=0.8,en;q=0.7", "tr"),
-        ("tr;q=0,en;q=0.2", "en"),
-        ("en;q=0,tr;q=0.2", "tr"),
-        ("tr;q=0.4,en;q=0.4", "tr"),
-        ("de-DE,fr;q=0.8", "en"),
-        ("*", "en"),
-        ("tr;q=2,en;q=0.2", "en"),
-        ("tr;q=NaN,en;q=0.2", "en"),
-        ("tr;q=-1,en;q=0.2", "en"),
-        ("tr;q=0.1234,en;q=0.2", "en"),
-        ("tr;q=1;broken,en;q=0.2", "en"),
-        ("tr_ TR,en;q=0.2", "en"),
-        ("tr;q=0.000,en;q=1.000", "en"),
+        (case["acceptLanguage"], case["expected"])
+        for case in NEGOTIATION["cases"]
+        if not {"cookie", "country", "padding"} & case.keys()
     ],
 )
 def test_browser_language_priorities(header: str, expected: str) -> None:
@@ -102,6 +100,26 @@ def test_language_choice_with_stale_cookie_keeps_the_new_value() -> None:
     assert UserLanguagePreference.objects.get(user=user).language == "tr"
 
 
+def test_public_site_choice_of_a_signed_in_person_becomes_their_preference() -> None:
+    user = User.objects.create_user(username="owner")
+    UserLanguagePreference.objects.create(user=user, language="tr")
+    browser = Client(enforce_csrf_checks=True, HTTP_ACCEPT_LANGUAGE="tr")
+    browser.force_login(user)
+    read = browser.get("/api/session/").json()
+    chosen = browser.post(
+        "/api/session/language/",
+        {"language": "en"},
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=read["csrf_token"],
+        HTTP_X_SESSION_TAG=read["session_tag"],
+    )
+    assert chosen.json()["user"]["language_preference"] == "en"
+    later = browser.get("/api/session/")
+    assert later.json()["language"] == "en"
+    assert LANGUAGE_COOKIE not in later.cookies
+    assert browser.cookies[LANGUAGE_COOKIE].value == "en"
+
+
 def test_anonymous_choice_requires_csrf_and_sets_only_explicit_cookie() -> None:
     client = Client(enforce_csrf_checks=True)
     rejected = client.post(
@@ -114,13 +132,14 @@ def test_anonymous_choice_requires_csrf_and_sets_only_explicit_cookie() -> None:
     assert accepted.json()["language"] == accepted.headers["Content-Language"] == "tr"
     assert accepted.json()["user"] is None
     assert accepted.json()["csrf_token"]
-    cookie = accepted.cookies[LANGUAGE_COOKIE]
+    contract = NEGOTIATION["cookie"]
+    cookie = accepted.cookies[contract["name"]]
     assert cookie.value == "tr"
-    assert cookie["secure"]
-    assert cookie["httponly"]
-    assert cookie["samesite"] == "Lax"
-    assert cookie["path"] == "/"
-    assert cookie["max-age"] == 365 * 24 * 60 * 60
+    assert cookie["secure"] is contract["secure"]
+    assert cookie["httponly"] is contract["httpOnly"]
+    assert cookie["samesite"] == contract["sameSite"]
+    assert cookie["path"] == contract["path"]
+    assert cookie["max-age"] == contract["maxAge"]
     assert not UserLanguagePreference.objects.exists()
     assert client.get("/api/session/", HTTP_ACCEPT_LANGUAGE="en").json()["language"] == "tr"
     with override_settings(DEBUG=True):

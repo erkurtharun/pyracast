@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     title: { absolute: "Page not found | Pyracast" },
 };
 
-// The root locale here is the cookie or English, never the requested path, so both languages show.
+// The root locale here is the visitor's negotiated language, never the requested path, so both languages show.
 export default function NotFound() {
     return (
         <SiteShell language="en">

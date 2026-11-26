@@ -154,7 +154,7 @@ test("pages and unknown files under /app/ keep the page headers", async ({
 
 test("a spoofed language header on /app/ is ignored", async ({ request }) => {
     const response = await request.get("/app/", {
-        headers: { "x-pyracast-public-language": "tr" },
+        headers: { "x-pyracast-language": "tr" },
     });
     expect(await response.text()).toMatch(/<html lang="en"/);
 });
