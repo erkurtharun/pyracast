@@ -684,12 +684,13 @@ test("path parameters and query values build one encoded URL", () => {
                 path: { tenant_id: 1, region_id: 11, plant_id: 21 },
                 query: {
                     start_date: "2026-11-18",
-                    issuance_cutoff: "2026-11-18T10:00:00+03:00",
+                    end_date: "2026-11-18T10:00:00+03:00",
+                    data_source: "satellite",
                 },
             },
         ),
     ).toBe(
-        "/api/tenants/1/regions/11/plants/21/performance/?start_date=2026-11-18&issuance_cutoff=2026-11-18T10%3A00%3A00%2B03%3A00",
+        "/api/tenants/1/regions/11/plants/21/performance/?start_date=2026-11-18&end_date=2026-11-18T10%3A00%3A00%2B03%3A00&data_source=satellite",
     );
 });
 

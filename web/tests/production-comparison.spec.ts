@@ -1,6 +1,13 @@
 import { expect, test } from "./support/test";
+import type { Page } from "@playwright/test";
 import { accessibilityViolations } from "./support/accessibility";
-import { answer, mockApi, type Mock } from "./support/workspace";
+import {
+    accountWith,
+    answer,
+    mockApi,
+    sessionIdentity,
+    type Mock,
+} from "./support/workspace";
 import type { components } from "../src/lib/schema";
 import { errorBody } from "./support/errors";
 
@@ -11,7 +18,29 @@ const day = (index: number) =>
 const shownDay = (index: number) =>
     `${index < 20 ? index + 12 : index - 19} ${index < 20 ? "Oct" : "Nov"} 2026`;
 
-test("available historical model days appear without empty grid rows", async ({
+async function openComparison(
+    page: Page,
+    names = { production: "Production", comparison: "Comparison" },
+) {
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page
+        .getByRole("button", { name: names.production, exact: true })
+        .click();
+    await page
+        .getByRole("button", { name: names.comparison, exact: true })
+        .click();
+    return page.locator("section").filter({
+        has: page.getByRole("heading", {
+            name: names.comparison,
+            exact: true,
+        }),
+    });
+}
+
+test("available satellite data days appear without empty grid rows", async ({
     page,
 }) => {
     await page.clock.setFixedTime(new Date("2026-11-11T12:00:00Z"));
@@ -22,24 +51,14 @@ test("available historical model days appear without empty grid rows", async ({
         query = new URL(route.request().url()).search;
         await route.fulfill({
             json: answer("PerformanceOutput", {
-                comparison: "historical_model",
+                data_source: "satellite",
                 start_date: "2026-10-12",
                 end_date: "2026-11-10",
                 matched_days: 8,
                 requested_days: 30,
                 relative_error: 0.2,
-                skill_score: 0.125,
-                skill_days: 3,
-                missing_days: 21,
-                excluded_days: 1,
-                scored_intervals: 64,
-                scored_hours: 64,
-                metrics: {
-                    daily_mae_mwh: 2,
-                    daily_bias_mwh: 2,
-                    source_positive_mae_mw: 0.2,
-                },
-                baseline_metrics: { daily_mae_mwh: 2 },
+                daily_mae_mwh: 2,
+                daily_bias_mwh: 2,
                 days: Array.from(
                     { length: 30 },
                     (_, index): PerformanceDay => ({
@@ -55,32 +74,17 @@ test("available historical model days appear without empty grid rows", async ({
                         predicted_energy_mwh: index < 22 ? null : 12,
                         error_mwh: index < 22 ? null : 2,
                         provisional_production: index >= 22,
-                        provisional_snapshot_ids: index >= 22 ? [index] : [],
-                        historical_configuration_assumed: index >= 22,
                     }),
                 ),
             }),
         });
     });
-    await page.goto("/app/");
-    await page
-        .getByRole("button", { name: /East array|Antalya solar park/ })
-        .click();
-    await page.getByRole("button", { name: "Production", exact: true }).click();
-    await page.getByRole("button", { name: "Comparison", exact: true }).click();
-    const comparison = page.locator("section").filter({
-        has: page.getByRole("heading", {
-            name: "Comparison",
-            exact: true,
-        }),
-    });
-    await expect.poll(() => query).toContain("comparison=archived_forecast");
+    const comparison = await openComparison(page);
+    await expect.poll(() => query).toContain("data_source=forecast");
     await comparison
-        .getByRole("button", {
-            name: "Weather-based expected production",
-        })
+        .getByRole("button", { name: "Satellite data", exact: true })
         .click();
-    await expect.poll(() => query).toContain("comparison=historical_model");
+    await expect.poll(() => query).toContain("data_source=satellite");
     expect(query).toContain("start_date=2026-10-12&end_date=2026-11-10");
     await expect(comparison.getByText("Advanced", { exact: true })).toHaveCount(
         0,
@@ -92,39 +96,27 @@ test("available historical model days appear without empty grid rows", async ({
             .filter({ hasText: "Absolute error as % of production" }),
     ).toContainText("20%");
     await expect(comparison.locator(".stat")).toHaveCount(4);
-    await expect(
-        comparison.getByText(/Improvement over|outside the calibration days/),
-    ).toHaveCount(0);
     await expect(comparison.getByText(/Days not compared/)).toHaveText([
         "Days not compared (22)",
     ]);
     await expect(
-        comparison.locator(".stat").filter({ hasText: "Excluded days" }),
-    ).toHaveCount(0);
-    await expect(
         comparison.locator(".stat").filter({
             hasText: "Average daily difference",
         }),
-    ).toHaveText("Average daily difference+2.00 MWhProduction below expected");
-    await expect(
-        comparison.getByText(
-            /Additional metrics|How the comparison is measured|Compared: |Current technical details|compared with actual production/,
-        ),
-    ).toHaveCount(0);
+    ).toHaveText("Average daily difference+2.00 MWhSatellite data too high");
     await expect(
         comparison.getByLabel("Start date"),
     ).toHaveAccessibleDescription("Up to 90 days.");
-    await expect(
-        comparison.getByRole("columnheader", { name: "Expected (MWh)" }),
-    ).toBeVisible();
-    await expect(
-        comparison.getByRole("columnheader", {
-            name: "Expected − actual (MWh)",
-        }),
-    ).toBeVisible();
+    for (const name of [
+        "Satellite data (MWh)",
+        "Satellite data − actual (MWh)",
+    ])
+        await expect(
+            comparison.getByRole("columnheader", { name, exact: true }),
+        ).toBeVisible();
     await expect(
         comparison.getByRole("table", {
-            name: "Weather-based expected production · 12 Oct 2026 – 10 Nov 2026",
+            name: "Satellite data · 12 Oct 2026 – 10 Nov 2026",
         }),
     ).toBeVisible();
     await expect(
@@ -148,36 +140,49 @@ test("available historical model days appear without empty grid rows", async ({
             (_, index) => shownDay(index + 1),
         ).join(", ")}`,
     ]);
-    await comparison.getByRole("button", { name: "Forecast accuracy" }).click();
-    await expect.poll(() => query).toContain("comparison=archived_forecast");
-    expect(query).not.toContain("issuance_cutoff");
+    await comparison
+        .getByRole("button", { name: "Forecast", exact: true })
+        .click();
+    await expect.poll(() => query).toContain("data_source=forecast");
     expect(
         await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(320);
     const scan = await accessibilityViolations(page);
     expect(scan).toEqual([]);
-    await comparison.getByText("Advanced", { exact: true }).click();
-    await comparison
-        .getByLabel(
-            "Use the last forecast available by this time on the previous day",
-        )
-        .fill("09:30");
     await comparison.getByLabel("Start date").fill("2026-10-22");
     await comparison.getByRole("button", { name: "Show", exact: true }).click();
     await expect
-        .poll(() => new URLSearchParams(query).get("issuance_cutoff"))
-        .toBe("09:30");
+        .poll(() => new URLSearchParams(query).get("start_date"))
+        .toBe("2026-10-22");
     await comparison
-        .getByRole("button", {
-            name: "Weather-based expected production",
-        })
+        .getByRole("button", { name: "Satellite data", exact: true })
         .click();
-    await expect.poll(() => query).toContain("comparison=historical_model");
+    await expect.poll(() => query).toContain("data_source=satellite");
     expect(query).toContain("start_date=2026-10-22");
-    expect(query).not.toContain("issuance_cutoff");
     expect(
         await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(320);
+});
+
+test("the comparison offers the forecast screen's two data names in Turkish", async ({
+    page,
+}) => {
+    const account = await mockApi(page);
+    account.current = accountWith({ language_preference: "tr" });
+    await page.route("**/api/session/", (route) =>
+        route.fulfill({
+            json: { ...sessionIdentity(account.current), language: "tr" },
+        }),
+    );
+    const comparison = await openComparison(page, {
+        production: "Üretim",
+        comparison: "Karşılaştırma",
+    });
+    await expect(
+        comparison
+            .getByRole("navigation", { name: "Karşılaştırma" })
+            .getByRole("button"),
+    ).toHaveText(["Tahmin", "Uydu verisi"]);
 });
 
 test("a completely unavailable comparison stays compact", async ({ page }) => {
@@ -185,16 +190,14 @@ test("a completely unavailable comparison stays compact", async ({ page }) => {
     await page.route("**/plants/21/performance/**", async (route) => {
         await route.fulfill({
             json: answer("PerformanceOutput", {
-                comparison: "archived_forecast",
+                data_source: "forecast",
                 start_date: "2026-10-12",
                 end_date: "2026-11-10",
                 matched_days: 0,
                 requested_days: 30,
                 relative_error: null,
-                skill_score: null,
-                skill_days: 0,
-                metrics: null,
-                baseline_metrics: null,
+                daily_mae_mwh: null,
+                daily_bias_mwh: null,
                 days: Array.from(
                     { length: 30 },
                     (_, index): PerformanceDay => ({
@@ -209,18 +212,7 @@ test("a completely unavailable comparison stays compact", async ({ page }) => {
             }),
         });
     });
-    await page.goto("/app/");
-    await page
-        .getByRole("button", { name: /East array|Antalya solar park/ })
-        .click();
-    await page.getByRole("button", { name: "Production", exact: true }).click();
-    await page.getByRole("button", { name: "Comparison", exact: true }).click();
-    const comparison = page.locator("section").filter({
-        has: page.getByRole("heading", {
-            name: "Comparison",
-            exact: true,
-        }),
-    });
+    const comparison = await openComparison(page);
     await expect(
         comparison.getByText(
             "No day in this date range can be compared. Choose other dates or check the actual production.",
@@ -253,19 +245,14 @@ test("a failed refresh on return keeps the comparison until a retry loads it", a
                   json: errorBody("busy", "Comparison service is busy."),
               })
             : route.fulfill({
-                  json: {
-                      comparison: "archived_forecast",
+                  json: answer("PerformanceOutput", {
+                      data_source: "forecast",
                       start_date: "2026-11-09",
                       end_date: "2026-11-10",
                       matched_days: 1,
                       requested_days: 2,
-                      missing_days: 1,
-                      metrics: {
-                          daily_mae_mwh: 2,
-                          daily_bias_mwh: 2,
-                          source_positive_mae_mw: 0.2,
-                      },
-                      baseline_metrics: { daily_mae_mwh: 3 },
+                      daily_mae_mwh: 2,
+                      daily_bias_mwh: 2,
                       days: [
                           {
                               date: "2026-11-09",
@@ -282,18 +269,12 @@ test("a failed refresh on return keeps the comparison until a retry loads it", a
                               measured_energy_mwh: 10,
                               predicted_energy_mwh: 12,
                               error_mwh: 2,
-                              provisional_snapshot_ids: [],
                           },
                       ],
-                  },
+                  }),
               }),
     );
-    await page.goto("/app/");
-    await page
-        .getByRole("button", { name: /East array|Antalya solar park/ })
-        .click();
-    await page.getByRole("button", { name: "Production", exact: true }).click();
-    await page.getByRole("button", { name: "Comparison", exact: true }).click();
+    await openComparison(page);
     const missing = page.getByText("Days not compared (1)", { exact: true });
     const counts = page.getByText(/Days not compared/);
     await expect(missing).toBeVisible();
@@ -326,7 +307,7 @@ test("a failed refresh on return keeps the comparison until a retry loads it", a
     await expect(counts).toHaveText(["Days not compared (1)"]);
 });
 
-test("a forecast accuracy comparison signs the daily difference, counts no day not compared, and an entered day whose source names real-time production is not marked real-time", async ({
+test("a forecast comparison signs the daily difference, counts no day not compared, and marks only a day on real-time production", async ({
     page,
 }) => {
     await page.clock.setFixedTime(new Date("2026-11-11T12:00:00Z"));
@@ -334,20 +315,14 @@ test("a forecast accuracy comparison signs the daily difference, counts no day n
     await page.route("**/plants/21/performance/**", (route) =>
         route.fulfill({
             json: answer("PerformanceOutput", {
-                comparison: "archived_forecast",
+                data_source: "forecast",
                 start_date: "2026-11-09",
                 end_date: "2026-11-10",
                 matched_days: 2,
                 requested_days: 2,
                 relative_error: 0.1,
-                skill_score: null,
-                skill_days: 0,
-                metrics: {
-                    daily_mae_mwh: 1,
-                    daily_bias_mwh: -1,
-                    source_positive_mae_mw: 0.1,
-                },
-                baseline_metrics: null,
+                daily_mae_mwh: 1,
+                daily_bias_mwh: -1,
                 days: ["2026-11-09", "2026-11-10"].map(
                     (date, index): PerformanceDay => ({
                         date,
@@ -357,23 +332,12 @@ test("a forecast accuracy comparison signs the daily difference, counts no day n
                         predicted_energy_mwh: 9,
                         error_mwh: -1,
                         provisional_production: index === 1,
-                        manual_observation_ids: index === 1 ? [5] : [],
-                        settlement_snapshot_ids: index === 1 ? [] : [3],
-                        provisional_snapshot_ids: [],
                     }),
                 ),
             }),
         }),
     );
-    await page.goto("/app/");
-    await page
-        .getByRole("button", { name: /East array|Antalya solar park/ })
-        .click();
-    await page.getByRole("button", { name: "Production", exact: true }).click();
-    await page.getByRole("button", { name: "Comparison", exact: true }).click();
-    const comparison = page.locator("section").filter({
-        has: page.getByRole("heading", { name: "Comparison", exact: true }),
-    });
+    const comparison = await openComparison(page);
     await expect(
         comparison.locator(".stat").filter({
             hasText: "Average daily difference",
@@ -387,7 +351,7 @@ test("a forecast accuracy comparison signs the daily difference, counts no day n
     ).toHaveCount(0);
     await expect(
         comparison.getByRole("table", {
-            name: "Forecast accuracy · 9 Nov 2026 – 10 Nov 2026",
+            name: "Forecast · 9 Nov 2026 – 10 Nov 2026",
         }),
     ).toBeVisible();
     for (const name of [
@@ -400,10 +364,13 @@ test("a forecast accuracy comparison signs the daily difference, counts no day n
         ).toBeVisible();
     await expect(
         comparison.getByRole("cell", { name: "Compared", exact: true }),
-    ).toHaveCount(2);
+    ).toHaveCount(1);
     await expect(
-        comparison.getByText(/Includes EPİAŞ real-time production|Real-time/),
-    ).toHaveCount(0);
+        comparison.getByRole("cell", {
+            name: "Real-time (EPİAŞ)",
+            exact: true,
+        }),
+    ).toHaveCount(1);
     await expect(
         comparison.getByRole("img", { name: "Absolute error by day" }),
     ).toBeVisible();
@@ -416,29 +383,19 @@ test("a range with requested days and none compared counts the days not compared
     await page.route("**/plants/21/performance/**", (route) =>
         route.fulfill({
             json: answer("PerformanceOutput", {
-                comparison: "archived_forecast",
+                data_source: "forecast",
                 start_date: "2026-10-12",
                 end_date: "2026-11-10",
                 matched_days: 0,
                 requested_days: 30,
                 relative_error: null,
-                skill_score: null,
-                skill_days: 0,
-                metrics: null,
-                baseline_metrics: null,
+                daily_mae_mwh: null,
+                daily_bias_mwh: null,
                 days: [],
             }),
         }),
     );
-    await page.goto("/app/");
-    await page
-        .getByRole("button", { name: /East array|Antalya solar park/ })
-        .click();
-    await page.getByRole("button", { name: "Production", exact: true }).click();
-    await page.getByRole("button", { name: "Comparison", exact: true }).click();
-    const comparison = page.locator("section").filter({
-        has: page.getByRole("heading", { name: "Comparison", exact: true }),
-    });
+    const comparison = await openComparison(page);
     await expect(
         comparison.getByText(
             "No day in this date range can be compared. Choose other dates or check the actual production.",
