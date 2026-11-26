@@ -199,7 +199,7 @@ export function Portfolio() {
                                     <h2>{siteName(site)}</h2>
                                     {metadata && (
                                         <p>
-                                            {format.quantity(
+                                            {format.recordedQuantity(
                                                 metadata.dc_capacity_mw,
                                                 "MWp",
                                             )}

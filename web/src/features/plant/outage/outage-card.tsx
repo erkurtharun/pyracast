@@ -35,7 +35,7 @@ function Capacity({ label, value }: { label: string; value: number | null }) {
             <dd>
                 {value == null
                     ? t("unknown")
-                    : t("power", { value: format.number(value, 2) })}
+                    : t("power", { value: format.recorded(value) })}
             </dd>
         </div>
     );

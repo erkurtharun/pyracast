@@ -203,7 +203,7 @@ export function ProductionHistory({
         write.action === "revert"
             ? t("remove_correction")
             : t("save_value", {
-                  energy: format.number(write.change.energy ?? 0, 6),
+                  energy: format.recorded(write.change.energy ?? 0),
                   quality: label("ObservationQuality", write.change.quality),
               });
     const orphanRepeats = repeatsOrphan(screen);

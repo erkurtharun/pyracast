@@ -51,7 +51,7 @@ export function CalibrationRunList({
                                     inUse={run.id === inUse}
                                 />
                             </td>
-                            <td>{format.number(run.factor, 4)}</td>
+                            <td>{format.recorded(run.factor)}</td>
                             <td>
                                 <button
                                     className="text-button"

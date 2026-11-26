@@ -2,9 +2,10 @@ import { expect, test } from "@playwright/test";
 import {
     MISSING,
     fileNumber,
-    formatNumber,
+    formatComputed,
     formatPercent,
-    formatQuantity,
+    formatRecorded,
+    formatRecordedQuantity,
     formatRounded,
     formatSigned,
 } from "../src/lib/format/number";
@@ -26,17 +27,54 @@ import {
 
 const UNIT_SPACE = " ";
 
-test("an entered number keeps its precision with the language's separators", () => {
-    expect(formatNumber("en", 1284.25)).toBe("1,284.25");
-    expect(formatNumber("tr", 1284.25)).toBe("1.284,25");
-    expect(formatNumber("en", 1234.56789)).toBe("1,234.568");
-    expect(formatNumber("en", 0.1234567, 6)).toBe("0.123457");
-    expect(formatNumber("tr", -1234567.891)).toBe("-1.234.567,891");
-    expect(formatNumber("en", 0)).toBe("0");
-    expect(formatNumber("tr", -0.0001)).toBe("0");
+test("a recorded value shows every decimal it has with the language's separators", () => {
+    expect(formatRecorded("en", 0.0004)).toBe("0.0004");
+    expect(formatRecorded("tr", 0.0004)).toBe("0,0004");
+    expect(formatRecorded("en", 1.234567)).toBe("1.234567");
+    expect(formatRecorded("tr", 1.234567)).toBe("1,234567");
+    expect(formatRecorded("en", 1284)).toBe("1,284");
+    expect(formatRecorded("tr", 1284)).toBe("1.284");
+    expect(formatRecorded("en", 1284.25)).toBe("1,284.25");
+    expect(formatRecorded("tr", -1234567.891)).toBe("-1.234.567,891");
+    expect(formatRecorded("en", 0)).toBe("0");
     expect(MISSING).toBe("—");
-    for (const value of [null, undefined, Number.NaN, "5"])
-        expect(formatNumber("en", value)).toBe(MISSING);
+    for (const value of [null, undefined, Number.NaN, "5"]) {
+        expect(formatRecorded("en", value)).toBe(MISSING);
+        expect(formatRecorded("tr", value)).toBe(MISSING);
+    }
+});
+
+test("a computed figure keeps up to three decimals and drops the sign of a zero", () => {
+    expect(formatComputed("en", 1234.56789)).toBe("1,234.568");
+    expect(formatComputed("tr", 1234.56789)).toBe("1.234,568");
+    expect(formatComputed("en", 0.5)).toBe("0.5");
+    expect(formatComputed("tr", -0.0001)).toBe("0");
+    expect(formatComputed("en", null)).toBe(MISSING);
+});
+
+test("numbers format where the browser refuses the negative sign display", () => {
+    const NumberFormat = Intl.NumberFormat;
+    class OlderNumberFormat extends NumberFormat {
+        constructor(
+            locales?: Intl.LocalesArgument,
+            options?: Intl.NumberFormatOptions,
+        ) {
+            if (options?.signDisplay === "negative")
+                throw new RangeError("signDisplay");
+            super(locales, options);
+        }
+    }
+    Object.defineProperty(Intl, "NumberFormat", { value: OlderNumberFormat });
+    try {
+        expect(formatRounded("en", 12.5, "MWh")).toBe("12.50");
+        expect(formatRounded("tr", -0.001, "MWh")).toBe("0,00");
+        expect(formatRecorded("tr", -1.5)).toBe("-1,5");
+        expect(formatComputed("en", -0.0001)).toBe("0");
+        expect(formatPercent("tr", -0.004)).toBe("%0");
+        expect(formatSigned("en", -0.424, 2)).toBe("−0.42");
+    } finally {
+        Object.defineProperty(Intl, "NumberFormat", { value: NumberFormat });
+    }
 });
 
 test("a summary is rounded by its unit and keeps zero apart from a missing value", () => {
@@ -70,14 +108,21 @@ test("a signed number shows its sign with a minus sign and no sign once it round
     expect(formatSigned("en", null, 2)).toBe(MISSING);
 });
 
-test("a quantity joins number and unit with a non-breaking space and a missing one has no unit", () => {
-    expect(formatQuantity("en", 2.5, "MWh")).toBe(`2.5${UNIT_SPACE}MWh`);
-    expect(formatQuantity("tr", 1284.5, "MW")).toBe(`1.284,5${UNIT_SPACE}MW`);
-    expect(formatQuantity("en", 0.1234567, "MW", 6)).toBe(
-        `0.123457${UNIT_SPACE}MW`,
+test("a recorded quantity joins number and unit with a non-breaking space and a missing one has no unit", () => {
+    expect(formatRecordedQuantity("en", 2.5, "MWh")).toBe(
+        `2.5${UNIT_SPACE}MWh`,
     );
-    expect(formatQuantity("tr", 0, "MWp")).toBe(`0${UNIT_SPACE}MWp`);
-    expect(formatQuantity("en", null, "MW")).toBe(MISSING);
+    expect(formatRecordedQuantity("tr", 1284.5, "MW")).toBe(
+        `1.284,5${UNIT_SPACE}MW`,
+    );
+    expect(formatRecordedQuantity("en", 1.234567, "MWp")).toBe(
+        `1.234567${UNIT_SPACE}MWp`,
+    );
+    expect(formatRecordedQuantity("tr", 0.0004, "MWh")).toBe(
+        `0,0004${UNIT_SPACE}MWh`,
+    );
+    expect(formatRecordedQuantity("tr", 0, "MWp")).toBe(`0${UNIT_SPACE}MWp`);
+    expect(formatRecordedQuantity("en", null, "MW")).toBe(MISSING);
 });
 
 test("a file number is the plain stored value and an impossible one is empty", () => {

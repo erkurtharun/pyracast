@@ -342,12 +342,14 @@ export function ProductionImport({
                                         <td>
                                             {row.current_energy_mwh === null
                                                 ? t("missing")
-                                                : format.number(
+                                                : format.recorded(
                                                       row.current_energy_mwh,
                                                   )}
                                         </td>
                                         <td>
-                                            {format.number(row.new_energy_mwh)}
+                                            {format.recorded(
+                                                row.new_energy_mwh,
+                                            )}
                                         </td>
                                     </tr>
                                 ))}

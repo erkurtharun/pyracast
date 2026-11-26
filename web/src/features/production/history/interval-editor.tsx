@@ -113,7 +113,7 @@ export function IntervalEditor({
                             outcome.kind === "restore"
                                 ? t("revert_interval", {
                                       interval,
-                                      energy: format.number(outcome.energy),
+                                      energy: format.recorded(outcome.energy),
                                   })
                                 : t("remove_correction_interval", { interval })
                         }
@@ -126,7 +126,7 @@ export function IntervalEditor({
                     >
                         {outcome.kind === "restore"
                             ? t("use_provider", {
-                                  energy: format.number(outcome.energy),
+                                  energy: format.recorded(outcome.energy),
                               })
                             : t("remove_correction")}
                     </button>

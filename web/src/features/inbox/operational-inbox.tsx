@@ -641,10 +641,9 @@ function ProductionProposal({
                 (row.proposed ? (
                     <p>
                         {t("revertToProvider", {
-                            value: format.quantity(
+                            value: format.recordedQuantity(
                                 row.proposed.energy_mwh,
                                 "MWh",
-                                6,
                             ),
                         })}
                     </p>
@@ -668,7 +667,7 @@ function ProductionProposal({
                 {t("atSubmission")}:{" "}
                 {row.baseline_energy_mwh === null
                     ? t("noReading")
-                    : format.quantity(row.baseline_energy_mwh, "MWh", 6)}
+                    : format.recordedQuantity(row.baseline_energy_mwh, "MWh")}
             </p>
             {(row.baseline_energy_mwh !== (row.current?.energy_mwh ?? null) ||
                 row.baseline_source_kind !==
@@ -693,7 +692,10 @@ function ProductionProposal({
                             >
                                 {evidenceTime(interval.starts_at)} –{" "}
                                 {evidenceTime(interval.ends_at)}:{" "}
-                                {format.quantity(interval.energy_mwh, "MWh", 6)}
+                                {format.recordedQuantity(
+                                    interval.energy_mwh,
+                                    "MWh",
+                                )}
                             </li>
                         ))}
                     </ul>
@@ -710,7 +712,7 @@ function ReadingValue({ value }: { value: Reading | null }) {
     return value ? (
         <>
             <p className="proposal-energy">
-                {format.quantity(value.energy_mwh, "MWh", 6)}
+                {format.recordedQuantity(value.energy_mwh, "MWh")}
             </p>
             <p>
                 {label("ObservationQuality", qualityOf(value.quality))} ·{" "}
@@ -755,7 +757,7 @@ function IncidentProposal({
     ) => {
         if (value === null || value === undefined)
             return name === "ends_at" ? t("ongoing") : t("unknown");
-        if (typeof value === "number") return format.number(value, 6);
+        if (typeof value === "number") return format.recorded(value);
         if (name === "starts_at" || name === "ends_at")
             return format.zonedTime(value, timezone);
         if (name === "kind")

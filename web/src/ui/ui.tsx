@@ -85,7 +85,7 @@ export function Stat({
         <div className="stat">
             <span>{label}</span>
             <strong>
-                {typeof value === "string" ? value : format.number(value)}
+                {typeof value === "string" ? value : format.recorded(value)}
                 {unit && (
                     <>
                         {" "}

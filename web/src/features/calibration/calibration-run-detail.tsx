@@ -36,7 +36,7 @@ function ActivationEffect({
 }) {
     const t = useTranslations("Calibrations");
     const format = useFormat();
-    const factor = format.number(run.factor, 4);
+    const factor = format.recorded(run.factor);
     const start = firstCalibrationDay(run);
     return (
         <>
@@ -209,7 +209,7 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
             <div className="stats">
                 <Stat
                     label={t("factor")}
-                    value={formatter.number(run.factor, 4)}
+                    value={formatter.recorded(run.factor)}
                 />
                 <Stat
                     label={t("window")}

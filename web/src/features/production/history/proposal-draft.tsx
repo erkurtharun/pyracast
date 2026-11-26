@@ -157,10 +157,10 @@ export function ProposalDraft({
                             <span>
                                 <strong>{interval}</strong>{" "}
                                 {item.action === "set"
-                                    ? `${format.quantity(item.energy, "MWh", 6)} · ${label("ObservationQuality", item.quality)}`
+                                    ? `${format.recordedQuantity(item.energy, "MWh")} · ${label("ObservationQuality", item.quality)}`
                                     : item.outcome.kind === "restore"
                                       ? t("stagedProviderReading", {
-                                            energy: format.number(
+                                            energy: format.recorded(
                                                 item.outcome.energy,
                                             ),
                                         })

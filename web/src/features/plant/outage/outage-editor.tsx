@@ -137,7 +137,7 @@ export function OutageEditor({
     const ceiling = (value?: number | null) =>
         value == null
             ? undefined
-            : t("capacityCeiling", { value: format.number(value, 6) });
+            : t("capacityCeiling", { value: format.recorded(value) });
     const heading = outage ? t("editOutage") : t("reportOutage");
     const changeOf = (data: FormData): OutageChange => {
         const starts = plantInstant(data, "starts_at", timezone, t);

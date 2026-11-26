@@ -36,7 +36,7 @@ function IntervalValue({
                 {value == null
                     ? MISSING
                     : electrical
-                      ? format.number(value)
+                      ? format.computed(value)
                       : format.rounded(value, "W/m²")}
             </span>
             {value == null && (
