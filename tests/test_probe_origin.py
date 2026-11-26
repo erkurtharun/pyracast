@@ -13,6 +13,7 @@ SESSION = json.dumps(
         "csrf_token": "token",
         "language": "tr",
         "expires_at": None,
+        "idle_seconds": None,
         "session_tag": None,
     }
 ).encode()

@@ -1,7 +1,6 @@
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
-from django.conf import settings
 from django.contrib.auth.models import User
 from django.http import HttpRequest
 from django.middleware.csrf import get_token
@@ -22,6 +21,7 @@ from pyracast.accounts.language import (
 )
 from pyracast.accounts.models import Language
 from pyracast.accounts.session_tag import session_tag
+from pyracast.accounts.sessions import absolute_end, session_limits
 from pyracast.api.serializers import InputSerializer
 
 
@@ -51,15 +51,19 @@ class SessionOutput(serializers.Serializer[Any]):
     csrf_token = serializers.CharField()
     language = serializers.ChoiceField(choices=Language.choices)
     expires_at = serializers.DateTimeField(allow_null=True)
+    idle_seconds = serializers.IntegerField(allow_null=True)
     session_tag = serializers.CharField(allow_null=True)
 
 
-def _expires_at(request: Request) -> datetime | None:
+def _limits(request: Request) -> dict[str, datetime | int | None]:
     if not request.user.is_authenticated:
-        return None
+        return {"expires_at": None, "idle_seconds": None}
+    limits = session_limits(request.user)
     # SessionLifetime has already ended a session without a valid start time.
-    started: float = request.session["authenticated_at"]
-    return datetime.fromtimestamp(started + settings.PYRACAST_SESSION_ABSOLUTE_SECONDS, UTC)
+    return {
+        "expires_at": absolute_end(request.session, limits),
+        "idle_seconds": limits.idle_seconds,
+    }
 
 
 def http_request(request: Request) -> HttpRequest:
@@ -79,7 +83,7 @@ def session_output(request: Request) -> dict[str, Any]:
         ),
         "csrf_token": get_token(django_request),
         "language": django_request.LANGUAGE_CODE,
-        "expires_at": _expires_at(request),
+        **_limits(request),
         "session_tag": session_tag(request._request),
     }
 

@@ -17,7 +17,7 @@ from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse, HttpResponseBase
 
 from pyracast.accounts.session_cookie import SessionStore
-from pyracast.accounts.sessions import end_sessions, expiry_reason
+from pyracast.accounts.sessions import end_sessions, expiry_reason, session_limits
 
 if TYPE_CHECKING:
     SessionsField = forms.ModelMultipleChoiceField[UserSession]
@@ -55,10 +55,11 @@ class OwnSessionsInput(SelectSessionsInput):
 def live_sessions(user: User) -> list[UserSession]:
     # Sessions past one of the Pyracast limits end at their next request; they are not listed.
     now = time.time()
+    limits = session_limits(user)
     return [
         session
         for session in UserSession.objects.purge_and_list(user)
-        if expiry_reason(SessionStore(session.session_key), now) is None
+        if expiry_reason(SessionStore(session.session_key), limits, now) is None
     ]
 
 

@@ -71,6 +71,14 @@ def session_cookie(response: Any) -> tuple[str, Any, str] | None:
     return None if cookie is None else (cookie.value, cookie["max-age"], cookie["expires"])
 
 
+def lasting_session_cookie(response: Any) -> tuple[str, int]:
+    cookie = session_cookie(response)
+    assert cookie is not None
+    value, max_age, expires = cookie
+    assert expires
+    return value, max_age
+
+
 def carrying_key(key: str, *, enforce_csrf_checks: bool = True) -> Client:
     client = Client(enforce_csrf_checks=enforce_csrf_checks)
     client.cookies[settings.SESSION_COOKIE_NAME] = key

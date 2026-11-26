@@ -454,9 +454,10 @@ import django
 django.setup()
 from pyracast.accounts.language import LANGUAGES
 session = json.load(sys.stdin)
-assert set(session) == {"user", "csrf_token", "language", "expires_at", "session_tag"}, session
+signed_in_only = {"expires_at", "idle_seconds", "session_tag"}
+assert set(session) == {"user", "csrf_token", "language", *signed_in_only}, session
 assert session["user"] is None and session["language"] in LANGUAGES, session
-assert session["expires_at"] is None and session["session_tag"] is None, session
+assert all(session[key] is None for key in signed_in_only), session
 assert isinstance(session["csrf_token"], str) and session["csrf_token"], session
 print(session["csrf_token"])
 ')

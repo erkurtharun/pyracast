@@ -69,14 +69,22 @@ def test_the_list_shows_where_the_account_is_signed_in_and_nothing_of_other_acco
     assert [entry["id"] for entry in sessions if entry["is_current"]] == [row_of(here).pk]
 
 
-def test_a_session_past_its_idle_limit_is_not_listed() -> None:
+@pytest.mark.parametrize(
+    ("idle_seconds", "listed_too"),
+    [(31 * 60, True), (30 * 24 * 60 * 60 + 60, False)],
+    ids=["half-an-hour", "past-thirty-days"],
+)
+def test_a_member_session_is_listed_until_its_idle_limit_of_thirty_days(
+    idle_seconds: int, listed_too: bool
+) -> None:
     owner = account("owner")
     here, idle = signed_in(owner), signed_in(owner)
     store = SessionStore(session_key(idle))
-    store["last_activity_at"] = time.time() - 31 * 60
+    store["last_activity_at"] = time.time() - idle_seconds
     store.save()
+    expected = [row_of(here).pk, row_of(idle).pk] if listed_too else [row_of(here).pk]
 
-    assert [entry["id"] for entry in listed(here)] == [row_of(here).pk]
+    assert sorted(entry["id"] for entry in listed(here)) == sorted(expected)
 
 
 def test_ending_another_session_of_the_account_signs_it_out(

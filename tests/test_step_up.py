@@ -43,6 +43,7 @@ from tests.support.account_sessions import (
     capture_security_events,
     carrying_key,
     elsewhere,
+    lasting_session_cookie,
     moment,
     session_cookie,
     session_key,
@@ -1039,7 +1040,10 @@ def test_a_proof_recorded_with_the_key_rotation_serves_the_next_request_of_that_
         late = stale.get("/api/tenants/")
         assert (late.status_code, late.json()["code"]) == (401, "not_authenticated")
     rotated = session_key(client)
-    assert session_cookie(rotation) == (rotated, "", "")
+    ninety_days = 90 * 24 * 60 * 60
+    key, lifetime = lasting_session_cookie(rotation)
+    assert key == rotated
+    assert ninety_days - 5 <= lifetime <= ninety_days
     jar = carrying_key(old)
 
     arrive(jar, rotation, late)

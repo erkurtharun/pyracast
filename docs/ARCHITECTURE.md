@@ -115,8 +115,10 @@ Fernet under HKDF keys derived from the application key, one context per purpose
 Sessions are server-side rows. Requests that share a session serialize on a PostgreSQL advisory
 lock, so concurrent requests cannot overwrite each other's security state; that requires one
 PostgreSQL session per request, so transaction pooling and Django's connection pool are refused.
-Sessions end after 12 hours or 30 minutes without a request; any authenticated request, a
-background poll included, counts as activity (`SessionLifetime`). Rate limits for authentication
+Sessions end after 90 days or 30 days without a request, and their cookie outlasts the browser;
+an administrator account's session ends after 12 hours or 30 minutes without a request, with the
+browser. Any authenticated request, a background poll included, counts as activity
+(`SessionLifetime`, limits from `session_limits`). Rate limits for authentication
 live in a PostgreSQL cache on its own autocommit connection, so a rolled-back request cannot reset
 them. See [session-and-csrf](flows/session-and-csrf.md),
 [rate-limiting](flows/rate-limiting.md) and the identity flows in the

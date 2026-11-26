@@ -1,6 +1,8 @@
 import math
 import time
 from collections.abc import Callable, Collection
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -12,7 +14,7 @@ from allauth.usersessions.models import UserSession
 from django.conf import settings
 from django.contrib.auth import signals as auth_signals
 from django.contrib.auth.base_user import AbstractBaseUser
-from django.contrib.auth.models import User
+from django.contrib.auth.models import AnonymousUser, User
 from django.contrib.sessions.backends.base import SessionBase
 from django.contrib.sessions.exceptions import SessionInterrupted
 from django.contrib.sessions.models import Session
@@ -35,10 +37,47 @@ class ExpiryReason(StrEnum):
     INVALID_MARKER = "invalid_marker"
 
 
-def start_session(*, request: HttpRequest, user: AbstractBaseUser, **_kwargs: Any) -> None:
+@dataclass(frozen=True, slots=True)
+class SessionLimits:
+    idle_seconds: int
+    absolute_seconds: int
+    ends_with_browser: bool
+
+
+def session_limits(user: User | AnonymousUser) -> SessionLimits:
+    # Only administrator accounts keep the short session; the figures others see are not critical.
+    if user.is_staff or user.is_superuser:
+        return SessionLimits(
+            settings.PYRACAST_ADMIN_SESSION_IDLE_SECONDS,
+            settings.PYRACAST_ADMIN_SESSION_ABSOLUTE_SECONDS,
+            ends_with_browser=True,
+        )
+    return SessionLimits(
+        settings.PYRACAST_SESSION_IDLE_SECONDS,
+        settings.PYRACAST_SESSION_ABSOLUTE_SECONDS,
+        ends_with_browser=False,
+    )
+
+
+def absolute_end(session: SessionBase, limits: SessionLimits) -> datetime:
+    return datetime.fromtimestamp(float(session["authenticated_at"]) + limits.absolute_seconds, UTC)
+
+
+def apply_cookie_lifetime(session: SessionBase, limits: SessionLimits) -> None:
+    if limits.ends_with_browser:
+        if not session.get_expire_at_browser_close():
+            session.set_expiry(0)
+        return
+    end = absolute_end(session, limits)
+    if session.get_expire_at_browser_close() or session.get_expiry_date() != end:
+        session.set_expiry(end)
+
+
+def start_session(*, request: HttpRequest, user: User, **_kwargs: Any) -> None:
     now = time.time()
     request.session["authenticated_at"] = now
     request.session["last_activity_at"] = now
+    apply_cookie_lifetime(request.session, session_limits(user))
     issue_tag(request)
     with transaction.atomic():
         record_authority(request, user)
@@ -51,12 +90,12 @@ def _marker_age(session: SessionBase, marker: str, now: float) -> float | None:
     return now - value
 
 
-def expiry_reason(session: SessionBase, now: float) -> ExpiryReason | None:
-    limits = (
-        ("authenticated_at", settings.PYRACAST_SESSION_ABSOLUTE_SECONDS, ExpiryReason.ABSOLUTE),
-        ("last_activity_at", settings.PYRACAST_SESSION_IDLE_SECONDS, ExpiryReason.IDLE),
+def expiry_reason(session: SessionBase, limits: SessionLimits, now: float) -> ExpiryReason | None:
+    markers = (
+        ("authenticated_at", limits.absolute_seconds, ExpiryReason.ABSOLUTE),
+        ("last_activity_at", limits.idle_seconds, ExpiryReason.IDLE),
     )
-    for marker, limit, reason in limits:
+    for marker, limit, reason in markers:
         age = _marker_age(session, marker, now)
         if age is None:
             return ExpiryReason.INVALID_MARKER
