@@ -934,6 +934,8 @@ def test_a_failed_job_of_a_pull_request_run_cancels_the_rest_of_the_run() -> Non
         assert stop["needs"] == watched, identifier
         assert stop["if"] == STOP_CONDITION, identifier
         assert "continue-on-error" not in stop, identifier
+        assert "if" not in cancel, identifier
+        assert "continue-on-error" not in cancel, identifier
         assert str(cancel["uses"]).startswith("actions/github-script@"), identifier
         assert cancel["with"] == {"script": CANCEL_OWN_RUN}, identifier
     assert "fail-fast" not in str(workflow("ci.yml"))
@@ -1485,6 +1487,5 @@ def test_in_ci_only_jobs_of_one_api_call_may_write_and_only_to_actions() -> None
         **{identifier: {"actions": "write"} for identifier in STOP_JOBS},
     }
     for identifier in writers:
-        assert [str(candidate["uses"]) for candidate in ci_jobs()[identifier]["steps"]] == [
-            ci_jobs()["release_start"]["steps"][0]["uses"]
-        ], identifier
+        (call,) = ci_jobs()[identifier]["steps"]
+        assert str(call["uses"]).startswith("actions/github-script@"), identifier
