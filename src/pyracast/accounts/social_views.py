@@ -273,7 +273,7 @@ class ManageProvidersView(StepUpAnswers, AllauthManageProvidersView):
 
 
 class ProviderCallbackView(OAuth2CallbackView):
-    # allauth contract: allauth 65.22.1's OAuth2CallbackView.dispatch up to the adapter's
+    # allauth contract: allauth 65.23.0's OAuth2CallbackView.dispatch up to the adapter's
     # complete_login (tests/test_provider_callback_contract.py pins those sources). The callback
     # only verifies: it takes its state while the session's requests are serialized, exchanges
     # with no lock and no transaction, and stores the verified login for the browser session that
@@ -316,6 +316,7 @@ class ProviderCallbackView(OAuth2CallbackView):
                     request, provider, exception=error, extra_context={"state": state}
                 ),
             )
+        # The SPA completion uses only the state issued for this session and round trip.
         login.state = state
         store_verified_login(cast(str, request.session.session_key), login)
         return HttpResponseRedirect(state["next"])

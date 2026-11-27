@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 from allauth.core import context as allauth_context
 from django.core import mail
+from django.core.mail import EmailMultiAlternatives
 from django.db import transaction
 from django.test import Client, RequestFactory, override_settings
 from django.utils import translation
@@ -129,9 +130,9 @@ def test_account_mail_waits_for_the_commit_and_is_dropped_on_rollback() -> None:
     ("prefix", "language", "subject"),
     [
         ("mfa/email/webauthn_added", "en", "A passkey was added to your account"),
-        ("mfa/email/webauthn_added", "tr", "Hesabınıza bir geçiş anahtarı eklendi"),
+        ("mfa/email/webauthn_added", "tr", "Hesabınıza bir geçiş anahtarı eklendi"),  # noqa: RUF001 -- Turkish copy.
         ("mfa/email/webauthn_removed", "en", "A passkey was removed from your account"),
-        ("mfa/email/webauthn_removed", "tr", "Hesabınızdan bir geçiş anahtarı kaldırıldı"),
+        ("mfa/email/webauthn_removed", "tr", "Hesabınızdan bir geçiş anahtarı kaldırıldı"),  # noqa: RUF001 -- Turkish copy.
     ],
 )
 def test_passkey_security_notice_uses_the_outbox_and_account_language(
@@ -156,5 +157,6 @@ def test_passkey_security_notice_uses_the_outbox_and_account_language(
 
     assert deliver_mail() == 1
     (message,) = mail.outbox
+    assert isinstance(message, EmailMultiAlternatives)
     assert_account_mail(message, prefix=prefix, to=PRIMARY, language=language, subject=subject)
     assert_security_details(message, language=language, since=since)

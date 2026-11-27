@@ -6,6 +6,7 @@ from allauth.account.internal.stagekit import LOGIN_SESSION_KEY
 from allauth.account.models import EmailAddress
 from allauth.headless.base.response import ConflictResponse, ForbiddenResponse
 from allauth.headless.base.views import APIView
+from allauth.headless.internal.restkit.inputs import Input
 from allauth.headless.mfa import inputs, views
 from allauth.headless.mfa.response import (
     AddWebAuthnResponse,
@@ -42,9 +43,9 @@ def invalid_passkey() -> ValidationError:
     return get_adapter().validation_error("incorrect_code")
 
 
-def active_customer(user_id: int | None) -> bool:
+def active_customer(user: User) -> bool:
     return User.objects.filter(
-        pk=user_id, is_active=True, is_staff=False, is_superuser=False
+        pk=user.pk, is_active=True, is_staff=False, is_superuser=False
     ).exists()
 
 
@@ -77,7 +78,7 @@ class LoginPasskeyInput(PasskeyInput, inputs.LoginWebAuthnInput):
         # Only a valid assertion identifies an account to lock. Re-read the credential and its
         # owner under those locks before issuing a session, including after an operator promotion.
         lock_account(verified.user_id)
-        current = (
+        current: Authenticator | None = (
             Authenticator.objects.select_related("user")
             .filter(
                 pk=verified.pk,
@@ -104,6 +105,11 @@ class ReauthenticatePasskeyInput(PasskeyInput, inputs.ReauthenticateWebAuthnInpu
 
 
 class PasskeyCeremony(APIView):
+    answer_input: type[Input]
+
+    def get_input_class(self) -> type[Input] | None:
+        return self.answer_input if self.request.method == "POST" else super().get_input_class()
+
     def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         # allauth keeps one challenge per session. Bind it to this operation and a short
         # lifetime. A submitted answer consumes it, including when validation fails.
@@ -123,7 +129,7 @@ class PasskeyCeremony(APIView):
 
 
 class LoginView(StartingView, PasskeyCeremony, views.LoginWebAuthnView):
-    input_class = {"POST": LoginPasskeyInput}
+    answer_input = LoginPasskeyInput
 
     def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         if request.user.is_authenticated or LOGIN_SESSION_KEY in request.session:
@@ -132,7 +138,7 @@ class LoginView(StartingView, PasskeyCeremony, views.LoginWebAuthnView):
 
 
 class AuthenticateView(PendingFactorView, views.AuthenticateWebAuthnView, PasskeyCeremony):
-    input_class = {"POST": AuthenticatePasskeyInput}
+    answer_input = AuthenticatePasskeyInput
 
     def get_input_kwargs(self) -> dict[str, Any]:
         user = cast(User, self.stage.login.user)
@@ -148,29 +154,28 @@ class AuthenticateView(PendingFactorView, views.AuthenticateWebAuthnView, Passke
 
 class ReauthenticateView(StrongestFactor, PasskeyCeremony, views.ReauthenticateWebAuthnView):
     factor = Factor.MFA
-    input_class = {"POST": ReauthenticatePasskeyInput}
+    answer_input = ReauthenticatePasskeyInput
 
     def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         with confirmation(request):
-            if not active_customer(request.user.pk):
+            if not active_customer(cast(User, request.user)):
                 return ForbiddenResponse(request)
             return super().handle(request, *args, **kwargs)
 
 
 class ManageView(StepUpAnswers, PasskeyCeremony, views.ManageWebAuthnView):
-    input_class = {"POST": EnrollPasskeyInput, "DELETE": inputs.DeleteWebAuthnInput}
+    answer_input = EnrollPasskeyInput
 
     def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         with credential_write(request):
-            if not active_customer(request.user.pk):
+            user = cast(User, request.user)
+            if not active_customer(user):
                 return ForbiddenResponse(request)
             if request.method == "DELETE" and (refused := require_recent_mfa(request)) is not None:
                 return refused
             if (
                 request.method in {"GET", "POST"}
-                and not EmailAddress.objects.filter(
-                    user_id=request.user.pk, verified=True, primary=True
-                ).exists()
+                and not EmailAddress.objects.filter(user=user, verified=True, primary=True).exists()
             ):
                 return ForbiddenResponse(request)
             raise_if_reauthentication_required(request, app="allauth.mfa")

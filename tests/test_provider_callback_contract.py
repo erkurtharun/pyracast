@@ -10,12 +10,12 @@ from allauth.socialaccount.providers.oauth2.views import OAuth2CallbackView
 # pyracast.accounts.social_views.ProviderCallbackView re-implements the first of these up to the
 # adapter's complete_login and takes its state through the others: the state is taken once and
 # saved at once, before the session's serialization ends, and the store swapped in after the save
-# is left unsaved. Digests of allauth 65.22.1; a changed source fails here until the view is read
+# is left unsaved. Digests of allauth 65.23.0; a changed source fails here until the view is read
 # against it.
 SEQUENCE: dict[str, tuple[Callable[..., Any], str]] = {
     "OAuth2CallbackView.dispatch": (
         OAuth2CallbackView.dispatch,
-        "313de4b5f9730fff3a5f113d79cbe2c9553d64fbf015232812cd527ee2048465",
+        "890d8c3ba73d4716ae9bfa68ab0be6a60b1c5b53b5615cbe4f76a4e82829bcb8",
     ),
     "OAuth2CallbackView._get_state": (
         OAuth2CallbackView._get_state,
