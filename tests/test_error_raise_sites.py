@@ -19,7 +19,7 @@ ALLAUTH_PROTOCOL = {
     "accounts/headless.py:VerifyEmailView.post",
     "accounts/headless.py:ResendEmailVerificationCodeView.post",
     "accounts/headless.py:ConfirmReauthenticationCodeView.post",
-    "accounts/mfa_views.py:AuthenticateView.handle",
+    "accounts/mfa_views.py:PendingFactorView.handle",
     "accounts/headless.py:ManageEmailView.post",
     "accounts/social_views.py:ProviderSignupView.handle",
     # The provider redirect and callback answer with allauth's error redirect, as allauth's own
@@ -30,6 +30,7 @@ ALLAUTH_PROTOCOL = {
     "accounts/inputs.py:ChangePasswordInput.clean_current_password",
     "accounts/inputs.py:SecondFactorCode.matching_code",
     "accounts/inputs.py:TOTPActivationInput.clean_code.matching_code",
+    "accounts/passkey_views.py:invalid_passkey",
     "accounts/login_limits.py:check_second_factor",
     "accounts/social.py:SocialAccountAdapter.validate_disconnect",
     "accounts/step_up.py:step_up_required",

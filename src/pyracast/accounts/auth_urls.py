@@ -5,7 +5,7 @@ from allauth.headless.mfa import views as mfa_views
 from django.urls import path
 from django.views.decorators.http import require_http_methods, require_POST
 
-from pyracast.accounts import headless, passkeys
+from pyracast.accounts import headless, passkey_views
 from pyracast.accounts.devices import SessionsView
 from pyracast.accounts.mfa_views import (
     AuthenticateView,
@@ -33,19 +33,19 @@ urlpatterns = [
     path(
         "auth/webauthn/login",
         require_http_methods(["GET", "POST"])(
-            passkeys.LoginView.as_api_view(client=Client.BROWSER)
+            passkey_views.LoginView.as_api_view(client=Client.BROWSER)
         ),
     ),
     path(
         "auth/webauthn/authenticate",
         require_http_methods(["GET", "POST"])(
-            passkeys.AuthenticateView.as_api_view(client=Client.BROWSER)
+            passkey_views.AuthenticateView.as_api_view(client=Client.BROWSER)
         ),
     ),
     path(
         "auth/webauthn/reauthenticate",
         require_http_methods(["GET", "POST"])(
-            passkeys.ReauthenticateView.as_api_view(client=Client.BROWSER)
+            passkey_views.ReauthenticateView.as_api_view(client=Client.BROWSER)
         ),
     ),
     path(
@@ -100,7 +100,7 @@ urlpatterns = [
     path(
         "account/authenticators/webauthn",
         require_http_methods(["GET", "POST", "DELETE"])(
-            passkeys.ManageView.as_api_view(client=Client.BROWSER)
+            passkey_views.ManageView.as_api_view(client=Client.BROWSER)
         ),
     ),
     path("account/authenticators/totp", ManageTOTPView.as_api_view(client=Client.BROWSER)),

@@ -181,6 +181,12 @@ def test_anonymous_options_are_scoped_to_the_public_origin_and_attempt() -> None
     client = browser()
     with override_settings(PYRACAST_PUBLIC_ORIGIN=""), pytest.raises(PermissionDenied):
         MFAAdapter().get_public_key_credential_rp_entity()
+    for path in (MANAGE, SECOND, CONFIRM):
+        assert client.get(AUTH + path).status_code == 401
+    for path in (LOGIN, SECOND, CONFIRM, MANAGE):
+        refused = client.options(AUTH + path)
+        assert refused.status_code == 405
+        assert refused["Allow"] == ("GET, POST, DELETE" if path == MANAGE else "GET, POST")
     options = client.get(AUTH + LOGIN).json()["data"]["request_options"]["publicKey"]
     assert options["rpId"] == "testserver"
     assert options.get("allowCredentials", []) == []
@@ -200,4 +206,5 @@ def test_anonymous_options_are_scoped_to_the_public_origin_and_attempt() -> None
         client, LOGIN, {"credential": {"response": {"clientDataJSON": other_origin.b64}}}
     )
     assert response.status_code == 400
+    assert [error["code"] for error in response.json()["errors"]] == ["incorrect_code"]
     assert session_user(client) is None
