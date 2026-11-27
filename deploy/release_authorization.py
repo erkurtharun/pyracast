@@ -220,7 +220,7 @@ def _decide_whole_run(
             "repeated jobs ended."
         )
     attempt, artifact = _newest_images(facts["artifacts"], main, int(run["run_attempt"]))
-    if not _built_by_image_job(facts, artifact, attempt):
+    if not _built_by_image_job(facts, run, artifact, attempt):
         raise RefusedError(_unbuilt_images(attempt))
     return Authorized(main, int(run["id"]), attempt, int(artifact["id"]), since)
 
@@ -278,7 +278,7 @@ def _prove_early(facts: Mapping[str, Any], main: str, run: Mapping[str, Any] | N
         built_in, artifact = 0, {}
     if built_in != attempt:
         raise _UnprovenError(f"No unexpired image artifact of attempt {attempt} exists")
-    if not _built_by_image_job(facts, artifact, attempt):
+    if not _built_by_image_job(facts, run, artifact, attempt):
         raise _UnprovenError(_unbuilt_images(attempt))
     return Authorized(
         main,
@@ -369,7 +369,8 @@ def _proof(facts: Mapping[str, Any], main: str) -> tuple[int, int]:
         )
     ((match, artifact),) = evidence
     recorders = [job for job in proof["jobs"] if job["name"] == TESTED_TREE_JOB]
-    if len(recorders) != 1 or not _made_by(artifact, recorders[0], tested["run_started_at"]):
+    tested_start = {attempt: tested.get("run_started_at")}
+    if len(recorders) != 1 or not _made_by(artifact, recorders[0], attempt, tested_start):
         raise _UnprovenError(
             f"The tested tree of CI run {identifier} was not recorded by its {TESTED_TREE_JOB} job"
         )
@@ -397,28 +398,47 @@ def _proof(facts: Mapping[str, Any], main: str) -> tuple[int, int]:
 
 
 def _made_by(
-    artifact: Mapping[str, Any], job: Mapping[str, Any], attempt_started_at: object
+    artifact: Mapping[str, Any],
+    job: Mapping[str, Any],
+    attempt: int,
+    attempt_starts: Mapping[int, object],
 ) -> bool:
-    # A re-run lists the jobs it kept with the times of the attempt that ran them.
     try:
-        created = _instant(artifact["created_at"])
-        started = _instant(job["started_at"])
-        return _instant(attempt_started_at) <= started <= created <= _instant(job["completed_at"])
+        started = _instant(job.get("started_at"))
+        created = _instant(artifact.get("created_at"))
+        ended = _instant(job.get("completed_at"))
+        return _attempt_of(started, attempt_starts) == attempt and started <= created <= ended
     except (TypeError, ValueError):
         return False
 
 
+def _attempt_of(started: datetime, attempt_starts: Mapping[int, object]) -> int | None:
+    # A re-run lists the jobs it kept with the times of the attempt that ran them.
+    begun = [attempt for attempt, start in attempt_starts.items() if _instant(start) <= started]
+    return max(begun, default=None)
+
+
 def _built_by_image_job(
-    facts: Mapping[str, Any], artifact: Mapping[str, Any], attempt: int
+    facts: Mapping[str, Any], run: Mapping[str, Any], artifact: Mapping[str, Any], attempt: int
 ) -> bool:
     builders = [job for job in facts["jobs"] if job["name"] == IMAGE_JOB]
-    starts = [entry["run_started_at"] for entry in facts["attempts"] if entry["attempt"] == attempt]
-    return len(builders) == 1 and len(starts) == 1 and _made_by(artifact, builders[0], starts[0])
+    return len(builders) == 1 and _made_by(
+        artifact, builders[0], attempt, _attempt_starts(facts, run)
+    )
+
+
+def _attempt_starts(facts: Mapping[str, Any], run: Mapping[str, Any]) -> dict[int, object]:
+    current = int(run["run_attempt"])
+    earlier = {
+        entry.get("attempt"): entry.get("run_started_at") for entry in facts["earlier_attempts"]
+    }
+    starts = {attempt: earlier.get(attempt) for attempt in range(1, current)}
+    return starts | {current: run.get("run_started_at")}
 
 
 def _unbuilt_images(attempt: int) -> str:
     return (
-        f"The image artifact of attempt {attempt} was not uploaded by the {IMAGE_JOB} job "
+        f"The image artifact of attempt {attempt} was not created within the {IMAGE_JOB} job "
         "of that attempt"
     )
 

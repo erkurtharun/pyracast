@@ -113,9 +113,9 @@ jobs:
               id: artifact.id, name: artifact.name, expired: artifact.expired,
               head_sha: artifact.workflow_run?.head_sha ?? null, created_at: artifact.created_at,
             }));
-            const attemptsOf = async candidate => {
+            const earlierAttemptsOf = async candidate => {
               const attempts = [];
-              for (let attempt = 1; attempt <= candidate.run_attempt; attempt += 1) {
+              for (let attempt = 1; attempt < candidate.run_attempt; attempt += 1) {
                 const { data } = await github.rest.actions.getWorkflowRunAttempt({
                   ...repository, run_id: candidate.id, attempt_number: attempt,
                 });
@@ -127,7 +127,7 @@ jobs:
             let run = null;
             let jobs = [];
             let artifacts = [];
-            let attempts = [];
+            let earlierAttempts = [];
             let runError = null;
             try {
               if (source) {
@@ -144,7 +144,7 @@ jobs:
               if (run) {
                 jobs = await jobsOf(run);
                 artifacts = await artifactsOf(run);
-                attempts = await attemptsOf(run);
+                earlierAttempts = await earlierAttemptsOf(run);
               }
             } catch (error) {
               if (!requested) throw error;
@@ -210,7 +210,7 @@ jobs:
               run_error: runError,
               jobs,
               artifacts,
-              attempts,
+              earlier_attempts: earlierAttempts,
               deployments,
               proof,
               sonar_enabled: process.env.SONAR_ENABLED === 'true',

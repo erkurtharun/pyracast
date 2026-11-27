@@ -1020,16 +1020,18 @@ def test_the_release_judges_a_ci_run_its_dispatch_names_through_the_same_gate() 
         in (script)
     )
     assert (
-        "for (let attempt = 1; attempt <= candidate.run_attempt; attempt += 1) { const { data } = "
+        "for (let attempt = 1; attempt < candidate.run_attempt; attempt += 1) { const { data } = "
         "await github.rest.actions.getWorkflowRunAttempt({ ...repository, run_id: candidate.id, "
         "attempt_number: attempt, }); attempts.push({ attempt, run_started_at: "
         "data.run_started_at }); }"
     ) in script
+    assert script.count("getWorkflowRunAttempt(") == 2
     assert (
         "jobs = await jobsOf(run); artifacts = await artifactsOf(run); "
-        "attempts = await attemptsOf(run);"
+        "earlierAttempts = await earlierAttemptsOf(run);"
     ) in script
-    assert "artifacts, attempts, deployments," in script
+    assert "artifacts, earlier_attempts: earlierAttempts, deployments," in script
+    assert "run_started_at: candidate.run_started_at," in script
     assert "if (requested) {" in script
     assert collect["env"] == {"SONAR_ENABLED": "${{ vars.SONAR_ENABLED }}"}
     assert "sonar_enabled: process.env.SONAR_ENABLED === 'true'," in script
