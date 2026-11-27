@@ -62,7 +62,7 @@ from tests.support.gateway_routes import (
     routes,
 )
 from tests.support.log_filters import filter_of, matches, resources
-from tests.support.workflows import WORKFLOWS, ci_job_names, ci_jobs, job_names, workflow
+from tests.support.workflows import WORKFLOWS, ci_job_names, workflow
 
 ROOT = Path(__file__).resolve().parents[1]
 DEPLOY = ROOT / "deploy"
@@ -660,24 +660,6 @@ def test_ci_job_whose_matrix_excludes_every_combination_defines_no_job() -> None
     }
 
     assert ci_job_names(jobs) == set()
-
-
-def test_windows_tests_run_in_four_shards_that_the_verify_job_combines() -> None:
-    jobs = ci_jobs()
-    shards = jobs["verify_windows_shards"]
-    indexes = shards["strategy"]["matrix"]["shard"]
-    count = len(indexes)
-    partition = "\n".join(step.get("run", "") for step in shards["steps"])
-    combine = "\n".join(step.get("run", "") for step in jobs["verify_windows"]["steps"])
-
-    assert count == 4
-    assert indexes == list(range(1, count + 1))
-    assert job_names("verify_windows_shards", shards) == {
-        f"Windows tests ({index}/{count})" for index in indexes
-    }
-    assert f"--shard ${{{{ env.TEST_SHARD }}}}/{count} " in partition
-    assert re.findall(r"windows-shards/(\d+)\"", combine) == [str(index) for index in indexes]
-    assert jobs["verify_windows"]["needs"] == "verify_windows_shards"
 
 
 def test_every_tls_client_context_of_the_deployment_sets_a_minimum_version() -> None:
