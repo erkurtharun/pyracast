@@ -646,15 +646,107 @@ def audit_jobs() -> list[tuple[str, str]]:
     ]
 
 
+AFTER_SETUP = "${{ !cancelled() && steps.sync.outcome == 'success' }}"
+
+
+def audit_step(job: dict[str, Any], command: str) -> dict[str, Any]:
+    steps: list[dict[str, Any]] = job["steps"]
+    (found,) = [candidate for candidate in steps if command in candidate.get("run", "")]
+    return found
+
+
+def audit_problems(ci: dict[str, Any], scheduled: dict[str, Any]) -> list[str]:
+    audit = ci["jobs"]["audit"]
+    (daily,) = scheduled["jobs"].values()
+    python, web = (
+        [candidate for candidate in audit["steps"] if command in candidate.get("run", "")]
+        for command in AUDIT_COMMANDS
+    )
+    sync = [candidate.get("run") for candidate in audit["steps"] if candidate.get("id") == "sync"]
+    problems = []
+    if daily["steps"] != audit["steps"]:
+        problems.append("scheduled audit drifts")
+    if len(python) != 1 or "if" in python[0]:
+        problems.append("Python audit disabled")
+    if len(web) != 1 or web[0].get("if") != AFTER_SETUP or sync != ["uv sync --locked --no-build"]:
+        problems.append("web audit hidden")
+    if any("continue-on-error" in candidate for candidate in [audit, daily, *python, *web]):
+        problems.append("audit failure ignored")
+    return problems
+
+
+def in_both_audits(
+    change: Callable[[dict[str, Any]], object],
+) -> Callable[[dict[str, Any], dict[str, Any]], object]:
+    def apply(ci: dict[str, Any], scheduled: dict[str, Any]) -> None:
+        for job in (ci["jobs"]["audit"], *scheduled["jobs"].values()):
+            change(job)
+
+    return apply
+
+
+PYTHON_AUDIT, WEB_AUDIT = AUDIT_COMMANDS
+AUDIT_BROKEN_SHAPES: list[tuple[str, Callable[[dict[str, Any], dict[str, Any]], object], str]] = [
+    (
+        "Python audit off in both",
+        in_both_audits(lambda job: audit_step(job, PYTHON_AUDIT).update({"if": False})),
+        "Python audit disabled",
+    ),
+    (
+        "Python audit removed from both",
+        in_both_audits(lambda job: job["steps"].remove(audit_step(job, PYTHON_AUDIT))),
+        "Python audit disabled",
+    ),
+    (
+        "web audit off in both",
+        in_both_audits(lambda job: audit_step(job, WEB_AUDIT).update({"if": False})),
+        "web audit hidden",
+    ),
+    (
+        "web audit only after a passing Python audit in both",
+        in_both_audits(lambda job: audit_step(job, WEB_AUDIT).pop("if")),
+        "web audit hidden",
+    ),
+    (
+        "web audit after an unnamed setup in both",
+        in_both_audits(lambda job: audit_step(job, "uv sync").pop("id")),
+        "web audit hidden",
+    ),
+    (
+        "Python audit may fail in both",
+        in_both_audits(
+            lambda job: audit_step(job, PYTHON_AUDIT).update({"continue-on-error": True})
+        ),
+        "audit failure ignored",
+    ),
+    (
+        "daily audit alone changed",
+        lambda ci, scheduled: next(iter(scheduled["jobs"].values()))["steps"].pop(),
+        "scheduled audit drifts",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("break_shape", "problem"),
+    [(shape, problem) for _, shape, problem in AUDIT_BROKEN_SHAPES],
+    ids=[name for name, _, _ in AUDIT_BROKEN_SHAPES],
+)
+def test_each_broken_shape_of_the_two_audits_is_named(
+    break_shape: Callable[[dict[str, Any], dict[str, Any]], object], problem: str
+) -> None:
+    ci, scheduled = workflow("ci.yml"), workflow(SCHEDULED_AUDIT)
+    break_shape(ci, scheduled)
+
+    assert problem in audit_problems(ci, scheduled)
+
+
 def test_one_job_runs_both_dependency_audits_in_ci_and_on_a_daily_schedule() -> None:
     audit = ci_jobs()["audit"]
     (scheduled,) = workflow(SCHEDULED_AUDIT)["jobs"].values()
 
     assert audit_jobs() == [("ci.yml", "audit"), (SCHEDULED_AUDIT, "audit")]
-    for fragment in AUDIT_COMMANDS:
-        assert [line for line in commands(audit).splitlines() if fragment in line], fragment
-    assert "if" not in step(audit, "Audit web dependencies against dated exceptions")
-    assert scheduled["steps"] == audit["steps"]
+    assert audit_problems(workflow("ci.yml"), workflow(SCHEDULED_AUDIT)) == []
     assert (scheduled["name"], scheduled["timeout-minutes"]) == (
         audit["name"],
         audit["timeout-minutes"],
