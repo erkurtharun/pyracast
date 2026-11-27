@@ -292,8 +292,7 @@ def _prove_early(facts: Mapping[str, Any], main: str, run: Mapping[str, Any] | N
 
 
 def _skippable(facts: Mapping[str, Any], other_event_job: str) -> frozenset[str]:
-    # A job that gates the release may be skipped only while it is switched off for the
-    # repository; the other job never runs for this event, and a stop job runs only on a failure.
+    # Sonar skips only while off; the other event's job and an idle stop job always skip.
     if facts.get("sonar_enabled") is False:
         return frozenset({other_event_job, STOP_JOB, SONAR_JOB})
     return frozenset({other_event_job, STOP_JOB})

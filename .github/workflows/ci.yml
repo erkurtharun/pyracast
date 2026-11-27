@@ -20,7 +20,6 @@ jobs:
     timeout-minutes: 35
     env:
       DOCKER_BUILD_RECORD_UPLOAD: 'false'
-      # A release build keeps its images, imports no shared build cache and alone writes it.
       RELEASE_BUILD: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -551,8 +550,7 @@ jobs:
               inputs: { ci_run_id: String(context.runId), ci_run_attempt: process.env.GITHUB_RUN_ATTEMPT },
             });
 
-  # Outside CI result: a failed job of a pull request run cancels the rest of the run. A job waits
-  # for every job it needs, so each stop job needs exactly one.
+  # A job waits for every job it needs, so each stop job needs exactly one.
   stop_after_deployment:
     name: &stop-name Stop the pull request run
     needs: deployment

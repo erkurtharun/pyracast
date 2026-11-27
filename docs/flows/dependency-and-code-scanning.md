@@ -1,6 +1,6 @@
 # Scan code, dependencies and images
 
-GitHub Actions runs the scans: CI on every push to `main`, pull request and manual dispatch, CodeQL code scanning on pushes to and pull requests for `main` and weekly, Release again for the images it publishes, and a daily rescan of the release images. Dependabot opens weekly update pull requests that go through the same CI. A red scan fails its CI run (whether that blocks a merge depends on branch protection, which is outside the repository) and keeps Release from deploying; no scan result is stored or shown anywhere in the product.
+GitHub Actions runs the scans: CI on every push to `main`, pull request, merge group and manual dispatch, CodeQL code scanning on pushes to and pull requests for `main` and weekly, Release again for the images it publishes, and a daily rescan of the release images. Dependabot opens weekly update pull requests that go through the same CI. A red scan fails its CI run (whether that blocks a merge depends on branch protection, which is outside the repository) and keeps Release from deploying; no scan result is stored or shown anywhere in the product.
 
 ## Entry points
 
@@ -11,7 +11,7 @@ GitHub Actions runs the scans: CI on every push to `main`, pull request and manu
 - `.github/workflows/ci.yml` job `deployment`, step "Scan every image; block every high or critical vulnerability": `deploy/scan-images.sh` for the backend, web, gateway, RabbitMQ and PostgreSQL images, which ends in `deploy/check_image_scans.py`.
 - `.github/workflows/ci.yml` job `sonar` with `sonar-project.properties`: Sonar quality gate over Python, TypeScript, deployment code and Dockerfiles, only when `vars.SONAR_ENABLED == 'true'`.
 - `.github/workflows/release.yml` job `scan`: downloads the CI image archives, verifies and loads them and runs `deploy/scan-images.sh` again before job `deploy` authenticates to the cloud. Job `authorize` (`deploy/release_authorization.py`) accepts a CI run only when its `CI result` job succeeded.
-- `.github/workflows/image-rescan.yml` job `rescan` ("Image rescan", daily and on dispatch): with the repository variable `GCP_IMAGE_RESCAN` (Terraform's `image_rescan_setting`, read by `deploy/image_rescan.py`) it logs in to the registry with a read-only workload identity and scans the five deployed `production` images; without it, it rebuilds the five images from `main` without the shared build cache and scans those.
+- `.github/workflows/image-rescan.yml` job `rescan` ("Image rescan", daily and on dispatch): with the repository variable `GCP_IMAGE_RESCAN` (Terraform's `image_rescan_setting`, read by `deploy/image_rescan.py`) it logs in to the registry with a read-only workload identity and scans the five deployed `production` images; without it, it rebuilds the five images from `main` and scans those.
 - `.github/dependabot.yml`: six weekly ecosystems (uv, github-actions, docker with five directories, gomod, terraform, npm), Monday 05:00 Europe/Istanbul, each with a cooldown (5 days; 14 for uv and npm majors), groups for uv, npm and actions, and ignores for the `python` and `node` base-image majors (python minors too), `uv-build`, `typescript` 6 and later, and `pika` 1.5 and later (also capped in `pyproject.toml`), because pika 1.5 deprecates the `BlockingConnection` that Dramatiq calls; the ignore and the cap are lifted once a Dramatiq release no longer calls it.
 - `scripts/check.py` lint runs Ruff with the bandit rules (`S` in `pyproject.toml`, `S101` allowed in tests), so `verify_ubuntu` and Windows shard 1 of `verify_windows_shards` also do static security linting of Python; shards 2 to 4 run `--tests-only` and `verify_windows` runs `check.py --combine-shards`, which run no Ruff.
 - Qodana is local-only (no workflow, script or hook runs it): `qodana scan --config qodana.yaml` for Python and `qodana scan --only-directory web --config qodana-js.yaml` for `web/`, both native, both failing on a critical or high finding, with `QODANA_TOKEN` in the environment. The web configuration adds the defect inspections that ESLint, the type check and knip do not cover; layout and naming stay with the formatter and ESLint. A developer runs the README `pip-audit` commands or `bash deploy/scan-images.sh BACKEND_IMAGE WEB_IMAGE GATEWAY_IMAGE POSTGRES_IMAGE RABBITMQ_IMAGE`.
@@ -20,7 +20,7 @@ GitHub Actions runs the scans: CI on every push to `main`, pull request and manu
 
 ```mermaid
 flowchart TD
-  trig["push, pull_request, dispatch"] --> aud["audit: pip-audit on audit-requirements.txt"]
+  trig["push, pull_request, merge_group, dispatch"] --> aud["audit: pip-audit on audit-requirements.txt"]
   trig --> web["web_ubuntu: check, then npm_audit.py web"]
   trig --> ver["verify_ubuntu: check.py incl. Ruff S rules"]
   trig --> dep["deployment: build 5 images, load, scan"]
@@ -30,7 +30,7 @@ flowchart TD
   ss --> chk{"check_image_scans.py"}
   chk -->|"identity, inventory, unaccepted HIGH or CRITICAL finding, or exception problem"| red["job fails"]
   ver -->|"coverage.xml"| son
-  web -->|"web_ubuntu lcov only"| son{"sonar: enabled, not Dependabot, not fork"}
+  web -->|"web_ubuntu lcov only"| son{"sonar: enabled, not merge_group, not Dependabot, not fork"}
   son -->|"skipped"| skip["no analysis"]
   son -->|"runs"| qg["quality gate, wait up to 300 s"]
   aud --> ok["CI result green"]
@@ -58,7 +58,7 @@ No database table is read or written. Artifacts:
 
 ## Authorization
 
-- Sonar: `SONAR_TOKEN` secret plus `SONAR_PROJECT_KEY` and `SONAR_ORGANIZATION` variables, validated by the "Validate Sonar configuration" step. The job `if:` skips fork pull requests and `dependabot[bot]` runs (which get no Actions secrets).
+- Sonar: `SONAR_TOKEN` secret plus `SONAR_PROJECT_KEY` and `SONAR_ORGANIZATION` variables, validated by the "Validate Sonar configuration" step. The job `if:` skips fork pull requests and `dependabot[bot]` runs (which get no Actions secrets) and every `merge_group` run.
 - Release: `authorize` runs only with `vars.GCP_DEPLOY_ENABLED == 'true'` on `main` after a successful CI `workflow_run` or a dispatch, and accepts only the current `main` SHA with a successful `push`/`workflow_dispatch` `ci.yml` run of this repository whose `CI result` job passed, and one unexpired image artifact. `scan` holds read permissions only and no cloud credential; `deploy` runs in environment `production` with a workload-identity token.
 - Rescan: only the read-only registry identity named by `GCP_IMAGE_RESCAN`; a run without the variable has no cloud access.
 - Code scanning: the workflow token reads contents only; job `analyze` adds `security-events: write` for the upload, and the checkout keeps no credential (`persist-credentials: false`).

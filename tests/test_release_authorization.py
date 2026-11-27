@@ -41,7 +41,6 @@ GIT = shutil.which("git")
 IMAGE_JOB = "Deployment configuration and containers"
 FIRST_ATTEMPT_STARTED = "2026-11-21T04:10:00Z"
 UNBOUND_IMAGES = "Deployment configuration and containers job of that attempt"
-# Start, upload and end of the image job each attempt ran.
 IMAGE_BUILDS = {
     1: ("2026-11-21T04:11:00Z", "2026-11-21T04:18:00Z", "2026-11-21T04:19:00Z"),
     2: ("2026-11-21T05:01:00Z", "2026-11-21T05:08:00Z", "2026-11-21T05:09:00Z"),
