@@ -486,7 +486,7 @@ jobs:
     name: CI result
     needs: [deployment, verify_ubuntu, web_ubuntu, web_production, scientific, audit, sonar]
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -503,7 +503,7 @@ jobs:
     name: Record the tested tree
     needs: [deployment, verify_ubuntu, web_ubuntu, web_production, scientific, audit, sonar, ci_result]
     if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.ci_result.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 5
     continue-on-error: true
     steps:
@@ -538,7 +538,7 @@ jobs:
     name: Start the release of a proven merge
     needs: [deployment, web_production]
     if: vars.GCP_DEPLOY_ENABLED == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 5
     continue-on-error: true
     permissions:

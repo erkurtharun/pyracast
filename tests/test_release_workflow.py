@@ -631,10 +631,51 @@ def test_the_web_dependency_audit_runs_once_per_ci_run() -> None:
     assert "matrix" not in web.get("strategy", {})
 
 
-def test_every_workflow_job_runs_on_ubuntu() -> None:
+SLIM_RUNNER = "ubuntu-slim"
+SLIM_JOBS = {
+    "ci.yml": {"ci_result", "pr_tested", "release_start"},
+    "release.yml": {"authorize", "cleanup"},
+}
+SLIM_PYTHON = (3, 12)
+SLIM_JOB_MINUTES = 15
+SYSTEM_PYTHON_SCRIPT = re.compile(r"\bpython3 ([\w./-]+\.py)\b")
+
+
+def slim_jobs() -> Iterator[tuple[str, dict[str, Any]]]:
     for path in workflow_files():
         for identifier, job in workflow(path.name)["jobs"].items():
-            assert job["runs-on"] == "ubuntu-latest", f"{path.name} {identifier}"
+            if job["runs-on"] == SLIM_RUNNER:
+                yield f"{path.name} {identifier}", job
+
+
+def test_the_small_jobs_run_on_the_slim_runner_and_every_other_job_on_ubuntu_latest() -> None:
+    for path in workflow_files():
+        for identifier, job in workflow(path.name)["jobs"].items():
+            small = identifier in SLIM_JOBS.get(path.name, set())
+            expected = SLIM_RUNNER if small else "ubuntu-latest"
+            assert job["runs-on"] == expected, f"{path.name} {identifier}"
+
+
+def test_every_slim_job_fits_the_slim_runner_and_its_python() -> None:
+    scripts = set()
+    for name, job in slim_jobs():
+        steps = " ".join(str(candidate.get("uses", "")) for candidate in job["steps"])
+        assert job["timeout-minutes"] <= SLIM_JOB_MINUTES, name
+        assert "services" not in job, name
+        assert "container" not in job, name
+        for tool in ("setup-uv", "setup-node", "setup-python", "setup-buildx", "docker/"):
+            assert tool not in steps, name
+        for fragment in ("uv ", "docker ", "npm ", "npx "):
+            assert fragment not in commands(job), name
+        scripts |= set(SYSTEM_PYTHON_SCRIPT.findall(commands(job)))
+    assert scripts == {
+        "scripts/ci_result.py",
+        "deploy/release_authorization.py",
+        "deploy/release_scope.py",
+    }
+    for script in scripts:
+        source = ROOT / script
+        ast.parse(source.read_text(encoding="utf-8"), str(source), feature_version=SLIM_PYTHON)
 
 
 SHIPPED_BUILD_SUITE = "Run the mocked browser suite against the production web build"

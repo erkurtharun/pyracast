@@ -25,7 +25,7 @@ jobs:
       vars.GCP_DEPLOY_ENABLED == 'true' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 10
     permissions:
       contents: read
@@ -654,7 +654,7 @@ jobs:
 
   cleanup:
     needs: [authorize, deploy]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 5
     permissions:
       actions: write
