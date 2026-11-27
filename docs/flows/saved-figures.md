@@ -136,10 +136,10 @@ forecast reads, also at ten times the forecast history (about 14 to 15 on a deve
 - `web/tests/saved-figures-withdrawn.spec.ts`: runs only when `feature.ts` sets `SAVED_FIGURES` to `false`; no switch,
   cover button, refresh code, registration lookup or read over a copy whose deletion failed; a database of marks only is
   deleted.
-- `web/tests/saved-copy.spec.ts`: a start without a database that loads no store code, a browser that lacks or fails
-  the database list, adoption, every removal, the sign-out's record before its request and the deletion
-  when it cannot commit, each observed at the worker's answer, the marks against every writer, the rule's table of
-  cases against the store, the observed revision, the notice.
+- `web/tests/saved-copy.spec.ts`: observed at the worker's answer: adoption, every removal, the sign-out's record
+  before its request and the deletion when it cannot commit; observed in the workspace, the notice and the stored copy:
+  a start without a database that loads no store code, a browser that lacks, fails or never answers the database list;
+  the marks against every writer, the rule's table of cases against the store, the observed revision, the notice.
 - `web/tests/saved-pages.spec.ts` and `web/production-tests/saved-pages.spec.ts`: the worker's pages, the rule's table
   of cases against the worker.
 - `web/production-tests/round-trip.spec.ts`: with saved figures on, switch on, offline pages (each answer checked as the

@@ -1218,6 +1218,35 @@ for (const [browser, withhold] of [
         await expect(plants(page)).toBeVisible();
     });
 
+for (const [question, settledAnswers] of [
+    ["the first question", 0],
+    ["the repeated question under the copy's lock", 1],
+] as const)
+    test(`a browser whose database list never settles for ${question} shows the notice at two seconds and leaves the copy's lock free`, async ({
+        page,
+    }) => {
+        await page.addInitScript((settled) => {
+            let asked = 0;
+            IDBFactory.prototype.databases = () =>
+                asked++ < settled ? Promise.resolve([]) : new Promise(() => {});
+        }, settledAnswers);
+        await signedIn(page);
+        await page.goto("/app/w/1/");
+        await page.clock.runFor(2_000);
+        await expectUnchecked(page);
+        await expect
+            .poll(() =>
+                page.evaluate(async () => {
+                    const { held = [], pending = [] } =
+                        await navigator.locks.query();
+                    return [...held, ...pending].some(
+                        ({ name }) => name === "pyracast.saved-copy",
+                    );
+                }),
+            )
+            .toBe(false);
+    });
+
 test("the withdrawn build's removal deletes a held copy with its marks only after its figures were cleared", async ({
     page,
 }) => {

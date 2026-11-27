@@ -388,7 +388,7 @@ function handOffNeeded(session: Session) {
     return Boolean(session.user);
 }
 
-async function savedDatabaseListed() {
+async function listsSavedDatabase() {
     try {
         return (await indexedDB.databases()).some(
             ({ name }) => name === savedDatabase,
@@ -398,11 +398,15 @@ async function savedDatabaseListed() {
     }
 }
 
+function savedDatabaseListed(limit: Deadline) {
+    return Promise.race([listsSavedDatabase(), limit.reached.then(() => true)]);
+}
+
 // A database in its first upgrade is not listed yet, so an absence is asked again behind another window's creation under the copy's lock.
 async function savedDatabaseAbsent(limit: Deadline) {
-    if (await savedDatabaseListed()) return false;
+    if (await savedDatabaseListed(limit)) return false;
     try {
-        return !(await underLock(limit, savedDatabaseListed));
+        return !(await underLock(limit, () => savedDatabaseListed(limit)));
     } catch {
         return false;
     }
