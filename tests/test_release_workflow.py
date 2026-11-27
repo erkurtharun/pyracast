@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from deploy import ci_images, release_authorization, release_unit
+from scripts import ci_result
 from tests.support.workflows import (
     WORKFLOWS,
     ci_job_names,
@@ -40,15 +41,13 @@ def release_text() -> str:
     return (WORKFLOWS / "release.yml").read_text(encoding="utf-8")
 
 
-def test_one_ci_result_job_judges_every_other_ci_job_but_the_release_start_and_record() -> None:
+def test_one_ci_result_job_judges_every_other_ci_job_but_the_record_and_the_stop_jobs() -> None:
     jobs = ci_jobs()
     result = jobs["ci_result"]
     checkout, check = result["steps"]
 
     assert result["name"] == release_authorization.REQUIRED_CI_JOB
-    assert set(result["needs"]) == (
-        set(jobs) - {"ci_result", "release_start", "pr_tested"} - set(STOP_JOBS)
-    )
+    assert set(result["needs"]) == set(jobs) - {"ci_result", "pr_tested"} - set(STOP_JOBS)
     assert result["if"] == "${{ !cancelled() }}"
     assert str(checkout["uses"]).startswith("actions/checkout@")
     assert check["name"] == "Require every CI job"
@@ -65,7 +64,8 @@ def test_the_release_waits_for_the_ci_result_job_alone() -> None:
     assert release_authorization.REQUIRED_CI_JOB in ci_job_names(ci_jobs())
     assert "const required" not in release_text()
     assert step(authorize, "Authorize the current main commit against its exact CI run")["run"] == (
-        'python3 deploy/release_authorization.py authorize "$RUNNER_TEMP/release-facts.json"'
+        'python3 deploy/release_authorization.py authorize "$RUNNER_TEMP/release-facts.json" '
+        '"$RUNNER_TEMP/merge-proof.json"'
     )
     assert step_index(authorize, "actions/checkout") < step_index(
         authorize, "release_authorization.py authorize"
@@ -158,7 +158,7 @@ def scanned(job: dict[str, Any]) -> list[str]:
     return [line for line in step(job, SCAN)["run"].splitlines() if "$GITHUB_ENV" not in line]
 
 
-AUTOMATIC = "github.event_name == 'workflow_run' || inputs.ci_run_id != ''"
+AUTOMATIC = "github.event_name == 'workflow_run'"
 FIND_DEPLOYMENTS = "Find the production deployments of this commit"
 FIND_BEFORE_DOWNLOAD = "Find the production deployments of this commit before the download"
 READ_BEFORE_DOWNLOAD = "Read the current main commit before the download"
@@ -610,11 +610,10 @@ def test_scan_checks_out_the_authorized_commit() -> None:
 
 def test_deploy_runs_the_authorized_commit_only_after_proving_it_is_on_main() -> None:
     deploy = release_jobs()["deploy"]
-    attempt, checkout, move = deploy["steps"][:3]
+    checkout, move = deploy["steps"][:2]
 
-    assert attempt["name"] == ATTEMPT_CHECK
-    assert step_index(deploy, "actions/checkout") == 1
-    assert step_index(deploy, "git checkout") == 2
+    assert step_index(deploy, "actions/checkout") == 0
+    assert step_index(deploy, "git checkout") == 1
     assert checkout["with"] == {
         "repository": "erkurtharun/pyracast",
         "ref": "refs/heads/main",
@@ -630,7 +629,7 @@ def test_deploy_runs_the_authorized_commit_only_after_proving_it_is_on_main() ->
         'git checkout --detach "$RELEASE_SHA"',
     ]
     assert deploy["env"]["RELEASE_SHA"] == "${{ needs.authorize.outputs.sha }}"
-    assert "refs/heads/main" not in str(deploy["steps"][2:])
+    assert "refs/heads/main" not in str(deploy["steps"][1:])
 
 
 AUDIT_COMMANDS = ("pip-audit --strict", "scripts/npm_audit.py web")
@@ -806,7 +805,7 @@ def test_one_job_runs_both_dependency_audits_in_ci_and_on_a_daily_schedule() -> 
 
 SLIM_RUNNER = "ubuntu-slim"
 SLIM_JOBS = {
-    "ci.yml": {"ci_result", "pr_tested", "release_start", *STOP_JOBS},
+    "ci.yml": {"merge_proof", "ci_result", "pr_tested", *STOP_JOBS},
     "release.yml": {"authorize", "cleanup"},
     SCHEDULED_AUDIT: {"audit"},
 }
@@ -926,8 +925,6 @@ def shipped_build_suite_problems(document: dict[str, Any]) -> list[str]:
         problems.append("suite before the ordinary build")
     if "web_production" not in needed_jobs(jobs["ci_result"]):
         problems.append("result job without the production build")
-    if "web_production" not in needed_jobs(jobs["release_start"]):
-        problems.append("early release without the production build")
     return problems
 
 
@@ -1011,11 +1008,6 @@ BROKEN_SHAPES: list[tuple[str, Callable[[dict[str, Any]], object], str]] = [
         lambda d: d["jobs"]["ci_result"]["needs"].remove("web_production"),
         "result job without the production build",
     ),
-    (
-        "early release before it",
-        lambda d: d["jobs"]["release_start"].update(needs="deployment"),
-        "early release without the production build",
-    ),
 ]
 
 
@@ -1046,25 +1038,167 @@ PARENT = "c" * 40
 TREE = "d" * 40
 
 
-def test_ci_asks_release_to_judge_a_push_to_main_once_its_images_and_shipped_build_passed() -> None:
-    start = ci_jobs()["release_start"]
-    (ask,) = start["steps"]
-    script = " ".join(ask["with"]["script"].split())
+PROOF_JOB = "merge_proof"
+PROVEN_JOB_IDS = {"verify_ubuntu", "web_ubuntu", "scientific"}
+PUSH_ONLY = "github.event_name == 'push'"
+UNPROVEN = (
+    "${{ !cancelled() && !github.event.pull_request.draft && "
+    "needs.merge_proof.outputs.proven != 'true' }}"
+)
+SONAR_CONDITION = (
+    "vars.SONAR_ENABLED == 'true' && !cancelled() && "
+    "needs.verify_ubuntu.result == 'success' && needs.web_ubuntu.result == 'success' && "
+    "github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || "
+    "github.event.pull_request.head.repo.full_name == github.repository)"
+)
+PROVE = 'python3 deploy/release_authorization.py prove "$RUNNER_TEMP/merge-proof.json"'
+COLLECT_PROOF = "Collect the pull request run that tested the tree of this commit"
+PROOF_READS = {"contents": "read", "actions": "read", "pull-requests": "read"}
 
-    assert start["name"] == release_authorization.RELEASE_START_JOB
-    assert start["needs"] == ["deployment", "web_production"]
-    assert start["if"] == (
-        "vars.GCP_DEPLOY_ENABLED == 'true' && github.event_name == 'push' && "
-        "github.ref == 'refs/heads/main'"
+
+def proof_rule_problems(document: dict[str, Any]) -> list[str]:
+    jobs = document["jobs"]
+    proof = jobs.get(PROOF_JOB, {})
+    steps = proof.get("steps", [])
+    decisions = [candidate for candidate in steps if candidate.get("run") == PROVE]
+    checkouts = [
+        candidate for candidate in steps if "actions/checkout@" in candidate.get("uses", "")
+    ]
+    skipped_by_proof = {
+        identifier
+        for identifier, job in jobs.items()
+        if f"needs.{PROOF_JOB}.outputs.proven" in str(job.get("if", ""))
+    }
+    problems = []
+    if proof.get("name") != release_authorization.MERGE_PROOF_JOB or proof.get("if") != PUSH_ONLY:
+        problems.append("first job outside a push")
+    if proof.get("permissions") != PROOF_READS:
+        problems.append("first job with other permissions")
+    if len(checkouts) != 1 or checkouts[0]["with"].get("fetch-depth") != 2:
+        problems.append("first job without the parent commit")
+    if len(decisions) != 1 or proof.get("outputs") != {
+        "proven": f"${{{{ steps.{decisions[0].get('id')}.outputs.proven }}}}"
+    }:
+        problems.append("first job decides elsewhere")
+    if skipped_by_proof != ci_result.PROVEN_JOBS:
+        problems.append("jobs skipped by the proof differ from those the result job accepts")
+    for identifier in sorted(skipped_by_proof):
+        job = jobs[identifier]
+        if job.get("needs") != PROOF_JOB or job.get("if") != UNPROVEN:
+            problems.append(f"{identifier} on another condition")
+    names = {jobs[identifier].get("name") for identifier in skipped_by_proof}
+    if names != release_authorization.PROVEN_JOBS:
+        problems.append("the release judges other jobs")
+    if ci_result.PROOF_JOB != PROOF_JOB or PROOF_JOB not in needed_jobs(jobs["ci_result"]):
+        problems.append("result job without the first job")
+    return problems
+
+
+def test_a_push_skips_only_the_suites_its_first_job_found_passed_on_the_same_tree() -> None:
+    document = workflow("ci.yml")
+    jobs = document["jobs"]
+
+    assert proof_rule_problems(document) == []
+    assert ci_result.PROVEN_JOBS == PROVEN_JOB_IDS
+    for identifier in RELEASE_TESTED_JOBS - PROVEN_JOB_IDS:
+        assert "needs" not in jobs[identifier], identifier
+    assert set(needed_jobs(jobs["sonar"])) == {"verify_ubuntu", "web_ubuntu"}
+
+
+PROOF_BROKEN_SHAPES: list[tuple[str, Callable[[dict[str, Any]], object], str]] = [
+    (
+        "first job on every event",
+        lambda d: d["jobs"][PROOF_JOB].pop("if"),
+        "first job outside a push",
+    ),
+    (
+        "first job may write",
+        lambda d: d["jobs"][PROOF_JOB]["permissions"].update(actions="write"),
+        "first job with other permissions",
+    ),
+    (
+        "first job without the parent",
+        lambda d: d["jobs"][PROOF_JOB]["steps"][0]["with"].update({"fetch-depth": 1}),
+        "first job without the parent commit",
+    ),
+    (
+        "first job answers from a fixed value",
+        lambda d: d["jobs"][PROOF_JOB].update(outputs={"proven": "true"}),
+        "first job decides elsewhere",
+    ),
+    (
+        "images skipped by the proof",
+        lambda d: d["jobs"]["deployment"].update({"needs": PROOF_JOB, "if": UNPROVEN}),
+        "jobs skipped by the proof differ from those the result job accepts",
+    ),
+    (
+        "audit skipped by the proof",
+        lambda d: d["jobs"]["audit"].update({"needs": PROOF_JOB, "if": UNPROVEN}),
+        "jobs skipped by the proof differ from those the result job accepts",
+    ),
+    (
+        "shipped build skipped by the proof",
+        lambda d: d["jobs"]["web_production"].update({"needs": PROOF_JOB, "if": UNPROVEN}),
+        "jobs skipped by the proof differ from those the result job accepts",
+    ),
+    (
+        "suite skipped with a skipped first job",
+        lambda d: d["jobs"]["verify_ubuntu"].update(
+            {"if": UNPROVEN.replace("!cancelled() && ", "")}
+        ),
+        "verify_ubuntu on another condition",
+    ),
+    (
+        "suite renamed",
+        lambda d: d["jobs"]["scientific"].update(name="Science"),
+        "the release judges other jobs",
+    ),
+    (
+        "result job blind to the first job",
+        lambda d: d["jobs"]["ci_result"]["needs"].remove(PROOF_JOB),
+        "result job without the first job",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("break_shape", "problem"),
+    [(shape, problem) for _, shape, problem in PROOF_BROKEN_SHAPES],
+    ids=[name for name, _, _ in PROOF_BROKEN_SHAPES],
+)
+def test_each_broken_shape_of_the_proof_rule_is_named(
+    break_shape: Callable[[dict[str, Any]], object], problem: str
+) -> None:
+    document = workflow("ci.yml")
+    break_shape(document)
+
+    assert problem in proof_rule_problems(document)
+
+
+def test_the_release_collects_the_proof_with_the_step_of_the_first_job_of_a_push() -> None:
+    proof = ci_jobs()[PROOF_JOB]
+    authorize = release_jobs()["authorize"]
+    collected = step(authorize, COLLECT_PROOF)
+    script = " ".join(collected["with"]["script"].split())
+
+    assert collected == step(proof, COLLECT_PROOF)
+    assert collected["continue-on-error"] is True
+    assert collected["env"] == {"SONAR_ENABLED": "${{ vars.SONAR_ENABLED }}"}
+    assert authorize["steps"].index(collected) < step_index(authorize, "authorize")
+    assert "commit_sha: context.sha" in script
+    assert "sha: context.sha," in script
+    assert "merged_at: pull.merged_at," in script
+    assert "sonar_enabled: process.env.SONAR_ENABLED === 'true'," in script
+    assert (
+        "const runs = await github.paginate(github.rest.actions.listWorkflowRuns, { ...repository, "
+        "workflow_id: workflow.id, event: 'pull_request', head_sha: merged[0].head.sha, "
+        "per_page: 100, });"
+    ) in script
+    assert "} catch (error) { proof = { error: error.message }; }" in script
+    assert script.endswith(
+        "fs.writeFileSync(`${process.env.RUNNER_TEMP}/merge-proof.json`, JSON.stringify(proof));"
     )
-    assert start["permissions"] == {"actions": "write"}
-    assert start["continue-on-error"] is True
-    assert str(ask["uses"]).startswith("actions/github-script@")
-    assert script == (
-        "await github.rest.actions.createWorkflowDispatch({ ...context.repo, "
-        "workflow_id: 'release.yml', ref: 'main', inputs: { ci_run_id: String(context.runId), "
-        "ci_run_attempt: process.env.GITHUB_RUN_ATTEMPT }, });"
-    )
+    assert release_authorization.PROOF_FILE == "merge-proof.json"
 
 
 def test_ci_runs_on_a_push_to_main_a_pull_request_and_a_dispatch() -> None:
@@ -1072,7 +1206,7 @@ def test_ci_runs_on_a_push_to_main_a_pull_request_and_a_dispatch() -> None:
     assert "merge_group" not in (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
 
 
-def test_every_repeated_job_still_runs_to_the_end_on_each_push_to_main() -> None:
+def test_every_job_but_the_proven_suites_runs_to_the_end_on_each_push_to_main() -> None:
     document = workflow("ci.yml")
     jobs = ci_jobs()
 
@@ -1082,20 +1216,26 @@ def test_every_repeated_job_still_runs_to_the_end_on_each_push_to_main() -> None
         "cancel-in-progress": True,
     }
     assert set(jobs) == (
-        RELEASE_TESTED_JOBS | {"sonar", "ci_result", "release_start", "pr_tested"} | set(STOP_JOBS)
+        RELEASE_TESTED_JOBS | {PROOF_JOB, "sonar", "ci_result", "pr_tested"} | set(STOP_JOBS)
     )
     assert draft_rule_problems(document) == []
     for identifier in RELEASE_TESTED_JOBS:
-        assert jobs[identifier]["if"] == NOT_A_DRAFT, identifier
-        assert "needs" not in jobs[identifier], identifier
+        assert jobs[identifier]["if"] == (
+            UNPROVEN if identifier in PROVEN_JOB_IDS else NOT_A_DRAFT
+        ), identifier
         assert "continue-on-error" not in jobs[identifier], identifier
-    assert "push" not in jobs["sonar"]["if"]
-    assert "github.ref" not in jobs["sonar"]["if"]
+    assert jobs["sonar"]["if"] == SONAR_CONDITION
     assert jobs["ci_result"]["if"] == "${{ !cancelled() }}"
     for job in jobs.values():
-        assert "release_start" not in str(job.get("needs", "")), job["name"]
         assert "pr_tested" not in str(job.get("needs", "")), job["name"]
         assert "stop_after" not in str(job.get("needs", "")), job["name"]
+
+
+def test_nothing_dispatches_the_release_and_an_operator_dispatch_names_no_run() -> None:
+    assert triggers("release.yml")["workflow_dispatch"] is None
+    assert "inputs." not in release_text()
+    for path in workflow_files():
+        assert "createWorkflowDispatch" not in path.read_text(encoding="utf-8"), path.name
 
 
 NOT_A_DRAFT = "${{ !github.event.pull_request.draft }}"
@@ -1117,6 +1257,8 @@ def pull_request_trigger(document: dict[Any, Any]) -> dict[str, Any]:
 def draft_rule_problems(document: dict[str, Any]) -> list[str]:
     jobs = document["jobs"]
     past_a_skip = {
+        **dict.fromkeys(PROVEN_JOB_IDS, UNPROVEN),
+        "sonar": SONAR_CONDITION,
         "ci_result": RESULT_CONDITION,
         "pr_tested": RECORD_CONDITION,
         **dict.fromkeys(STOP_JOBS, STOP_CONDITION),
@@ -1126,7 +1268,10 @@ def draft_rule_problems(document: dict[str, Any]) -> list[str]:
         problems.append("draft changes start no run")
     for identifier, job in sorted(jobs.items()):
         condition = str(job.get("if", ""))
-        if "needs" not in job:
+        if identifier == PROOF_JOB:
+            if condition != PUSH_ONLY:
+                problems.append(f"{identifier} runs on a draft")
+        elif "needs" not in job:
             if condition != NOT_A_DRAFT:
                 problems.append(f"{identifier} runs on a draft")
         elif STATUS_FUNCTION.search(condition) and condition != past_a_skip.get(identifier):
@@ -1279,7 +1424,7 @@ def test_a_passed_pull_request_run_records_its_tested_tree_in_a_job_without_repo
     )
     assert "git rev-parse 'HEAD^{tree}'" in read["run"]
     assert '"${parents[1]}" == "$PULL_REQUEST_HEAD"' in read["run"]
-    assert record["name"] == "Record the tested tree for an early release of its squash merge"
+    assert record["name"] == "Record the tested tree for the push of its squash merge"
     assert record["if"] == "steps.tested.outputs.tree != ''"
     assert str(record["uses"]).startswith("actions/upload-artifact@")
     assert record["with"]["if-no-files-found"] == "error"
@@ -1293,26 +1438,12 @@ def test_a_passed_pull_request_run_records_its_tested_tree_in_a_job_without_repo
     )
 
 
-def test_the_release_judges_a_ci_run_its_dispatch_names_through_the_same_gate() -> None:
-    inputs = triggers("release.yml")["workflow_dispatch"]["inputs"]
+def test_the_release_collects_the_facts_of_the_ci_run_that_triggered_it() -> None:
     authorize = release_jobs()["authorize"]
     collect = step(authorize, "Collect the CI run of the current main commit")
     script = " ".join(collect["with"]["script"].split())
 
-    assert set(inputs) == {"ci_run_id", "ci_run_attempt"}
-    for value in inputs.values():
-        assert (value["required"], value["type"]) == (False, "string")
-    assert (
-        "const requested = context.eventName === 'workflow_dispatch' && inputs.ci_run_id "
-        "? { id: inputs.ci_run_id, run_attempt: inputs.ci_run_attempt ?? '' } : null;"
-    ) in script
-    assert "github.rest.repos.listPullRequestsAssociatedWithCommit" in script
-    assert (
-        "const runs = await github.paginate(github.rest.actions.listWorkflowRuns, { ...repository, "
-        "workflow_id: workflow.id, event: 'pull_request', head_sha: merged[0].head.sha, "
-        "per_page: 100, });"
-    ) in script
-    assert "data.workflow_runs.reduce" not in script
+    assert "const runs = await github.paginate(github.rest.actions.listWorkflowRuns" not in script
     assert (
         ".map(job => ({ name: job.name, conclusion: job.conclusion, "
         "started_at: job.started_at, completed_at: job.completed_at, }))"
@@ -1322,24 +1453,15 @@ def test_the_release_judges_a_ci_run_its_dispatch_names_through_the_same_gate() 
         in (script)
     )
     assert (
-        "for (let attempt = 1; attempt < candidate.run_attempt; attempt += 1) { const { data } = "
-        "await github.rest.actions.getWorkflowRunAttempt({ ...repository, run_id: candidate.id, "
-        "attempt_number: attempt, }); attempts.push({ attempt, run_started_at: "
+        "for (let attempt = 1; attempt < run.run_attempt; attempt += 1) { const { data } = "
+        "await github.rest.actions.getWorkflowRunAttempt({ ...repository, run_id: run.id, "
+        "attempt_number: attempt, }); earlierAttempts.push({ attempt, run_started_at: "
         "data.run_started_at }); }"
     ) in script
     assert script.count("getWorkflowRunAttempt(") == 2
-    assert (
-        "jobs = await jobsOf(run); artifacts = await artifactsOf(run); "
-        "earlierAttempts = await earlierAttemptsOf(run);"
-    ) in script
-    assert "artifacts, earlier_attempts: earlierAttempts, deployments," in script
+    assert "artifacts, earlier_attempts: earlierAttempts, deployments, };" in script
     assert "run_started_at: candidate.run_started_at," in script
-    assert "if (requested) {" in script
-    assert collect["env"] == {"SONAR_ENABLED": "${{ vars.SONAR_ENABLED }}"}
-    assert "sonar_enabled: process.env.SONAR_ENABLED === 'true'," in script
-    assert "if (!requested) throw error; runError = error.message;" in script
-    assert "run_error: runError," in script
-    assert "release_attempt: Number(process.env.GITHUB_RUN_ATTEMPT)," in script
+    assert "env" not in collect
     assert authorize["permissions"] == {
         "contents": "read",
         "actions": "read",
@@ -1347,42 +1469,13 @@ def test_the_release_judges_a_ci_run_its_dispatch_names_through_the_same_gate() 
         "pull-requests": "read",
     }
     assert authorize["outputs"]["ci_started_at"] == "${{ steps.decision.outputs.ci_started_at }}"
-    assert authorize["outputs"]["proven"] == "${{ steps.decision.outputs.proven }}"
+    assert "proven" not in authorize["outputs"]
 
 
-ATTEMPT_CHECK = "Refuse an early release authorized in an earlier attempt of this run"
-
-
-def test_an_early_release_scans_and_deploys_only_on_an_authorization_of_its_own_attempt() -> None:
-    jobs = release_jobs()
-
-    assert jobs["authorize"]["outputs"]["release_attempt"] == (
-        "${{ steps.decision.outputs.release_attempt }}"
-    )
-    for identifier in ("scan", "deploy"):
-        job = jobs[identifier]
-        check = job["steps"][0]
-        lines = check["run"].splitlines()
-
-        assert check["name"] == ATTEMPT_CHECK, identifier
-        assert check["if"] == "inputs.ci_run_id != ''", identifier
-        assert check["env"] == {
-            "AUTHORIZED_IN": "${{ needs.authorize.outputs.release_attempt }}"
-        }, identifier
-        assert "continue-on-error" not in check, identifier
-        assert lines[0] == 'if [[ "$AUTHORIZED_IN" != "$GITHUB_RUN_ATTEMPT" ]]; then', identifier
-        assert lines[-2:] == ["  exit 1", "fi"], identifier
-        assert "re-run all jobs" in check["run"], identifier
-        assert [candidate.get("name") for candidate in job["steps"]].count(ATTEMPT_CHECK) == 1
-        assert job["steps"].index(check) < first_download(job), identifier
-
-
-def test_an_early_start_is_classified_like_the_release_after_the_whole_run() -> None:
+def test_a_release_is_classified_by_the_event_that_started_it() -> None:
     classify = step(release_jobs()["authorize"], "Classify the changes since the deployed commit")
 
-    assert classify["env"]["RELEASE_EVENT"] == (
-        "${{ inputs.ci_run_id != '' && 'workflow_run' || github.event_name }}"
-    )
+    assert classify["env"]["RELEASE_EVENT"] == "${{ github.event_name }}"
     assert classify["run"] == (
         'python3 deploy/release_scope.py classify "$RELEASE_EVENT" "$DEPLOYED_SHA" "$RELEASE_SHA"'
     )
@@ -1783,7 +1876,6 @@ def test_in_ci_only_jobs_of_one_api_call_may_write_and_only_to_actions() -> None
 
     assert workflow("ci.yml")["permissions"] == {"contents": "read"}
     assert writers == {
-        "release_start": {"actions": "write"},
         **{identifier: {"actions": "write"} for identifier in STOP_JOBS},
     }
     for identifier in writers:
