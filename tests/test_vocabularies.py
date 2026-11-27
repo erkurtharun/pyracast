@@ -6,15 +6,24 @@ from typing import cast, get_args
 import pytest
 from django.apps import apps
 from django.conf import settings
-from django.db import models
+from django.db import IntegrityError, models, transaction
 from drf_spectacular.plumbing import deep_import_string
 
-from pyracast.accounts.models import UserLanguagePreference
+from pyracast.accounts.invitations import invite_workspace_member
+from pyracast.accounts.models import (
+    OutboundMail,
+    OutboundMailError,
+    OutboundMailKind,
+    UserLanguagePreference,
+)
+from pyracast.db import violated_constraint
 from pyracast.languages import Language
 from pyracast.mail.errors import MailFailure
 from pyracast.notifications.models import PAUSED_DELIVERY_ERRORS, NotificationDeliveryError
 from pyracast.plants.models import CalibrationAssessment
 from pyracast.plants.numerics import FitAssessment
+from pyracast.regions.models import AuditAction, AuditEvent
+from tests.support.domain import make_system
 from tests.support.vocabularies import (
     COVERED_APPS,
     FAILURE_CODES,
@@ -160,6 +169,44 @@ def test_operation_rejects_values_outside_the_vocabulary(
     case: InputVocabulary, value: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     assert_operation_rejects(case, case.operation(monkeypatch), value)
+
+
+def refusal(row: models.Model, **values: object) -> str | None:
+    try:
+        with transaction.atomic():
+            type(row)._default_manager.filter(pk=row.pk).update(**values)
+    except IntegrityError as error:
+        return violated_constraint(error)
+    return None
+
+
+def test_the_database_stores_every_audit_action_mail_kind_and_mail_error_and_no_other() -> None:
+    system = make_system()
+    invite_workspace_member(system.member, system.tenant.pk, "guest@example.com")
+    event = (
+        AuditEvent.objects.filter(region=system.region)
+        .exclude(action=AuditAction.REGION_CREATED)
+        .earliest("pk")
+    )
+    mail = OutboundMail.objects.get()
+
+    assert {
+        action: refusal(event, action=action) for action in AuditAction.values
+    } == dict.fromkeys(AuditAction.values)
+    assert {
+        kind: refusal(
+            mail,
+            kind=kind,
+            invitation=mail.invitation if kind == OutboundMailKind.WORKSPACE_INVITATION else None,
+        )
+        for kind in OutboundMailKind.values
+    } == dict.fromkeys(OutboundMailKind.values)
+    assert {
+        error: refusal(mail, last_error=error) for error in OutboundMailError.values
+    } == dict.fromkeys(OutboundMailError.values)
+    assert refusal(event, action="xx") == "auditevent_action_chk"
+    assert refusal(mail, kind="xx", invitation=None) == "outboundmail_kind_chk"
+    assert refusal(mail, last_error="xx") == "outboundmail_last_error_chk"
 
 
 def test_every_mail_failure_can_be_stored_on_a_reminder_delivery() -> None:

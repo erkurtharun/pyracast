@@ -192,11 +192,20 @@ def test_the_database_refuses_an_administrator_change_that_names_one_account_twi
             "workspaceinvitation_revoked_at_chk",
         ),
         (
+            lambda now: {"revoked_at": now, "revoked_reason": "unknown"},
+            "workspaceinvitation_revoked_reason_chk",
+        ),
+        (
             lambda now: {"accepted_by": User.objects.get(username="ledger-admin")},
             "workspaceinvitation_accepted_by_chk",
         ),
     ],
-    ids=["accepted_and_revoked", "reason_without_revocation", "acceptor_without_acceptance"],
+    ids=[
+        "accepted_and_revoked",
+        "reason_without_revocation",
+        "revocation_for_an_unknown_reason",
+        "acceptor_without_acceptance",
+    ],
 )
 def test_the_database_refuses_an_invitation_state_no_writer_stores(
     change: Any, constraint: str, workspace: tuple[Tenant, User]

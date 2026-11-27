@@ -73,6 +73,9 @@ def test_the_state_follows_from_stored_facts_and_never_from_a_moved_deadline() -
         return WorkspaceInvitation(**{"expires_at": ahead, **fields}).state_at(now)
 
     assert state() == "pending"
+    assert state(token_hash=None) == "pending"
+    assert state(role=WorkspaceRole.ADMIN) == "pending"
+    assert state(delivery_status="failed") == "pending"
     assert state(expires_at=now) == "expired"
     assert state(expires_at=behind) == "expired"
     assert state(accepted_at=behind) == "accepted"
