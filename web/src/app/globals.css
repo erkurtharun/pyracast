@@ -2368,9 +2368,17 @@ details details {
     font-size: 14px;
     font-weight: 500;
 }
-.social-provider img {
+.social-provider::before {
+    content: "";
     flex: 0 0 20px;
-    object-fit: contain;
+    height: 20px;
+    background: center / contain no-repeat;
+}
+.social-provider.google::before {
+    background-image: url("/identity/google.png");
+}
+.social-provider.microsoft::before {
+    background-image: url("/identity/microsoft.svg");
 }
 .social-provider:focus-visible {
     outline: 3px solid var(--teal-708);
