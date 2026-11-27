@@ -511,6 +511,9 @@ test("a turn-on in the settings that waits while another window signs out and fi
     await expect(
         other.getByRole("heading", { name: "Welcome back" }),
     ).toBeVisible();
+    await expect(
+        page.getByRole("heading", { name: "Welcome back" }),
+    ).toBeVisible();
     expect((await readCopy(page)).holder).toBeUndefined();
     expect(reads.flat()).toEqual([]);
 });
