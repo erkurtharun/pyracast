@@ -49,7 +49,7 @@ export function AuthFields({
                     }
                     key={mode === "socialSignup" ? socialEmail : "email"}
                     type="email"
-                    autoComplete="email"
+                    autoComplete={mode === "login" ? "username" : "email"}
                     maxLength={254}
                     required
                 />

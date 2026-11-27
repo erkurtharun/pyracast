@@ -47,8 +47,8 @@ NOTICES = {
         _("An email address was removed"),
         _("%(deleted_email)s was removed from your Pyracast account."),
     ),
-    "mfa/email/totp_activated": Notice(_("Two-step verification was turned on")),
-    "mfa/email/totp_deactivated": Notice(_("Two-step verification was turned off")),
+    "mfa/email/totp_activated": Notice(_("An authenticator app was added to your account")),
+    "mfa/email/totp_deactivated": Notice(_("An authenticator app was removed from your account")),
     OutboundMailKind.WEBAUTHN_ADDED: Notice(_("A passkey was added to your account")),
     OutboundMailKind.WEBAUTHN_REMOVED: Notice(_("A passkey was removed from your account")),
     "account/email/second_factor_reset": Notice(

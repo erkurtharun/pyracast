@@ -39,6 +39,7 @@ Pyracast is a Django API with a Next.js single-page client, one PostgreSQL datab
 
 ## Authentication and security
 
+- Customer passkeys use discoverable WebAuthn credentials and require user verification for enrollment, sign-in and sensitive account actions. [allauth WebAuthn](https://docs.allauth.org/en/latest/mfa/webauthn.html) and [MFA configuration](https://docs.allauth.org/en/latest/mfa/configuration.html)
 - allauth rate limits need a cache shared by all workers with an atomic `cache.add()` and strongly consistent reads, plus a trusted client IP setting because `X-Forwarded-For` is distrusted by default. [allauth rate limits](https://docs.allauth.org/en/latest/common/rate_limits.html)
 - Django rotates the CSRF secret on every login, so a client holding a pre-login token must fetch a new one. [Django CSRF](https://docs.djangoproject.com/en/6.1/ref/csrf/)
 - Django never purges expired database sessions; `clearsessions` has to run on a schedule. [Django sessions](https://docs.djangoproject.com/en/6.1/topics/http/sessions/)

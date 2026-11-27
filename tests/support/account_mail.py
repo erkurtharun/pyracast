@@ -83,8 +83,8 @@ NOTICE_COPY: dict[str, dict[str, tuple[str, str | None]]] = {
             "An email address was removed",
             "{deleted_email} was removed from your Pyracast account.",
         ),
-        "mfa/email/totp_activated": ("Two-step verification was turned on", None),
-        "mfa/email/totp_deactivated": ("Two-step verification was turned off", None),
+        "mfa/email/totp_activated": ("An authenticator app was added to your account", None),
+        "mfa/email/totp_deactivated": ("An authenticator app was removed from your account", None),
         "mfa/email/recovery_codes_generated": (
             "New recovery codes were generated",
             "The previous codes no longer work.",
@@ -118,9 +118,12 @@ NOTICE_COPY: dict[str, dict[str, tuple[str, str | None]]] = {
             "Bir e-posta adresi kald\u0131r\u0131ld\u0131",
             "{deleted_email} adresi Pyracast hesab\u0131n\u0131zdan kald\u0131r\u0131ld\u0131.",
         ),
-        "mfa/email/totp_activated": ("\u0130ki ad\u0131ml\u0131 doğrulama aç\u0131ld\u0131", None),
+        "mfa/email/totp_activated": (
+            "Hesab\u0131n\u0131za bir doğrulama uygulamas\u0131 eklendi",
+            None,
+        ),
         "mfa/email/totp_deactivated": (
-            "\u0130ki ad\u0131ml\u0131 doğrulama kapat\u0131ld\u0131",
+            "Hesab\u0131n\u0131zdan bir doğrulama uygulamas\u0131 kald\u0131r\u0131ld\u0131",
             None,
         ),
         "mfa/email/recovery_codes_generated": (

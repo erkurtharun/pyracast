@@ -141,14 +141,26 @@ def test_passkeys_require_fresh_proof_and_verified_customer_and_never_open_conso
     assert client.get(AUTH + MANAGE).status_code == 401
     assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
     device = PasskeyDevice()
-    assert device.enroll(client).status_code == 200
+    enrolled = device.enroll(client)
+    assert enrolled.status_code == 200
     assert not client.get("/api/session/").json()["user"]["can_admin"]
 
+    passkey_session = browser()
+    assert device.verify(passkey_session, LOGIN).status_code == 200
+    recovered = browser()
+    assert (
+        submit(recovered, "auth/login", {"email": user.email, "password": PASSWORD}).status_code
+        == 401
+    )
+    recovery_code = enrolled.json()["meta"]["recovery_codes"][0]
+    assert submit(recovered, "auth/2fa/authenticate", {"code": recovery_code}).status_code == 200
     User.objects.filter(pk=user.pk).update(is_staff=True, is_superuser=True)
+    assert not recovered.get("/api/session/").json()["user"]["can_admin"]
     assert device.verify(browser(), LOGIN).status_code == 400
     assert not client.get("/api/session/").json()["user"]["can_admin"]
     assert client.get(AUTH + CONFIRM).status_code == 403
     with_totp(user)
+    assert not passkey_session.get("/api/session/").json()["user"]["can_admin"]
     admin = browser()
     assert (
         submit(admin, "auth/login", {"email": user.email, "password": PASSWORD}).status_code == 401
