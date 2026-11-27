@@ -16,6 +16,7 @@ from pyracast.accounts.models import OutboundMail, WorkspaceAdminChange, Workspa
 from pyracast.change_requests.models import ChangeRequest, IncidentChange
 from pyracast.change_requests.operations import reject_request
 from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.db import violated_constraint
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionSchedule,
@@ -384,8 +385,15 @@ def revision_of_another(*, start: timedelta, length: timedelta, plant: bool = Fa
     return stage
 
 
+OWNERLESS = {"lease_token": None, "lease_expires_at": NOW + timedelta(days=1)}
+
+
 def lease_breaches(
-    table: str, rows: Callable[[pytest.MonkeyPatch], Rows], held: str, closed: str
+    table: str,
+    rows: Callable[[pytest.MonkeyPatch], Rows],
+    held: str,
+    closed: str,
+    observed: dict[str, dict[str, object]] | None = None,
 ) -> list[ParameterSet]:
     rule = (table, LEASE_RULES[table])
     guard = check(table, f"{table.split('_', 1)[1]}_lease_chk")
@@ -393,7 +401,9 @@ def lease_breaches(
         "token-without-expiry": {"status": held, "lease_token": TOKEN},
         "expiry-without-token": {"lease_expires_at": NOW},
         f"{held}-without-lease": {"status": held},
+        f"{held}-with-expiry-only": {"status": held, **OWNERLESS},
         "lease-while-closed": {"status": closed, "lease_token": TOKEN, "lease_expires_at": NOW},
+        **(observed or {}),
     }
     return [
         breach(name, rule, changing(rows, **values), guard) for name, values in branches.items()
@@ -403,6 +413,7 @@ def lease_breaches(
 TIMES = {
     "text": "10:00",
     "hour-out-of-range": ["24:00"],
+    "minute-out-of-range": ["10:60"],
     "single-digit-hour": ["9:00"],
     "seconds": ["10:00:00"],
     "trailing-newline": ["10:00\n"],
@@ -426,10 +437,31 @@ LINEAGE = row_trigger(
     "A production revision supersedes the same plant and interval",
 )
 BREACHES = [
-    *lease_breaches(JOBS, collection_job, "running", "pending"),
-    *lease_breaches("metering_epiascollectionjob", epias_job, "running", "pending"),
+    *lease_breaches(
+        JOBS,
+        collection_job,
+        "running",
+        "pending",
+        {
+            "stale-with-token": {"status": "stale", "lease_token": TOKEN},
+            "stale-with-lease": {"status": "stale", "lease_token": TOKEN, "lease_expires_at": NOW},
+        },
+    ),
+    *lease_breaches(
+        "metering_epiascollectionjob",
+        epias_job,
+        "running",
+        "pending",
+        {"failed-with-lease": {"status": "failed", "lease_token": TOKEN, "lease_expires_at": NOW}},
+    ),
     *lease_breaches(RUNS, calibration_run, "running", "pending"),
-    *lease_breaches("notifications_notificationdelivery", delivery, "sending", "failed"),
+    *lease_breaches(
+        "notifications_notificationdelivery",
+        delivery,
+        "sending",
+        "failed",
+        {"uncertain-with-token": {"status": "uncertain", "lease_token": TOKEN}},
+    ),
     *lease_breaches(MAIL, invitation_mail, "sending", "pending"),
     breach(
         "previous-administrator-is-the-new-one",
@@ -552,11 +584,14 @@ BREACHES = [
         changing(collection_job, endpoint="historical_import"),
         check(JOBS, "collectionjob_reference_import_chk"),
     ),
-    breach(
-        "import-under-another-endpoint",
-        (JOBS, IMPORT_SHAPE_RULE),
-        changing(reference_import_job, endpoint="scaled_forecasts"),
-        check(JOBS, "collectionjob_reference_import_chk"),
+    *(
+        breach(
+            f"import-under-the-{endpoint}-endpoint",
+            (JOBS, IMPORT_SHAPE_RULE),
+            changing(reference_import_job, endpoint=endpoint),
+            check(JOBS, "collectionjob_reference_import_chk"),
+        )
+        for endpoint in ("forecasts", "scaled_forecasts")
     ),
     breach(
         "unfinished-import",
@@ -656,7 +691,7 @@ BREACHES = [
     breach(
         "revision-of-another-start",
         (OBSERVATIONS, OBSERVATION_LINEAGE_RULE),
-        revision_of_another(start=timedelta(hours=1), length=timedelta(hours=1)),
+        revision_of_another(start=timedelta(minutes=30), length=timedelta(minutes=30)),
         LINEAGE,
     ),
     breach(
@@ -686,14 +721,20 @@ def lifted(guard: Guard) -> Iterator[None]:
 
 
 @pytest.mark.parametrize("case", BREACHES)
-def test_the_database_refuses_a_breach_and_the_audit_reports_it_once_the_guard_is_lifted(
-    case: Breach, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_the_database_refuses_a_breach(case: Breach, monkeypatch: pytest.MonkeyPatch) -> None:
     write = case.stage(monkeypatch)
     assert stored_violations() == {}
 
     with pytest.raises(IntegrityError, match=case.guard.refusal), transaction.atomic():
         write()
+
+
+@pytest.mark.parametrize("case", BREACHES)
+def test_the_audit_reports_a_breach_once_the_guard_is_lifted(
+    case: Breach, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write = case.stage(monkeypatch)
+    assert stored_violations() == {}
 
     with lifted(case.guard):
         write()
@@ -712,42 +753,50 @@ def test_every_stored_rule_has_a_breach() -> None:
 
 LARGEST = sys.float_info.max
 SMALLEST = math.ulp(0.0)
-# (source, target, factor) at the edges of float8: subnormal and overflowing quotients, and
-# products or tolerances that leave float8 although the quotient is representable.
+STORED = "stored"
+NOT_THE_QUOTIENT = FACTOR_GUARD.refusal
+# PostgreSQL refuses a quotient that overflows or underflows to zero before the check compares.
+OUT_OF_RANGE = "NumericValueOutOfRange"
+# (source, target, factor, outcome on the intact database) at the float8 edges of the rule's terms.
 FLOAT_LIMITS = (
-    (1e308, 1e-10, 1e-10 / 1e308),
-    (1e308, 1e-10, math.nextafter(1e-10 / 1e308, 1)),
-    (1e308, sys.float_info.min, SMALLEST),
-    (4.0, SMALLEST, SMALLEST),
-    (1.5, SMALLEST, SMALLEST / 1.5),
-    (1.0, 1e-320, 1e-320),
-    (3.0, LARGEST, LARGEST / 3),
-    (0.5, 6e307, 6e307 / 0.5),
-    (math.nextafter(1.0, 0), LARGEST, LARGEST),
-    (0.5, LARGEST, 1.0),
-    (1e-10, 1e300, 1.0),
-    (2.0, 3.0, 1.5),
-    (2.0, 3.0, math.nextafter(1.5, 2)),
+    (1e308, 1e-10, 1e-10 / 1e308, STORED),
+    (1e308, 1e-10, math.nextafter(1e-10 / 1e308, 1), NOT_THE_QUOTIENT),
+    (1e308, sys.float_info.min, SMALLEST, OUT_OF_RANGE),
+    (4.0, SMALLEST, SMALLEST, OUT_OF_RANGE),
+    (1.5, SMALLEST, SMALLEST / 1.5, STORED),
+    (1.0, 1e-320, 1e-320, STORED),
+    (3.0, LARGEST, LARGEST / 3, STORED),
+    (0.5, 6e307, 6e307 / 0.5, STORED),
+    (math.nextafter(1.0, 0), LARGEST, LARGEST, OUT_OF_RANGE),
+    (0.5, LARGEST, 1.0, OUT_OF_RANGE),
+    (1e-10, 1e300, 1.0, OUT_OF_RANGE),
+    (2.0, 3.0, 1.5, STORED),
+    (2.0, 3.0, math.nextafter(1.5, 2), NOT_THE_QUOTIENT),
 )
-QUOTIENTS = [factor == target / source for source, target, factor in FLOAT_LIMITS]
 FACTOR_LABEL = f"forecasts_referencecapacitynormalization: {NORMALIZATION_FACTOR_RULE}"
+
+
+def stored_outcome(rows: Rows, source: float, target: float, factor: float) -> str:
+    try:
+        with transaction.atomic():
+            rows.update(source_capacity_kw=source, target_capacity_kw=target, factor=factor)
+    except IntegrityError as error:
+        return violated_constraint(error) or str(error)
+    except DataError as error:
+        return type(error.__cause__).__name__
+    return STORED
 
 
 def test_the_database_stores_a_factor_only_as_the_exact_quotient_at_the_float_limits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     rows = normalization(monkeypatch)
-    stored = []
-    for source, target, factor in FLOAT_LIMITS:
-        try:
-            with transaction.atomic():
-                rows.update(source_capacity_kw=source, target_capacity_kw=target, factor=factor)
-        except IntegrityError, DataError:
-            stored.append(False)
-        else:
-            stored.append(True)
 
-    assert stored == QUOTIENTS
+    outcomes = [
+        stored_outcome(rows, source, target, factor) for source, target, factor, _ in FLOAT_LIMITS
+    ]
+
+    assert outcomes == [intact for *_, intact in FLOAT_LIMITS]
 
 
 def test_the_audit_reports_exactly_the_factors_that_are_not_the_quotient_at_the_float_limits(
@@ -756,8 +805,10 @@ def test_the_audit_reports_exactly_the_factors_that_are_not_the_quotient_at_the_
     rows = normalization(monkeypatch)
     reported = []
     with lifted(FACTOR_GUARD):
-        for source, target, factor in FLOAT_LIMITS:
+        for source, target, factor, _ in FLOAT_LIMITS:
             rows.update(source_capacity_kw=source, target_capacity_kw=target, factor=factor)
-            reported.append(stored_violations() == {FACTOR_LABEL: 1})
+            reported.append(stored_violations())
 
-    assert reported == [not quotient for quotient in QUOTIENTS]
+    assert reported == [
+        {} if intact == STORED else {FACTOR_LABEL: 1} for *_, intact in FLOAT_LIMITS
+    ]
