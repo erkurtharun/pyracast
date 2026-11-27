@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 import pytest
-from django.db import connection, models
+from django.db import connection, models, transaction
 from django.db.models import F
 from psycopg import sql
 
@@ -387,44 +387,51 @@ def test_observation_migration_refuses_a_revision_of_another_interval(
 
 
 @pytest.mark.usefixtures("leaf")
-@pytest.mark.parametrize(
-    ("model", "values", "rule"),
-    [
-        (ProviderAccount, {"daily_quota": 0}, "daily quota"),
-        (ProviderAccount, {"daily_quota": 11}, "daily quota"),
-        (ProviderAccount, {"credential_revision": 0}, "credential revision"),
-        (ProviderAccount, {"authentication_failed_revision": 0}, "authentication failure"),
-        (
-            ProviderAccount,
-            {"authentication_failed_revision": F("credential_revision") + 1},
-            "authentication failure",
-        ),
-        (SiteBinding, {"validated_at": None}, "validation"),
-        (SiteBinding, {"validated_credential_revision": None}, "validation"),
-        (SiteBinding, {"validated_credential_revision": 0}, "validation"),
-    ],
-)
 def test_provider_migration_refuses_accounts_and_bindings_no_writer_produces(
-    model: type[ProviderAccount | SiteBinding], values: dict[str, object], rule: str
+    subtests: pytest.Subtests,
 ) -> None:
     system = make_system(approved=True)
-    row = system.account if model is ProviderAccount else system.binding
-    rows = model._default_manager.filter(pk=row.pk)
-    stored: dict[str, object] = dict(rows.values().get())
     migrate(PREVIOUS["connections"])
-    rows.update(**values)
-    changed = row_values(rows)
-    table = model._meta.db_table
-    assert {label.partition(":")[0] for label in audit()} == {table}
+    target = ("connections", "0003_provider_account_and_binding_checks")
+    cases: tuple[tuple[models.Model, str, object, str], ...] = (
+        (system.account, "daily_quota", 0, "daily quota"),
+        (system.account, "daily_quota", 11, "daily quota"),
+        (system.account, "credential_revision", 0, "credential revision"),
+        (system.account, "authentication_failed_revision", 0, "authentication failure"),
+        (
+            system.account,
+            "authentication_failed_revision",
+            F("credential_revision") + 1,
+            "authentication failure",
+        ),
+        (system.binding, "validated_at", None, "validation"),
+        (system.binding, "validated_credential_revision", None, "validation"),
+        (system.binding, "validated_credential_revision", 0, "validation"),
+    )
+    for row, field, value, rule in cases:
+        table = row._meta.db_table
+        with subtests.test(table=table, field=field, value=str(value)), transaction.atomic():
+            # Pending triggers from the row update would block the migration's ALTER TABLE.
+            with connection.cursor() as cursor:
+                cursor.execute("SET CONSTRAINTS ALL IMMEDIATE")
+            rows = type(row)._default_manager.filter(pk=row.pk)
+            original = row_values(rows, (field,))
+            rows.update(**{field: value})
+            changed = row_values(rows)
+            assert {label.partition(":")[0] for label in audit()} == {table}
 
-    with pytest.raises(ValueError, match=rf"{table} holds 1 row.*{rule}"):
-        forward()
+            with pytest.raises(ValueError, match=rf"{table} holds 1 row.*{rule}"):
+                migrate(target)
 
-    assert not checks(table) & NEW_CHECKS[table]
-    assert row_values(rows) == changed
-    rows.update(**{field: stored[field] for field in values})
+            assert not checks(table) & NEW_CHECKS[table]
+            assert row_values(rows) == changed
+            rows.update(**original)
+            migrate(target)
+            assert NEW_CHECKS[table] <= checks(table)
+            transaction.set_rollback(True)
     forward()
-    assert NEW_CHECKS[table] <= checks(table)
+    for table in (ProviderAccount._meta.db_table, SiteBinding._meta.db_table):
+        assert NEW_CHECKS[table] <= checks(table)
 
 
 def _delivery(system: System) -> NotificationDelivery:
