@@ -414,7 +414,7 @@ TIMES = {
     "text": "10:00",
     "hour-out-of-range": ["24:00"],
     "minute-out-of-range": ["10:60"],
-    "single-digit-hour": ["9:00"],
+    "single-digit-hour": ["6:30"],
     "seconds": ["10:00:00"],
     "trailing-newline": ["10:00\n"],
     "number": [600],
@@ -692,6 +692,12 @@ BREACHES = [
         "revision-of-another-start",
         (OBSERVATIONS, OBSERVATION_LINEAGE_RULE),
         revision_of_another(start=timedelta(minutes=30), length=timedelta(minutes=30)),
+        LINEAGE,
+    ),
+    breach(
+        "revision-of-the-next-interval",
+        (OBSERVATIONS, OBSERVATION_LINEAGE_RULE),
+        revision_of_another(start=timedelta(hours=1), length=timedelta(hours=1)),
         LINEAGE,
     ),
     breach(
