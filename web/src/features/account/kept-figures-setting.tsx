@@ -9,7 +9,10 @@ export function KeptFiguresSetting() {
     const preference = useKeptFiguresPreference();
     if (!preference) return null;
     return (
-        <section className="panel narrow">
+        <section
+            className="panel narrow"
+            aria-busy={preference.saving || undefined}
+        >
             <FieldErrors
                 value={preference.failed ? { kept: common("saveFailed") } : {}}
             >
@@ -21,6 +24,11 @@ export function KeptFiguresSetting() {
                     onChange={preference.change}
                 />
             </FieldErrors>
+            {preference.saving && (
+                <p className="field-hint" role="status">
+                    {common("saving")}
+                </p>
+            )}
         </section>
     );
 }

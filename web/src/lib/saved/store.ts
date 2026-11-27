@@ -24,7 +24,7 @@ export type CopyState = "off" | "on" | "paused" | "unavailable";
 export type Owner = { user: number; session: string };
 // `off`: the owner's person turned keeping off on this device.
 export type CopyView = { state: CopyState; plants: number; off: boolean };
-export type Observation = Owner & {
+type Observation = Owner & {
     language: Holder["language"];
     adoptedAt: number;
     present: () => boolean;
@@ -37,8 +37,8 @@ export type HeldPlant = PlantKey & {
     attemptedAt: number | null;
     refreshedAt: number | null;
 };
-export type Held = { retryAt: number | null; plants: HeldPlant[] };
-export type Listed = {
+type Held = { retryAt: number | null; plants: HeldPlant[] };
+type Listed = {
     workspaces: { tenant: number; name: string }[];
     onScreen?: {
         tenant: number;
@@ -137,7 +137,7 @@ function run(
     }).finally(() => database.close());
 }
 
-// At the deadline an adoption is aborted unless its commit has begun; any other transaction lands.
+// With `abortLate` the deadline aborts the transaction unless its commit has begun, and the answer is its own end; any other transaction lands.
 async function transact(
     mode: IDBTransactionMode,
     work: (transaction: IDBTransaction) => void,
@@ -151,27 +151,47 @@ async function transact(
         database.close();
         return "pending";
     }
+    if (abortLate) return run(database, mode, work, limit);
     return Promise.race([
-        run(database, mode, work, abortLate ? limit : undefined),
+        run(database, mode, work),
         limit.reached.then(() => "pending" as const),
     ]);
 }
 
-// The holder store also keeps the device's marks: `["off", user]` and `["ended", at, session]`.
+function whenRead(
+    transaction: IDBTransaction,
+    request: IDBRequest,
+    then: () => void,
+) {
+    request.onsuccess = () => {
+        try {
+            then();
+        } catch {
+            transaction.abort();
+        }
+    };
+}
+
 function withHolder(
+    transaction: IDBTransaction,
+    read: (holder: unknown, store: IDBObjectStore) => void,
+) {
+    const store = transaction.objectStore("holder");
+    const holder = store.get(holderKey);
+    whenRead(transaction, holder, () => read(holder.result, store));
+}
+
+// The holder store also keeps the device's marks: `["off", user]` and `["ended", at, session]`.
+function withMarks(
     transaction: IDBTransaction,
     read: (holder: unknown, store: IDBObjectStore, marks: unknown[]) => void,
 ) {
     const store = transaction.objectStore("holder");
     const holder = store.get(holderKey);
     const marks = store.getAllKeys();
-    marks.onsuccess = () => {
-        try {
-            read(holder.result, store, marks.result);
-        } catch {
-            transaction.abort();
-        }
-    };
+    whenRead(transaction, marks, () =>
+        read(holder.result, store, marks.result),
+    );
 }
 
 function isOff(marks: unknown[], user: number) {
@@ -250,28 +270,20 @@ function current(confirmedAt: number, now: number) {
     return now - confirmedAt <= keptForMs && confirmedAt - now <= dayMs;
 }
 
-function deleteDatabase(
-    limit: Deadline,
-    deleted = () => {},
-): Promise<"deleted" | "failed" | "pending"> {
-    if (limit.expired()) return Promise.resolve("pending");
-    return new Promise((resolve) => {
+function deleteDatabase(limit: Deadline) {
+    return new Promise<void>((resolve) => {
         try {
             const request = indexedDB.deleteDatabase(databaseName);
-            request.onsuccess = () => {
-                deleted();
-                resolve("deleted");
-            };
-            request.onerror = () => resolve("failed");
+            request.onsuccess = request.onerror = () => resolve();
         } catch {
-            resolve("failed");
+            resolve();
         }
-        void limit.reached.then(() => resolve("pending"));
+        void limit.reached.then(() => resolve());
     });
 }
 
-// A withdrawn build removes the marks with the figures; a deletion still waiting at the deadline goes on and `deleted` runs whenever it succeeds.
-export async function removeCopy(limit: Deadline, deleted: () => void) {
+// A withdrawn build removes the marks with the figures; a deletion still waiting at the deadline goes on.
+export async function removeCopy(limit: Deadline) {
     const outcome = await transact(
         "readwrite",
         (transaction) => {
@@ -280,22 +292,16 @@ export async function removeCopy(limit: Deadline, deleted: () => void) {
         },
         limit,
     );
-    if (outcome === "absent") deleted();
-    else if (outcome === "done") await deleteDatabase(limit, deleted);
+    if (outcome === "done") await deleteDatabase(limit);
 }
 
 // The mark and the removal it implies commit together, so no figures outlive a record that refuses them.
-export async function endSession(
-    leaving: Owner,
-    committed: () => void,
-    limit: Deadline,
-) {
+export async function endSession(leaving: Owner, limit: Deadline) {
     const read = { done: false };
     const outcome = await transact(
         "readwrite",
         (transaction) =>
             withHolder(transaction, (holder, store) => {
-                transaction.addEventListener("complete", committed);
                 const now = Date.now();
                 store.delete(
                     IDBKeyRange.bound(["ended"], ["ended", now - keptForMs]),
@@ -308,23 +314,17 @@ export async function endSession(
                 read.done = true;
             }),
         limit,
-        { creating: true },
+        { creating: true, abortLate: true },
     );
     return written(outcome, read);
 }
 
-export async function setKept(
-    user: number,
-    kept: boolean,
-    committed: () => void,
-    limit: Deadline,
-) {
+export async function setKept(user: number, kept: boolean, limit: Deadline) {
     const read = { done: false };
     const outcome = await transact(
         "readwrite",
         (transaction) =>
             withHolder(transaction, (holder, store) => {
-                transaction.addEventListener("complete", committed);
                 if (kept) store.delete(["off", user]);
                 else {
                     store.put(true, ["off", user]);
@@ -334,7 +334,7 @@ export async function setKept(
                 read.done = true;
             }),
         limit,
-        { creating: !kept },
+        { creating: !kept, abortLate: true },
     );
     return written(outcome, read) || (kept && outcome === "absent");
 }
@@ -347,7 +347,7 @@ export async function adopt(
     const outcome = await transact(
         "readwrite",
         (transaction) =>
-            withHolder(transaction, (holder, store, marks) => {
+            withMarks(transaction, (holder, store, marks) => {
                 if (limit.expired()) {
                     read.handoff = "unverified";
                     return;
@@ -395,7 +395,7 @@ export async function copyState(
     const outcome = await transact(
         "readonly",
         (transaction) => {
-            withHolder(transaction, (holder, _, marks) => {
+            withMarks(transaction, (holder, _, marks) => {
                 read.holder = holder;
                 read.marks = marks;
             });
@@ -414,17 +414,17 @@ export async function copyState(
     return { state: owns(holder, owner, marks) ? "on" : "paused", plants, off };
 }
 
+// Answers false only when this device refused to create or write the copy; a declined or unfinished turn-on is no refusal.
 export async function turnOn(
     owner: Pick<Holder, "user" | "language" | "session" | "removal">,
     present: () => boolean,
     committed: () => void,
     limit: Deadline,
 ) {
-    const read = { done: false };
     const outcome = await transact(
         "readwrite",
         (transaction) =>
-            withHolder(transaction, (holder, store, marks) => {
+            withMarks(transaction, (holder, store, marks) => {
                 if (!present() || refuses(marks, owner)) return;
                 transaction.addEventListener("complete", committed);
                 if (!heldFor(holder, owner)) clearFigures(transaction);
@@ -437,12 +437,15 @@ export async function turnOn(
                     } satisfies Holder,
                     holderKey,
                 );
-                read.done = true;
             }),
         limit,
         { creating: true },
     );
-    return written(outcome, read);
+    const refused =
+        outcome === "failed" ||
+        outcome === "unavailable" ||
+        outcome === "blocked";
+    return !refused || limit.expired();
 }
 
 function isKeyPart(value: unknown): value is number {
@@ -501,7 +504,7 @@ function withPlants(
     owner: Owner,
     work: (plants: HeldPlant[], store: IDBObjectStore, holder: Holder) => void,
 ) {
-    withHolder(transaction, (holder, _, marks) => {
+    withMarks(transaction, (holder, _, marks) => {
         if (!owns(holder, owner, marks)) return;
         const store = transaction.objectStore("plants");
         const request = store.getAll();
@@ -729,7 +732,7 @@ export async function setRetryAt(owner: Owner, at: number, limit: Deadline) {
     const outcome = await transact(
         "readwrite",
         (transaction) =>
-            withHolder(transaction, (holder, store, marks) => {
+            withMarks(transaction, (holder, store, marks) => {
                 if (!owns(holder, owner, marks)) return;
                 store.put({ ...holder, retryAt: at }, holderKey);
                 read.done = true;

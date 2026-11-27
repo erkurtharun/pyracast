@@ -32,15 +32,19 @@ import {
     heldDays,
     holderOf,
     holdCopy,
-    holdHolderWrite,
+    holdWrite,
     loadStore,
     offMark,
     onBlankPage,
+    plantKey,
     readCopy,
+    readHeld,
     refusalCases,
     refuseClears,
+    refuseWrites,
     seedCopy,
     watchStoreChunk,
+    workerShows,
     writeStore,
     type Holder,
 } from "./support/saved-copy";
@@ -57,11 +61,10 @@ const untouched = {
     holder: holderOf(),
     plants: 1,
     days: heldDays.length,
-    flag: "1",
     marks: [],
 };
-const absent = { plants: 0, days: 0, flag: null, marks: [] };
-const cleared = { version: 1, plants: 0, days: 0, flag: "1", marks: [] };
+const absent = { plants: 0, days: 0, marks: [] };
+const cleared = { version: 1, plants: 0, days: 0, marks: [] };
 
 function plants(page: Page) {
     return page.getByRole("heading", { name: "Plants", exact: true });
@@ -233,7 +236,7 @@ async function heldSignIn(page: Page, next: Account) {
     return { release, admitted };
 }
 
-test("without a copy a signed-in start, another user's sign-in and a language change load no store, and a sign-out records only its session's end", async ({
+test("without a copy a signed-in start asks the store and creates no database, a sign-out records only its session's end, and another user's sign-in and a language change keep that record", async ({
     page,
 }) => {
     const account = await signedIn(page);
@@ -241,42 +244,16 @@ test("without a copy a signed-in start, another user's sign-in and a language ch
     await answerLanguage(page, secondAccount);
     await page.goto("/app/w/1/");
     await expect(plants(page)).toBeVisible();
-    expect(chunk.requested()).toBe(false);
+    expect(chunk.requested()).toBe(true);
+    expect(await readCopy(page)).toEqual(absent);
     await signOut(page);
     await expect(welcome(page)).toBeVisible();
-    const ended = {
-        version: 1,
-        plants: 0,
-        days: 0,
-        flag: null,
-        marks: [signedOutHere],
-    };
+    const ended = { version: 1, plants: 0, days: 0, marks: [signedOutHere] };
     expect(await readCopy(page)).toEqual(ended);
-    const later = await watchStoreChunk(page);
     await signInAs(page, account, secondAccount);
     await page.getByLabel("Language", { exact: true }).selectOption("tr");
     await expect(page.locator("html")).toHaveAttribute("lang", "tr");
-    expect(later.requested()).toBe(false);
     expect(await readCopy(page)).toEqual(ended);
-});
-
-test("a flag without a database creates none at a signed-in start, and a sign-out creates it with only its session's end", async ({
-    page,
-}) => {
-    await onBlankPage(page);
-    await page.evaluate(() =>
-        window.localStorage.setItem("pyracast.saved", "1"),
-    );
-    await signedIn(page);
-    await page.goto("/app/w/1/");
-    await expect(plants(page)).toBeVisible();
-    expect(await readCopy(page)).toEqual({ ...absent, flag: "1" });
-    await signOut(page);
-    await expect(welcome(page)).toBeVisible();
-    expect(await readCopy(page)).toEqual({
-        ...cleared,
-        marks: [signedOutHere],
-    });
 });
 
 test("a start as the holder with the stored tag keeps every figure and renews the confirmation and the language", async ({
@@ -292,7 +269,6 @@ test("a start as the holder with the stored tag keeps every figure and renews th
         holder: { session: "tag-a", active: true, language: "en" },
         plants: 1,
         days: 2,
-        flag: "1",
     });
 });
 
@@ -326,7 +302,6 @@ test("a holder whose removal token is written in capitals stays this person's co
         holder: { removal: holder.removal, session: "tag-a", active: true },
         plants: 1,
         days: 2,
-        flag: "1",
     });
 });
 
@@ -373,121 +348,135 @@ test("a sign-out whose request is lost removes every figure, a second window of 
     expect((await readCopy(page)).holder?.active).toBe(true);
 });
 
-test("a sign-out whose store code loads late sends its request at two seconds and records the session's end once the code loads, before the page reloads", async ({
-    page,
-}) => {
-    await seedCopy(page, { flagged: false });
-    await signedIn(page);
-    const chunk = await watchStoreChunk(page, true);
-    await page.goto("/app/w/1/");
-    await expect(plants(page)).toBeVisible();
-    expect(chunk.requested()).toBe(false);
-    await page.evaluate(() =>
-        window.localStorage.setItem("pyracast.saved", "1"),
-    );
-    await expectHeldFigures(page);
+function watchDeletes(page: Page) {
     const deletes: string[] = [];
     page.on("request", (request) => {
-        if (request.method() === "DELETE") deletes.push(request.url());
+        if (request.method() === "DELETE")
+            deletes.push(new URL(request.url()).pathname);
     });
-    await pauseClock(page);
-    await signOut(page);
-    await chunk.reached;
-    await page.clock.runFor(1_999);
-    expect(deletes).toEqual([]);
+    return deletes;
+}
+
+// The DELETE waits until `answer`; `sent` settles once it reached the network.
+async function holdSignOut(page: Page) {
+    let answer!: () => void;
+    const answered = new Promise<void>((resolve) => (answer = resolve));
     const sent = page.waitForRequest(
         (request) => request.method() === "DELETE",
     );
-    await page.clock.runFor(1);
-    expect(new URL((await sent).url()).pathname).toBe(
-        "/api/auth/browser/v1/auth/session",
-    );
+    await page.route(signOutPath, async (route) => {
+        if (route.request().method() !== "DELETE") return route.fallback();
+        await answered;
+        await route.fallback();
+    });
+    return { sent, answer };
+}
+
+async function shownWithCopy(page: Page) {
+    await seedCopy(page);
+    await signedIn(page);
+    await page.goto("/app/w/1/");
+    await expect(plants(page)).toBeVisible();
+    await expect.poll(() => renewed(page)).toBe(true);
     await expectHeldFigures(page);
-    const reloaded = page.waitForEvent("load");
-    chunk.release();
-    await reloaded;
-    await page.clock.resume();
-    await expect(welcome(page)).toBeVisible();
-    expect(deletes).toHaveLength(1);
+}
+
+test("a sign-out whose record waits sends its request only once the session's end is committed", async ({
+    page,
+}) => {
+    const write = await holdWrite(page);
+    await shownWithCopy(page);
+    const deletes = watchDeletes(page);
+    await write.arm("ended");
+    await pauseClock(page);
+    await signOut(page);
+    await expect.poll(write.held).toBe(true);
+    await page.clock.runFor(9_000);
+    expect(deletes).toEqual([]);
+    const request = await holdSignOut(page);
+    await write.release();
+    await request.sent;
     expect(await readCopy(page)).toMatchObject({
         holder: { active: false },
         plants: 0,
         days: 0,
         marks: [signedOutHere],
     });
+    await page.clock.resume();
+    request.answer();
+    await expect(welcome(page)).toBeVisible();
+    expect(deletes).toEqual(["/api/auth/browser/v1/auth/session"]);
 });
 
-test("a sign-out whose store code loads late leaves a copy that another session holds when its record lands", async ({
+test("a sign-out whose record does not commit within ten seconds deletes the copy's database before its request", async ({
     page,
-    context,
 }) => {
-    await seedCopy(page, { flagged: false });
-    const account = await signedIn(page);
-    const chunk = await watchStoreChunk(page, true);
-    await page.goto("/app/w/1/");
-    await expect(plants(page)).toBeVisible();
-    await page.evaluate(() =>
-        window.localStorage.setItem("pyracast.saved", "1"),
-    );
-    await expectHeldFigures(page);
-    await abortSignOut(page);
+    const write = await holdWrite(page);
+    await shownWithCopy(page);
+    const deletes = watchDeletes(page);
+    await write.arm("ended");
     await pauseClock(page);
     await signOut(page);
-    await chunk.reached;
-    await page.clock.runFor(2_000);
-    await expect(tryAgain(page)).toBeVisible();
-    await expectHeldFigures(page);
-    const newer = holderOf({ session: "tag-c" });
-    await seedCopy(await context.newPage(), { holder: newer });
-    account.current = { ...firstAccount, tag: "tag-c" };
-    const other = await context.newPage();
-    await signedIn(other, account);
-    await other.goto("/app/w/1/");
-    await expect
-        .poll(() => readCopy(other))
-        .toMatchObject({
-            holder: { session: "tag-c", active: true },
-            plants: 1,
-            days: 2,
-            marks: [],
-        });
-    chunk.release();
-    await expect
-        .poll(() => readCopy(other))
-        .toMatchObject({
-            holder: { session: "tag-c", active: true },
-            plants: 1,
-            days: 2,
-            marks: [signedOutHere],
-        });
-    await chunk.stop();
+    await expect.poll(write.held).toBe(true);
+    await page.clock.runFor(9_999);
+    expect(deletes).toEqual([]);
+    const request = await holdSignOut(page);
+    await page.clock.runFor(1);
+    await request.sent;
+    expect(await readCopy(page)).toEqual(absent);
+    expect(await workerShows(page)).toBe(false);
+    await page.clock.resume();
+    request.answer();
+    await expect(welcome(page)).toBeVisible();
+    expect(deletes).toEqual(["/api/auth/browser/v1/auth/session"]);
 });
 
-test("a sign-out removal that runs after another session activated the copy leaves that holder and its figures", async ({
+for (const recorded of [true, false])
+    test(`a sign-out ${recorded ? "whose end is committed" : "whose end cannot be written"} leaves nothing the worker shows while its request is in flight and after it succeeded`, async ({
+        page,
+    }) => {
+        const marks = await refuseWrites(page, "ended");
+        await shownWithCopy(page);
+        expect(await workerShows(page)).toBe(true);
+        if (!recorded) await marks.refuse();
+        const request = await holdSignOut(page);
+        await signOut(page);
+        await request.sent;
+        if (recorded)
+            expect(await readCopy(page)).toMatchObject({
+                holder: { active: false },
+                plants: 0,
+                days: 0,
+                marks: [signedOutHere],
+            });
+        else expect(await readCopy(page)).toEqual(absent);
+        expect(await workerShows(page)).toBe(false);
+        request.answer();
+        await expect(welcome(page)).toBeVisible();
+        expect(await workerShows(page)).toBe(false);
+    });
+
+test("a sign-out record that waits behind another session's activation leaves that holder and its figures", async ({
     page,
 }) => {
-    await seedCopy(page);
-    await signedIn(page);
     const writes = await countWrites(page);
-    await page.goto("/app/w/1/");
-    await expect(plants(page)).toBeVisible();
-    await expect.poll(() => renewed(page)).toBe(true);
-    await expectHeldFigures(page);
+    await shownWithCopy(page);
     await abortSignOut(page);
     const release = await holdCopy(page);
     await pauseClock(page);
     await signOut(page);
     await expect.poll(writes).toBe(2);
-    await page.clock.runFor(2_000);
-    await expect(tryAgain(page)).toBeVisible();
     const newer = holderOf({
         session: "tag-c",
         confirmedAt: instant.getTime(),
     });
     await release(newer);
-    await expect
-        .poll(() => readCopy(page))
-        .toEqual({ ...untouched, holder: newer, marks: [signedOutHere] });
+    await expect(tryAgain(page)).toBeVisible();
+    expect(await readCopy(page)).toEqual({
+        ...untouched,
+        holder: newer,
+        marks: [signedOutHere],
+    });
 });
 
 test("a start of a session whose end is recorded keeps its copy paused, and a new session activates it", async ({
@@ -516,16 +505,100 @@ test("a start of a session whose end is recorded keeps its copy paused, and a ne
         .toMatchObject({ session: "tag-c", active: true });
 });
 
-test("another person's start removes the holder and the figures and keeps this device's marks and the flag", async ({
+test("another person's start over a copy that left no other trace on the device removes the holder and the figures, keeps the marks, and the worker shows nothing", async ({
     page,
 }) => {
     const marks = [endedMark("tag-old"), offMark()];
     await seedCopy(page, { marks });
     await expectHeldFigures(page);
+    expect(await page.evaluate(() => window.localStorage.length)).toBe(0);
     await signedIn(page, { current: secondAccount });
     await page.goto("/app/w/1/");
     await expect(plants(page)).toBeVisible();
-    await expect.poll(() => readCopy(page)).toEqual({ ...cleared, marks });
+    expect(await readCopy(page)).toEqual({ ...cleared, marks });
+    expect(await workerShows(page)).toBe(false);
+});
+
+test("a start of a person who turned keeping off here keeps their active copy paused, and the worker shows nothing", async ({
+    page,
+}) => {
+    await seedCopy(page, {
+        holder: holderOf({ session: "tag-old" }),
+        marks: [offMark()],
+    });
+    await signedIn(page);
+    await page.goto("/app/w/1/");
+    await expect(plants(page)).toBeVisible();
+    await expect.poll(() => renewed(page)).toBe(true);
+    expect((await readCopy(page)).holder).toMatchObject({
+        session: "tag-a",
+        active: false,
+    });
+    expect(await workerShows(page)).toBe(false);
+});
+
+const heldKey = { tenant: 1, site: 7, plant: 7 };
+const writers = [
+    [
+        "renaming its workspaces",
+        "settle",
+        { workspaces: [{ tenant: 1, name: "Renamed" }] },
+    ],
+    [
+        "opening a plant",
+        "openPlant",
+        { ...plantKey, name: "Opened", workspace: "Sunfield Energy" },
+        5,
+    ],
+    ["removing its workspace", "removeWorkspace", 1],
+    ["removing its plant", "removePlant", heldKey],
+    ["marking a read of its plant", "markAttempt", heldKey, 5],
+    [
+        "writing its plant's days",
+        "writeDays",
+        heldKey,
+        instant.getTime() - dayMs,
+        { name: "Renamed", forecast: [], production: [] },
+    ],
+    ["postponing its reads", "setRetryAt", 5],
+] as const;
+
+for (const [change, operation, ...operands] of writers)
+    test(`the store refuses ${change} for an active copy whose person turned keeping off here`, async ({
+        page,
+    }) => {
+        await seedCopy(page, { marks: [offMark()] });
+        await loadStore(page);
+        expect(
+            await writeStore(
+                page,
+                operation,
+                { user: 1, session: "tag-a" },
+                ...operands,
+            ),
+        ).toBe(false);
+        expect(await readCopy(page)).toEqual({
+            ...untouched,
+            marks: [offMark()],
+        });
+        expect(await readHeld(page)).toMatchObject({
+            plants: [{ name: "East array", workspace: "Sunfield Energy" }],
+        });
+    });
+
+test("two sessions' ends written one after another are both kept", async ({
+    page,
+}) => {
+    await seedCopy(page, { holder: null, plants: [], days: [] });
+    await loadStore(page);
+    for (const session of ["tag-a", "tag-b"])
+        expect(await writeStore(page, "endSession", { user: 1, session })).toBe(
+            true,
+        );
+    expect((await readCopy(page)).marks).toEqual([
+        anEndedMark("tag-a"),
+        anEndedMark("tag-b"),
+    ]);
 });
 
 for (const { name, marks, shown } of refusalCases(1, "tag-a"))
@@ -533,7 +606,7 @@ for (const { name, marks, shown } of refusalCases(1, "tag-a"))
         page,
     }) => {
         await seedCopy(page, { marks });
-        await loadStore(page, true);
+        await loadStore(page);
         const owner = { user: 1, session: "tag-a" };
         expect(await writeStore(page, "copyState", owner)).toMatchObject({
             state: shown ? "on" : "paused",
@@ -799,7 +872,7 @@ test("an adoption that reads the holder just before two seconds and still has it
     await seedCopy(page, { holder });
     await expectHeldFigures(page);
     const writes = await countWrites(page);
-    const write = await holdHolderWrite(page);
+    const write = await holdWrite(page);
     await signedIn(page);
     const release = await holdCopy(page);
     await pauseClock(page);
@@ -1065,53 +1138,7 @@ test("a database of a newer format keeps a signed-in start from showing the sess
     expect(await readCopy(page)).toEqual({ ...untouched, version: 2 });
 });
 
-test("a browser that refuses the copy's database while its flag can be read does not show a signed-in session", async ({
-    page,
-}) => {
-    await onBlankPage(page);
-    await page.evaluate(() =>
-        window.localStorage.setItem("pyracast.saved", "1"),
-    );
-    await page.addInitScript(() => {
-        IDBFactory.prototype.open = () => {
-            throw new DOMException("Storage is blocked.", "SecurityError");
-        };
-    });
-    await signedIn(page);
-    await page.goto("/app/w/1/");
-    await expectUnchecked(page);
-    expect(await observedTag(page)).toBeNull();
-});
-
-test("a browser whose flag cannot be read and whose copy answers its open with an error does not show a signed-in session", async ({
-    page,
-}) => {
-    await seedCopy(page, { version: 2 });
-    await page.addInitScript(() => {
-        Object.defineProperty(window, "localStorage", {
-            get() {
-                throw new DOMException("Storage is blocked.", "SecurityError");
-            },
-        });
-    });
-    await signedIn(page);
-    await page.goto("/app/w/1/");
-    await expectUnchecked(page);
-});
-
-test("a browser that refuses storage outright, the copy's flag included, signs in and out as before", async ({
-    page,
-}) => {
-    await page.addInitScript(() => {
-        Object.defineProperty(window, "localStorage", {
-            get() {
-                throw new DOMException("Storage is blocked.", "SecurityError");
-            },
-        });
-        IDBFactory.prototype.open = () => {
-            throw new DOMException("Storage is blocked.", "SecurityError");
-        };
-    });
+async function signsInAndOut(page: Page) {
     const account = await signedIn(page);
     await page.goto("/app/w/1/");
     await expect(plants(page)).toBeVisible();
@@ -1120,7 +1147,40 @@ test("a browser that refuses storage outright, the copy's flag included, signs i
     await signInAs(page, account, firstAccount);
     await signOut(page);
     await expect(welcome(page)).toBeVisible();
-});
+}
+
+for (const [refused, refuse] of [
+    [
+        "the copy's database",
+        () => {
+            IDBFactory.prototype.open = () => {
+                throw new DOMException("Storage is blocked.", "SecurityError");
+            };
+        },
+    ],
+    [
+        "storage outright",
+        () => {
+            Object.defineProperty(window, "localStorage", {
+                get() {
+                    throw new DOMException(
+                        "Storage is blocked.",
+                        "SecurityError",
+                    );
+                },
+            });
+            IDBFactory.prototype.open = () => {
+                throw new DOMException("Storage is blocked.", "SecurityError");
+            };
+        },
+    ],
+] as const)
+    test(`a browser that refuses ${refused} at its open signs in and out as before`, async ({
+        page,
+    }) => {
+        await page.addInitScript(refuse);
+        await signsInAndOut(page);
+    });
 
 test("the withdrawn build's removal deletes a held copy with its marks only after its figures were cleared", async ({
     page,
@@ -1128,36 +1188,42 @@ test("the withdrawn build's removal deletes a held copy with its marks only afte
     await seedCopy(page, { marks: [offMark()] });
     const allowClears = await refuseClears(page);
     const remove = async () => (await callStore(page, "removeCopy"))();
-    await loadStore(page, false);
-    expect((await remove()).deleted).toBe(0);
-    await expectHeldFigures(page);
+    await loadStore(page);
+    await remove();
+    expect(await readCopy(page)).toEqual({
+        ...untouched,
+        marks: [offMark()],
+    });
     await allowClears();
-    expect((await remove()).deleted).toBe(1);
-    expect(await readCopy(page)).toEqual({ ...absent, flag: "1" });
-    expect((await remove()).deleted).toBe(2);
+    await remove();
+    expect(await readCopy(page)).toEqual(absent);
+    await remove();
+    expect(await readCopy(page)).toEqual(absent);
 });
 
-test("the store answers within its limit while another window keeps the copy from being deleted, and reports the deletion once it succeeds", async ({
+test("the store answers within its limit while another window keeps the copy from being deleted, and the copy is deleted once that window lets go", async ({
     page,
 }) => {
     await seedCopy(page);
     await expectHeldFigures(page);
     const deletion = await blockDeletion(page);
-    await loadStore(page, false);
+    await loadStore(page);
     await pauseClock(page);
     const started = await callStore(page, "removeCopy");
     await expect.poll(deletion.asked).toBe(true);
     await page.clock.runFor(2_000);
-    expect((await started()).deleted).toBe(0);
+    await started();
     const state = await callStore(page, "copyState");
     await page.clock.runFor(2_000);
     expect(await state()).toEqual({
-        answer: { state: "unavailable", plants: 0, off: false },
-        deleted: 0,
+        state: "unavailable",
+        plants: 0,
+        off: false,
     });
     await deletion.release();
-    await expect.poll(async () => (await state()).deleted).toBe(1);
-    expect((await readCopy(page)).version).toBeUndefined();
+    await expect
+        .poll(async () => (await readCopy(page)).version)
+        .toBeUndefined();
 });
 
 async function stagedCorrection(page: Page) {

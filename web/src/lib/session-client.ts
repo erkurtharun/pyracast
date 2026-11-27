@@ -50,13 +50,12 @@ type ShownOwner = {
     signOut?: "keepInvitation" | "clearInvitation";
 };
 type PreviousEnd = { notice?: "ended" | "changed"; clearInvitation: boolean };
-// A start and a hand-over consult the store of saved figures only where this flag is set or cannot be read.
-export const savedFlagKey = "pyracast.saved";
+// Tells other windows that the store of saved figures changed; it decides nothing.
 const savedChangeKey = "pyracast.savedChange";
+const savedDatabase = "pyracast-saved";
 const savedLock = "pyracast.saved-copy";
 const savedLimitMs = 2_000;
-// A sign-out sends its request after two seconds; its record may still land until the document reloads after ten.
-const recordLimitMs = 10_000;
+const signOutRecordLimitMs = 10_000;
 export type SavedStore = typeof import("./saved/store");
 type Handoff = "handed" | "superseded" | "unhanded";
 
@@ -276,7 +275,7 @@ export function isCurrent(session: Session | undefined) {
     return observed === null || observed === tagOf(session);
 }
 
-export function readStored(key: string): string | null | undefined {
+function readStored(key: string): string | null | undefined {
     try {
         return window.localStorage.getItem(key);
     } catch {
@@ -284,22 +283,12 @@ export function readStored(key: string): string | null | undefined {
     }
 }
 
-export function writeStored(key: string, value: string | null) {
+function writeStored(key: string, value: string) {
     try {
-        if (value === null) window.localStorage.removeItem(key);
-        else window.localStorage.setItem(key, value);
+        window.localStorage.setItem(key, value);
     } catch {
         return;
     }
-}
-
-function savedCopyFlagged() {
-    return readStored(savedFlagKey) !== null;
-}
-
-// A flag written anew since the deletion was asked for names another copy.
-function forgetSavedCopy(flag: string | null | undefined) {
-    if (readStored(savedFlagKey) === flag) writeStored(savedFlagKey, null);
 }
 
 function randomHex() {
@@ -308,12 +297,18 @@ function randomHex() {
     ).join("");
 }
 
-function loadedStore<T>(work: (store: SavedStore) => Promise<T>) {
+function storeCode(): Promise<SavedStore | undefined> {
     savedStore ??= import("./saved/store");
-    return savedStore.then(work).catch(() => {
+    return savedStore.catch(() => {
         savedStore = undefined;
         return undefined;
     });
+}
+
+function loadedStore<T>(work: (store: SavedStore) => Promise<T>) {
+    return storeCode()
+        .then((store) => store && work(store))
+        .catch(() => undefined);
 }
 
 // The copy's operations run one after another, in the order this document asked for them.
@@ -369,26 +364,37 @@ export async function savedCopyAnswered() {
     await Promise.all(pendingAnswers);
 }
 
+// Write, wait for the commit, then tell: true only once the write committed, which the store aborts at the deadline unless its commit has begun.
+export async function commitToStore(
+    write: (store: SavedStore, limit: Deadline) => Promise<boolean>,
+    limit = deadline(savedLimitMs),
+) {
+    const store = await Promise.race([
+        storeCode(),
+        limit.reached.then(() => undefined),
+    ]);
+    const committed = store !== undefined && (await write(store, limit));
+    limit.clear();
+    if (committed) announceSavedChange();
+    return committed;
+}
+
 export function startSavedCopy() {
-    if (SAVED_FIGURES || !savedCopyFlagged()) return;
-    const flag = readStored(savedFlagKey);
-    void boundedStore((store, limit) =>
-        store.removeCopy(limit, () => forgetSavedCopy(flag)),
-    );
+    if (!SAVED_FIGURES)
+        void boundedStore((store, limit) => store.removeCopy(limit));
 }
 
 function handOffNeeded(session: Session) {
-    return Boolean(session.user) && savedCopyFlagged();
+    return Boolean(session.user);
 }
 
-// A browser that refuses storage outright, the flag included, can hold no copy.
+// Storage refused at the open is refused to the worker too, so no copy can be served.
 async function handOff(
     { user, language, session_tag }: Session,
     present: () => boolean,
     adoptedAt: number,
 ): Promise<Handoff> {
     if (!user) return "handed";
-    const flagUnreadable = readStored(savedFlagKey) === undefined;
     const limit = deadline(savedLimitMs);
     const handoff = await boundedStore(
         (store) =>
@@ -406,27 +412,36 @@ async function handOff(
     );
     if (handoff === "superseded") return "superseded";
     if (limit.expired()) return "unhanded";
-    return handoff === "verified" || (handoff === "blocked" && flagUnreadable)
+    return handoff === "verified" || handoff === "blocked"
         ? "handed"
         : "unhanded";
 }
 
-// Recorded before the request, also without a copy: a window opened meanwhile can keep nothing for this session.
+// Needs neither the store's code nor an open connection; a pending deletion holds every later open of the database.
+function deleteSavedDatabase() {
+    return new Promise<void>((resolve) => {
+        try {
+            const request = indexedDB.deleteDatabase(savedDatabase);
+            request.onsuccess =
+                request.onerror =
+                request.onblocked =
+                    () => resolve();
+        } catch {
+            resolve();
+        }
+    });
+}
+
+// Committed before the request, also without a copy: a window opened meanwhile can keep nothing for this session.
 async function endSavedSession(session: Session | undefined) {
     const tag = session?.session_tag;
     if (!SAVED_FIGURES || !session?.user || !tag) return;
     const leaving = { user: session.user.id, session: tag };
-    const waited = deadline(savedLimitMs);
-    await Promise.race([
-        boundedStore(
-            (store, limit) =>
-                store.endSession(leaving, announceSavedChange, limit),
-            deadline(recordLimitMs),
-            false,
-        ),
-        waited.reached,
-    ]);
-    waited.clear();
+    const ended = await commitToStore(
+        (store, limit) => store.endSession(leaving, limit),
+        deadline(signOutRecordLimitMs),
+    );
+    if (!ended) await deleteSavedDatabase();
 }
 
 export type SavedFigures = { state: CopyState; plants: number };
@@ -434,8 +449,7 @@ export type SavedFigures = { state: CopyState; plants: number };
 export async function savedCopyState(
     session = state.session,
 ): Promise<SavedFigures> {
-    if (!SAVED_FIGURES || !savedCopyFlagged())
-        return { state: "off", plants: 0 };
+    if (!SAVED_FIGURES) return { state: "off", plants: 0 };
     const owner = {
         user: session?.user?.id ?? 0,
         session: session?.session_tag ?? "",
@@ -459,23 +473,20 @@ export function sessionStill(owner: string) {
     );
 }
 
-export function announceSavedChange() {
+function announceSavedChange() {
     writeStored(savedChangeKey, randomHex());
     for (const listener of savedListeners) listener();
 }
 
-// The flag is written before the copy exists, so another person's sign-in always finds a copy it must clear.
+// False only when this device refused to create the copy.
 export async function turnOnSavedFigures() {
     const { session } = state;
     const owner = sessionOwner(session);
     const user = session?.user;
     const tag = session?.session_tag;
-    if (!session || !owner || !user || !tag) return;
-    if (readStored(savedFlagKey) === null)
-        writeStored(savedFlagKey, randomHex());
-    if (!readStored(savedFlagKey)) return;
+    if (!session || !owner || !user || !tag) return true;
     const revision = observation();
-    await boundedStore((store, limit) =>
+    const answer = await boundedStore((store, limit) =>
         store.turnOn(
             {
                 user: user.id,
@@ -488,12 +499,12 @@ export async function turnOnSavedFigures() {
             limit,
         ),
     );
+    return answer !== false;
 }
 
-// Every key of the kept figures starts with the flag's name.
 export function subscribeSavedFigures(listener: () => void) {
     const changed = (event: StorageEvent) => {
-        if (event.key?.startsWith(savedFlagKey) !== false) listener();
+        if (event.key === savedChangeKey || event.key === null) listener();
     };
     const shown = () => {
         if (document.visibilityState === "visible") listener();
@@ -610,7 +621,7 @@ function shownAgain(session: Session) {
         : undefined;
 }
 
-// Equal owner and revision leave a removal mark, the language and the 90 days to judge, so the hand-over still runs behind the screen.
+// Equal owner and revision leave an ended mark, the language and the 90 days to judge, so the hand-over still runs behind the screen.
 function renewHandoff(session: Session, owner: string) {
     if (!handOffNeeded(session)) return;
     const observed = observation();

@@ -1,13 +1,11 @@
 "use client";
 import type { QueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { SAVED_FIGURES } from "@/lib/saved/feature";
 import type { CopyView } from "@/lib/saved/store";
 import {
-    announceSavedChange,
     boundedStore,
-    readStored,
-    savedFlagKey,
+    commitToStore,
     sessionOwner,
     sessionStill,
     subscribeSavedFigures,
@@ -16,7 +14,7 @@ import {
     type Session,
 } from "@/lib/session-client";
 
-export type ShownPlant = {
+type ShownPlant = {
     tenant: number;
     site: number;
     plant: number;
@@ -35,6 +33,9 @@ let plant: ShownPlant | undefined;
 let workspace: number | undefined;
 const opened = new Set<() => void>();
 let mounted: { owner: string; stop?: () => void } | undefined;
+// The owner whose copy this device refused to create.
+let unkept: string | undefined;
+const unkeptListeners = new Set<() => void>();
 
 export function shownPlant() {
     return plant;
@@ -77,22 +78,41 @@ async function registered() {
     try {
         return Boolean(await navigator.serviceWorker?.getRegistration("/app/"));
     } catch {
-        return false;
+        return undefined;
     }
 }
 
-// Undefined where nothing can be kept; a browser that cannot keep the flag keeps nothing new, but a copy it holds stays removable.
-async function deviceCopy(user: number, session: string) {
-    if (!(await registered())) return undefined;
+// "none" where nothing can be kept, "unread" when the device did not answer.
+async function deviceCopy(
+    user: number,
+    session: string,
+): Promise<CopyView | "none" | "unread"> {
+    const worker = await registered();
+    if (worker === false) return "none";
+    if (worker === undefined) return "unread";
     const copy = await boundedStore(
         (store, limit) => store.copyState({ user, session }, limit),
         undefined,
         false,
     );
-    if (!copy || copy.state === "unavailable") return undefined;
-    return copy.state === "off" && readStored(savedFlagKey) === undefined
-        ? undefined
-        : copy;
+    return !copy || copy.state === "unavailable" ? "unread" : copy;
+}
+
+function noteUnkept(owner: string | undefined) {
+    if (unkept === owner) return;
+    unkept = owner;
+    for (const listener of unkeptListeners) listener();
+}
+
+function subscribeUnkept(listener: () => void) {
+    unkeptListeners.add(listener);
+    return () => {
+        unkeptListeners.delete(listener);
+    };
+}
+
+function unkeptOwner() {
+    return unkept;
 }
 
 // The worker's registration can complete after the screen mounted.
@@ -152,12 +172,19 @@ export function useSavedFigures(
         const check = async () => {
             const copy = await deviceCopy(user, tag);
             if (!active) return;
-            if (copy?.state === "on") {
+            if (typeof copy === "object" && copy.state === "on") {
+                noteUnkept(undefined);
                 startRefresh(shown);
                 return;
             }
             stopRefresh();
-            if (copy?.state === "off" && !copy.off) void turnOnSavedFigures();
+            if (typeof copy !== "object") return;
+            if (copy.state !== "off" || copy.off) {
+                noteUnkept(undefined);
+                return;
+            }
+            const accepted = await turnOnSavedFigures();
+            if (active) noteUnkept(accepted ? undefined : owner);
         };
         void check();
         const unsubscribe = subscribeKeeping(() => void check());
@@ -169,25 +196,39 @@ export function useSavedFigures(
     }, [client, owner, user, tag]);
 }
 
-// `asked`: the choice being written, shown until the stored state is read back.
+// `copy` is the last state the store confirmed; a read that fails keeps it.
 type Preference = {
     user: number;
-    copy?: CopyView;
-    failed: boolean;
-    asked?: boolean;
+    copy: CopyView;
+    choice: "confirmed" | "saving" | "failed";
 };
 
 export function useKeptFiguresPreference() {
     const { session } = useSessionState();
     const user = session?.user?.id;
     const tag = session?.session_tag;
+    const refused =
+        useSyncExternalStore(subscribeUnkept, unkeptOwner, () => undefined) ===
+        sessionOwner(session);
     const [preference, setPreference] = useState<Preference>();
     useEffect(() => {
         if (!SAVED_FIGURES || user === undefined || !tag) return;
         let active = true;
         const read = () =>
             void deviceCopy(user, tag).then((copy) => {
-                if (active) setPreference({ user, copy, failed: false });
+                if (!active || copy === "unread") return;
+                setPreference((known) =>
+                    copy === "none"
+                        ? undefined
+                        : {
+                              user,
+                              copy,
+                              choice:
+                                  known?.user === user
+                                      ? known.choice
+                                      : "confirmed",
+                          },
+                );
             });
         read();
         const unsubscribe = subscribeKeeping(read);
@@ -196,26 +237,30 @@ export function useKeptFiguresPreference() {
             unsubscribe();
         };
     }, [user, tag]);
-    if (!tag || !preference?.copy || preference.user !== user) return undefined;
-    const { user: person, copy, failed, asked } = preference;
+    if (!tag || !preference || preference.user !== user) return undefined;
+    const { user: person, copy, choice } = preference;
     const change = async (kept: boolean) => {
-        setPreference({ user: person, copy, failed: false, asked: kept });
-        const done = await boundedStore(
-            (store, limit) =>
-                store.setKept(person, kept, announceSavedChange, limit),
-            undefined,
-            false,
+        if (choice === "saving") return;
+        setPreference({ ...preference, choice: "saving" });
+        const committed = await commitToStore((store, limit) =>
+            store.setKept(person, kept, limit),
         );
-        if (!done)
-            setPreference({
-                user: person,
-                copy: await deviceCopy(person, tag),
-                failed: true,
-            });
+        setPreference((known) =>
+            known?.user !== person
+                ? known
+                : committed
+                  ? {
+                        user: person,
+                        copy: { ...known.copy, off: !kept },
+                        choice: "confirmed",
+                    }
+                  : { ...known, choice: "failed" },
+        );
     };
     return {
-        kept: asked ?? !copy.off,
-        failed,
+        kept: !copy.off && !refused,
+        saving: choice === "saving",
+        failed: choice === "failed" || refused,
         change: (kept: boolean) => void change(kept),
     };
 }

@@ -3,6 +3,8 @@ import { mockApi } from "./support/workspace";
 import { serveSession } from "./support/session";
 import {
     daysAnswer,
+    endedMark,
+    offMark,
     readCopy,
     refuseClears,
     seedCopy,
@@ -30,6 +32,26 @@ async function watchRefreshCode(page: Page) {
     return () => requested;
 }
 
+test("a withdrawn build deletes a database that holds only the device's marks", async ({
+    page,
+}) => {
+    await seedCopy(page, {
+        holder: null,
+        plants: [],
+        days: [],
+        marks: [offMark(), endedMark("tag-old")],
+    });
+    const account = await mockApi(page);
+    await serveSession(page, account);
+    await page.goto("/app/w/1/");
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
+    await expect
+        .poll(async () => (await readCopy(page)).version)
+        .toBeUndefined();
+});
+
 test("a withdrawn build whose kept figures could not be removed shows neither the setting nor the figures and reads nothing for them", async ({
     page,
 }) => {
@@ -51,7 +73,7 @@ test("a withdrawn build whose kept figures could not be removed shows neither th
     await expect(
         page.getByRole("heading", { name: "Plants", exact: true }),
     ).toBeVisible();
-    expect(await readCopy(page)).toMatchObject({ plants: 1, flag: "1" });
+    expect(await readCopy(page)).toMatchObject({ plants: 1 });
     for (let step = 0; step < 12; step += 1)
         await page.clock.fastForward(5 * minute);
     await page.getByRole("button", { name: "Account", exact: true }).click();
