@@ -365,12 +365,51 @@ def test_ci_builds_each_release_image_once_into_the_archive_the_release_reads() 
         assert build["provenance"] == "mode=max"
         assert build["sbom"] == builds["backend"]["sbom"]
         assert build["labels"] == "org.opencontainers.image.revision=${{ github.sha }}"
-        assert build["cache-from"] == f"type=gha,scope={name}-linux-amd64,timeout=2m"
     assert bind["env"] == {
         f"{name.upper()}_DIGEST": f"${{{{ steps.{name}.outputs.digest }}}}"
         for name in RELEASE_IMAGES
     }
     assert f"for image in {' '.join(RELEASE_IMAGES)}; do" in bind["run"]
+
+
+def builder_setups(job: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        candidate["with"]
+        for candidate in job["steps"]
+        if str(candidate.get("uses", "")).startswith("docker/setup-buildx-action@")
+    ]
+
+
+def test_a_release_build_imports_no_shared_cache_and_is_the_only_run_that_writes_it() -> None:
+    deployment = ci_jobs()["deployment"]
+    builds = {
+        candidate["id"]: candidate["with"]
+        for candidate in deployment["steps"]
+        if str(candidate.get("uses", "")).startswith("docker/build-push-action@")
+    }
+
+    assert deployment["env"]["RELEASE_BUILD"] == f"${{{{ {RELEASABLE_RUN} }}}}"
+    assert [setup.get("cache-binary") for setup in builder_setups(deployment)] == [False]
+    assert tuple(builds) == RELEASE_IMAGES
+    for name, build in builds.items():
+        scope = f"type=gha,scope={name}-linux-amd64"
+        assert build["cache-from"] == (
+            f"${{{{ env.RELEASE_BUILD != 'true' && '{scope},timeout=2m' || '' }}}}"
+        )
+        assert build["cache-to"] == (
+            f"${{{{ env.RELEASE_BUILD == 'true' && "
+            f"'{scope},mode=max,ignore-error=true,timeout=2m' || '' }}}}"
+        )
+        assert "no-cache" not in build
+
+
+def test_the_image_rescan_builds_without_the_shared_cache() -> None:
+    (job,) = workflow("image-rescan.yml")["jobs"].values()
+
+    assert [setup.get("cache-binary") for setup in builder_setups(job)] == [False]
+    for build in image_builds(job):
+        assert "cache-from" not in build
+        assert "cache-to" not in build
 
 
 def triggers(name: str) -> dict[str, Any]:
@@ -670,9 +709,10 @@ def test_the_mocked_browser_suite_runs_against_the_shipped_web_build_in_releasab
     config = (ROOT / "web" / "playwright.config.ts").read_text(encoding="utf-8")
 
     assert shipped_build_suite_problems(document) == []
+    assert document["jobs"]["deployment"]["env"]["RELEASE_BUILD"] == f"${{{{ {RELEASABLE_RUN} }}}}"
     assert (
         step(document["jobs"]["deployment"], "Retain tested main images for the release")["if"]
-        == RELEASABLE_RUN
+        == "env.RELEASE_BUILD == 'true'"
     )
     assert f"process.env.{next(iter(PASS_ON_RETRY))}" in config
     assert traces["if"] == "always()"
