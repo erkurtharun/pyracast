@@ -609,6 +609,9 @@ test("a window opened while another window's sign-out is in flight keeps nothing
     await expect(
         page.getByRole("heading", { name: "Welcome back" }),
     ).toBeVisible();
+    await expect(
+        other.getByRole("heading", { name: "Welcome back" }),
+    ).toBeVisible();
     expect(await readCopy(other)).toMatchObject({
         plants: 0,
         days: 0,
