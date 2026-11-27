@@ -1,12 +1,19 @@
+from collections.abc import Sequence
+from urllib.parse import urlsplit
+
 from allauth.account.internal.stagekit import unstash_login
 from allauth.core import context
 from allauth.mfa.adapter import DefaultMFAAdapter
 from cryptography.fernet import InvalidToken
+from django.conf import settings
+from django.contrib.auth.base_user import AbstractBaseUser
+from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest
 from django.views.decorators.debug import sensitive_variables
 
 from pyracast.accounts.audit import SecurityEvent, record_security_event
+from pyracast.accounts.authorization import requires_admin_mfa
 from pyracast.encryption import secret_cipher
 
 PREFIX = "mfa:v1:"
@@ -35,6 +42,18 @@ def _unreadable() -> PermissionDenied:
 
 
 class MFAAdapter(DefaultMFAAdapter):
+    def get_public_key_credential_rp_entity(self) -> dict[str, str]:
+        host = urlsplit(settings.PYRACAST_PUBLIC_ORIGIN).hostname
+        if not host:
+            raise PermissionDenied
+        return {"id": host, "name": "Pyracast"}
+
+    def is_mfa_enabled(self, user: AbstractBaseUser, types: Sequence[str] | None = None) -> bool:
+        if isinstance(user, User) and requires_admin_mfa(user):
+            operator_types = ("totp", "recovery_codes")
+            types = [kind for kind in operator_types if types is None or kind in types]
+        return super().is_mfa_enabled(user, types)
+
     @sensitive_variables()
     def encrypt(self, text: str) -> str:
         return PREFIX + secret_cipher(KEY_CONTEXT).encrypt(text.encode()).decode("ascii")

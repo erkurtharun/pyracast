@@ -68,6 +68,7 @@ sequenceDiagram
 - Confirmation: every console request that is not GET, HEAD or OPTIONS, language switch included, needs `has_mfa_evidence(within=CONFIRMATION)`: a reauthentication by an enrolled authenticator within `ACCOUNT_REAUTHENTICATION_TIMEOUT` (300 s); a sign-in never counts. A refused write leads with "Nothing was saved" and returns to the page of its Referer. A change of the administrator's credential state ends confirmations given before it. Only sign-out and `confirm/` are exempt. The code is checked under the account's locks (`processes.confirmation`).
 - Console writes of business data take no account locks: one that passed its check before a credential change committed completes, and the next request is refused.
 - Login side: `AuthenticationBackend` and `SocialAccountAdapter` refuse staff or superusers without TOTP.
+- Customer passkeys provide no console evidence. Promotion to staff also prevents a previously enrolled customer key from completing passwordless sign-in, second-factor sign-in or reauthentication.
 - SPA: `SessionUserOutput.get_can_admin` uses the same predicate and only steers navigation; domain operations the console calls re-check `require_platform_admin` (active staff superuser, no MFA). `/admin/login/` and `get_can_admin` must keep equal rules, or `/admin/` and `/app/` would redirect to each other.
 - CSRF: `CsrfViewMiddleware` rejects a POST without token with 403 before the gate runs, `/admin/login/` and `/admin/logout/` included.
 

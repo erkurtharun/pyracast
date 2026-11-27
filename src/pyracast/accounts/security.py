@@ -58,14 +58,21 @@ def has_mfa_evidence(request: HttpRequest, *, within: ProofWindow | None = None)
     if not user.is_authenticated or not user.is_active:
         return False
     now = time.time()
+    allowed = (
+        (Authenticator.Type.TOTP, Authenticator.Type.RECOVERY_CODES)
+        if user.is_staff or user.is_superuser
+        else settings.MFA_SUPPORTED_TYPES
+    )
     authenticator_ids = [
         record.get("id")
         for record in get_authentication_records(request, user)
         if record.get("method") == Factor.MFA
-        and record.get("type") in settings.MFA_SUPPORTED_TYPES
+        and record.get("type") in allowed
         and (within is None or _inside(record, within, now))
     ]
     return bool(
         authenticator_ids
-        and Authenticator.objects.filter(user=user, pk__in=authenticator_ids).exists()
+        and Authenticator.objects.filter(
+            user=user, type__in=allowed, pk__in=authenticator_ids
+        ).exists()
     )

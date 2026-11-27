@@ -205,7 +205,7 @@ def capture_codes(mailbox: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return mailbox
 
 
-def run_spec(spec: str, gateway: Gateway, **environment: str) -> None:
+def run_spec(spec: str, gateway: Gateway, *, origin: str | None = None, **environment: str) -> None:
     npm = shutil.which("npm.cmd" if os.name == "nt" else "npm")
     assert npm is not None, "Node.js and npm run the browser scenarios"
     port = free_port()
@@ -215,7 +215,7 @@ def run_spec(spec: str, gateway: Gateway, **environment: str) -> None:
         cwd=ROOT,
         env=os.environ
         | environment
-        | {"BROWSER_ORIGIN": gateway.origin, "BROWSER_WEB_PORT": str(port)},
+        | {"BROWSER_ORIGIN": origin or gateway.origin, "BROWSER_WEB_PORT": str(port)},
         check=True,
         timeout=SPEC_TIMEOUT_SECONDS,
     )
