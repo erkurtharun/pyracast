@@ -14,16 +14,10 @@ NEEDS_OUTPUT = re.compile(r"\$\{\{ needs\.(?P<job>[\w-]+)\.outputs\.(?P<key>[\w-
 ENV = re.compile(r"\$\{\{ env\.(?P<name>\w+) \}\}")
 UPLOADED_ID = re.compile(r"steps\.(?P<step>[\w-]+)\.outputs\.artifact-id")
 SHA = "a" * 40
-RUNNER_OS = {"ubuntu-latest": "Linux", "windows-latest": "Windows"}
 
 
 def uses(candidate: dict[str, Any], action: str) -> bool:
     return str(candidate.get("uses", "")).startswith(action)
-
-
-def runs_on_its_runner(job: dict[str, Any], candidate: dict[str, Any]) -> bool:
-    match = re.fullmatch(r"runner\.os == '(\w+)'", str(candidate.get("if", "")))
-    return match is None or RUNNER_OS[job["runs-on"]] == match[1]
 
 
 def uploads() -> list[tuple[str, str, dict[str, Any]]]:
@@ -32,7 +26,7 @@ def uploads() -> list[tuple[str, str, dict[str, Any]]]:
         for path in sorted(WORKFLOWS.glob("*.yml"))
         for identifier, job in workflow(path.name)["jobs"].items()
         for candidate in job["steps"]
-        if uses(candidate, UPLOAD) and runs_on_its_runner(job, candidate)
+        if uses(candidate, UPLOAD)
     ]
 
 
@@ -94,11 +88,11 @@ def test_every_ci_download_reads_the_artifact_ids_its_producers_uploaded() -> No
     jobs = ci_jobs()
     consumers = {identifier: job for identifier, job in jobs.items() if downloads(job)}
 
-    assert set(consumers) == {"sonar", "verify_windows"}
+    assert set(consumers) == {"sonar"}
     for identifier, job in consumers.items():
         for download in downloads(job):
             options = download["with"]
-            assert set(options) - {"path", "merge-multiple"} == {
+            assert set(options) - {"path"} == {
                 "artifact-ids",
                 "github-token",
                 "run-id",
@@ -147,29 +141,6 @@ def test_no_consumer_derives_an_artifact_from_the_run_attempt() -> None:
     for identifier, job in ci_jobs().items():
         if downloads(job):
             assert "github.run_attempt" not in str(job), identifier
-
-
-def test_each_windows_shard_exposes_its_own_artifact_to_the_combine() -> None:
-    jobs = ci_jobs()
-    shards = jobs["verify_windows_shards"]
-    indexes = shards["strategy"]["matrix"]["shard"]
-    upload = step(shards, "Upload Windows coverage and test inventory")
-    partition = step(shards, "Run a complete Windows test partition")["run"]
-    uploaded = f"steps.{upload.get('id')}.outputs.artifact-id"
-    combine = jobs["verify_windows"]
-    (download,) = downloads(combine)
-
-    assert shards.get("outputs") == {
-        f"shard-{index}": f"${{{{ matrix.shard == {index} && {uploaded} || '' }}}}"
-        for index in indexes
-    }
-    assert '--shard-output "${{ runner.temp }}/windows-shards/${{ env.TEST_SHARD }}"' in partition
-    assert upload["with"]["path"] == "${{ runner.temp }}/windows-shards/"
-    assert download["with"].get("path") == "${{ runner.temp }}/windows-shards"
-    assert download["with"].get("merge-multiple") is True
-    assert artifact_references(combine, download) == [
-        f"${{{{ needs.verify_windows_shards.outputs.shard-{index} }}}}" for index in indexes
-    ]
 
 
 def test_the_release_reads_the_attempt_from_the_image_artifact_name_ci_uploads() -> None:

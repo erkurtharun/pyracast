@@ -1,9 +1,11 @@
 import ast
 import json
 import re
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from deploy import ci_images, release_authorization, release_unit
 from tests.support.workflows import (
@@ -15,6 +17,7 @@ from tests.support.workflows import (
     step,
     step_index,
     workflow,
+    workflow_files,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -574,28 +577,198 @@ def test_deploy_runs_the_authorized_commit_only_after_proving_it_is_on_main() ->
     assert "refs/heads/main" not in str(deploy["steps"][2:])
 
 
-def test_only_the_first_windows_shard_repeats_the_static_stages() -> None:
-    shards = ci_jobs()["verify_windows_shards"]
-    partition = step(shards, "Run a complete Windows test partition")["run"]
-
-    assert "${{ env.TEST_SHARD != '1' && '--tests-only' || '' }}" in partition
-
-
 def test_the_web_dependency_audit_runs_once_per_ci_run() -> None:
+    audits = [
+        (identifier, candidate)
+        for identifier, job in ci_jobs().items()
+        for candidate in job["steps"]
+        if "scripts/npm_audit.py web" in candidate.get("run", "")
+    ]
     web = ci_jobs()["web_ubuntu"]
 
-    assert step(web, "Audit web dependencies against dated exceptions")["if"] == (
-        "runner.os == 'Linux'"
+    assert audits == [("web_ubuntu", step(web, "Audit web dependencies against dated exceptions"))]
+    assert "if" not in audits[0][1]
+    assert "if" not in web
+    assert "matrix" not in web.get("strategy", {})
+
+
+def test_every_workflow_job_runs_on_ubuntu() -> None:
+    for path in workflow_files():
+        for identifier, job in workflow(path.name)["jobs"].items():
+            assert job["runs-on"] == "ubuntu-latest", f"{path.name} {identifier}"
+
+
+SHIPPED_BUILD_SUITE = "Run the mocked browser suite against the production web build"
+RELEASABLE_RUN = (
+    "github.ref == 'refs/heads/main' && "
+    "(github.event_name == 'push' || github.event_name == 'workflow_dispatch')"
+)
+PASS_ON_RETRY = {"PLAYWRIGHT_ACCEPT_PASS_ON_RETRY": "1"}
+BUILD_SELECTORS = ("NEXT_DIST_DIR", "PLAYWRIGHT_COVERAGE")
+
+
+def needed_jobs(job: dict[str, Any]) -> list[str]:
+    needs = job.get("needs", [])
+    return [needs] if isinstance(needs, str) else list(needs)
+
+
+def production_job(document: dict[str, Any]) -> dict[str, Any]:
+    job: dict[str, Any] = document["jobs"]["web_production"]
+    return job
+
+
+def shipped_suite(document: dict[str, Any]) -> dict[str, Any]:
+    return step(production_job(document), SHIPPED_BUILD_SUITE)
+
+
+def shipped_build_suite_problems(document: dict[str, Any]) -> list[str]:
+    jobs = document["jobs"]
+    job = production_job(document)
+    steps = job["steps"]
+    suites = [
+        index
+        for index, candidate in enumerate(steps)
+        if candidate.get("name") == SHIPPED_BUILD_SUITE
+    ]
+    if len(suites) != 1:
+        return ["no single suite step"]
+    (index,) = suites
+    suite = steps[index]
+    builds = [
+        position
+        for position, candidate in enumerate(steps)
+        if candidate.get("run") == "npm run build" and "env" not in candidate
+    ]
+    scopes = {"workflow": document, "job": job, "step": suite}
+    problems = [
+        f"build selected at {scope} level"
+        for scope, owner in scopes.items()
+        if any(name in owner.get("env", {}) for name in BUILD_SELECTORS)
+    ]
+    if suite.get("run") != "npm test":
+        problems.append("another command")
+    if suite.get("if") != RELEASABLE_RUN:
+        problems.append("another condition")
+    if suite.get("env") != PASS_ON_RETRY:
+        problems.append("another suite environment")
+    if "continue-on-error" in suite or "continue-on-error" in job:
+        problems.append("failure ignored")
+    if "if" in job:
+        problems.append("job condition")
+    if not builds or builds[0] > index:
+        problems.append("suite before the ordinary build")
+    if "web_production" not in needed_jobs(jobs["ci_result"]):
+        problems.append("result job without the production build")
+    if "web_production" not in needed_jobs(jobs["release_start"]):
+        problems.append("early release without the production build")
+    return problems
+
+
+def test_the_mocked_browser_suite_runs_against_the_shipped_web_build_in_releasable_runs() -> None:
+    document = workflow("ci.yml")
+    traces = step(production_job(document), "Upload Playwright failure traces")
+    config = (ROOT / "web" / "playwright.config.ts").read_text(encoding="utf-8")
+
+    assert shipped_build_suite_problems(document) == []
+    assert (
+        step(document["jobs"]["deployment"], "Retain tested main images for the release")["if"]
+        == RELEASABLE_RUN
     )
+    assert f"process.env.{next(iter(PASS_ON_RETRY))}" in config
+    assert traces["if"] == "always()"
+    assert {"web/test-results/**/trace.zip", "web/test-results/**/error-context.md"} <= set(
+        traces["with"]["path"].split()
+    )
+
+
+def suite_first(document: dict[str, Any]) -> None:
+    steps = production_job(document)["steps"]
+    steps.insert(0, steps.pop(steps.index(shipped_suite(document))))
+
+
+BROKEN_SHAPES: list[tuple[str, Callable[[dict[str, Any]], object], str]] = [
+    ("renamed step", lambda d: shipped_suite(d).update(name="Run it"), "no single suite step"),
+    ("cannot fail", lambda d: shipped_suite(d).update(run="npm test || true"), "another command"),
+    ("other suite", lambda d: shipped_suite(d).update(run="npm run check"), "another command"),
+    ("no condition", lambda d: shipped_suite(d).pop("if"), "another condition"),
+    (
+        "push only",
+        lambda d: shipped_suite(d).update({"if": "github.event_name == 'push'"}),
+        "another condition",
+    ),
+    (
+        "always",
+        lambda d: shipped_suite(d).update({"if": "always()"}),
+        "another condition",
+    ),
+    ("no pass on the retry", lambda d: shipped_suite(d).pop("env"), "another suite environment"),
+    (
+        "step continues on error",
+        lambda d: shipped_suite(d).update({"continue-on-error": True}),
+        "failure ignored",
+    ),
+    (
+        "job continues on error",
+        lambda d: production_job(d).update({"continue-on-error": True}),
+        "failure ignored",
+    ),
+    (
+        "job condition",
+        lambda d: production_job(d).update({"if": "github.event_name == 'push'"}),
+        "job condition",
+    ),
+    (
+        "workflow directory",
+        lambda d: d.update(env={"NEXT_DIST_DIR": ".next-second"}),
+        "build selected at workflow level",
+    ),
+    (
+        "job directory",
+        lambda d: production_job(d)["env"].update(NEXT_DIST_DIR=".next-second"),
+        "build selected at job level",
+    ),
+    (
+        "job coverage",
+        lambda d: production_job(d)["env"].update(PLAYWRIGHT_COVERAGE="1"),
+        "build selected at job level",
+    ),
+    (
+        "step directory",
+        lambda d: shipped_suite(d)["env"].update(NEXT_DIST_DIR=".next-second"),
+        "build selected at step level",
+    ),
+    ("suite first", suite_first, "suite before the ordinary build"),
+    (
+        "not judged by the result job",
+        lambda d: d["jobs"]["ci_result"]["needs"].remove("web_production"),
+        "result job without the production build",
+    ),
+    (
+        "early release before it",
+        lambda d: d["jobs"]["release_start"].update(needs="deployment"),
+        "early release without the production build",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("break_shape", "problem"),
+    [(shape, problem) for _, shape, problem in BROKEN_SHAPES],
+    ids=[name for name, _, _ in BROKEN_SHAPES],
+)
+def test_each_broken_shape_of_the_shipped_build_suite_is_named(
+    break_shape: Callable[[dict[str, Any]], object], problem: str
+) -> None:
+    document = workflow("ci.yml")
+    break_shape(document)
+
+    assert problem in shipped_build_suite_problems(document)
 
 
 RELEASE_TESTED_JOBS = {
     "deployment",
     "verify_ubuntu",
-    "verify_windows_shards",
-    "verify_windows",
     "web_ubuntu",
-    "web_windows",
     "web_production",
     "scientific",
     "audit",
@@ -605,13 +778,13 @@ PARENT = "c" * 40
 TREE = "d" * 40
 
 
-def test_ci_asks_release_to_judge_a_push_to_main_once_its_images_are_ready() -> None:
+def test_ci_asks_release_to_judge_a_push_to_main_once_its_images_and_shipped_build_passed() -> None:
     start = ci_jobs()["release_start"]
     (ask,) = start["steps"]
     script = " ".join(ask["with"]["script"].split())
 
     assert start["name"] == release_authorization.RELEASE_START_JOB
-    assert start["needs"] == "deployment"
+    assert start["needs"] == ["deployment", "web_production"]
     assert start["if"] == (
         "vars.GCP_DEPLOY_ENABLED == 'true' && github.event_name == 'push' && "
         "github.ref == 'refs/heads/main'"
@@ -945,7 +1118,6 @@ def test_every_repository_file_a_workflow_step_names_is_a_pipeline_path() -> Non
         "scripts/ci_result.py",
         "scripts/check_scientific.py",
         "scripts/start_postgres.py",
-        "scripts/start_rabbitmq.py",
         "deploy/release_authorization.py",
         "deploy/scan-images.sh",
         "deploy/systemd/pyracast-backup.timer",
