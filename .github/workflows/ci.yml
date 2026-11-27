@@ -49,7 +49,7 @@ jobs:
             !/web/.prettierignore
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
-          version: 0.13.9
+          version: 0.13.10
           enable-cache: false
       - name: Validate GitHub workflows and deployment scripts
         run: >-
@@ -209,7 +209,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
-          version: 0.13.9
+          version: 0.13.10
           enable-cache: true
       - run: uv sync --locked --no-build
       - run: uv run --locked --no-sync --no-build python -m scripts.start_postgres --ephemeral --non-durable
@@ -296,7 +296,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
-          version: 0.13.9
+          version: 0.13.10
           enable-cache: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -393,7 +393,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
-          version: 0.13.9
+          version: 0.13.10
           enable-cache: true
           cache-suffix: scientific
       - name: Check scientific dependencies
@@ -414,7 +414,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
-          version: 0.13.9
+          version: 0.13.10
           enable-cache: true
       - run: uv sync --locked --no-build
       - run: uv export --locked --all-groups --all-extras --no-emit-project --no-hashes --output-file audit-requirements.txt

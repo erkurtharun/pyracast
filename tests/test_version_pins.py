@@ -601,6 +601,14 @@ def test_dependabot_updates_the_base_image_of_each_support_image_the_release_bui
     assert {"/deploy/postgres", "/deploy/rabbitmq"} <= set(docker["directories"])
 
 
+def test_dependabot_leaves_the_uv_image_to_an_update_of_every_uv_pin() -> None:
+    (docker,) = [
+        update for update in dependabot_updates() if update["package-ecosystem"] == "docker"
+    ]
+
+    assert {"dependency-name": "astral-sh/uv"} in docker["ignore"]
+
+
 def test_every_dependabot_update_waits_out_a_cooldown_before_it_can_release() -> None:
     updates = dependabot_updates()
 
