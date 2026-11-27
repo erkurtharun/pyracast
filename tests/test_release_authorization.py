@@ -1594,3 +1594,15 @@ def test_a_command_reading_a_file_refuses_to_run_without_the_runner_temp_directo
     assert exit_info.value.code == 2
     assert "RUNNER_TEMP is required" in capsys.readouterr().err
     assert not (tmp_path / "output").exists()
+
+
+def test_a_run_attempt_without_the_starts_of_its_earlier_attempts_is_refused_at_once() -> None:
+    huge = facts(
+        run_changes={"run_attempt": 10**12},
+        artifacts=[images(1, 90)],
+        jobs=run_jobs(image_attempt=1),
+        earlier_attempts=[],
+    )
+
+    with pytest.raises(RefusedError, match=UNBOUND_IMAGES):
+        decide(huge)

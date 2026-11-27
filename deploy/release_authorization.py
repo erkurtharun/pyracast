@@ -421,17 +421,23 @@ def _built_by_image_job(
     facts: Mapping[str, Any], run: Mapping[str, Any], artifact: Mapping[str, Any], attempt: int
 ) -> bool:
     builders = [job for job in facts["jobs"] if job["name"] == IMAGE_JOB]
-    return len(builders) == 1 and _made_by(
-        artifact, builders[0], attempt, _attempt_starts(facts, run)
+    starts = _attempt_starts(facts, run)
+    return (
+        len(builders) == 1
+        and starts is not None
+        and _made_by(artifact, builders[0], attempt, starts)
     )
 
 
-def _attempt_starts(facts: Mapping[str, Any], run: Mapping[str, Any]) -> dict[int, object]:
+def _attempt_starts(facts: Mapping[str, Any], run: Mapping[str, Any]) -> dict[int, object] | None:
     current = int(run["run_attempt"])
-    earlier = {
-        entry.get("attempt"): entry.get("run_started_at") for entry in facts["earlier_attempts"]
+    starts = {
+        entry.get("attempt"): entry.get("run_started_at")
+        for entry in facts["earlier_attempts"]
+        if isinstance(entry.get("attempt"), int) and 1 <= entry["attempt"] < current
     }
-    starts = {attempt: earlier.get(attempt) for attempt in range(1, current)}
+    if len(starts) != current - 1:
+        return None
     return starts | {current: run.get("run_started_at")}
 
 
