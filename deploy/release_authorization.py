@@ -219,7 +219,9 @@ def _decide_whole_run(
             "repeated jobs ended."
         )
     attempt, artifact = _newest_images(facts["artifacts"], main, int(run["run_attempt"]))
-    return Authorized(main, int(run["id"]), attempt, artifact, since)
+    if not _built_by_image_job(facts, artifact, attempt):
+        raise RefusedError(_unbuilt_images(attempt))
+    return Authorized(main, int(run["id"]), attempt, int(artifact["id"]), since)
 
 
 def _release_baseline(
@@ -272,14 +274,16 @@ def _prove_early(facts: Mapping[str, Any], main: str, run: Mapping[str, Any] | N
     try:
         built_in, artifact = _newest_images(facts["artifacts"], main, attempt)
     except RefusedError:
-        built_in, artifact = 0, 0
+        built_in, artifact = 0, {}
     if built_in != attempt:
         raise _UnprovenError(f"No unexpired image artifact of attempt {attempt} exists")
+    if not _built_by_image_job(facts, artifact, attempt):
+        raise _UnprovenError(_unbuilt_images(attempt))
     return Authorized(
         main,
         int(run["id"]),
         attempt,
-        artifact,
+        int(artifact["id"]),
         _release_baseline(run, facts["artifacts"], main),
         pull_request,
         pull_request_run,
@@ -364,7 +368,7 @@ def _proof(facts: Mapping[str, Any], main: str) -> tuple[int, int]:
         )
     ((match, artifact),) = evidence
     recorders = [job for job in proof["jobs"] if job["name"] == TESTED_TREE_JOB]
-    if len(recorders) != 1 or not _recorded_by(artifact, recorders[0]):
+    if len(recorders) != 1 or not _made_by(artifact, recorders[0], tested["run_started_at"]):
         raise _UnprovenError(
             f"The tested tree of CI run {identifier} was not recorded by its {TESTED_TREE_JOB} job"
         )
@@ -391,13 +395,31 @@ def _proof(facts: Mapping[str, Any], main: str) -> tuple[int, int]:
     return number, identifier
 
 
-def _recorded_by(artifact: Mapping[str, Any], job: Mapping[str, Any]) -> bool:
-    # Only the record job runs no repository code; a record made outside its run is not its own.
+def _made_by(
+    artifact: Mapping[str, Any], job: Mapping[str, Any], attempt_started_at: object
+) -> bool:
+    # A re-run lists the jobs it kept with the times of the attempt that ran them.
     try:
         created = _instant(artifact["created_at"])
-        return _instant(job["started_at"]) <= created <= _instant(job["completed_at"])
+        started = _instant(job["started_at"])
+        return _instant(attempt_started_at) <= started <= created <= _instant(job["completed_at"])
     except (TypeError, ValueError):
         return False
+
+
+def _built_by_image_job(
+    facts: Mapping[str, Any], artifact: Mapping[str, Any], attempt: int
+) -> bool:
+    builders = [job for job in facts["jobs"] if job["name"] == IMAGE_JOB]
+    starts = [entry["run_started_at"] for entry in facts["attempts"] if entry["attempt"] == attempt]
+    return len(builders) == 1 and len(starts) == 1 and _made_by(artifact, builders[0], starts[0])
+
+
+def _unbuilt_images(attempt: int) -> str:
+    return (
+        f"The image artifact of attempt {attempt} was not uploaded by the {IMAGE_JOB} job "
+        "of that attempt"
+    )
 
 
 def _committed_before(committed: object, created: object) -> bool:
@@ -409,7 +431,7 @@ def _committed_before(committed: object, created: object) -> bool:
 
 def _newest_images(
     artifacts: Sequence[Mapping[str, Any]], sha: str, run_attempt: int
-) -> tuple[int, int]:
+) -> tuple[int, Mapping[str, Any]]:
     # The newest build up to the authorizing attempt: a partial re-run keeps earlier images, and a
     # later attempt never changes what this release deploys.
     built = [
@@ -421,7 +443,7 @@ def _newest_images(
     newest = [artifact for built_in, artifact in built if built_in == attempt]
     if len(newest) != 1 or newest[0]["expired"] or newest[0]["head_sha"] != sha:
         raise RefusedError("Run CI again to produce an unexpired image artifact")
-    return attempt, int(newest[0]["id"])
+    return attempt, newest[0]
 
 
 def cleanup_order(artifacts: Sequence[Mapping[str, Any]], sha: str, run_attempt: int) -> list[int]:

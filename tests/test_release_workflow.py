@@ -939,6 +939,17 @@ def test_the_release_judges_a_ci_run_its_dispatch_names_through_the_same_gate() 
         "head_sha: artifact.workflow_run?.head_sha ?? null, created_at: artifact.created_at,"
         in (script)
     )
+    assert (
+        "for (let attempt = 1; attempt <= candidate.run_attempt; attempt += 1) { const { data } = "
+        "await github.rest.actions.getWorkflowRunAttempt({ ...repository, run_id: candidate.id, "
+        "attempt_number: attempt, }); attempts.push({ attempt, run_started_at: "
+        "data.run_started_at }); }"
+    ) in script
+    assert (
+        "jobs = await jobsOf(run); artifacts = await artifactsOf(run); "
+        "attempts = await attemptsOf(run);"
+    ) in script
+    assert "artifacts, attempts, deployments," in script
     assert "if (requested) {" in script
     assert collect["env"] == {"SONAR_ENABLED": "${{ vars.SONAR_ENABLED }}"}
     assert "sonar_enabled: process.env.SONAR_ENABLED === 'true'," in script
