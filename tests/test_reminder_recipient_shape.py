@@ -1,22 +1,28 @@
 from collections.abc import Callable, Sequence
+from datetime import timedelta
 from typing import Any
 
 import pytest
-from django.db import IntegrityError, models, transaction
+from django.contrib.auth.models import User
+from django.db import IntegrityError, connection, models, transaction
 
+from pyracast.accounts.models import Membership, Tenant
 from pyracast.db import violated_constraint
 from pyracast.forecasts.models import CollectionSchedule
 from pyracast.notifications.models import (
     DeliveryRecipient,
+    ReminderMemberRole,
     ReminderRecipient,
     ReminderRecipientTie,
     ReminderSchedule,
 )
+from tests.support.domain import NOW, make_system
 from tests.support.notifications import configured, ready
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
 ADDRESS = "member@example.com"
+SLOT = NOW + timedelta(hours=1)
 TIMES = [
     ("text", "10:00"),
     ("hour_out_of_range", ["24:00"]),
@@ -99,3 +105,114 @@ def test_empty_and_well_formed_times_are_stored() -> None:
     schedules.update(times=["00:00", "23:59"])
 
     assert schedules.values_list("times", flat=True).get() == ["00:00", "23:59"]
+
+
+@pytest.mark.parametrize(
+    ("model", "values"),
+    [
+        (ReminderRecipient, {"address": "a@example.com", "key": "a@example.com", "role": "all"}),
+        (DeliveryRecipient, {"address": "a@example.com", "key": "a@example.com", "role": ""}),
+        (ReminderMemberRole, {"role": ""}),
+    ],
+)
+def test_a_role_outside_the_vocabulary_is_refused_by_the_database(
+    model: type[models.Model], values: dict[str, str]
+) -> None:
+    system = make_system(approved=True)
+    schedule = ReminderSchedule.objects.create(region=system.region, effective_from=NOW)
+    owner: dict[str, object] = {"schedule": schedule}
+    if model is DeliveryRecipient:
+        owner = {
+            "delivery": schedule.notificationdelivery_set.create(
+                binding=system.binding,
+                scheduled_for=SLOT,
+                available_at=SLOT,
+                preparation_deadline=SLOT,
+            )
+        }
+    if model is ReminderMemberRole:
+        owner["membership"] = Membership.objects.get(user=system.member)
+    with pytest.raises(IntegrityError), transaction.atomic():
+        model._default_manager.create(**owner, **values)
+
+
+def test_one_member_has_one_choice_per_schedule() -> None:
+    system = make_system(approved=True)
+    schedule = ReminderSchedule.objects.create(region=system.region, effective_from=NOW)
+    membership = Membership.objects.get(user=system.member)
+    ReminderMemberRole.objects.create(schedule=schedule, membership=membership, role="to")
+    with pytest.raises(IntegrityError), transaction.atomic():
+        ReminderMemberRole.objects.create(schedule=schedule, membership=membership, role="cc")
+
+
+def test_a_choice_for_a_member_of_another_workspace_is_refused_by_the_database() -> None:
+    system = make_system(approved=True)
+    schedule = ReminderSchedule.objects.create(region=system.region, effective_from=NOW)
+    outsider = User.objects.create(username="outsider")
+    other = Membership.objects.create(tenant=Tenant.objects.create(name="Other"), user=outsider)
+    own = ReminderMemberRole.objects.create(
+        schedule=schedule, membership=Membership.objects.get(user=system.member), role="to"
+    )
+
+    with pytest.raises(IntegrityError), transaction.atomic():
+        ReminderMemberRole.objects.create(schedule=schedule, membership=other, role="cc")
+    with pytest.raises(IntegrityError), transaction.atomic():
+        ReminderMemberRole.objects.filter(pk=own.pk).update(membership=other)
+
+    assert list(ReminderMemberRole.objects.values_list("membership_id", flat=True)) == [
+        own.membership_id
+    ]
+
+
+def typed_row() -> int:
+    system = make_system(approved=True)
+    schedule = ReminderSchedule.objects.create(region=system.region, effective_from=NOW)
+    return int(
+        ReminderRecipient.objects.create(
+            schedule=schedule, address="a@example.com", key="a@example.com"
+        ).pk
+    )
+
+
+def written(pk: int, role: str, members: str) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "UPDATE notifications_reminderrecipient SET role = %s, role_members = %s::bigint[] "
+            "WHERE id = %s",
+            [role, members, pk],
+        )
+
+
+@pytest.mark.parametrize(
+    ("role", "members"),
+    [
+        ("to", "{{1,2},{3,4}}"),
+        ("to", "{1,NULL}"),
+        ("cc", "{NULL}"),
+        ("to", "{0}"),
+        ("cc", "{3,-1}"),
+        ("", "{5}"),
+        ("bcc", "{5}"),
+    ],
+)
+def test_members_of_a_typed_choice_in_another_shape_are_refused_by_the_database(
+    role: str, members: str
+) -> None:
+    pk = typed_row()
+
+    with pytest.raises(IntegrityError), transaction.atomic():
+        written(pk, role, members)
+
+
+@pytest.mark.parametrize(("role", "members", "stored"), [("", "{}", []), ("to", "{5}", [5])])
+def test_members_of_a_typed_choice_in_its_shape_are_stored(
+    role: str, members: str, stored: list[int]
+) -> None:
+    pk = typed_row()
+
+    written(pk, role, members)
+
+    assert ReminderRecipient.objects.values_list("role", "role_members").get(pk=pk) == (
+        role,
+        stored,
+    )
