@@ -63,7 +63,7 @@ sequenceDiagram
 | `mfa_authenticator` | R/W | One `totp` and one `recovery_codes` row per user (allauth `unique_authenticator_type`); TOTP secret Fernet-encrypted (context `pyracast-mfa-credentials-v1`, prefix `mfa:v1:`); recovery `data` holds `viewed_at` and the used mask. |
 | `auth_user`, `account_emailaddress`, `socialaccount_socialaccount` | lock | The account's rows are locked with its authenticators (`account_state(lock=True)`) in every POST and DELETE and in recovery-code requests; never written here. Any unverified address blocks enrolment (allauth `validate_can_add_authenticator`). |
 | `django_session`, `usersessions_usersession`, `pyracast_authentication_cache` | R/W | Pending TOTP secret, authentication records (`method`, `reauthenticated`, `at`, `type`, `id`; an activation adds an `mfa` record) and the authority record; `revoke_other_sessions` deletes the user's other sessions; `login_failed` counters on the autocommit `auth_cache` connection. |
-| `notifications_outboundmail` | W | The activation, recovery-code and deactivation notices, stored as mail intents. |
+| `notifications_outboundmail` | W | TOTP, recovery-code and passkey changes. A passkey addition or removal queues one security notice per key in the same transaction. The mailer renders it in the account's preferred language. |
 
 ## Authorization
 

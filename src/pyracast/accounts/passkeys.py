@@ -1,6 +1,7 @@
 import time
 from typing import Any, cast
 
+from allauth.account.internal.flows.reauthentication import raise_if_reauthentication_required
 from allauth.account.internal.stagekit import LOGIN_SESSION_KEY
 from allauth.account.models import EmailAddress
 from allauth.headless.base.response import ConflictResponse, ForbiddenResponse
@@ -24,13 +25,14 @@ from fido2.webauthn import CollectedClientData
 
 from pyracast.accounts.adapters import acting_on_judged_confirmation
 from pyracast.accounts.authorization import requires_admin_mfa
-from pyracast.accounts.mfa_views import (
-    PendingFactorView,
-    judged_confirmation,
-    record_activation_proof,
-    shown_once,
+from pyracast.accounts.mfa_views import PendingFactorView, shown_once
+from pyracast.accounts.processes import (
+    StartingView,
+    confirmation,
+    credential_write,
+    end_confirmations,
+    lock_account,
 )
-from pyracast.accounts.processes import StartingView, confirmation, credential_write, lock_account
 from pyracast.accounts.security import Factor
 from pyracast.accounts.sessions import revoke_other_sessions
 from pyracast.accounts.step_up import StepUpAnswers, StrongestFactor, require_recent_mfa
@@ -40,7 +42,7 @@ def invalid_passkey() -> ValidationError:
     return get_adapter().validation_error("incorrect_code")
 
 
-def active_customer(user_id: int) -> bool:
+def active_customer(user_id: int | None) -> bool:
     return User.objects.filter(
         pk=user_id, is_active=True, is_staff=False, is_superuser=False
     ).exists()
@@ -157,7 +159,6 @@ class ReauthenticateView(StrongestFactor, PasskeyCeremony, views.ReauthenticateW
 
 class ManageView(StepUpAnswers, PasskeyCeremony, views.ManageWebAuthnView):
     input_class = {"POST": EnrollPasskeyInput, "DELETE": inputs.DeleteWebAuthnInput}
-    confirmed_at: float
 
     def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         with credential_write(request):
@@ -172,7 +173,7 @@ class ManageView(StepUpAnswers, PasskeyCeremony, views.ManageWebAuthnView):
                 ).exists()
             ):
                 return ForbiddenResponse(request)
-            self.confirmed_at = judged_confirmation(request)
+            raise_if_reauthentication_required(request, app="allauth.mfa")
             with acting_on_judged_confirmation():
                 return super().handle(request, *args, **kwargs)
 
@@ -188,6 +189,11 @@ class ManageView(StepUpAnswers, PasskeyCeremony, views.ManageWebAuthnView):
         )
         user = cast(User, request.user)
         revoke_other_sessions(request, user, "mfa_added")
-        record_activation_proof(request, authenticator, self.confirmed_at)
+        end_confirmations(request, user)
         meta = None if generated is None else {"recovery_codes": shown_once(generated)}
         return AuthenticatorResponse(request, authenticator, meta=meta)
+
+    def delete(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        response = super().delete(request, *args, **kwargs)
+        end_confirmations(request, cast(User, request.user))
+        return response

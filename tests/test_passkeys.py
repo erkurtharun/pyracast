@@ -22,6 +22,7 @@ from fido2.webauthn import (
     RegistrationResponse,
 )
 
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from tests.support.account_sessions import account, browser, session_user, signed_in, with_totp
 from tests.support.auth_lifecycle import AUTH, PASSWORD, submit
 
@@ -105,6 +106,8 @@ def test_discoverable_sign_in_second_factor_step_up_and_revocation() -> None:
     assert len(added.json()["meta"]["recovery_codes"]) == 10
     assert session_user(other_session) is None
     key_id = added.json()["data"]["id"]
+    assert enrolling.get(AUTH + MANAGE).status_code == 401
+    assert device.verify(enrolling, CONFIRM).status_code == 200
     second_key = PasskeyDevice().enroll(enrolling)
     assert second_key.status_code == 200
     assert "recovery_codes" not in second_key.json().get("meta", {})
@@ -112,6 +115,11 @@ def test_discoverable_sign_in_second_factor_step_up_and_revocation() -> None:
     customer = browser()
     assert device.verify(customer, LOGIN).status_code == 200
     assert session_user(customer) == user.pk
+    workspace = Tenant.objects.create(name="My workspace")
+    Membership.objects.create(user=user, tenant=workspace, role=WorkspaceRole.ADMIN)
+    other = Tenant.objects.create(name="Another customer")
+    assert customer.get(f"/api/tenants/{workspace.pk}/members/").status_code == 200
+    assert customer.get(f"/api/tenants/{other.pk}/members/").status_code == 403
     assert customer.get(AUTH + LOGIN).status_code == 409
     assert remove(customer, key_id).status_code == 401
     assert device.verify(customer, CONFIRM).status_code == 200

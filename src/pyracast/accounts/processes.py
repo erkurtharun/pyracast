@@ -280,7 +280,7 @@ def live_confirmations(request: HttpRequest, user: AbstractBaseUser) -> list[dic
     ]
 
 
-def _end(request: HttpRequest, user: AbstractBaseUser, *, keep: object = None) -> None:
+def end_confirmations(request: HttpRequest, user: AbstractBaseUser, *, keep: object = None) -> None:
     # allauth's gates read only the flag; the records stay, so the session keeps its sign-in.
     for record in get_authentication_records(request, user):
         if record.get("reauthenticated") and record is not keep:
@@ -294,11 +294,11 @@ def record_authority(request: HttpRequest, user: AbstractBaseUser) -> None:
     # an earlier state end.
     state = account_state(user.pk, lock=True)
     if state is None:
-        _end(request, user)
+        end_confirmations(request, user)
         return
     if request.session.get(AUTHORITY) != [user.pk, state]:
         records = get_authentication_records(request, user)
-        _end(request, user, keep=records[-1] if records else None)
+        end_confirmations(request, user, keep=records[-1] if records else None)
     request.session[AUTHORITY] = [user.pk, state]
 
 
@@ -309,7 +309,7 @@ def end_stale_reauthentication(request: HttpRequest) -> None:
     if not user.is_authenticated or not live_confirmations(request, user):
         return
     if request.session.get(AUTHORITY) != [user.pk, account_state(user.pk)]:
-        _end(request, user)
+        end_confirmations(request, user)
 
 
 def authorize_credential_write(request: HttpRequest) -> str:
@@ -325,7 +325,7 @@ def authorize_credential_write(request: HttpRequest) -> str:
     if key is None or not request.session.exists(key):
         raise SessionInterrupted("Another session of the account ended this one.")
     if state is None or request.session.get(AUTHORITY) != [user.pk, state]:
-        _end(request, user)
+        end_confirmations(request, user)
         raise ReauthenticationRequired
     return state
 
