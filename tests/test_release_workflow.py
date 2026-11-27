@@ -22,6 +22,18 @@ from tests.support.workflows import (
 
 ROOT = Path(__file__).resolve().parents[1]
 TRANSFER = "Transfer the verified release and deploy through IAP"
+STOP_JOBS = {
+    "stop_after_deployment": "deployment",
+    "stop_after_verify": "verify_ubuntu",
+    "stop_after_web": "web_ubuntu",
+    "stop_after_web_production": "web_production",
+    "stop_after_scientific": "scientific",
+    "stop_after_audit": "audit",
+}
+STOP_CONDITION = "failure() && github.event_name == 'pull_request'"
+CANCEL_OWN_RUN = (
+    "await github.rest.actions.cancelWorkflowRun({ ...context.repo, run_id: context.runId });"
+)
 
 
 def release_text() -> str:
@@ -34,7 +46,9 @@ def test_one_ci_result_job_judges_every_other_ci_job_but_the_release_start_and_r
     checkout, check = result["steps"]
 
     assert result["name"] == release_authorization.REQUIRED_CI_JOB
-    assert set(result["needs"]) == set(jobs) - {"ci_result", "release_start", "pr_tested"}
+    assert set(result["needs"]) == (
+        set(jobs) - {"ci_result", "release_start", "pr_tested"} - set(STOP_JOBS)
+    )
     assert result["if"] == "${{ !cancelled() }}"
     assert str(checkout["uses"]).startswith("actions/checkout@")
     assert check["name"] == "Require every CI job"
@@ -633,7 +647,7 @@ def test_the_web_dependency_audit_runs_once_per_ci_run() -> None:
 
 SLIM_RUNNER = "ubuntu-slim"
 SLIM_JOBS = {
-    "ci.yml": {"ci_result", "pr_tested", "release_start"},
+    "ci.yml": {"ci_result", "pr_tested", "release_start", *STOP_JOBS},
     "release.yml": {"authorize", "cleanup"},
 }
 SLIM_PYTHON = (3, 12)
@@ -889,7 +903,9 @@ def test_every_repeated_job_still_runs_to_the_end_on_each_push_to_main() -> None
         "group": "ci-${{ github.workflow }}-${{ github.ref }}",
         "cancel-in-progress": True,
     }
-    assert set(jobs) == RELEASE_TESTED_JOBS | {"sonar", "ci_result", "release_start", "pr_tested"}
+    assert set(jobs) == (
+        RELEASE_TESTED_JOBS | {"sonar", "ci_result", "release_start", "pr_tested"} | set(STOP_JOBS)
+    )
     for identifier in RELEASE_TESTED_JOBS:
         assert "if" not in jobs[identifier], identifier
         assert "continue-on-error" not in jobs[identifier], identifier
@@ -899,6 +915,24 @@ def test_every_repeated_job_still_runs_to_the_end_on_each_push_to_main() -> None
     for job in jobs.values():
         assert "release_start" not in str(job.get("needs", "")), job["name"]
         assert "pr_tested" not in str(job.get("needs", "")), job["name"]
+        assert "stop_after" not in str(job.get("needs", "")), job["name"]
+
+
+def test_a_failed_job_of_a_pull_request_run_cancels_the_rest_of_the_run() -> None:
+    jobs = ci_jobs()
+
+    assert set(STOP_JOBS.values()) == RELEASE_TESTED_JOBS
+    for identifier, watched in STOP_JOBS.items():
+        stop = jobs[identifier]
+        (cancel,) = stop["steps"]
+        assert stop["name"] == release_authorization.STOP_JOB, identifier
+        assert stop["needs"] == watched, identifier
+        assert stop["if"] == STOP_CONDITION, identifier
+        assert "continue-on-error" not in stop, identifier
+        assert str(cancel["uses"]).startswith("actions/github-script@"), identifier
+        assert cancel["with"] == {"script": CANCEL_OWN_RUN}, identifier
+    assert "fail-fast" not in str(workflow("ci.yml"))
+    assert all("strategy" not in job for job in jobs.values())
 
 
 def test_a_passed_pull_request_run_records_its_tested_tree_in_a_job_without_repository_code() -> (
@@ -1431,7 +1465,7 @@ def test_no_workflow_runs_for_pull_request_targets_and_every_action_is_pinned_by
                     assert PINNED_ACTION.fullmatch(str(candidate["uses"])), candidate["uses"]
 
 
-def test_in_ci_only_the_release_start_may_write_and_only_to_actions() -> None:
+def test_in_ci_only_jobs_of_one_api_call_may_write_and_only_to_actions() -> None:
     writers = {
         identifier: job["permissions"]
         for identifier, job in ci_jobs().items()
@@ -1439,4 +1473,11 @@ def test_in_ci_only_the_release_start_may_write_and_only_to_actions() -> None:
     }
 
     assert workflow("ci.yml")["permissions"] == {"contents": "read"}
-    assert writers == {"release_start": {"actions": "write"}}
+    assert writers == {
+        "release_start": {"actions": "write"},
+        **{identifier: {"actions": "write"} for identifier in STOP_JOBS},
+    }
+    for identifier in writers:
+        assert [str(candidate["uses"]) for candidate in ci_jobs()[identifier]["steps"]] == [
+            ci_jobs()["release_start"]["steps"][0]["uses"]
+        ], identifier

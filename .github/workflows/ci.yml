@@ -552,3 +552,64 @@ jobs:
               ...context.repo, workflow_id: 'release.yml', ref: 'main',
               inputs: { ci_run_id: String(context.runId), ci_run_attempt: process.env.GITHUB_RUN_ATTEMPT },
             });
+
+  # Outside CI result: a failed job of a pull request run cancels the rest of the run. A job waits
+  # for every job it needs, so each stop job needs exactly one.
+  stop_after_deployment:
+    name: &stop-name Stop the pull request run
+    needs: deployment
+    if: &stop-condition failure() && github.event_name == 'pull_request'
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    permissions: &stop-permissions
+      actions: write
+    steps: &stop-steps
+      - name: Cancel the run after a failed job
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: 'await github.rest.actions.cancelWorkflowRun({ ...context.repo, run_id: context.runId });'
+
+  stop_after_verify:
+    name: *stop-name
+    needs: verify_ubuntu
+    if: *stop-condition
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    permissions: *stop-permissions
+    steps: *stop-steps
+
+  stop_after_web:
+    name: *stop-name
+    needs: web_ubuntu
+    if: *stop-condition
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    permissions: *stop-permissions
+    steps: *stop-steps
+
+  stop_after_web_production:
+    name: *stop-name
+    needs: web_production
+    if: *stop-condition
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    permissions: *stop-permissions
+    steps: *stop-steps
+
+  stop_after_scientific:
+    name: *stop-name
+    needs: scientific
+    if: *stop-condition
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    permissions: *stop-permissions
+    steps: *stop-steps
+
+  stop_after_audit:
+    name: *stop-name
+    needs: audit
+    if: *stop-condition
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    permissions: *stop-permissions
+    steps: *stop-steps

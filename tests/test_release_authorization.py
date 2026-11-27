@@ -425,6 +425,7 @@ def test_the_released_check_needs_a_readable_start_of_the_ci_run() -> None:
 SONAR = "Sonar quality gate"
 RECORD = "Record the tested tree"
 RELEASE_START = "Start the release of a proven merge"
+STOP = "Stop the pull request run"
 PULL_REQUEST_JOBS = [
     IMAGE_JOB,
     "Verify (ubuntu-latest)",
@@ -569,6 +570,24 @@ def test_the_pull_request_run_may_skip_the_release_start_and_sonar_while_sonar_i
 
     assert decide(early(tested_jobs=started_on_main_only)) == proven()
     assert decide(early(tested_jobs=sonar_off, sonar_enabled=False)) == proven()
+
+
+def test_a_pull_request_run_and_a_main_run_may_skip_their_stop_jobs() -> None:
+    stops = [{"name": STOP, "conclusion": "skipped"} for _ in range(6)]
+    tested = [*jobs_with(SONAR, "success"), *stops]
+    running = [*running_jobs(), *stops]
+
+    assert decide(early(tested_jobs=tested)) == proven()
+    assert decide(early(jobs=running)) == proven()
+
+
+@pytest.mark.parametrize("conclusion", ["failure", "cancelled"])
+def test_a_pull_request_run_whose_stop_job_ended_without_success_is_no_proof(
+    conclusion: str,
+) -> None:
+    stopped = [*jobs_with(SONAR, "success"), {"name": STOP, "conclusion": conclusion}]
+
+    deferred(early(tested_jobs=stopped), "did not pass every job")
 
 
 @pytest.mark.parametrize("enabled", [True, "false", None, "absent"])

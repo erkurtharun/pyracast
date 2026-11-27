@@ -16,6 +16,7 @@ IMAGE_JOB = "Deployment configuration and containers"
 RELEASE_START_JOB = "Start the release of a proven merge"
 TESTED_TREE_JOB = "Record the tested tree"
 SONAR_JOB = "Sonar quality gate"
+STOP_JOB = "Stop the pull request run"
 CI_WORKFLOW_PATH = ".github/workflows/ci.yml"
 FACTS_FILE = "release-facts.json"
 DEPLOYMENTS_FILE = "release-deployments.json"
@@ -292,10 +293,10 @@ def _prove_early(facts: Mapping[str, Any], main: str, run: Mapping[str, Any] | N
 
 def _skippable(facts: Mapping[str, Any], other_event_job: str) -> frozenset[str]:
     # A job that gates the release may be skipped only while it is switched off for the
-    # repository; the other job never runs for this event.
+    # repository; the other job never runs for this event, and a stop job runs only on a failure.
     if facts.get("sonar_enabled") is False:
-        return frozenset({other_event_job, SONAR_JOB})
-    return frozenset({other_event_job})
+        return frozenset({other_event_job, STOP_JOB, SONAR_JOB})
+    return frozenset({other_event_job, STOP_JOB})
 
 
 def _passed_every_job(jobs: Sequence[Mapping[str, Any]], skippable: Collection[str]) -> bool:
