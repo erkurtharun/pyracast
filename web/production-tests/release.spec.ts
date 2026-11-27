@@ -313,6 +313,9 @@ test("a sign-in completed on a sign-in screen of the old build at a deep address
 }) => {
     await page.clock.setFixedTime(now);
     await serveSession(page, await mockApi(page, { anonymous: true }));
+    await page.route(/\/plants\/21\/days\/$/, (route) =>
+        route.fulfill({ json: daysAnswer() }),
+    );
     await page.goto(DEEP_ADDRESS);
     await expect(
         page.getByRole("heading", { name: "Welcome back" }),
