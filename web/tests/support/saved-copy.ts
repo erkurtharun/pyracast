@@ -132,7 +132,7 @@ export function refusalCases(user: number, session: string) {
     ] satisfies { name: string; marks: Mark[]; shown: boolean }[];
 }
 
-export type Copy = {
+type Copy = {
     holder?: Holder | null;
     plants?: unknown[];
     days?: unknown[];

@@ -236,16 +236,20 @@ async function heldSignIn(page: Page, next: Account) {
     return { release, admitted };
 }
 
-test("without a copy a signed-in start asks the store and creates no database, a sign-out records only its session's end, and another user's sign-in and a language change keep that record", async ({
+test("without a database a signed-in start shows the session without loading the store's code and creates none, a sign-out records only its session's end, and another user's sign-in and a language change keep that record", async ({
     page,
 }) => {
     const account = await signedIn(page);
-    const chunk = await watchStoreChunk(page);
+    const chunk = await watchStoreChunk(page, true);
     await answerLanguage(page, secondAccount);
     await page.goto("/app/w/1/");
     await expect(plants(page)).toBeVisible();
-    expect(chunk.requested()).toBe(true);
+    await page.clock.runFor(2_000);
+    await expect(plants(page)).toBeVisible();
+    expect(await uncheckedNotice(page).count()).toBe(0);
+    expect(chunk.requested()).toBe(false);
     expect(await readCopy(page)).toEqual(absent);
+    chunk.release();
     await signOut(page);
     await expect(welcome(page)).toBeVisible();
     const ended = { version: 1, plants: 0, days: 0, marks: [signedOutHere] };
@@ -1180,6 +1184,38 @@ for (const [refused, refuse] of [
     }) => {
         await page.addInitScript(refuse);
         await signsInAndOut(page);
+    });
+
+for (const [browser, withhold] of [
+    [
+        "offers no list of its databases",
+        () => {
+            Reflect.deleteProperty(IDBFactory.prototype, "databases");
+        },
+    ],
+    [
+        "cannot list its databases",
+        () => {
+            IDBFactory.prototype.databases = () =>
+                Promise.reject(
+                    new DOMException("Not determined.", "UnknownError"),
+                );
+        },
+    ],
+] as const)
+    test(`a browser that ${browser} checks the store at a signed-in start and shows the notice when its code does not load within two seconds`, async ({
+        page,
+    }) => {
+        await page.addInitScript(withhold);
+        const chunk = await watchStoreChunk(page, true);
+        await signedIn(page);
+        await page.goto("/app/w/1/", { waitUntil: "commit" });
+        await chunk.reached;
+        await page.clock.runFor(2_000);
+        await expectUnchecked(page);
+        chunk.release();
+        await tryAgain(page).click();
+        await expect(plants(page)).toBeVisible();
     });
 
 test("the withdrawn build's removal deletes a held copy with its marks only after its figures were cleared", async ({

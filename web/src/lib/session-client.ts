@@ -388,6 +388,26 @@ function handOffNeeded(session: Session) {
     return Boolean(session.user);
 }
 
+async function savedDatabaseListed() {
+    try {
+        return (await indexedDB.databases()).some(
+            ({ name }) => name === savedDatabase,
+        );
+    } catch {
+        return true;
+    }
+}
+
+// A database in its first upgrade is not listed yet, so an absence is asked again behind another window's creation under the copy's lock.
+async function savedDatabaseAbsent(limit: Deadline) {
+    if (await savedDatabaseListed()) return false;
+    try {
+        return !(await underLock(limit, savedDatabaseListed));
+    } catch {
+        return false;
+    }
+}
+
 // Storage refused at the open is refused to the worker too, so no copy can be served.
 async function handOff(
     { user, language, session_tag }: Session,
@@ -396,20 +416,23 @@ async function handOff(
 ): Promise<Handoff> {
     if (!user) return "handed";
     const limit = deadline(savedLimitMs);
-    const handoff = await boundedStore(
-        (store) =>
-            store.adopt(
-                {
-                    user: user.id,
-                    session: session_tag ?? "",
-                    language,
-                    adoptedAt,
-                    present,
-                },
-                limit,
-            ),
-        limit,
-    );
+    const handoff = (await savedDatabaseAbsent(limit))
+        ? "verified"
+        : await boundedStore(
+              (store) =>
+                  store.adopt(
+                      {
+                          user: user.id,
+                          session: session_tag ?? "",
+                          language,
+                          adoptedAt,
+                          present,
+                      },
+                      limit,
+                  ),
+              limit,
+          );
+    limit.clear();
     if (handoff === "superseded") return "superseded";
     if (limit.expired()) return "unhanded";
     return handoff === "verified" || handoff === "blocked"
@@ -444,7 +467,7 @@ async function endSavedSession(session: Session | undefined) {
     if (!ended) await deleteSavedDatabase();
 }
 
-export type SavedFigures = { state: CopyState; plants: number };
+type SavedFigures = { state: CopyState; plants: number };
 
 export async function savedCopyState(
     session = state.session,
@@ -533,7 +556,7 @@ function failHandoff() {
 }
 
 // Superseded: a newer adoption or read was observed meanwhile, so only a new read tells what the server holds.
-export type Adoption = "handed" | "failed" | "superseded";
+type Adoption = "handed" | "failed" | "superseded";
 
 export function adoptSession(
     session: Session,

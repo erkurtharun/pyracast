@@ -16,6 +16,7 @@ import {
     focusWindow,
     isMarked,
     markDocument,
+    secondAccount,
     serveSession,
     sessionAnswer,
 } from "./support/session";
@@ -650,8 +651,7 @@ test("an off in one window while another window's default keeping waits for the 
     await expect(keepSetting(page)).not.toBeChecked();
     expect((await readCopy(page)).marks).toEqual([offMark()]);
     await lock.release();
-    await expect.poll(() => lock.waitingFor(mine)).toBe(0);
-    await expect.poll(() => lock.waitingFor(theirs)).toBe(0);
+    await expect.poll(() => storeLockFree(page)).toBe(true);
     await expectTurnedOff(page);
     await expect(keepSetting(page)).not.toBeChecked();
     await other.getByRole("button", { name: "Account", exact: true }).click();
@@ -685,6 +685,31 @@ test("a choice the device cannot store keeps the field and the stored state and 
     await keepSetting(page).click();
     await expect(page.getByText(savingFailed, { exact: true })).toBeVisible();
     await expect(keepSetting(page)).not.toBeChecked();
+    await expectTurnedOff(page);
+});
+
+test("a choice that could not be stored gives way to the state another window stored since, without the message", async ({
+    page,
+    context,
+}) => {
+    const account: AccountState = { current: firstAccount };
+    const choices = await refuseWrites(page, "off");
+    const other = await context.newPage();
+    for (const tab of [page, other]) {
+        await supplyRegistration(tab);
+        await signedIn(tab, account);
+        await serveDays(tab);
+        await openSettings(tab);
+    }
+    await expectKept(page);
+    await choices.refuse();
+    await keepSetting(page).click();
+    await expect(page.getByText(savingFailed, { exact: true })).toBeVisible();
+    await expect(keepSetting(page)).toBeChecked();
+    await keepSetting(other).click();
+    await expect(keepSetting(other)).not.toBeChecked();
+    await expect(keepSetting(page)).not.toBeChecked();
+    await expect(page.getByText(savingFailed, { exact: true })).toHaveCount(0);
     await expectTurnedOff(page);
 });
 
@@ -931,6 +956,30 @@ test("a changed session answered while the store is busy past its limit covers t
         page.getByRole("heading", { name: "Pyracast could not be opened" }),
     ).toBeVisible();
     await expect(plants(page)).toHaveCount(0);
+});
+
+test("a signed-in start while another window holds the copy's lock waits for it and removes the other person's copy created meanwhile", async ({
+    page,
+    context,
+}) => {
+    const lock = await lockTaker(context);
+    await lock.take();
+    await expect.poll(lock.granted).toBe(1);
+    await signedIn(page, { current: secondAccount });
+    await page.goto("/app/w/1/", { waitUntil: "commit" });
+    await pauseClock(page);
+    const mine = await lockClient(page);
+    await expect.poll(() => lock.waitingFor(mine)).toBe(1);
+    await seedCopy(await context.newPage());
+    await lock.release();
+    await page.clock.resume();
+    await expect(plants(page)).toBeVisible();
+    expect(await readCopy(page)).toEqual({
+        version: 1,
+        plants: 0,
+        days: 0,
+        marks: [],
+    });
 });
 
 test("a window hidden while its run judges the held plants marks no attempt and reads the plant once it is visible again", async ({

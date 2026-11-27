@@ -203,6 +203,18 @@ type Preference = {
     choice: "confirmed" | "saving" | "failed";
 };
 
+// A failure stays only beside the state it was shown with; a state stored since by another window replaces it.
+function choiceAfterRead(
+    known: Preference | undefined,
+    user: number,
+    copy: CopyView,
+): Preference["choice"] {
+    if (known?.user !== user) return "confirmed";
+    return known.choice === "failed" && known.copy.off !== copy.off
+        ? "confirmed"
+        : known.choice;
+}
+
 export function useKeptFiguresPreference() {
     const { session } = useSessionState();
     const user = session?.user?.id;
@@ -223,10 +235,7 @@ export function useKeptFiguresPreference() {
                         : {
                               user,
                               copy,
-                              choice:
-                                  known?.user === user
-                                      ? known.choice
-                                      : "confirmed",
+                              choice: choiceAfterRead(known, user, copy),
                           },
                 );
             });
