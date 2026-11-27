@@ -4,6 +4,8 @@ A signed-in customer opens Account settings to enrol a TOTP authenticator from a
 
 ## Entry points
 
+- Customers can also add a named passkey in account settings. `GET .../account/authenticators/webauthn` requires a verified primary address and fresh confirmation. It requests a discoverable credential with user verification required. `POST` confirms the registration through allauth and fido2 under the account lock, revokes other sessions, and shows newly generated recovery codes once. `DELETE` takes the current customer's authenticator IDs and requires a fresh authenticator proof. Removing the last primary authenticator also retires its recovery codes. The private key stays with the customer's authenticator or passkey provider.
+
 - `web/src/features/account/two-factor-settings.tsx` `TwoFactorSettings` (view state machine, hosted by `AccountSecurity`) with `authenticator-setup.tsx` `AuthenticatorSetup`, `recovery-codes.tsx` `RecoveryCodes`, the parts in `two-factor/` (`status-tag`, `load-error`, `enabled-panel`, `confirm-step`, `model.ts` `parseAuthenticators`) and the shared prompt `step-up.tsx` (`step-up-reauthentication`).
 - `GET /api/auth/browser/v1/account/authenticators`: allauth `AuthenticatorsView` (type, dates, recovery-code counts); `GET|POST|DELETE .../account/authenticators/totp`: `pyracast.accounts.mfa_views.ManageTOTPView`; `GET|HEAD|POST .../account/authenticators/recovery-codes`: `ManageRecoveryCodesView`. The routes live in `accounts/auth_urls.py`; signal receivers in `accounts/sessions.py` and `accounts/audit.py`.
 
@@ -61,7 +63,7 @@ sequenceDiagram
 | `mfa_authenticator` | R/W | One `totp` and one `recovery_codes` row per user (allauth `unique_authenticator_type`); TOTP secret Fernet-encrypted (context `pyracast-mfa-credentials-v1`, prefix `mfa:v1:`); recovery `data` holds `viewed_at` and the used mask. |
 | `auth_user`, `account_emailaddress`, `socialaccount_socialaccount` | lock | The account's rows are locked with its authenticators (`account_state(lock=True)`) in every POST and DELETE and in recovery-code requests; never written here. Any unverified address blocks enrolment (allauth `validate_can_add_authenticator`). |
 | `django_session`, `usersessions_usersession`, `pyracast_authentication_cache` | R/W | Pending TOTP secret, authentication records (`method`, `reauthenticated`, `at`, `type`, `id`; an activation adds an `mfa` record) and the authority record; `revoke_other_sessions` deletes the user's other sessions; `login_failed` counters on the autocommit `auth_cache` connection. |
-| `notifications_outboundmail` | W | The activation, recovery-code and deactivation notices, stored as mail intents. |
+| `notifications_outboundmail` | W | TOTP, recovery-code and passkey changes. A passkey addition or removal queues one security notice per key in the same transaction. The mailer renders it in the account's preferred language. |
 
 ## Authorization
 

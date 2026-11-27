@@ -7,7 +7,7 @@ Every mail django-allauth sends about an account goes through one adapter: verif
 - `pyracast.accounts.adapters.AccountAdapter`: `send_mail` (language, intent), `send_notification_mail` and `notify` (add the `user` to the context), `render_mail` (worker side). Wired by `ACCOUNT_ADAPTER`; behaviour gated by `ACCOUNT_EMAIL_NOTIFICATIONS`, `ACCOUNT_PREVENT_ENUMERATION` and the `*_BY_CODE_*` settings in `src/pyracast/settings.py`.
 - `pyracast.accounts.mail_intents` `enqueue_mail`, `seal_code`, `enqueue_lock_notice`; the worker calls `pyracast.accounts.account_mail.compose_account_mail` from `pyracast.notifications.outbox.send_outbound_mail`.
 - Code mails, project templates on `src/pyracast/accounts/templates/mail/base.html` plus `src/pyracast/accounts/templates/mail/code.html`: `email_confirmation{,_signup}` for signup, unverified sign-in, `auth/email/verify/resend` and `account/email`; `password_reset_code` for `auth/password/request`; `login_code` for `auth/reauthenticate/code/request` (`web/src/features/account/security-reauthentication.tsx`), open only to an account with neither password nor authenticator.
-- Notices, `pyracast.accounts.account_mail.NOTICES` rendered by `render_notice` into `src/pyracast/accounts/templates/mail/notice.{txt,html}`: security notices for password, email, two-factor, recovery-code and sign-in provider changes; `second_factor_reset` after the operator command `reset_mfa`; anti-enumeration notices `unknown_account` (reset request for an address without an eligible account) and `account_already_exists` (password or provider signup with a registered address); `login_locked` when failed sign-ins pause password sign-in. Triggers: the password, email, TOTP, recovery-code, provider-link, reset and signup endpoints (flows `password-change`, `password-reset`, `account-email-change`, `two-factor-management`, `linked-accounts`).
+- Notices, `pyracast.accounts.account_mail.NOTICES` rendered by `render_notice` into `src/pyracast/accounts/templates/mail/notice.{txt,html}`: security notices for password, email, TOTP, passkey, recovery-code and sign-in provider changes; `second_factor_reset` after the operator command `reset_mfa`; anti-enumeration notices `unknown_account` (reset request for an address without an eligible account) and `account_already_exists` (password or provider signup with a registered address); `login_locked` when failed sign-ins pause password sign-in. The add and remove passkey flows store `mfa/email/webauthn_added` and `mfa/email/webauthn_removed` in the same transaction as the credential change (flow `two-factor-management`). Other triggers are covered by the `password-change`, `password-reset`, `account-email-change`, `two-factor-management` and `linked-accounts` flows.
 
 ## Sequence
 
@@ -87,6 +87,6 @@ sequenceDiagram
 ## Tests
 
 - `tests/test_account_mail_content.py`: a matrix over endpoints and languages through the real headless views.
-- `tests/test_account_mail_outbox.py`, `tests/test_account_mail_commits.py`.
+- `tests/test_account_mail_outbox.py` and `tests/test_account_mail_commits.py` cover stored intents and commits, including localized passkey notices and rollback.
 - `tests/test_account_mail_failures.py`, `tests/test_mail_outcomes.py`: failing mailers and their log lines without address, code or traceback.
 - Gaps: browser tests mock the API; no real inbox.

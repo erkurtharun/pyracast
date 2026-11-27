@@ -195,7 +195,9 @@ HEADLESS_FRONTEND_URLS = {
     "account_signup": f"{PYRACAST_PUBLIC_ORIGIN}/app/?signup=1",
 }
 HEADLESS_ADAPTER = "pyracast.accounts.social.HeadlessAdapter"
-MFA_SUPPORTED_TYPES = ["totp", "recovery_codes"]
+MFA_SUPPORTED_TYPES = ["totp", "webauthn", "recovery_codes"]
+MFA_PASSKEY_LOGIN_ENABLED = True
+MFA_WEBAUTHN_USER_VERIFICATION = "required"
 MFA_ADAPTER = "pyracast.accounts.mfa.MFAAdapter"
 MFA_REAUTHENTICATION_REQUIRED = True
 MFA_RECOVERY_CODES_SHOW_ONCE = True

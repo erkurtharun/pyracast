@@ -5,7 +5,7 @@ from allauth.headless.mfa import views as mfa_views
 from django.urls import path
 from django.views.decorators.http import require_http_methods, require_POST
 
-from pyracast.accounts import headless
+from pyracast.accounts import headless, passkey_views
 from pyracast.accounts.devices import SessionsView
 from pyracast.accounts.mfa_views import (
     AuthenticateView,
@@ -30,6 +30,24 @@ urlpatterns = [
         require_http_methods(["GET", "DELETE"])(SessionsView.as_api_view(client=Client.BROWSER)),
     ),
     path("auth/login", headless.LoginView.as_api_view(client=Client.BROWSER)),
+    path(
+        "auth/webauthn/login",
+        require_http_methods(["GET", "POST"])(
+            passkey_views.LoginView.as_api_view(client=Client.BROWSER)
+        ),
+    ),
+    path(
+        "auth/webauthn/authenticate",
+        require_http_methods(["GET", "POST"])(
+            passkey_views.AuthenticateView.as_api_view(client=Client.BROWSER)
+        ),
+    ),
+    path(
+        "auth/webauthn/reauthenticate",
+        require_http_methods(["GET", "POST"])(
+            passkey_views.ReauthenticateView.as_api_view(client=Client.BROWSER)
+        ),
+    ),
     path(
         "auth/signup", CompanySignupView.as_api_view(client=Client.BROWSER), name="password_signup"
     ),
@@ -79,6 +97,12 @@ urlpatterns = [
     path("account/password/change", headless.ChangePasswordView.as_api_view(client=Client.BROWSER)),
     path("account/providers", ManageProvidersView.as_api_view(client=Client.BROWSER)),
     path("account/authenticators", mfa_views.AuthenticatorsView.as_api_view(client=Client.BROWSER)),
+    path(
+        "account/authenticators/webauthn",
+        require_http_methods(["GET", "POST", "DELETE"])(
+            passkey_views.ManageView.as_api_view(client=Client.BROWSER)
+        ),
+    ),
     path("account/authenticators/totp", ManageTOTPView.as_api_view(client=Client.BROWSER)),
     path(
         "account/authenticators/recovery-codes",

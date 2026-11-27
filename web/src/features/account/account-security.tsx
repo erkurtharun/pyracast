@@ -9,6 +9,7 @@ import { LinkedAccounts } from "./linked-accounts";
 import { SignedInDevices } from "./signed-in-devices";
 import { StepUpPrompt, stepUpMode, useStepUp } from "./step-up";
 import { TwoFactorSettings } from "./two-factor-settings";
+import { PasskeySettings } from "./passkey-settings";
 import { ActionForm, CheckboxField, Field, type Submitted } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 
@@ -122,10 +123,18 @@ export function AccountSecurity({
     hasPassword: boolean;
     email: string;
 }) {
+    const [totpRevision, setTotpRevision] = useState(0);
     return (
         <>
             <PasswordChange hasPassword={hasPassword} email={email} />
-            <TwoFactorSettings mfaRequired={mfaRequired} email={email} />
+            <TwoFactorSettings
+                mfaRequired={mfaRequired}
+                email={email}
+                onTotpChange={() => setTotpRevision((revision) => revision + 1)}
+            />
+            {!mfaRequired && (
+                <PasskeySettings email={email} totpRevision={totpRevision} />
+            )}
             <LinkedAccounts email={email} hasPassword={hasPassword} />
             <SignedInDevices />
         </>

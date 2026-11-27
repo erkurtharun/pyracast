@@ -24,9 +24,22 @@ export function stepUpMode(
 ): ReauthMode | undefined {
     if (result.status !== 401 || !result.meta?.is_authenticated)
         return undefined;
-    const flows = (result.data as { flows?: { id?: unknown }[] } | undefined)
-        ?.flows;
-    const id = flows?.[0]?.id;
+    const flows = (
+        result.data as
+            | {
+                  flows?: { id?: unknown; types?: string[] }[];
+              }
+            | undefined
+    )?.flows;
+    const flow = flows?.[0];
+    const id = flow?.id;
+    if (id === "mfa_reauthenticate" && flow?.types?.includes("webauthn")) {
+        return flow.types.some(
+            (type) => type === "totp" || type === "recovery_codes",
+        )
+            ? "mfaOrPasskey"
+            : "passkey";
+    }
     return typeof id === "string" ? MODES[id] : undefined;
 }
 
@@ -84,25 +97,28 @@ export function StepUpPrompt({
     onError: (message: string) => void;
 }) {
     const t = useTranslations("Security");
+    const passkeys = useTranslations("Passkeys");
     const errors = useTranslations("Errors");
     const { pending } = stepUp;
     if (!pending) return null;
+    const title = {
+        mfa: t("reauthMfaTitle"),
+        email: t("emailReauthTitle"),
+        password: t("reauthPasswordTitle"),
+        passkey: passkeys("verify"),
+        mfaOrPasskey: passkeys("verifyOptions"),
+    }[pending.mode];
+    const description = {
+        mfa: t("reauthMfaDescription"),
+        email: undefined,
+        password: t("reauthPasswordDescription"),
+        passkey: undefined,
+        mfaOrPasskey: passkeys("verifyDescription"),
+    }[pending.mode];
     return (
         <div className="mfa-subpanel step-up">
-            <h3>
-                {pending.mode === "mfa"
-                    ? t("reauthMfaTitle")
-                    : pending.mode === "email"
-                      ? t("emailReauthTitle")
-                      : t("reauthPasswordTitle")}
-            </h3>
-            {pending.mode !== "email" && (
-                <p>
-                    {pending.mode === "mfa"
-                        ? t("reauthMfaDescription")
-                        : t("reauthPasswordDescription")}
-                </p>
-            )}
+            <h3>{title}</h3>
+            {description && <p>{description}</p>}
             {pending.again && <Notice>{t("confirmAgain")}</Notice>}
             <ReauthenticationForm
                 key={pending.mode}

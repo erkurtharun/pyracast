@@ -59,7 +59,7 @@ def test_the_project_migrations_on_disk_are_the_recorded_history_in_chain_order(
         }
         for app in project
     } == baseline
-    assert len(set(HISTORY)) == len(HISTORY) == 68
+    assert len(set(HISTORY)) == len(HISTORY) == 69
     assert sorted(key for key in disk if key[0] in project) == sorted(HISTORY)
     for app in project:
         chain = [key for key in HISTORY if key[0] == app]

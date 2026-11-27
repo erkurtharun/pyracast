@@ -46,9 +46,11 @@ function refused(failure: unknown) {
 export function TwoFactorSettings({
     mfaRequired,
     email,
+    onTotpChange,
 }: {
     mfaRequired: boolean;
     email: string;
+    onTotpChange: () => void;
 }) {
     const t = useTranslations("Security");
     const locale = useLocale();
@@ -148,6 +150,7 @@ export function TwoFactorSettings({
 
     // A change whose answer was lost may have committed: the list says what the account holds.
     async function reconcile(action: Action) {
+        if (action === "activate" || action === "remove") onTotpChange();
         try {
             const { totpEnabled, facts } = await readFacts();
             if (totpEnabled) {
@@ -215,6 +218,7 @@ export function TwoFactorSettings({
                 return Promise.resolve();
             };
             if (await confirmedFirst(result, fresh)) return;
+            onTotpChange();
             setSetupCode("");
             const facts = await currentFacts();
             setNotice("authenticatorActivated");
@@ -250,6 +254,7 @@ export function TwoFactorSettings({
                 "DELETE",
             );
             if (await confirmedFirst(result, remove)) return;
+            onTotpChange();
             setSetupCode("");
             setNotice("authenticatorRemoved");
             show({ kind: "disabled" });

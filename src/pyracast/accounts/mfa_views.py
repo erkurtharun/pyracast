@@ -9,6 +9,7 @@ from allauth.account.internal.flows.reauthentication import raise_if_reauthentic
 from allauth.account.internal.stagekit import LOGIN_SESSION_KEY, clear_login
 from allauth.core.exceptions import ReauthenticationRequired
 from allauth.headless.base.response import UnauthorizedResponse
+from allauth.headless.base.views import APIView
 from allauth.headless.internal.restkit.inputs import Input
 from allauth.headless.mfa import views
 from allauth.headless.mfa.response import AuthenticatorResponse
@@ -104,9 +105,7 @@ def record_activation_proof(
     request.session[AUTHENTICATION_METHODS_SESSION_KEY] = records
 
 
-class AuthenticateView(views.AuthenticateView):
-    input_class = SecondFactorInput
-
+class PendingFactorView(APIView):
     def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         # Without a pending sign-in allauth answers and the session keeps its authentication.
         if request.method != "POST" or LOGIN_SESSION_KEY not in request.session:
@@ -120,6 +119,10 @@ class AuthenticateView(views.AuthenticateView):
         except AuthorityChangedError:
             clear_login(request)
             return UnauthorizedResponse(request)
+
+
+class AuthenticateView(PendingFactorView, views.AuthenticateView):
+    input_class = SecondFactorInput
 
 
 class ReauthenticateView(StrongestFactor, views.ReauthenticateView):

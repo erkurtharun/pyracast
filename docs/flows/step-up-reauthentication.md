@@ -4,6 +4,8 @@ A signed-in user attempts a sensitive account operation (set or change the passw
 
 ## Entry points
 
+- Customers with a passkey can choose it in the shared MFA confirmation prompt. `GET|POST .../auth/webauthn/reauthenticate` requires device user verification, checks the current customer's credential under the account locks, and records fresh MFA evidence through the existing session-key rotation. Signing in with a passkey alone never satisfies this prompt.
+
 - UI: `web/src/features/account/step-up.tsx` (`stepUpMode`, `useStepUp`, `StepUpPrompt`) hosts `security-reauthentication.tsx` `ReauthenticationForm`; asking screens are `account-security.tsx` (`PasswordChange`), `two-factor-settings.tsx`, `linked-accounts.tsx` and `email-change.tsx`.
 - `POST /api/auth/browser/v1/auth/reauthenticate` -> `pyracast.accounts.headless.ReauthenticateView` (allauth view with `inputs.ReauthenticateInput`: password not stripped, max 1024; runs in `processes.confirmation`).
 - `POST .../auth/2fa/reauthenticate` -> `pyracast.accounts.mfa_views.ReauthenticateView` (`inputs.SecondFactorReauthenticateInput`: TOTP or recovery code; also in `confirmation`).

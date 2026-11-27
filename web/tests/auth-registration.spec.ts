@@ -223,6 +223,10 @@ test("an ended session asks to sign in again", async ({ page }) => {
         }),
     );
     await page.goto("/app/");
+    await expect(page.getByLabel("Email", { exact: true })).toHaveAttribute(
+        "autocomplete",
+        "username",
+    );
     await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
     await page
         .getByLabel("Password", { exact: true })

@@ -81,6 +81,7 @@ AUTH_ROUTES = sorted(
         "account/authenticators",
         "account/authenticators/recovery-codes",
         "account/authenticators/totp",
+        "account/authenticators/webauthn",
         "account/email",
         "account/password/change",
         "account/providers",
@@ -100,6 +101,9 @@ AUTH_ROUTES = sorted(
         "auth/session",
         "auth/sessions",
         "auth/signup",
+        "auth/webauthn/authenticate",
+        "auth/webauthn/login",
+        "auth/webauthn/reauthenticate",
         "config",
     )
 )

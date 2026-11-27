@@ -3,11 +3,15 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from allauth.core import context as allauth_context
 from django.core import mail
+from django.core.mail import EmailMultiAlternatives
 from django.db import transaction
-from django.test import Client, override_settings
+from django.test import Client, RequestFactory, override_settings
+from django.utils import translation
 
 from pyracast.accounts.adapters import AccountAdapter
+from pyracast.accounts.models import OutboundMail
 from tests.support.account_mail import (
     CASES,
     CHANGED_NOTICE,
@@ -17,6 +21,8 @@ from tests.support.account_mail import (
     Combination,
     Mail,
     account,
+    assert_account_mail,
+    assert_security_details,
     browser,
     matrix_settings,
     provider_requests,
@@ -118,3 +124,39 @@ def test_account_mail_waits_for_the_commit_and_is_dropped_on_rollback() -> None:
     (message,) = mail.outbox
     assert message.to == [PRIMARY]
     assert message.extra_headers["X-Pyracast-Mail"] == CHANGED_NOTICE
+
+
+@pytest.mark.parametrize(
+    ("prefix", "language", "subject"),
+    [
+        ("mfa/email/webauthn_added", "en", "A passkey was added to your account"),
+        ("mfa/email/webauthn_added", "tr", "Hesabınıza bir geçiş anahtarı eklendi"),  # noqa: RUF001 -- Turkish copy.
+        ("mfa/email/webauthn_removed", "en", "A passkey was removed from your account"),
+        ("mfa/email/webauthn_removed", "tr", "Hesabınızdan bir geçiş anahtarı kaldırıldı"),  # noqa: RUF001 -- Turkish copy.
+    ],
+)
+def test_passkey_security_notice_uses_the_outbox_and_account_language(
+    prefix: str, language: str, subject: str
+) -> None:
+    user = account(PRIMARY, "member", language)
+    request = RequestFactory().post("/", headers={"User-Agent": FIREFOX})
+    since = datetime.now(UTC)
+    request_language = "tr" if language == "en" else "en"
+
+    with allauth_context.request_context(request), translation.override(request_language):
+        with transaction.atomic():
+            AccountAdapter().send_notification_mail(prefix, user)
+            assert not mail.outbox
+            assert OutboundMail.objects.get().kind == prefix
+            transaction.set_rollback(True)
+        assert not OutboundMail.objects.exists()
+
+        with transaction.atomic():
+            AccountAdapter().send_notification_mail(prefix, user)
+            assert not mail.outbox
+
+    assert deliver_mail() == 1
+    (message,) = mail.outbox
+    assert isinstance(message, EmailMultiAlternatives)
+    assert_account_mail(message, prefix=prefix, to=PRIMARY, language=language, subject=subject)
+    assert_security_details(message, language=language, since=since)

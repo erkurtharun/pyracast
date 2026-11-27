@@ -3,7 +3,7 @@ import { prepared, type Method } from "./api/lane";
 import { browserErrors } from "@/i18n/browser";
 
 export type AuthData = {
-    flows?: { id: string; is_pending?: boolean }[];
+    flows?: { id: string; is_pending?: boolean; types?: string[] }[];
     unused_codes?: string[];
     unused_code_count?: number;
     total_code_count?: number;

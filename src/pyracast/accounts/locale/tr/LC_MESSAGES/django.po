@@ -158,11 +158,17 @@ msgstr "Bir e-posta adresi kaldırıldı"
 msgid "%(deleted_email)s was removed from your Pyracast account."
 msgstr "%(deleted_email)s adresi Pyracast hesabınızdan kaldırıldı."
 
-msgid "Two-step verification was turned on"
-msgstr "İki adımlı doğrulama açıldı"
+msgid "An authenticator app was added to your account"
+msgstr "Hesabınıza bir doğrulama uygulaması eklendi"
 
-msgid "Two-step verification was turned off"
-msgstr "İki adımlı doğrulama kapatıldı"
+msgid "An authenticator app was removed from your account"
+msgstr "Hesabınızdan bir doğrulama uygulaması kaldırıldı"
+
+msgid "A passkey was added to your account"
+msgstr "Hesabınıza bir geçiş anahtarı eklendi"
+
+msgid "A passkey was removed from your account"
+msgstr "Hesabınızdan bir geçiş anahtarı kaldırıldı"
 
 msgid "New recovery codes were generated"
 msgstr "Yeni kurtarma kodları oluşturuldu"

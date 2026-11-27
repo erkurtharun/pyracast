@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { authRequest } from "@/lib/auth-api";
@@ -90,13 +89,6 @@ export function SocialProviderButtons({
                         className={`social-provider ${provider}`}
                         type="submit"
                     >
-                        <Image
-                            unoptimized
-                            src={`/identity/${provider === "google" ? "google.png" : "microsoft.svg"}`}
-                            width={20}
-                            height={20}
-                            alt=""
-                        />
                         <span>{t(`${label}.${provider}`)}</span>
                     </button>
                 </form>
