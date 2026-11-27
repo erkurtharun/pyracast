@@ -255,8 +255,8 @@ image artifact needs no action when that commit is already the one serving. To r
    **Actions → Release → Run workflow → main** while that CI run's artifact is unexpired.
 
 The checkout action leaves those unshipped paths out of the checkout of every workflow job that
-checks out code, except those that test, analyse or report on the whole repository (patterns: output of `python3 deploy/release_scope.py sparse-patterns`). A pull request's CI builds, scans and
-smoke-tests the images from that checkout, so an image build that needs a listed path fails there;
+checks out code, except those that test, analyse or report on the whole repository (patterns: output of `python3 deploy/release_scope.py sparse-patterns`). The CI of a pull request that is ready for
+review (for a draft only a failing `CI result` runs) builds, scans and smoke-tests the images from that checkout, so an image build that needs a listed path fails there;
 such a path does not belong on the list. Release's own jobs use the same checkout but first run in
 the release after a merge. The images a release ships come from a CI run on `main`, which builds
 them without importing the shared build cache and is the only run that writes it; pull request
@@ -386,7 +386,12 @@ Inspect the host from `/opt/pyracast/current` as root with
   (`rabbitmqctl change_password` and an application restart for the broker), never by deleting
   a data volume ([encryption-key-rotation](flows/encryption-key-rotation.md)).
 - **Patching:** review the monthly Dependabot pull requests and each security update pull
-  request; image digests do not update themselves. The daily `Image rescan` workflow scans images rebuilt from `main`, or the deployed
+  request; image digests do not update themselves. The daily `Dependency audit` workflow runs
+  `pip-audit` and the npm audit on `main`; a failed run means an advisory is open, an npm
+  exception expired or is no longer reported, or an audit could not run. Every run of `main` runs
+  the same audits: a release that follows the whole run waits for that run's successful audit,
+  while a release started early for a proven merge relies on the audit that passed in the pull
+  request's run, and the audit of the run of `main` may still be in progress. The daily `Image rescan` workflow scans images rebuilt from `main`, or the deployed
   `production` digests once `image_rescan_reader = true` is applied and the repository variable
   `GCP_IMAGE_RESCAN` holds `terraform -chdir=infra/terraform output -raw image_rescan_setting`; a
   failed run needs an image update. Review Ubuntu updates and the pinned Docker packages in
