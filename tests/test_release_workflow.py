@@ -54,7 +54,10 @@ def test_one_ci_result_job_judges_every_other_ci_job_but_the_release_start_and_r
     assert str(checkout["uses"]).startswith("actions/checkout@")
     assert check["name"] == "Require every CI job"
     assert check["run"] == "python3 scripts/ci_result.py"
-    assert check["env"] == {"NEEDS": "${{ toJSON(needs) }}"}
+    assert check["env"] == {
+        "NEEDS": "${{ toJSON(needs) }}",
+        "PULL_REQUEST_DRAFT": DRAFT_FLAG,
+    }
 
 
 def test_the_release_waits_for_the_ci_result_job_alone() -> None:
@@ -962,6 +965,9 @@ def test_every_repeated_job_still_runs_to_the_end_on_each_push_to_main() -> None
 
 PLANNED_AUDIT = "needs.plan.outputs.audit == 'true'"
 PLAN_DECISION = 'python3 scripts/ci_plan.py >> "$GITHUB_OUTPUT"'
+NOT_A_DRAFT = "${{ !github.event.pull_request.draft }}"
+PULL_REQUEST_TYPES = ["opened", "synchronize", "reopened", "ready_for_review", "converted_to_draft"]
+DRAFT_FLAG = "${{ github.event.pull_request.draft }}"
 
 
 def plan_job(document: dict[str, Any]) -> dict[str, Any]:
@@ -974,6 +980,18 @@ def run_plan_problems(document: dict[str, Any]) -> list[str]:
     plan = plan_job(document)
     checkout, *decisions = plan["steps"]
     problems = []
+    if pull_request_trigger(document)["pull_request"] != {"types": PULL_REQUEST_TYPES}:
+        problems.append("draft changes start no run")
+    if plan.get("if") != NOT_A_DRAFT:
+        problems.append("plan runs on a draft")
+    for identifier in sorted(RELEASE_TESTED_JOBS - {"audit"}):
+        if needed_jobs(jobs[identifier]) != ["plan"]:
+            problems.append(f"{identifier} runs on a draft")
+    if (
+        step(jobs["ci_result"], "Require every CI job").get("env", {}).get("PULL_REQUEST_DRAFT")
+        != DRAFT_FLAG
+    ):
+        problems.append("result job blind to drafts")
     if [candidate.get("run") for candidate in decisions] != [PLAN_DECISION] or plan.get(
         "outputs"
     ) != {"audit": f"${{{{ steps.{decisions[0].get('id')}.outputs.audit }}}}"}:
@@ -992,7 +1010,50 @@ def run_plan_problems(document: dict[str, Any]) -> list[str]:
     return problems
 
 
+def pull_request_trigger(document: dict[Any, Any]) -> dict[str, Any]:
+    on: dict[str, Any] = document["on"] if "on" in document else document[True]
+    return on
+
+
 PLAN_BROKEN_SHAPES: list[tuple[str, Callable[[dict[str, Any]], object], str]] = [
+    (
+        "default types",
+        lambda d: pull_request_trigger(d).update(pull_request=None),
+        "draft changes start no run",
+    ),
+    (
+        "no run when marked ready",
+        lambda d: pull_request_trigger(d)["pull_request"]["types"].remove("ready_for_review"),
+        "draft changes start no run",
+    ),
+    (
+        "no run when made a draft",
+        lambda d: pull_request_trigger(d)["pull_request"]["types"].remove("converted_to_draft"),
+        "draft changes start no run",
+    ),
+    ("plan always", lambda d: plan_job(d).pop("if"), "plan runs on a draft"),
+    (
+        "plan on any draft flag",
+        lambda d: plan_job(d).update({"if": "${{ always() }}"}),
+        "plan runs on a draft",
+    ),
+    (
+        "image job on its own",
+        lambda d: d["jobs"]["deployment"].pop("needs"),
+        "deployment runs on a draft",
+    ),
+    (
+        "production build on its own",
+        lambda d: d["jobs"]["web_production"].pop("needs"),
+        "web_production runs on a draft",
+    ),
+    (
+        "result job without the draft flag",
+        lambda d: step(d["jobs"]["ci_result"], "Require every CI job")["env"].pop(
+            "PULL_REQUEST_DRAFT"
+        ),
+        "result job blind to drafts",
+    ),
     (
         "decision in another script",
         lambda d: plan_job(d)["steps"][1].update(run="echo audit=false >> $GITHUB_OUTPUT"),

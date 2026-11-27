@@ -50,6 +50,10 @@ def read_needs(value: str) -> dict[str, dict[str, Any]]:
 
 def main(environ: Mapping[str, str] = os.environ) -> int:
     needs = read_needs(environ["NEEDS"])
+    # A skipped job reports success to a required check, so a draft's run must fail here.
+    if environ.get("PULL_REQUEST_DRAFT") == "true":
+        print("A draft pull request is not verified; mark it ready for review to run CI.")
+        return 1
     failed = failures(needs, environ["GITHUB_EVENT_NAME"])
     if failed:
         print(f"These CI jobs did not pass: {', '.join(failed)}.")

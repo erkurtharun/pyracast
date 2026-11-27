@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
 
 permissions:
@@ -16,6 +17,7 @@ concurrency:
 jobs:
   plan:
     name: Plan the checks
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-slim
     timeout-minutes: 5
     outputs:
@@ -31,6 +33,7 @@ jobs:
 
   deployment:
     name: Deployment configuration and containers
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
@@ -207,6 +210,7 @@ jobs:
 
   verify_ubuntu:
     name: Verify (ubuntu-latest)
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 75
     outputs:
@@ -294,6 +298,7 @@ jobs:
 
   web_ubuntu:
     name: Web (ubuntu-latest)
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 40
     outputs:
@@ -353,6 +358,7 @@ jobs:
 
   web_production:
     name: Web production build (ubuntu-latest)
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -398,6 +404,7 @@ jobs:
 
   scientific:
     name: Scientific (ubuntu-latest)
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -512,6 +519,7 @@ jobs:
       - name: Require every CI job
         env:
           NEEDS: ${{ toJSON(needs) }}
+          PULL_REQUEST_DRAFT: ${{ github.event.pull_request.draft }}
         run: python3 scripts/ci_result.py
 
   # Outside CI result, and no repository code runs here: the release compares this record of the

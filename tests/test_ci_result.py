@@ -99,6 +99,30 @@ def test_main_judges_the_skips_by_the_event_of_the_run() -> None:
     assert ci_result.main({"GITHUB_EVENT_NAME": "push", "NEEDS": skipped}) == 1
 
 
+def draft_needs() -> dict[str, dict[str, object]]:
+    return {name: {"result": "skipped"} for name in needs()}
+
+
+@pytest.mark.parametrize("run", [draft_needs(), needs()], ids=["jobs skipped", "jobs passed"])
+def test_a_draft_pull_request_run_is_never_a_pass(
+    run: dict[str, dict[str, object]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    environ = {"GITHUB_EVENT_NAME": "pull_request", "PULL_REQUEST_DRAFT": "true"}
+
+    assert ci_result.main({**environ, "NEEDS": json.dumps(run)}) == 1
+    assert capsys.readouterr().out == (
+        "A draft pull request is not verified; mark it ready for review to run CI.\n"
+    )
+
+
+@pytest.mark.parametrize("draft", ["false", ""])
+def test_a_pull_request_that_is_not_a_draft_is_judged_by_its_jobs(draft: str) -> None:
+    environ = {"GITHUB_EVENT_NAME": "pull_request", "PULL_REQUEST_DRAFT": draft}
+
+    assert ci_result.main({**environ, "NEEDS": json.dumps(needs())}) == 0
+    assert ci_result.main({**environ, "NEEDS": json.dumps(draft_needs())}) == 1
+
+
 @pytest.mark.parametrize("value", ["", "[]", "{}", '{"a": {}}', '{"a": []}'])
 def test_main_refuses_needs_it_cannot_read(value: str) -> None:
     with pytest.raises(ValueError, match="needs"):
