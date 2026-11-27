@@ -1,3 +1,4 @@
+import itertools
 from collections.abc import Iterator
 from contextlib import contextmanager
 from io import StringIO
@@ -13,6 +14,7 @@ from django.db.migrations.loader import MigrationLoader
 from django.db.models.signals import pre_migrate
 
 from pyracast.accounts.management.commands.migrate import MIGRATION_LOCK, migration_session
+from pyracast.migration_history import HISTORY
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -42,7 +44,7 @@ def test_standard_migrate_command_remains_idempotent() -> None:
     call_command("migrate", plan=True, verbosity=0)
 
 
-def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
+def test_the_project_migrations_on_disk_are_the_recorded_history_in_chain_order() -> None:
     loader = MigrationLoader(None)
     disk = loader.disk_migrations
     configs = [config for config in apps.get_app_configs() if config.name.startswith("pyracast.")]
@@ -57,92 +59,13 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
         }
         for app in project
     } == baseline
-    forward = {
-        "accounts": (
-            "0002_workspace_names_need_not_be_unique",
-            "0003_workspace_invitation_role",
-            "0004_invitation_and_administrator_change_checks",
-            "0005_schema_naming_convention",
-            "0006_expire_invitations_with_the_previous_link",
-            "0007_invitation_token_minted_at_send",
-            "0008_invitation_revocation_reason_and_acceptor",
-            "0009_workspace_administrator_names",
-        ),
-        "change_requests": (
-            "0002_change_vocabulary_checks",
-            "0003_decision_reason_and_incident_interval_checks",
-            "0004_schema_naming_convention",
-        ),
-        "connections": (
-            "0003_provider_account_and_binding_checks",
-            "0004_schema_naming_convention",
-            "0005_provider_account_key_fingerprint",
-        ),
-        "forecasts": (
-            "0002_collection_endpoint_and_request_purpose_checks",
-            "0003_lease_import_and_archive_checks",
-            "0004_schema_naming_convention",
-            "0005_collection_times_shape_check",
-            "0006_collection_outcomes_and_ledger_status",
-            "0007_remove_weather_reference",
-        ),
-        "incidents": (
-            "0002_incident_kind_choices",
-            "0003_schema_naming_convention",
-            "0004_create_idempotency_key",
-        ),
-        "metering": (
-            "0002_epias_vocabulary_choices",
-            "0003_lease_check_and_snapshot_trigger",
-            "0004_schema_naming_convention",
-            "0005_epias_connection_revisions",
-        ),
-        "notifications": (
-            "0002_delivery_vocabulary_checks",
-            "0003_delivery_lease_check",
-            "0004_recipient_and_time_shape_checks",
-            "0005_schema_naming_convention",
-            "0006_outbound_mail",
-            "0007_reminder_recipient_rows",
-            "0008_review_and_role_mail",
-            "0009_purge_warning_mail",
-            "0010_delivery_preparation_metadata",
-            "0011_recipient_roles",
-            "0012_recipient_limit_ceiling",
-            "0013_forecast_email_names",
-        ),
-        "plants": (
-            "0002_plant_event_action_and_calibration_error_checks",
-            "0003_lease_check_and_observation_trigger",
-            "0004_schema_naming_convention",
-            "0005_calibration_preparation_due_at",
-            "0006_submission_updated_at",
-            "0007_plant_parameters_revision",
-            "0008_calibration_run_available_at",
-            "0009_technical_details_names",
-            "0010_forecast_issuance_without_native_intervals",
-        ),
-        "regions": (
-            "0002_audit_event_details",
-            "0003_schema_naming_convention",
-            "0004_region_purge_started_at",
-            "0005_location_request_withdraw_and_decision_reason",
-            "0006_reminder_schedule_audit",
-            "0007_audit_region_resubmitted",
-            "0008_region_purge_warning_sent_at",
-            "0009_audit_connection_validation_failed",
-            "0010_region_created_audit_and_purge_findings",
-            "0011_plant_review_names",
-        ),
-    }
-    expected = {app: names | set(forward.get(app, ())) for app, names in baseline.items()}
-    assert {app: {name for label, name in disk if label == app} for app in project} == expected
-    for app, names in forward.items():
-        previous = "0002_initial" if app == "connections" else "0001_initial"
-        for name in names:
-            assert (app, previous) in disk[app, name].dependencies
-            previous = name
-        assert loader.graph.leaf_nodes(app) == [(app, previous)]
+    assert len(set(HISTORY)) == len(HISTORY) == 68
+    assert sorted(key for key in disk if key[0] in project) == sorted(HISTORY)
+    for app in project:
+        chain = [key for key in HISTORY if key[0] == app]
+        for previous, key in itertools.pairwise(chain):
+            assert previous in disk[key].dependencies
+        assert loader.graph.leaf_nodes(app) == [chain[-1]]
 
 
 @contextmanager
