@@ -164,6 +164,12 @@ msgstr "İki adımlı doğrulama açıldı"
 msgid "Two-step verification was turned off"
 msgstr "İki adımlı doğrulama kapatıldı"
 
+msgid "A passkey was added to your account"
+msgstr "Hesabınıza bir geçiş anahtarı eklendi"
+
+msgid "A passkey was removed from your account"
+msgstr "Hesabınızdan bir geçiş anahtarı kaldırıldı"
+
 msgid "New recovery codes were generated"
 msgstr "Yeni kurtarma kodları oluşturuldu"
 

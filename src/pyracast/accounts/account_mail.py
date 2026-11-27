@@ -49,6 +49,8 @@ NOTICES = {
     ),
     "mfa/email/totp_activated": Notice(_("Two-step verification was turned on")),
     "mfa/email/totp_deactivated": Notice(_("Two-step verification was turned off")),
+    OutboundMailKind.WEBAUTHN_ADDED: Notice(_("A passkey was added to your account")),
+    OutboundMailKind.WEBAUTHN_REMOVED: Notice(_("A passkey was removed from your account")),
     "account/email/second_factor_reset": Notice(
         _("Pyracast removed your two-step verification"),
         _("You were signed out on every device. Sign in again."),

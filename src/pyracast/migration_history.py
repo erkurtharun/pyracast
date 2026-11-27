@@ -46,6 +46,7 @@ HISTORY: tuple[tuple[str, str], ...] = (
     ("notifications", "0011_recipient_roles"),
     ("notifications", "0012_recipient_limit_ceiling"),
     ("notifications", "0013_forecast_email_names"),
+    ("notifications", "0014_passkey_mail_kinds"),
     ("plants", "0001_initial"),
     ("plants", "0002_plant_event_action_and_calibration_error_checks"),
     ("plants", "0003_lease_check_and_observation_trigger"),
