@@ -438,7 +438,12 @@ export async function watchStoreChunk(page: Page, held = false) {
         }
         await route.fulfill({ response, body });
     });
-    return { requested: () => requested, reached, release: () => release() };
+    return {
+        requested: () => requested,
+        reached,
+        release: () => release(),
+        stop: () => page.unrouteAll({ behavior: "wait" }),
+    };
 }
 
 function transpiled(name: string) {

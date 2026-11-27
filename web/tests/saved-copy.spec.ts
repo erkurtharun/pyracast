@@ -460,6 +460,7 @@ test("a sign-out whose store code loads late leaves a copy that another session 
             days: 2,
             marks: [signedOutHere],
         });
+    await chunk.stop();
 });
 
 test("a sign-out removal that runs after another session activated the copy leaves that holder and its figures", async ({
