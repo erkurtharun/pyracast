@@ -15,25 +15,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  plan:
-    name: Plan the checks
-    if: ${{ !github.event.pull_request.draft }}
-    runs-on: ubuntu-slim
-    timeout-minutes: 5
-    outputs:
-      audit: ${{ steps.audit.outputs.audit }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 2
-          persist-credentials: false
-      - name: Decide whether the dependency audits run
-        id: audit
-        run: python3 scripts/ci_plan.py >> "$GITHUB_OUTPUT"
-
   deployment:
     name: Deployment configuration and containers
-    needs: plan
+    if: &not-a-draft ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
@@ -210,7 +194,7 @@ jobs:
 
   verify_ubuntu:
     name: Verify (ubuntu-latest)
-    needs: plan
+    if: *not-a-draft
     runs-on: ubuntu-latest
     timeout-minutes: 75
     outputs:
@@ -298,7 +282,7 @@ jobs:
 
   web_ubuntu:
     name: Web (ubuntu-latest)
-    needs: plan
+    if: *not-a-draft
     runs-on: ubuntu-latest
     timeout-minutes: 40
     outputs:
@@ -358,7 +342,7 @@ jobs:
 
   web_production:
     name: Web production build (ubuntu-latest)
-    needs: plan
+    if: *not-a-draft
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -404,7 +388,7 @@ jobs:
 
   scientific:
     name: Scientific (ubuntu-latest)
-    needs: plan
+    if: *not-a-draft
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -426,8 +410,7 @@ jobs:
 
   audit:
     name: Dependency audit
-    needs: plan
-    if: needs.plan.outputs.audit == 'true'
+    if: *not-a-draft
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -508,7 +491,7 @@ jobs:
 
   ci_result:
     name: CI result
-    needs: [plan, deployment, verify_ubuntu, web_ubuntu, web_production, scientific, audit, sonar]
+    needs: [deployment, verify_ubuntu, web_ubuntu, web_production, scientific, audit, sonar]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-slim
     timeout-minutes: 5
@@ -526,7 +509,7 @@ jobs:
   # tested base and tree with the squash merge on main. Without it the merge takes the full path.
   pr_tested:
     name: Record the tested tree
-    needs: [plan, deployment, verify_ubuntu, web_ubuntu, web_production, scientific, audit, sonar, ci_result]
+    needs: [deployment, verify_ubuntu, web_ubuntu, web_production, scientific, audit, sonar, ci_result]
     if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.ci_result.result == 'success' }}
     runs-on: ubuntu-slim
     timeout-minutes: 5

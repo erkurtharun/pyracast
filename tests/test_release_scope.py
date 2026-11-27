@@ -466,7 +466,6 @@ WORKFLOW_FILES = frozenset(
 )
 JOBS_THAT_NEED_EVERY_PATH = frozenset(
     {
-        "ci.yml plan",
         "ci.yml verify_ubuntu",
         "ci.yml web_ubuntu",
         "ci.yml web_production",

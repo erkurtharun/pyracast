@@ -17,11 +17,6 @@ RELEASE_START_JOB = "Start the release of a proven merge"
 TESTED_TREE_JOB = "Record the tested tree"
 SONAR_JOB = "Sonar quality gate"
 STOP_JOB = "Stop the pull request run"
-AUDIT_JOB = "Dependency audit"
-# A pull request run skips the audit only when it changes none of its inputs, which are all
-# pipeline paths, so a squash proven early changes none either.
-PULL_REQUEST_RUN_SKIPS = frozenset({RELEASE_START_JOB, AUDIT_JOB})
-MAIN_RUN_SKIPS = frozenset({TESTED_TREE_JOB})
 CI_WORKFLOW_PATH = ".github/workflows/ci.yml"
 FACTS_FILE = "release-facts.json"
 DEPLOYMENTS_FILE = "release-deployments.json"
@@ -269,7 +264,7 @@ def _prove_early(facts: Mapping[str, Any], main: str, run: Mapping[str, Any] | N
     built = [job["conclusion"] for job in facts["jobs"] if job["name"] == IMAGE_JOB]
     if built != ["success"]:
         raise _UnprovenError(f"The image job of CI run {run['id']} has not passed")
-    skippable = _skippable(facts, MAIN_RUN_SKIPS)
+    skippable = _skippable(facts, TESTED_TREE_JOB)
     for job in facts["jobs"]:
         if job["conclusion"] not in {None, "success"} and not (
             job["conclusion"] == "skipped" and job["name"] in skippable
@@ -296,11 +291,11 @@ def _prove_early(facts: Mapping[str, Any], main: str, run: Mapping[str, Any] | N
     )
 
 
-def _skippable(facts: Mapping[str, Any], run_skips: frozenset[str]) -> frozenset[str]:
-    # Sonar skips only while off; the run's own skips and an idle stop job always skip.
+def _skippable(facts: Mapping[str, Any], other_event_job: str) -> frozenset[str]:
+    # Sonar skips only while off; the other event's job and an idle stop job always skip.
     if facts.get("sonar_enabled") is False:
-        return run_skips | {STOP_JOB, SONAR_JOB}
-    return run_skips | {STOP_JOB}
+        return frozenset({other_event_job, STOP_JOB, SONAR_JOB})
+    return frozenset({other_event_job, STOP_JOB})
 
 
 def _passed_every_job(jobs: Sequence[Mapping[str, Any]], skippable: Collection[str]) -> bool:
@@ -355,7 +350,7 @@ def _proof(facts: Mapping[str, Any], main: str) -> tuple[int, int]:
         )
     identifier = int(tested["id"])
     if (tested["status"], tested["conclusion"]) != ("completed", "success") or (
-        not _passed_every_job(proof["jobs"], _skippable(facts, PULL_REQUEST_RUN_SKIPS))
+        not _passed_every_job(proof["jobs"], _skippable(facts, RELEASE_START_JOB))
     ):
         raise _UnprovenError(
             f"CI run {identifier} of pull request #{number} did not pass every job"
