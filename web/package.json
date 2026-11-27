@@ -25,9 +25,9 @@
         "check:coverage": "npm run check:static && npm run test:coverage"
     },
     "dependencies": {
-        "@tanstack/react-query": "5.108.0",
+        "@tanstack/react-query": "5.108.2",
         "next": "16.4.6",
-        "next-intl": "4.15.1",
+        "next-intl": "4.15.3",
         "papaparse": "5.7.1",
         "qrcode.react": "4.2.0",
         "react": "19.3.1",
