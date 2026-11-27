@@ -73,6 +73,25 @@
             "retry": "Tekrar dene"
         }
     },
+    "Passkeys": {
+        "title": "Geçiş anahtarları",
+        "signIn": "Geçiş anahtarıyla giriş yap",
+        "verify": "Geçiş anahtarıyla doğrula",
+        "verifyOptions": "Geçiş anahtarıyla veya doğrulama koduyla onaylayın",
+        "verifyDescription": "Geçiş anahtarı, doğrulama uygulamanızdan bir kod veya kurtarma kodu kullanın.",
+        "codeDescription": "Parolanızla giriş yaptıktan sonra geçiş anahtarıyla veya kullanabileceğiniz bir kodla doğrulamayı tamamlayın.",
+        "add": "Geçiş anahtarı ekle",
+        "added": "Geçiş anahtarı eklendi.",
+        "remove": "Geçiş anahtarını kaldır ({name})",
+        "removeAction": "Kaldır",
+        "removed": "Geçiş anahtarı kaldırıldı.",
+        "empty": "Bu hesapta geçiş anahtarı yok.",
+        "unsupported": "Bu tarayıcı geçiş anahtarlarını desteklemiyor. Destekleyen başka bir tarayıcı kullanın.",
+        "cancelled": "Geçiş anahtarı kullanılmadı. Tekrar deneyin veya başka bir doğrulama yöntemi seçin.",
+        "failed": "Geçiş anahtarı kullanılamadı.",
+        "loadFailed": "Geçiş anahtarları yüklenemedi.",
+        "name": "Geçiş anahtarı adı (isteğe bağlı)"
+    },
     "Security": {
         "sessionExpired": "Çıkış yapıldı. Yeniden giriş yapın.",
         "verifyAuthenticator": "Devam etmek için doğrulama uygulamanızla onaylayın.",

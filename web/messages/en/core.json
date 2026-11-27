@@ -73,6 +73,25 @@
             "retry": "Try again"
         }
     },
+    "Passkeys": {
+        "title": "Passkeys",
+        "signIn": "Sign in with a passkey",
+        "verify": "Confirm with a passkey",
+        "verifyOptions": "Confirm with a passkey or a verification code",
+        "verifyDescription": "Use a passkey or enter a code from your authenticator app or recovery codes.",
+        "codeDescription": "After signing in with your password, complete verification with a passkey or an available code.",
+        "add": "Add a passkey",
+        "added": "Passkey added.",
+        "remove": "Remove passkey {name}",
+        "removeAction": "Remove",
+        "removed": "Passkey removed.",
+        "empty": "This account has no passkeys.",
+        "unsupported": "This browser cannot use passkeys. Use another supported browser.",
+        "cancelled": "No passkey was used. Try again or choose another available method.",
+        "failed": "Could not use the passkey.",
+        "loadFailed": "Could not load passkeys.",
+        "name": "Passkey name (optional)"
+    },
     "Security": {
         "sessionExpired": "You were signed out. Sign in again.",
         "verifyAuthenticator": "Confirm with your authenticator app to continue.",

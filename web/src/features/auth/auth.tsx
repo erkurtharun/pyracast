@@ -3,7 +3,8 @@ import { useLocale, useTranslations } from "next-intl";
 
 import { useEffect, useRef, useState } from "react";
 import { ApiError } from "@/lib/api/errors";
-import { authRequest, type AuthResult } from "@/lib/auth-api";
+import { authRequest, type AuthData, type AuthResult } from "@/lib/auth-api";
+import { usePasskeySupport } from "@/lib/passkeys";
 import { loadSession, signOut, useSessionState } from "@/lib/session-client";
 import { isLanguage } from "@/i18n/language";
 import { publicPath } from "@/lib/public-metadata";
@@ -22,6 +23,7 @@ import {
     receiveProviderReturn,
 } from "./provider-return";
 import { SocialProviderButtons } from "./social-provider-buttons";
+import { PasskeySignIn } from "./passkey-sign-in";
 import { LanguageSelect } from "@/ui/language-select";
 import { clearWorkspaceInvitation } from "@/features/workspace/workspace-invitation";
 import { LaunchCard } from "@/features/session/app-root";
@@ -86,6 +88,8 @@ export function Auth({
 }) {
     const t = useTranslations("Auth");
     const security = useTranslations("Security");
+    const passkeys = useTranslations("Passkeys");
+    const passkeySupported = usePasskeySupport();
     const { ended } = useSessionState();
     const locale = useLocale();
     const language = isLanguage(locale) ? locale : "en";
@@ -103,11 +107,22 @@ export function Auth({
     const [codeSentAt, setCodeSentAt] = useState(0);
     const [address, setAddress] = useState("");
     const [refusal, setRefusal] = useState<Refusal | null>(null);
+    const [flows, setFlows] = useState<AuthData["flows"]>();
     const [completing, setCompleting] = useState(
         () => callbackOutcome() === "succeeded",
     );
     const headingRef = useRef<HTMLHeadingElement>(null);
     const pending = isPending(mode);
+    const mfaTypes = flows?.find(
+        (flow) => flow.id === "mfa_authenticate",
+    )?.types;
+    const passkeyMfa = mode === "mfa" && !!mfaTypes?.includes("webauthn");
+    const codeMfa =
+        !passkeyMfa ||
+        mfaTypes?.some((type) => type === "totp" || type === "recovery_codes");
+    const passkeyLogin =
+        mode === "login" &&
+        flows?.some((flow) => flow.id === "mfa_login_webauthn");
 
     useEffect(() => {
         if (refusal) headingRef.current?.focus();
@@ -133,6 +148,7 @@ export function Auth({
             await loadSession();
             return;
         }
+        if (result.data?.flows) setFlows(result.data.flows);
         const next = modeForPendingFlow(result);
         if (next === "socialSignup" || next === "mfa") {
             enter(next);
@@ -168,6 +184,7 @@ export function Auth({
                 refused = completed === "refused";
                 const result = await authRequest("auth/session", "GET");
                 if (!active) return;
+                setFlows(result.data?.flows);
                 setSocialError(callbackError || refused);
                 if (takePasswordChanged()) setMessage("passwordChanged");
                 const next = modeForPendingFlow(result);
@@ -274,70 +291,86 @@ export function Auth({
                         />
                     ) : (
                         <>
-                            <StageGuide mode={mode} address={address} />
-                            <ActionForm
-                                key={mode}
-                                guard={false}
-                                permitted
-                                success={null}
-                                errorTitle={
-                                    {
-                                        login: t("signInFailed"),
-                                        mfa: t("signInFailed"),
-                                        register: t("registrationFailed"),
-                                        socialSignup: t("registrationFailed"),
-                                        verify: t("verificationFailed"),
-                                        forgot: t("resetFailed"),
-                                        reset: t("resetFailed"),
-                                    }[mode]
-                                }
-                                submit={
-                                    {
-                                        login: t("signIn"),
-                                        register: createLabel,
-                                        verify: t("verifyEmail"),
-                                        mfa: t("verifyCode"),
-                                        forgot: t("sendReset"),
-                                        reset: t("resetPassword"),
-                                        socialSignup: createLabel,
-                                    }[mode]
-                                }
-                                onSubmit={async (data) => {
-                                    const payload = Object.fromEntries(data);
-                                    if (
-                                        (mode === "register" ||
-                                            mode === "socialSignup") &&
-                                        invitationToken
-                                    )
-                                        payload.invitation_token =
-                                            invitationToken;
-                                    if (typeof payload.email === "string")
-                                        setAddress(payload.email);
-                                    const step = await submitAuth(
-                                        mode,
-                                        payload,
-                                        t,
-                                    );
-                                    if ("refusal" in step) {
-                                        setMessage("");
-                                        setRefusal(step.refusal);
-                                        return;
-                                    }
-                                    if ("result" in step) {
-                                        await finish(step.result);
-                                        return;
-                                    }
-                                    enter(step.mode, step.message);
-                                }}
-                            >
-                                <AuthFields
-                                    mode={mode}
-                                    invitationToken={invitationToken}
-                                    socialEmail={socialEmail}
-                                    showPassword={showPassword}
-                                    onShowPassword={setShowPassword}
+                            {passkeyMfa ? (
+                                codeMfa && <p>{passkeys("verifyDescription")}</p>
+                            ) : (
+                                <StageGuide mode={mode} address={address} />
+                            )}
+                            {passkeySupported && (passkeyLogin || passkeyMfa) && (
+                                <PasskeySignIn
+                                    key={mode}
+                                    secondFactor={passkeyMfa}
+                                    onResult={finish}
                                 />
-                            </ActionForm>
+                            )}
+                            {!passkeySupported && passkeyMfa && !codeMfa && (
+                                <Notice>{passkeys("unsupported")}</Notice>
+                            )}
+                            {codeMfa && (
+                                <ActionForm
+                                    key={mode}
+                                    guard={false}
+                                    permitted
+                                    success={null}
+                                    errorTitle={
+                                        {
+                                            login: t("signInFailed"),
+                                            mfa: t("signInFailed"),
+                                            register: t("registrationFailed"),
+                                            socialSignup: t("registrationFailed"),
+                                            verify: t("verificationFailed"),
+                                            forgot: t("resetFailed"),
+                                            reset: t("resetFailed"),
+                                        }[mode]
+                                    }
+                                    submit={
+                                        {
+                                            login: t("signIn"),
+                                            register: createLabel,
+                                            verify: t("verifyEmail"),
+                                            mfa: t("verifyCode"),
+                                            forgot: t("sendReset"),
+                                            reset: t("resetPassword"),
+                                            socialSignup: createLabel,
+                                        }[mode]
+                                    }
+                                    onSubmit={async (data) => {
+                                        const payload = Object.fromEntries(data);
+                                        if (
+                                            (mode === "register" ||
+                                                mode === "socialSignup") &&
+                                            invitationToken
+                                        )
+                                            payload.invitation_token =
+                                                invitationToken;
+                                        if (typeof payload.email === "string")
+                                            setAddress(payload.email);
+                                        const step = await submitAuth(
+                                            mode,
+                                            payload,
+                                            t,
+                                        );
+                                        if ("refusal" in step) {
+                                            setMessage("");
+                                            setRefusal(step.refusal);
+                                            return;
+                                        }
+                                        if ("result" in step) {
+                                            await finish(step.result);
+                                            return;
+                                        }
+                                        enter(step.mode, step.message);
+                                    }}
+                                >
+                                    <AuthFields
+                                        mode={mode}
+                                        invitationToken={invitationToken}
+                                        socialEmail={socialEmail}
+                                        showPassword={showPassword}
+                                        onShowPassword={setShowPassword}
+                                    />
+                                </ActionForm>
+                            )}
                             {mode === "verify" && (
                                 <ResendCode
                                     key={codeSentAt}
