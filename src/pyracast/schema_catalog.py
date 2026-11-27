@@ -1,5 +1,5 @@
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 from django.db.backends.base.base import BaseDatabaseWrapper
@@ -278,10 +278,14 @@ def statement(reads: Mapping[str, sql.Composable]) -> sql.Composed:
 QUERY = statement(READS)
 
 
+def catalog_of(reads: Iterable[tuple[str, list[list[str]]]]) -> Catalog:
+    return {name: sorted(rows) for name, rows in sorted(reads)}
+
+
 def read_catalog(connection: BaseDatabaseWrapper) -> Catalog:
     with connection.cursor() as cursor:
         cursor.execute(QUERY)
-        return {name: sorted(rows) for name, rows in sorted(cursor.fetchall())}
+        return catalog_of(cursor.fetchall())
 
 
 def _by_name(rows: list[list[str]], width: int) -> dict[str, list[list[str]]]:
