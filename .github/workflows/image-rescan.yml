@@ -75,6 +75,7 @@ jobs:
         if: env.IMAGE_RESCAN == ''
         with:
           version: v0.39.0
+          cache-binary: false
           driver-opts: image=moby/buildkit:v0.35.0@sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb
       - name: Build the production backend
         if: env.IMAGE_RESCAN == ''
@@ -85,7 +86,6 @@ jobs:
           platforms: linux/amd64
           tags: pyracast-backend:ci
           load: true
-          cache-from: type=gha,scope=backend-linux-amd64,timeout=2m
       - name: Build the production web
         if: env.IMAGE_RESCAN == ''
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -95,7 +95,6 @@ jobs:
           platforms: linux/amd64
           tags: pyracast-web:ci
           load: true
-          cache-from: type=gha,scope=web-linux-amd64,timeout=2m
       - name: Build the production gateway
         if: env.IMAGE_RESCAN == ''
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -104,7 +103,6 @@ jobs:
           platforms: linux/amd64
           tags: pyracast-gateway:ci
           load: true
-          cache-from: type=gha,scope=gateway-linux-amd64,timeout=2m
       - name: Build the production PostgreSQL image
         if: env.IMAGE_RESCAN == ''
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -113,7 +111,6 @@ jobs:
           platforms: linux/amd64
           tags: pyracast-postgres:ci
           load: true
-          cache-from: type=gha,scope=postgres-linux-amd64,timeout=2m
       - name: Build the production RabbitMQ image
         if: env.IMAGE_RESCAN == ''
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -122,7 +119,6 @@ jobs:
           platforms: linux/amd64
           tags: pyracast-rabbitmq:ci
           load: true
-          cache-from: type=gha,scope=rabbitmq-linux-amd64,timeout=2m
       - name: Scan every image; block every high or critical vulnerability
         if: env.IMAGE_RESCAN == ''
         run: |

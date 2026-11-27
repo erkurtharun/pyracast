@@ -258,7 +258,9 @@ The checkout action leaves those unshipped paths out of the checkout of every wo
 checks out code, except those that test, analyse or report on the whole repository (patterns: output of `python3 deploy/release_scope.py sparse-patterns`). A pull request's CI builds, scans and
 smoke-tests the images from that checkout, so an image build that needs a listed path fails there;
 such a path does not belong on the list. Release's own jobs use the same checkout but first run in
-the release after a merge.
+the release after a merge. The images a release ships come from a CI run on `main`, which builds
+them without importing the shared build cache and is the only run that writes it; pull request
+runs import it and write nothing.
 
 The deploy account can administer the VM; protect repository administration and the production
 environment as a production trust boundary.
@@ -500,6 +502,7 @@ A failed watchdog step by hand, in `/opt/pyracast/current` with
 | Watchdog heartbeat missing | No heartbeat for fifteen minutes | As for `pyracast_watchdog_heartbeat` |
 | Repeated container restarts | Three watchdog runs within an hour restarted containers | As for `pyracast_runtime_restarted` |
 | Security alerts (`sign_in_lockouts`, `second_factor_lockouts`, `authorization_refusals`, `csrf_refusals`, `invitation_limits`, `proxy_headers`, `admin_factor`) | `pyracast.security` lines of that event crossed their ten-minute threshold | Read those lines in the `pyracast-security` bucket for the clients, accounts or workspaces involved; for `proxy_headers` check the gateway and the peer address; for `admin_factor` confirm that the change was planned |
+| Project access changed | The project's IAM policy (members, owners, audit configuration) or one of its custom roles changed | Expected during a reviewed Terraform apply. Otherwise read the entry in the Admin Activity audit log (method `SetIamPolicy` or `google.iam.admin.v1.*Role`) for who changed what, undo the change and take that right from whoever made it |
 
 ## Database reset and restore
 

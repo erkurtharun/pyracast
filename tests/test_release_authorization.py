@@ -38,6 +38,27 @@ RECORD_STARTED = "2026-11-21T04:50:00Z"
 RECORDED = "2026-11-21T04:50:30Z"
 RECORD_ENDED = "2026-11-21T04:51:00Z"
 GIT = shutil.which("git")
+IMAGE_JOB = "Deployment configuration and containers"
+FIRST_ATTEMPT_STARTED = "2026-11-21T04:10:00Z"
+UNBOUND_IMAGES = "Deployment configuration and containers job of that attempt"
+IMAGE_BUILDS = {
+    1: ("2026-11-21T04:11:00Z", "2026-11-21T04:18:00Z", "2026-11-21T04:19:00Z"),
+    2: ("2026-11-21T05:01:00Z", "2026-11-21T05:08:00Z", "2026-11-21T05:09:00Z"),
+}
+
+
+def image_job(attempt: int, conclusion: str | None = "success", **changes: Any) -> dict[str, Any]:
+    started, _, completed = IMAGE_BUILDS[attempt]
+    job = {"name": IMAGE_JOB, "conclusion": conclusion}
+    return job | {"started_at": started, "completed_at": completed} | changes
+
+
+def run_jobs(image_attempt: int = 2) -> list[dict[str, Any]]:
+    return [
+        {"name": "Verify (ubuntu-latest)", "conclusion": "success"},
+        image_job(image_attempt),
+        {"name": "CI result", "conclusion": "success"},
+    ]
 
 
 def facts(run_changes: dict[str, Any] | None = None, **changes: Any) -> dict[str, Any]:
@@ -64,14 +85,12 @@ def facts(run_changes: dict[str, Any] | None = None, **changes: Any) -> dict[str
             "run_started_at": STARTED,
             **(run_changes or {}),
         },
-        "jobs": [
-            {"name": "Verify (ubuntu-latest)", "conclusion": "success"},
-            {"name": "CI result", "conclusion": "success"},
-        ],
+        "jobs": run_jobs(),
         "artifacts": [
-            {"id": 91, "name": f"release-images-{MAIN}-2", "expired": False, "head_sha": MAIN},
+            images(2, 91),
             {"id": 92, "name": "coverage-2", "expired": False, "head_sha": MAIN},
         ],
+        "earlier_attempts": [{"attempt": 1, "run_started_at": FIRST_ATTEMPT_STARTED}],
         "deployments": [],
         "sonar_enabled": True,
         "release_attempt": 1,
@@ -162,11 +181,21 @@ def test_only_a_single_passing_ci_result_job_authorizes(jobs: list[dict[str, str
 
 def images(attempt: int, artifact: int = 91, **changes: Any) -> dict[str, Any]:
     name = f"release-images-{MAIN}-{attempt}"
-    return {"id": artifact, "name": name, "expired": False, "head_sha": MAIN, **changes}
+    uploaded = IMAGE_BUILDS[attempt][1] if attempt in IMAGE_BUILDS else None
+    return {
+        "id": artifact,
+        "name": name,
+        "expired": False,
+        "head_sha": MAIN,
+        "created_at": uploaded,
+        **changes,
+    }
 
 
 def test_a_partial_rerun_releases_the_images_of_the_attempt_that_built_them() -> None:
-    assert decide(facts(artifacts=[images(1, 90)])) == authorized(ci_run_attempt=1, artifact_id=90)
+    kept = facts(artifacts=[images(1, 90)], jobs=run_jobs(image_attempt=1))
+
+    assert decide(kept) == authorized(ci_run_attempt=1, artifact_id=90)
 
 
 def test_images_rebuilt_in_a_later_attempt_replace_the_earlier_ones() -> None:
@@ -175,10 +204,113 @@ def test_images_rebuilt_in_a_later_attempt_replace_the_earlier_ones() -> None:
 
 def test_a_later_ci_attempt_leaves_the_images_of_the_authorizing_attempt_in_place() -> None:
     artifacts = [images(1, 90), images(2, 91)]
-
-    assert decide(facts({"run_attempt": 1}, artifacts=artifacts)) == authorized(
-        ci_run_attempt=1, artifact_id=90
+    first = facts(
+        {"run_attempt": 1, "run_started_at": FIRST_ATTEMPT_STARTED},
+        artifacts=artifacts,
+        jobs=run_jobs(image_attempt=1),
     )
+
+    assert decide(first) == authorized(
+        ci_run_attempt=1, artifact_id=90, ci_started_at=FIRST_ATTEMPT_STARTED
+    )
+
+
+@pytest.mark.parametrize(
+    ("artifact", "jobs"),
+    [
+        (images(2, created_at=IMAGE_BUILDS[1][1]), run_jobs(image_attempt=1)),
+        (images(2, created_at=IMAGE_BUILDS[1][1]), run_jobs()),
+        (images(2, created_at="2026-11-21T05:30:00Z"), run_jobs(image_attempt=1)),
+        (images(2, created_at="2026-11-21T05:00:59Z"), run_jobs()),
+        (images(2, created_at="2026-11-21T05:09:01Z"), run_jobs()),
+        (images(2, created_at=None), run_jobs()),
+        (images(2), [job for job in run_jobs() if job["name"] != IMAGE_JOB]),
+        (images(2), [*run_jobs(), image_job(2)]),
+        (images(2), [*run_jobs()[:1], image_job(2, completed_at=None), *run_jobs()[2:]]),
+    ],
+    ids=[
+        "named for a re-run but uploaded while the kept image job ran",
+        "uploaded in an earlier attempt",
+        "uploaded after the kept image job ended",
+        "uploaded before the image job started",
+        "uploaded after the image job ended",
+        "no upload time",
+        "no image job",
+        "two image jobs",
+        "image job without an end",
+    ],
+)
+def test_only_images_uploaded_while_the_image_job_of_their_attempt_ran_are_released(
+    artifact: dict[str, Any], jobs: list[dict[str, Any]]
+) -> None:
+    with pytest.raises(RefusedError, match=UNBOUND_IMAGES):
+        decide(facts(artifacts=[images(1, 90), artifact], jobs=jobs))
+
+
+def test_kept_images_need_the_start_of_the_attempt_their_name_carries() -> None:
+    kept = facts(artifacts=[images(1, 90)], jobs=run_jobs(image_attempt=1), earlier_attempts=[])
+
+    with pytest.raises(RefusedError, match=UNBOUND_IMAGES):
+        decide(kept)
+
+
+def test_images_uploaded_at_the_first_or_last_second_of_the_image_job_are_released() -> None:
+    started, _, completed = IMAGE_BUILDS[2]
+    for at in (started, completed):
+        assert decide(facts(artifacts=[images(2, created_at=at)])) == authorized()
+
+
+def test_images_named_for_an_earlier_attempt_but_created_in_the_rebuilt_image_job_are_refused() -> (
+    None
+):
+    renamed = images(1, 90, created_at=IMAGE_BUILDS[2][1])
+
+    with pytest.raises(RefusedError, match=UNBOUND_IMAGES):
+        decide(facts(artifacts=[renamed], jobs=run_jobs()))
+    deferred(
+        early(run={"run_attempt": 2}, artifacts=[renamed], jobs=[image_job(2)]),
+        "No unexpired image artifact of attempt 2",
+    )
+
+
+def without(value: dict[str, Any], key: str) -> dict[str, Any]:
+    return {name: item for name, item in value.items() if name != key}
+
+
+def absent_image_facts() -> list[dict[str, Any]]:
+    kept_without_start = facts(
+        artifacts=[images(1, 90)],
+        jobs=run_jobs(image_attempt=1),
+        earlier_attempts=[{"attempt": 1}],
+    )
+    run_without_start = facts()
+    run_without_start["run"] = without(run_without_start["run"], "run_started_at")
+    return [
+        facts(artifacts=[without(images(2), "created_at")]),
+        facts(jobs=[without(image_job(2), "started_at"), *run_jobs()[2:]]),
+        facts(jobs=[without(image_job(2), "completed_at"), *run_jobs()[2:]]),
+        kept_without_start,
+        run_without_start,
+    ]
+
+
+ABSENT_IMAGE_FACTS = [
+    "no creation time",
+    "no image job start",
+    "no image job end",
+    "no start of the earlier attempt",
+    "no start of the run's attempt",
+]
+
+
+@pytest.mark.parametrize("value", absent_image_facts(), ids=ABSENT_IMAGE_FACTS)
+def test_a_whole_run_whose_image_binding_lacks_a_time_is_refused_and_says_why(
+    tmp_path: Path, value: dict[str, Any]
+) -> None:
+    status, outputs, summary = run_main(tmp_path, value)
+
+    assert (status, outputs) == (1, {"authorized": "false"})
+    assert summary.startswith("Refused: The image artifact of attempt")
 
 
 def test_a_release_rerun_after_its_cleanup_finds_no_earlier_build_to_deploy() -> None:
@@ -308,9 +440,11 @@ def test_a_partial_rerun_of_main_after_a_release_of_its_earlier_images_is_supers
 
 
 def test_a_full_rerun_of_main_that_rebuilt_its_images_is_judged_on_its_own() -> None:
+    rebuilt = image_job(2, started_at="2026-11-21T05:21:00Z", completed_at="2026-11-21T05:29:00Z")
     value = facts(
         {"run_started_at": RERUN_STARTED},
-        artifacts=[images(1, 90), images(2, 91)],
+        artifacts=[images(1, 90), images(2, 91, created_at="2026-11-21T05:28:00Z")],
+        jobs=[rebuilt, {"name": "CI result", "conclusion": "success"}],
         deployments=[deployment()],
     )
 
@@ -318,7 +452,11 @@ def test_a_full_rerun_of_main_that_rebuilt_its_images_is_judged_on_its_own() -> 
 
 
 def test_a_partial_rerun_measures_earlier_releases_from_the_creation_of_its_run() -> None:
-    value = facts({"run_started_at": RERUN_STARTED}, artifacts=[images(1, 90)])
+    value = facts(
+        {"run_started_at": RERUN_STARTED},
+        artifacts=[images(1, 90)],
+        jobs=run_jobs(image_attempt=1),
+    )
 
     assert decide(value) == authorized(ci_run_attempt=1, artifact_id=90, ci_started_at=STARTED)
 
@@ -335,10 +473,10 @@ def test_the_released_check_needs_a_readable_start_of_the_ci_run() -> None:
     assert released_since([deployment()], MAIN, STARTED, {"success"})
 
 
-IMAGE_JOB = "Deployment configuration and containers"
 SONAR = "Sonar quality gate"
 RECORD = "Record the tested tree"
 RELEASE_START = "Start the release of a proven merge"
+STOP = "Stop the pull request run"
 PULL_REQUEST_JOBS = [
     IMAGE_JOB,
     "Verify (ubuntu-latest)",
@@ -363,15 +501,22 @@ def early(
     **changes: Any,
 ) -> dict[str, Any]:
     value = facts(
-        {"status": "in_progress", "conclusion": None, "run_attempt": 1, **(run or {})},
+        {
+            "status": "in_progress",
+            "conclusion": None,
+            "run_attempt": 1,
+            "run_started_at": FIRST_ATTEMPT_STARTED,
+            **(run or {}),
+        },
         event="workflow_dispatch",
         requested_run={"id": 7001, "attempt": 1},
         jobs=[
-            {"name": IMAGE_JOB, "conclusion": "success"},
+            image_job(1),
             {"name": "Verify (ubuntu-latest)", "conclusion": None},
             {"name": "CI result", "conclusion": None},
         ],
         artifacts=[images(1, 91)],
+        earlier_attempts=[],
     )
     value["commit"] = {
         "tree": TREE,
@@ -453,7 +598,12 @@ def pull_request_job(name: str, conclusion: str | None, **changes: Any) -> dict[
 
 
 def proven() -> Authorized:
-    return authorized(ci_run_attempt=1, pull_request=82, pull_request_run=6001)
+    return authorized(
+        ci_run_attempt=1,
+        ci_started_at=FIRST_ATTEMPT_STARTED,
+        pull_request=82,
+        pull_request_run=6001,
+    )
 
 
 def deferred(value: dict[str, Any], reason: str) -> Deferred:
@@ -483,6 +633,24 @@ def test_the_pull_request_run_may_skip_the_release_start_and_sonar_while_sonar_i
 
     assert decide(early(tested_jobs=started_on_main_only)) == proven()
     assert decide(early(tested_jobs=sonar_off, sonar_enabled=False)) == proven()
+
+
+def test_a_pull_request_run_and_a_main_run_may_skip_their_stop_jobs() -> None:
+    stops = [{"name": STOP, "conclusion": "skipped"} for _ in range(6)]
+    tested = [*jobs_with(SONAR, "success"), *stops]
+    running = [*running_jobs(), *stops]
+
+    assert decide(early(tested_jobs=tested)) == proven()
+    assert decide(early(jobs=running)) == proven()
+
+
+@pytest.mark.parametrize("conclusion", ["failure", "cancelled"])
+def test_a_pull_request_run_whose_stop_job_ended_without_success_is_no_proof(
+    conclusion: str,
+) -> None:
+    stopped = [*jobs_with(SONAR, "success"), {"name": STOP, "conclusion": conclusion}]
+
+    deferred(early(tested_jobs=stopped), "did not pass every job")
 
 
 @pytest.mark.parametrize("enabled", [True, "false", None, "absent"])
@@ -521,6 +689,25 @@ def record_job(**changes: Any) -> list[dict[str, Any]]:
             ),
             "not recorded",
         ),
+        (
+            early(
+                tested={"run_attempt": 2, "run_started_at": "2026-11-21T04:55:00Z"},
+                evidence=[evidence_artifact(attempt=2)],
+            ),
+            "not recorded",
+        ),
+        (early(tested={"run_started_at": None}), "not recorded"),
+    ],
+    ids=[
+        "before the record job",
+        "after the record job",
+        "no record time",
+        "record job without an end",
+        "unreadable record job start",
+        "two record jobs",
+        "no record job",
+        "record job kept from an earlier attempt",
+        "no start of the tested attempt",
     ],
 )
 def test_only_a_record_made_while_the_record_job_ran_is_evidence(
@@ -759,13 +946,15 @@ def test_a_failed_git_read_waits_for_the_whole_run() -> None:
 @pytest.mark.parametrize(
     ("value", "reason"),
     [
-        (early(jobs=[{"name": IMAGE_JOB, "conclusion": None}]), "image job"),
-        (early(jobs=[{"name": IMAGE_JOB, "conclusion": "failure"}]), "image job"),
+        (early(jobs=[image_job(1, None)]), "image job"),
+        (early(jobs=[image_job(1, "failure")]), "image job"),
         (early(jobs=[]), "image job"),
         (early(artifacts=[]), "image artifact"),
         (early(artifacts=[images(1, expired=True)]), "image artifact"),
         (early(artifacts=[images(1, head_sha=OLDER)]), "image artifact"),
         (early(run={"run_attempt": 2}, artifacts=[images(1, 90)]), "image artifact"),
+        (early(artifacts=[images(1, created_at="2026-11-21T04:20:00Z")]), UNBOUND_IMAGES),
+        (early(run={"run_started_at": "2026-11-21T04:11:01Z"}), UNBOUND_IMAGES),
     ],
 )
 def test_an_early_release_needs_the_images_this_attempt_built_while_the_run_goes_on(
@@ -774,9 +963,31 @@ def test_an_early_release_needs_the_images_this_attempt_built_while_the_run_goes
     deferred(value, reason)
 
 
+def absent_early_facts() -> list[dict[str, Any]]:
+    run_without_start = early()
+    run_without_start["run"] = without(run_without_start["run"], "run_started_at")
+    return [
+        early(artifacts=[without(images(1), "created_at")]),
+        early(jobs=[without(image_job(1), "started_at")]),
+        early(jobs=[without(image_job(1), "completed_at")]),
+        run_without_start,
+    ]
+
+
+@pytest.mark.parametrize(
+    "value",
+    absent_early_facts(),
+    ids=["no creation time", "no image job start", "no image job end", "no start of the attempt"],
+)
+def test_an_early_start_whose_image_binding_lacks_a_time_waits_for_the_whole_run(
+    value: dict[str, Any],
+) -> None:
+    deferred(value, UNBOUND_IMAGES)
+
+
 def running_jobs(*finished: tuple[str, str]) -> list[dict[str, Any]]:
     return [
-        {"name": IMAGE_JOB, "conclusion": "success"},
+        image_job(1),
         *({"name": name, "conclusion": conclusion} for name, conclusion in finished),
         {"name": "Verify (ubuntu-latest)", "conclusion": None},
         {"name": "CI result", "conclusion": None},
@@ -855,22 +1066,26 @@ def test_a_later_attempt_of_an_early_release_is_still_judged_on_its_facts() -> N
     assert decide(early(release_attempt=2)) == proven()
     deferred(early(release_attempt=2, evidence=[]), "no single tested tree")
     assert decide(ended(proof={"error": "Request timed out"}, release_attempt=2)) == (
-        authorized(ci_run_attempt=1)
+        released_whole_run()
     )
 
 
 def ended(conclusion: str = "success", **changes: Any) -> dict[str, Any]:
     value = early(run={"status": "completed", "conclusion": conclusion}, **changes)
     value["jobs"] = [
-        {"name": IMAGE_JOB, "conclusion": "success"},
+        image_job(1),
         {"name": "CI result", "conclusion": "success" if conclusion == "success" else "failure"},
     ]
     return value
 
 
+def released_whole_run() -> Authorized:
+    return authorized(ci_run_attempt=1, ci_started_at=FIRST_ATTEMPT_STARTED)
+
+
 def test_an_early_start_judged_after_its_run_succeeded_releases_by_the_whole_run_rule() -> None:
-    assert decide(ended()) == authorized(ci_run_attempt=1)
-    assert decide(ended(proof={"error": "Request timed out"})) == authorized(ci_run_attempt=1)
+    assert decide(ended()) == released_whole_run()
+    assert decide(ended(proof={"error": "Request timed out"})) == released_whole_run()
 
 
 def test_an_early_start_judged_after_its_run_was_released_is_superseded() -> None:
@@ -1123,9 +1338,7 @@ def evidence_for(repository: Path) -> dict[str, Any]:
         value[key] = head
     value["run"]["head_sha"] = head
     value["proof"]["pull_requests"][0]["merge_commit_sha"] = head
-    value["artifacts"] = [
-        {"id": 91, "name": f"release-images-{head}-1", "expired": False, "head_sha": head}
-    ]
+    value["artifacts"] = [{**images(1, 91), "name": f"release-images-{head}-1", "head_sha": head}]
     return value
 
 
@@ -1381,3 +1594,15 @@ def test_a_command_reading_a_file_refuses_to_run_without_the_runner_temp_directo
     assert exit_info.value.code == 2
     assert "RUNNER_TEMP is required" in capsys.readouterr().err
     assert not (tmp_path / "output").exists()
+
+
+def test_a_run_attempt_without_the_starts_of_its_earlier_attempts_is_refused_at_once() -> None:
+    huge = facts(
+        run_changes={"run_attempt": 10**12},
+        artifacts=[images(1, 90)],
+        jobs=run_jobs(image_attempt=1),
+        earlier_attempts=[],
+    )
+
+    with pytest.raises(RefusedError, match=UNBOUND_IMAGES):
+        decide(huge)

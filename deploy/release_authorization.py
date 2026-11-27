@@ -16,6 +16,7 @@ IMAGE_JOB = "Deployment configuration and containers"
 RELEASE_START_JOB = "Start the release of a proven merge"
 TESTED_TREE_JOB = "Record the tested tree"
 SONAR_JOB = "Sonar quality gate"
+STOP_JOB = "Stop the pull request run"
 CI_WORKFLOW_PATH = ".github/workflows/ci.yml"
 FACTS_FILE = "release-facts.json"
 DEPLOYMENTS_FILE = "release-deployments.json"
@@ -219,7 +220,9 @@ def _decide_whole_run(
             "repeated jobs ended."
         )
     attempt, artifact = _newest_images(facts["artifacts"], main, int(run["run_attempt"]))
-    return Authorized(main, int(run["id"]), attempt, artifact, since)
+    if not _built_by_image_job(facts, run, artifact, attempt):
+        raise RefusedError(_unbuilt_images(attempt))
+    return Authorized(main, int(run["id"]), attempt, int(artifact["id"]), since)
 
 
 def _release_baseline(
@@ -272,14 +275,16 @@ def _prove_early(facts: Mapping[str, Any], main: str, run: Mapping[str, Any] | N
     try:
         built_in, artifact = _newest_images(facts["artifacts"], main, attempt)
     except RefusedError:
-        built_in, artifact = 0, 0
+        built_in, artifact = 0, {}
     if built_in != attempt:
         raise _UnprovenError(f"No unexpired image artifact of attempt {attempt} exists")
+    if not _built_by_image_job(facts, run, artifact, attempt):
+        raise _UnprovenError(_unbuilt_images(attempt))
     return Authorized(
         main,
         int(run["id"]),
         attempt,
-        artifact,
+        int(artifact["id"]),
         _release_baseline(run, facts["artifacts"], main),
         pull_request,
         pull_request_run,
@@ -287,11 +292,10 @@ def _prove_early(facts: Mapping[str, Any], main: str, run: Mapping[str, Any] | N
 
 
 def _skippable(facts: Mapping[str, Any], other_event_job: str) -> frozenset[str]:
-    # A job that gates the release may be skipped only while it is switched off for the
-    # repository; the other job never runs for this event.
+    # Sonar skips only while off; the other event's job and an idle stop job always skip.
     if facts.get("sonar_enabled") is False:
-        return frozenset({other_event_job, SONAR_JOB})
-    return frozenset({other_event_job})
+        return frozenset({other_event_job, STOP_JOB, SONAR_JOB})
+    return frozenset({other_event_job, STOP_JOB})
 
 
 def _passed_every_job(jobs: Sequence[Mapping[str, Any]], skippable: Collection[str]) -> bool:
@@ -364,7 +368,8 @@ def _proof(facts: Mapping[str, Any], main: str) -> tuple[int, int]:
         )
     ((match, artifact),) = evidence
     recorders = [job for job in proof["jobs"] if job["name"] == TESTED_TREE_JOB]
-    if len(recorders) != 1 or not _recorded_by(artifact, recorders[0]):
+    tested_start = {attempt: tested.get("run_started_at")}
+    if len(recorders) != 1 or not _made_by(artifact, recorders[0], attempt, tested_start):
         raise _UnprovenError(
             f"The tested tree of CI run {identifier} was not recorded by its {TESTED_TREE_JOB} job"
         )
@@ -391,13 +396,56 @@ def _proof(facts: Mapping[str, Any], main: str) -> tuple[int, int]:
     return number, identifier
 
 
-def _recorded_by(artifact: Mapping[str, Any], job: Mapping[str, Any]) -> bool:
-    # Only the record job runs no repository code; a record made outside its run is not its own.
+def _made_by(
+    artifact: Mapping[str, Any],
+    job: Mapping[str, Any],
+    attempt: int,
+    attempt_starts: Mapping[int, object],
+) -> bool:
     try:
-        created = _instant(artifact["created_at"])
-        return _instant(job["started_at"]) <= created <= _instant(job["completed_at"])
+        started = _instant(job.get("started_at"))
+        created = _instant(artifact.get("created_at"))
+        ended = _instant(job.get("completed_at"))
+        return _attempt_of(started, attempt_starts) == attempt and started <= created <= ended
     except (TypeError, ValueError):
         return False
+
+
+def _attempt_of(started: datetime, attempt_starts: Mapping[int, object]) -> int | None:
+    # A re-run lists the jobs it kept with the times of the attempt that ran them.
+    begun = [attempt for attempt, start in attempt_starts.items() if _instant(start) <= started]
+    return max(begun, default=None)
+
+
+def _built_by_image_job(
+    facts: Mapping[str, Any], run: Mapping[str, Any], artifact: Mapping[str, Any], attempt: int
+) -> bool:
+    builders = [job for job in facts["jobs"] if job["name"] == IMAGE_JOB]
+    starts = _attempt_starts(facts, run)
+    return (
+        len(builders) == 1
+        and starts is not None
+        and _made_by(artifact, builders[0], attempt, starts)
+    )
+
+
+def _attempt_starts(facts: Mapping[str, Any], run: Mapping[str, Any]) -> dict[int, object] | None:
+    current = int(run["run_attempt"])
+    starts = {
+        entry.get("attempt"): entry.get("run_started_at")
+        for entry in facts["earlier_attempts"]
+        if isinstance(entry.get("attempt"), int) and 1 <= entry["attempt"] < current
+    }
+    if len(starts) != current - 1:
+        return None
+    return starts | {current: run.get("run_started_at")}
+
+
+def _unbuilt_images(attempt: int) -> str:
+    return (
+        f"The image artifact of attempt {attempt} was not created within the {IMAGE_JOB} job "
+        "of that attempt"
+    )
 
 
 def _committed_before(committed: object, created: object) -> bool:
@@ -409,7 +457,7 @@ def _committed_before(committed: object, created: object) -> bool:
 
 def _newest_images(
     artifacts: Sequence[Mapping[str, Any]], sha: str, run_attempt: int
-) -> tuple[int, int]:
+) -> tuple[int, Mapping[str, Any]]:
     # The newest build up to the authorizing attempt: a partial re-run keeps earlier images, and a
     # later attempt never changes what this release deploys.
     built = [
@@ -421,7 +469,7 @@ def _newest_images(
     newest = [artifact for built_in, artifact in built if built_in == attempt]
     if len(newest) != 1 or newest[0]["expired"] or newest[0]["head_sha"] != sha:
         raise RefusedError("Run CI again to produce an unexpired image artifact")
-    return attempt, int(newest[0]["id"])
+    return attempt, newest[0]
 
 
 def cleanup_order(artifacts: Sequence[Mapping[str, Any]], sha: str, run_attempt: int) -> list[int]:
