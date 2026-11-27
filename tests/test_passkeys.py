@@ -7,6 +7,7 @@ from allauth.mfa.webauthn.internal.auth import STATE_SESSION_KEY
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from django.contrib.auth.models import User
+from django.core.exceptions import PermissionDenied
 from django.test import Client, override_settings
 from fido2.cose import CoseKey
 from fido2.utils import sha256, websafe_decode
@@ -22,6 +23,7 @@ from fido2.webauthn import (
     RegistrationResponse,
 )
 
+from pyracast.accounts.mfa import MFAAdapter
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from tests.support.account_sessions import account, browser, session_user, signed_in, with_totp
 from tests.support.auth_lifecycle import AUTH, PASSWORD, submit
@@ -177,8 +179,8 @@ def test_passkeys_require_fresh_proof_and_verified_customer_and_never_open_conso
 
 def test_anonymous_options_are_scoped_to_the_public_origin_and_attempt() -> None:
     client = browser()
-    with override_settings(PYRACAST_PUBLIC_ORIGIN=""):
-        assert client.get(AUTH + LOGIN).status_code == 403
+    with override_settings(PYRACAST_PUBLIC_ORIGIN=""), pytest.raises(PermissionDenied):
+        MFAAdapter().get_public_key_credential_rp_entity()
     options = client.get(AUTH + LOGIN).json()["data"]["request_options"]["publicKey"]
     assert options["rpId"] == "testserver"
     assert options.get("allowCredentials", []) == []
