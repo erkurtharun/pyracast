@@ -1,5 +1,4 @@
 import type { Deadline } from "./deadline";
-import { SAVED_FIGURES } from "./feature";
 
 const databaseName = "pyracast-saved";
 const format = 1;
@@ -23,17 +22,12 @@ type Holder = {
 };
 export type CopyState = "off" | "on" | "paused" | "unavailable";
 export type Owner = { user: number; session: string };
-export type CopyView = { state: CopyState; plants: number; holder?: Owner };
+// `off`: the owner's person turned keeping off on this device.
+export type CopyView = { state: CopyState; plants: number; off: boolean };
 export type Observation = Owner & {
     language: Holder["language"];
     adoptedAt: number;
     present: () => boolean;
-};
-// A departure without a user and a session tag applies to any holder.
-export type Departure = { id: string; user?: number; session?: string };
-export type Removal = {
-    outstanding: () => Departure[];
-    acknowledge: (ids: string[]) => void;
 };
 export type PlantKey = { tenant: number; site: number; plant: number };
 export type HeldPlant = PlantKey & {
@@ -56,7 +50,7 @@ export type DaysAnswer = {
     forecast: unknown[];
     production: unknown[];
 };
-type Handoff = "verified" | "cleared" | "superseded" | "blocked" | "unverified";
+type Handoff = "verified" | "superseded" | "blocked" | "unverified";
 type Outcome =
     "done" | "absent" | "blocked" | "unavailable" | "failed" | "pending";
 
@@ -163,19 +157,40 @@ async function transact(
     ]);
 }
 
+// The holder store also keeps the device's marks: `["off", user]` and `["ended", at, session]`.
 function withHolder(
     transaction: IDBTransaction,
-    read: (holder: unknown, store: IDBObjectStore) => void,
+    read: (holder: unknown, store: IDBObjectStore, marks: unknown[]) => void,
 ) {
     const store = transaction.objectStore("holder");
-    const request = store.get(holderKey);
-    request.onsuccess = () => {
+    const holder = store.get(holderKey);
+    const marks = store.getAllKeys();
+    marks.onsuccess = () => {
         try {
-            read(request.result, store);
+            read(holder.result, store, marks.result);
         } catch {
             transaction.abort();
         }
     };
+}
+
+function isOff(marks: unknown[], user: number) {
+    return marks.some(
+        (mark) => Array.isArray(mark) && mark[0] === "off" && mark[1] === user,
+    );
+}
+
+// The one rule of the copy: no figures are kept, refreshed or shown for a person who turned keeping off here or for a session that is ending or ended.
+function refuses(marks: unknown[], { user, session }: Owner) {
+    return (
+        isOff(marks, user) ||
+        marks.some(
+            (mark) =>
+                Array.isArray(mark) &&
+                mark[0] === "ended" &&
+                mark[2] === session,
+        )
+    );
 }
 
 function isInstant(value: unknown): value is number {
@@ -210,46 +225,25 @@ function clearFigures(transaction: IDBTransaction) {
     transaction.objectStore("days").clear();
 }
 
-function clearAll(transaction: IDBTransaction) {
-    transaction.objectStore("holder").clear();
+function dropHolder(transaction: IDBTransaction, store: IDBObjectStore) {
+    store.delete(holderKey);
     clearFigures(transaction);
 }
 
-function pause(
-    transaction: IDBTransaction,
-    holder: unknown,
-    store: IDBObjectStore,
-) {
-    clearFigures(transaction);
-    if (isHolder(holder)) store.put({ ...holder, active: false }, holderKey);
-    else store.delete(holderKey);
-}
-
-function meantFor(leaving: Omit<Departure, "id">, holder: unknown) {
-    return (
-        !isHolder(holder) ||
-        !isIdentified(leaving) ||
-        (holder.user === leaving.user && holder.session === leaving.session)
-    );
-}
-
-function isIdentified(leaving: Omit<Departure, "id">): leaving is Owner {
-    return (
-        typeof leaving.user === "number" &&
-        Number.isInteger(leaving.user) &&
-        leaving.user > 0 &&
-        typeof leaving.session === "string" &&
-        leaving.session !== ""
-    );
-}
-
-function owns(holder: unknown, owner: Owner): holder is Holder {
+function heldFor(holder: unknown, owner: Owner): holder is Holder {
     return (
         isHolder(holder) &&
-        holder.active &&
         holder.user === owner.user &&
         holder.session === owner.session
     );
+}
+
+function owns(
+    holder: unknown,
+    owner: Owner,
+    marks: unknown[],
+): holder is Holder {
+    return heldFor(holder, owner) && holder.active && !refuses(marks, owner);
 }
 
 function current(confirmedAt: number, now: number) {
@@ -276,17 +270,13 @@ function deleteDatabase(
     });
 }
 
-// The figures are unreadable once the clear commits; a deletion still waiting at the deadline goes on and `deleted` runs whenever it succeeds.
-export async function removeCopy(
-    limit: Deadline,
-    deleted: () => void,
-    cleared = () => {},
-) {
+// A withdrawn build removes the marks with the figures; a deletion still waiting at the deadline goes on and `deleted` runs whenever it succeeds.
+export async function removeCopy(limit: Deadline, deleted: () => void) {
     const outcome = await transact(
         "readwrite",
         (transaction) => {
-            transaction.addEventListener("complete", cleared);
-            clearAll(transaction);
+            transaction.objectStore("holder").clear();
+            clearFigures(transaction);
         },
         limit,
     );
@@ -294,72 +284,70 @@ export async function removeCopy(
     else if (outcome === "done") await deleteDatabase(limit, deleted);
 }
 
-export async function deleteCopy(limit: Deadline, deleted: () => void) {
-    await deleteDatabase(limit, deleted);
-}
-
-function ids(departures: Departure[]) {
-    return departures.map(({ id }) => id);
-}
-
-async function removeOutstanding(removal: Removal, limit: Deadline) {
-    const observed = removal.outstanding();
-    if (observed.length === 0) return;
+// The mark and the removal it implies commit together, so no figures outlive a record that refuses them.
+export async function endSession(
+    leaving: Owner,
+    committed: () => void,
+    limit: Deadline,
+) {
+    const read = { done: false };
     const outcome = await transact(
         "readwrite",
         (transaction) =>
             withHolder(transaction, (holder, store) => {
-                const outstanding = removal.outstanding();
-                if (outstanding.some((leaving) => meantFor(leaving, holder)))
-                    pause(transaction, holder, store);
-                transaction.addEventListener("complete", () =>
-                    removal.acknowledge(ids(outstanding)),
+                transaction.addEventListener("complete", committed);
+                const now = Date.now();
+                store.delete(
+                    IDBKeyRange.bound(["ended"], ["ended", now - keptForMs]),
                 );
+                store.put(true, ["ended", now, leaving.session]);
+                if (heldFor(holder, leaving)) {
+                    clearFigures(transaction);
+                    store.put({ ...holder, active: false }, holderKey);
+                }
+                read.done = true;
             }),
         limit,
+        { creating: true },
     );
-    if (outcome === "absent") removal.acknowledge(ids(observed));
+    return written(outcome, read);
 }
 
-export async function removeFigures(
-    signedOut: Omit<Departure, "id">,
+export async function setKept(
+    user: number,
+    kept: boolean,
     committed: () => void,
     limit: Deadline,
 ) {
+    const read = { done: false };
     const outcome = await transact(
         "readwrite",
-        (transaction) => {
-            transaction.addEventListener("complete", committed);
+        (transaction) =>
             withHolder(transaction, (holder, store) => {
-                if (meantFor(signedOut, holder))
-                    pause(transaction, holder, store);
-            });
-        },
+                transaction.addEventListener("complete", committed);
+                if (kept) store.delete(["off", user]);
+                else {
+                    store.put(true, ["off", user]);
+                    if (isHolder(holder) && holder.user === user)
+                        dropHolder(transaction, store);
+                }
+                read.done = true;
+            }),
         limit,
+        { creating: !kept },
     );
-    return outcome === "done" || outcome === "absent";
-}
-
-export async function start(
-    removal: Removal,
-    limit: Deadline,
-    deleted: () => void,
-) {
-    if (SAVED_FIGURES) await removeOutstanding(removal, limit);
-    else await removeCopy(limit, deleted);
+    return written(outcome, read) || (kept && outcome === "absent");
 }
 
 export async function adopt(
     observation: Observation,
-    removal: Removal,
     limit: Deadline,
 ): Promise<Handoff> {
     const read: { handoff: Handoff } = { handoff: "verified" };
-    const observed = removal.outstanding();
     const outcome = await transact(
         "readwrite",
         (transaction) =>
-            withHolder(transaction, (holder, store) => {
+            withHolder(transaction, (holder, store, marks) => {
                 if (limit.expired()) {
                     read.handoff = "unverified";
                     return;
@@ -368,33 +356,22 @@ export async function adopt(
                     read.handoff = "superseded";
                     return;
                 }
-                const outstanding = removal.outstanding();
-                transaction.addEventListener("complete", () => {
-                    if (!limit.expired()) removal.acknowledge(ids(outstanding));
-                });
                 if (!isHolder(holder) || holder.user !== observation.user) {
-                    read.handoff = "cleared";
-                    clearAll(transaction);
+                    dropHolder(transaction, store);
                     return;
                 }
-                const removed = outstanding.some((leaving) =>
-                    meantFor(leaving, holder),
-                );
-                if (
-                    removed ||
-                    !current(holder.confirmedAt, observation.adoptedAt)
-                )
+                if (!current(holder.confirmedAt, observation.adoptedAt))
                     clearFigures(transaction);
                 store.put(
                     {
                         ...holder,
-                        ...(removed && { active: false }),
+                        session: observation.session,
+                        active:
+                            !refuses(marks, observation) &&
+                            (holder.active ||
+                                holder.session !== observation.session),
                         confirmedAt: observation.adoptedAt,
                         language: observation.language,
-                        ...(holder.session !== observation.session && {
-                            session: observation.session,
-                            active: true,
-                        }),
                     },
                     holderKey,
                 );
@@ -402,21 +379,25 @@ export async function adopt(
         limit,
         { abortLate: true },
     );
-    if (outcome === "absent") {
-        if (!limit.expired()) removal.acknowledge(ids(observed));
-        return "verified";
-    }
+    if (outcome === "absent") return "verified";
     if (outcome === "blocked") return "blocked";
     return outcome === "done" ? read.handoff : "unverified";
 }
 
-export async function copyState(limit: Deadline): Promise<CopyView> {
-    const read: { holder?: unknown; plants: number } = { plants: 0 };
+export async function copyState(
+    owner: Owner,
+    limit: Deadline,
+): Promise<CopyView> {
+    const read: { holder?: unknown; marks: unknown[]; plants: number } = {
+        marks: [],
+        plants: 0,
+    };
     const outcome = await transact(
         "readonly",
         (transaction) => {
-            withHolder(transaction, (holder) => {
+            withHolder(transaction, (holder, _, marks) => {
                 read.holder = holder;
+                read.marks = marks;
             });
             transaction.objectStore("plants").count().onsuccess = (event) => {
                 read.plants = (event.target as IDBRequest<number>).result;
@@ -424,22 +405,13 @@ export async function copyState(limit: Deadline): Promise<CopyView> {
         },
         limit,
     );
-    if (outcome === "absent") return { state: "off", plants: 0 };
-    if (outcome !== "done") return { state: "unavailable", plants: 0 };
-    const { holder, plants } = read;
-    if (!isHolder(holder)) return { state: "off", plants: 0 };
-    return {
-        state: holder.active ? "on" : "paused",
-        plants,
-        holder: { user: holder.user, session: holder.session },
-    };
-}
-
-// Without a copy the open is aborted before it creates one, which still shows that the browser answers.
-export async function available(limit: Deadline) {
-    if (!SAVED_FIGURES) return false;
-    const outcome = await transact("readonly", () => {}, limit);
-    return outcome === "absent" || outcome === "done";
+    if (outcome === "absent") return { state: "off", plants: 0, off: false };
+    if (outcome !== "done")
+        return { state: "unavailable", plants: 0, off: false };
+    const { holder, marks, plants } = read;
+    const off = isOff(marks, owner.user);
+    if (!isHolder(holder)) return { state: "off", plants: 0, off };
+    return { state: owns(holder, owner, marks) ? "on" : "paused", plants, off };
 }
 
 export async function turnOn(
@@ -452,15 +424,10 @@ export async function turnOn(
     const outcome = await transact(
         "readwrite",
         (transaction) =>
-            withHolder(transaction, (holder, store) => {
-                if (!present()) return;
+            withHolder(transaction, (holder, store, marks) => {
+                if (!present() || refuses(marks, owner)) return;
                 transaction.addEventListener("complete", committed);
-                if (
-                    !isHolder(holder) ||
-                    holder.user !== owner.user ||
-                    holder.session !== owner.session
-                )
-                    clearFigures(transaction);
+                if (!heldFor(holder, owner)) clearFigures(transaction);
                 store.put(
                     {
                         ...owner,
@@ -534,8 +501,8 @@ function withPlants(
     owner: Owner,
     work: (plants: HeldPlant[], store: IDBObjectStore, holder: Holder) => void,
 ) {
-    withHolder(transaction, (holder) => {
-        if (!owns(holder, owner)) return;
+    withHolder(transaction, (holder, _, marks) => {
+        if (!owns(holder, owner, marks)) return;
         const store = transaction.objectStore("plants");
         const request = store.getAll();
         request.onsuccess = () => {
@@ -762,8 +729,8 @@ export async function setRetryAt(owner: Owner, at: number, limit: Deadline) {
     const outcome = await transact(
         "readwrite",
         (transaction) =>
-            withHolder(transaction, (holder, store) => {
-                if (!owns(holder, owner)) return;
+            withHolder(transaction, (holder, store, marks) => {
+                if (!owns(holder, owner, marks)) return;
                 store.put({ ...holder, retryAt: at }, holderKey);
                 read.done = true;
             }),

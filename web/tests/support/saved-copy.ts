@@ -1,8 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
-import type { Page } from "@playwright/test";
-import { instant } from "./test";
+import { expect, instant, type Page } from "./test";
 
 export const dayMs = 86_400_000;
 const blank = "/saved-copy-blank/";
@@ -85,50 +84,62 @@ export const heldDays = [
     },
 ];
 
-export type RemovalMark = { removal: string; user: number; session: string };
+// The device's marks, kept as keys of the holder store beside the holder.
+export type Mark = ["off", number] | ["ended", number, string];
+
+export function offMark(user = 1): Mark {
+    return ["off", user];
+}
+
+export function endedMark(session: string, at = instant.getTime()): Mark {
+    return ["ended", at, session];
+}
+
+// A mark the application writes at a time it reads from its clock.
+export function anEndedMark(session: string) {
+    return ["ended", expect.any(Number), session];
+}
+
+// Each case of the one rule, for a holder of user `user` and session `session`: whether its figures are shown.
+export function refusalCases(user: number, session: string) {
+    return [
+        { name: "without a mark", marks: [], shown: true },
+        {
+            name: "turned off by its person",
+            marks: [offMark(user)],
+            shown: false,
+        },
+        {
+            name: "turned off by another person",
+            marks: [offMark(user + 1)],
+            shown: true,
+        },
+        {
+            name: "whose session ended",
+            marks: [endedMark(session)],
+            shown: false,
+        },
+        {
+            name: "whose session ended long ago",
+            marks: [endedMark(session, 1)],
+            shown: false,
+        },
+        {
+            name: "of which another session ended",
+            marks: [endedMark(`${session}-other`)],
+            shown: true,
+        },
+    ] satisfies { name: string; marks: Mark[]; shown: boolean }[];
+}
 
 export type Copy = {
-    holder?: Holder;
+    holder?: Holder | null;
     plants?: unknown[];
     days?: unknown[];
     version?: number;
     flagged?: boolean;
-    marks?: RemovalMark[];
+    marks?: Mark[];
 };
-
-const markPrefix = "pyracast.savedRemoval.";
-
-export function writeMarks(page: Page, marks: RemovalMark[]) {
-    return page.evaluate(
-        ({ marks, prefix }) => {
-            for (const mark of marks)
-                window.localStorage.setItem(
-                    prefix + mark.removal,
-                    JSON.stringify(mark),
-                );
-        },
-        { marks, prefix: markPrefix },
-    );
-}
-
-export function removalMarks(page: Page): Promise<unknown[]> {
-    return page.evaluate((prefix) => {
-        const keys = Array.from(
-            { length: window.localStorage.length },
-            (_, index) => window.localStorage.key(index) ?? "",
-        )
-            .filter((key) => key.startsWith(prefix))
-            .sort();
-        return keys.map((key) => {
-            const value = window.localStorage.getItem(key) ?? "";
-            try {
-                return JSON.parse(value) as unknown;
-            } catch {
-                return value;
-            }
-        });
-    }, markPrefix);
-}
 
 export async function onBlankPage(page: Page) {
     await page.route(`**${blank}`, (route) =>
@@ -149,9 +160,8 @@ export async function seedCopy(
     }: Copy = {},
 ) {
     await onBlankPage(page);
-    await writeMarks(page, marks);
     await page.evaluate(
-        ({ holder, plants, days, version, flagged }) =>
+        ({ holder, plants, days, version, flagged, marks }) =>
             new Promise<void>((resolve, reject) => {
                 if (flagged) window.localStorage.setItem("pyracast.saved", "1");
                 const request = indexedDB.open("pyracast-saved", version);
@@ -173,7 +183,9 @@ export async function seedCopy(
                         ["holder", "plants", "days"],
                         "readwrite",
                     );
-                    transaction.objectStore("holder").put(holder, "holder");
+                    const holders = transaction.objectStore("holder");
+                    if (holder) holders.put(holder, "holder");
+                    for (const mark of marks) holders.put(true, mark);
                     for (const plant of plants)
                         transaction.objectStore("plants").put(plant);
                     for (const day of days)
@@ -188,7 +200,7 @@ export async function seedCopy(
                         );
                 };
             }),
-        { holder, plants, days, version, flagged },
+        { holder, plants, days, version, flagged, marks },
     );
 }
 
@@ -203,14 +215,13 @@ export type ReadCopy = {
 
 // Reads without creating: a database that is gone stays gone, and one that exists must open.
 export async function readCopy(page: Page): Promise<ReadCopy> {
-    const marks = await removalMarks(page);
-    return page.evaluate(async (marks) => {
+    return page.evaluate(async () => {
         const flag = window.localStorage.getItem("pyracast.saved");
         const listed = async () =>
             (await indexedDB.databases()).some(
                 (database) => database.name === "pyracast-saved",
             );
-        const absent = { plants: 0, days: 0, flag, marks };
+        const absent = { plants: 0, days: 0, flag, marks: [] };
         if (!(await listed())) return absent;
         return new Promise<ReadCopy>((resolve, reject) => {
             const request = indexedDB.open("pyracast-saved");
@@ -235,6 +246,7 @@ export async function readCopy(page: Page): Promise<ReadCopy> {
                     "readonly",
                 );
                 const holder = transaction.objectStore("holder").get("holder");
+                const keys = transaction.objectStore("holder").getAllKeys();
                 const plants = transaction.objectStore("plants").count();
                 const days = transaction.objectStore("days").count();
                 transaction.oncomplete = () => {
@@ -245,14 +257,14 @@ export async function readCopy(page: Page): Promise<ReadCopy> {
                         plants: plants.result,
                         days: days.result,
                         flag,
-                        marks,
+                        marks: keys.result.filter((key) => key !== "holder"),
                     });
                 };
                 transaction.onabort = () =>
                     reject(new Error("The copy could not be read or written."));
             };
         });
-    }, marks);
+    });
 }
 
 // Another page holds a write transaction until `release` commits it, with the holder given; later transactions queue behind it.
@@ -369,14 +381,7 @@ export async function countWrites(page: Page) {
         );
 }
 
-export function markOf(
-    session: string,
-    removal = "fedcba9876543210fedcba9876543210",
-): RemovalMark {
-    return { removal, user: 1, session };
-}
-
-// Once armed, the next write of a holder keeps its transaction open until `release` or an abort.
+// Once armed, the next write of the holder keeps its transaction open until `release` or an abort.
 export async function holdHolderWrite(page: Page) {
     await page.addInitScript(() => {
         const put = Object.getOwnPropertyDescriptor(
@@ -391,7 +396,7 @@ export async function holdHolderWrite(page: Page) {
             ...operands: unknown[]
         ) {
             const request = put.apply(this, operands);
-            if (this.name === "holder" && Reflect.get(window, "holdWrite")) {
+            if (operands[1] === "holder" && Reflect.get(window, "holdWrite")) {
                 Reflect.deleteProperty(window, "holdWrite");
                 const { transaction } = this;
                 const keep = () => {
@@ -412,37 +417,6 @@ export async function holdHolderWrite(page: Page) {
         release: () =>
             page.evaluate(() => Object.assign(window, { writeReleased: true })),
     };
-}
-
-// Records the flag at each success of a deletion this page asks for, before the page's own handler runs.
-export async function watchDeletions(page: Page) {
-    await page.addInitScript(() => {
-        const deleteDatabase = Object.getOwnPropertyDescriptor(
-            IDBFactory.prototype,
-            "deleteDatabase",
-        )!.value as (this: IDBFactory, name: string) => IDBOpenDBRequest;
-        IDBFactory.prototype.deleteDatabase = function (
-            this: IDBFactory,
-            name: string,
-        ) {
-            const request = deleteDatabase.call(this, name);
-            request.addEventListener("success", () => {
-                const flags = (Reflect.get(window, "copyDeletions") ?? []) as (
-                    string | null
-                )[];
-                flags.push(window.localStorage.getItem("pyracast.saved"));
-                Object.assign(window, { copyDeletions: flags });
-            });
-            return request;
-        };
-    });
-    return () =>
-        page.evaluate(
-            () =>
-                (Reflect.get(window, "copyDeletions") ?? []) as (
-                    string | null
-                )[],
-        );
 }
 
 // The store chunk is the only script that names the database; holding it holds the document's copy work.
@@ -490,17 +464,17 @@ export async function loadStore(page: Page, savedFigures: boolean) {
 }
 
 type LoadedStore = Record<
-    "start" | "copyState",
+    "removeCopy" | "copyState",
     (...operands: unknown[]) => Promise<unknown>
 >;
 
+// `copyState` answers for user 1 in session "tag-a".
 export async function callStore(page: Page, operation: keyof LoadedStore) {
     await page.evaluate((name) => {
         const store = Reflect.get(window, "savedStore") as LoadedStore;
         const { deadline } = Reflect.get(window, "savedDeadline") as {
             deadline: (limitMs: number) => unknown;
         };
-        const none = { outstanding: () => [], acknowledge: () => {} };
         const limit = deadline(2_000);
         const deleted = () => {
             const count = Reflect.get(window, "storeDeletions") as
@@ -509,9 +483,9 @@ export async function callStore(page: Page, operation: keyof LoadedStore) {
         };
         Object.assign(window, {
             storeAnswer:
-                name === "start"
-                    ? store.start(none, limit, deleted)
-                    : store[name](limit),
+                name === "removeCopy"
+                    ? store.removeCopy(limit, deleted)
+                    : store.copyState({ user: 1, session: "tag-a" }, limit),
         });
     }, operation);
     return () =>
@@ -655,21 +629,93 @@ export async function workerClock(page: Page) {
     );
 }
 
-export async function supplyRegistration(page: Page) {
-    await page.addInitScript(() => {
+// A late registration is found only after `complete`, which also settles `ready` as a worker's activation does.
+export async function supplyRegistration(page: Page, { late = false } = {}) {
+    await page.addInitScript((late) => {
+        const registration = {
+            scope: `${location.origin}/app/`,
+        } as ServiceWorkerRegistration;
+        let registered = !late;
+        let activate: (
+            registration: ServiceWorkerRegistration,
+        ) => void = () => {};
+        const ready = new Promise<ServiceWorkerRegistration>(
+            (resolve) => (activate = resolve),
+        );
+        let lookups = 0;
+        Object.assign(window, {
+            registrationLookups: () => lookups,
+            completeRegistration: () => {
+                registered = true;
+                activate(registration);
+            },
+        });
         ServiceWorkerContainer.prototype.getRegistration = function (
             this: ServiceWorkerContainer,
             scope?: string,
         ) {
+            lookups += 1;
             return Promise.resolve(
-                scope === "/app/"
-                    ? ({
-                          scope: `${location.origin}/app/`,
-                      } as ServiceWorkerRegistration)
-                    : undefined,
+                registered && scope === "/app/" ? registration : undefined,
             );
         };
+        if (late)
+            Object.defineProperty(ServiceWorkerContainer.prototype, "ready", {
+                configurable: true,
+                get: () => ready,
+            });
+    }, late);
+    return {
+        lookups: () =>
+            page.evaluate(() =>
+                (Reflect.get(window, "registrationLookups") as () => number)(),
+            ),
+        complete: () =>
+            page.evaluate(() =>
+                (Reflect.get(window, "completeRegistration") as () => void)(),
+            ),
+    };
+}
+
+const workerSource = readFileSync(
+    path.resolve(__dirname, "../../public/app/sw.js"),
+    "utf8",
+);
+
+// The worker's own script answers a navigation without a connection from this browser's copy, in a blank page of the same origin.
+async function workerAnswer(page: Page, address = "/app/") {
+    const blank = await page.context().newPage();
+    await onBlankPage(blank);
+    await blank.evaluate(() => {
+        Object.assign(window, {
+            registration: { scope: `${location.origin}/app/` },
+            fetch: () => Promise.reject(new TypeError("offline")),
+        });
     });
+    await blank.addScriptTag({ content: workerSource });
+    const text = await blank.evaluate(async (address) => {
+        let answer: Promise<Response> | undefined;
+        const navigation = Object.assign(new Event("fetch"), {
+            request: {
+                url: new URL(address, location.origin).href,
+                method: "GET",
+                mode: "navigate",
+            },
+            preloadResponse: Promise.resolve(undefined),
+            respondWith: (response: Promise<Response>) => {
+                answer = response;
+            },
+        });
+        window.dispatchEvent(navigation);
+        return answer ? (await answer).text() : "";
+    }, address);
+    await blank.close();
+    return text;
+}
+
+// Whether the worker would show a held plant's figures without a connection.
+export async function workerShows(page: Page, address = "/app/") {
+    return (await workerAnswer(page, address)).includes("East array");
 }
 
 export async function controlVisibility(page: Page) {

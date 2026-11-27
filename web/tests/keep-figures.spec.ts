@@ -20,12 +20,15 @@ import {
     sessionAnswer,
 } from "./support/session";
 import {
+    anEndedMark,
     controlVisibility,
+    countWrites,
     daysAnswer,
     heldPlantOf,
     holderOf,
     holdHolderWrite,
     loadStore,
+    offMark,
     onBlankPage,
     plantKey,
     readCopy,
@@ -33,6 +36,7 @@ import {
     seedCopy,
     supplyRegistration,
     watchStoreChunk,
+    workerShows,
     writeStore,
 } from "./support/saved-copy";
 import { savedFiguresOff } from "./support/worker-state";
@@ -69,7 +73,6 @@ const removedTexts = {
         "Bu cihazdan kaldır",
     ],
 } as const;
-const emptyCopy = { plants: 0, days: 0, flag: null, marks: [] };
 const daysPath = /\/api\/tenants\/\d+\/regions\/\d+\/plants\/\d+\/days\/$/;
 const owner = { user: 1, session: "tag-a" };
 const storeLock = "pyracast.saved-copy";
@@ -218,13 +221,112 @@ async function expectNoRemovedTexts(
         await expect(page.getByText(text, { exact: true })).toHaveCount(0);
 }
 
-// The person turned keeping off on this device before; the store loads because the flag is set.
+// The person turned keeping off on this device before.
 async function turnedOffBefore(page: Page) {
-    await onBlankPage(page);
-    await page.evaluate(() => {
-        window.localStorage.setItem("pyracast.saved", "1");
-        window.localStorage.setItem("pyracast.savedOff.1", "1");
+    await seedCopy(page, {
+        holder: null,
+        plants: [],
+        days: [],
+        marks: [offMark()],
     });
+}
+
+async function expectTurnedOff(page: Page) {
+    await expect
+        .poll(() => readCopy(page))
+        .toMatchObject({ plants: 0, days: 0, marks: [offMark()] });
+    expect((await readCopy(page)).holder).toBeUndefined();
+    expect(await workerShows(page)).toBe(false);
+}
+
+async function expectKept(page: Page, session = "tag-a") {
+    await expect.poll(async () => (await readCopy(page)).days).toBe(2);
+    expect((await readCopy(page)).holder).toMatchObject({
+        session,
+        active: true,
+    });
+    expect(await workerShows(page)).toBe(true);
+}
+
+// Once armed, each write of this page's "off" mark, or its removal, throws until allowed again.
+async function refuseChoices(page: Page) {
+    await page.addInitScript(() => {
+        const refused = (key: unknown) =>
+            Array.isArray(key) &&
+            key[0] === "off" &&
+            window.localStorage.getItem("refuseChoices") !== null;
+        for (const name of ["put", "delete"] as const) {
+            const original = Object.getOwnPropertyDescriptor(
+                IDBObjectStore.prototype,
+                name,
+            )!.value as (
+                this: IDBObjectStore,
+                ...operands: unknown[]
+            ) => IDBRequest;
+            Object.defineProperty(IDBObjectStore.prototype, name, {
+                configurable: true,
+                writable: true,
+                value: function (this: IDBObjectStore, ...operands: unknown[]) {
+                    if (refused(name === "put" ? operands[1] : operands[0]))
+                        throw new DOMException("Refused.", "UnknownError");
+                    return original.apply(this, operands);
+                },
+            });
+        }
+    });
+    return {
+        refuse: () =>
+            page.evaluate(() =>
+                window.localStorage.setItem("refuseChoices", "1"),
+            ),
+        allow: () =>
+            page.evaluate(() =>
+                window.localStorage.removeItem("refuseChoices"),
+            ),
+    };
+}
+
+const savingFailed = "Could not be saved.";
+
+// Records, for every page of the origin, the session of each holder a transaction is asked to write, committed or not.
+async function recordHolderWrites(page: Page) {
+    await page.addInitScript(() => {
+        const put = Object.getOwnPropertyDescriptor(
+            IDBObjectStore.prototype,
+            "put",
+        )!.value as (
+            this: IDBObjectStore,
+            ...operands: unknown[]
+        ) => IDBRequest;
+        Object.defineProperty(IDBObjectStore.prototype, "put", {
+            configurable: true,
+            writable: true,
+            value: function (this: IDBObjectStore, ...operands: unknown[]) {
+                if (operands[1] === "holder") {
+                    const written = JSON.parse(
+                        window.localStorage.getItem("holderWrites") ?? "[]",
+                    ) as unknown[];
+                    written.push(
+                        (operands[0] as { session?: unknown }).session,
+                    );
+                    window.localStorage.setItem(
+                        "holderWrites",
+                        JSON.stringify(written),
+                    );
+                }
+                return put.apply(this, operands);
+            },
+        });
+    });
+}
+
+function holderWrites(page: Page) {
+    return page.evaluate(
+        () =>
+            JSON.parse(
+                window.localStorage.getItem("holderWrites") ?? "[]",
+            ) as unknown[],
+    );
 }
 
 async function openSettings(page: Page) {
@@ -282,7 +384,9 @@ test("a person who opens a workspace has its plant and figures kept without any 
         holder: { user: 1, session: "tag-a", active: true, retryAt: null },
         plants: 1,
         days: 2,
+        marks: [],
     });
+    expect(await workerShows(page)).toBe(true);
     expect((await readHeld(page)).plants).toEqual([
         expect.objectContaining({
             ...plantKey,
@@ -301,7 +405,8 @@ test("a person who opens a workspace has its plant and figures kept without any 
         setting.en.hint,
     );
     await keepSetting(page).uncheck();
-    await expect.poll(() => readCopy(page)).toEqual(emptyCopy);
+    await expect(keepSetting(page)).not.toBeChecked();
+    await expectTurnedOff(page);
     await page.reload();
     await expect(keepSetting(page)).not.toBeChecked();
     account.current = { ...firstAccount, tag: "tag-b" };
@@ -309,20 +414,23 @@ test("a person who opens a workspace has its plant and figures kept without any 
     await expect(plants(page)).toBeVisible();
     await openSettings(page);
     await expect(keepSetting(page)).not.toBeChecked();
-    expect(await readCopy(page)).toEqual(emptyCopy);
+    await expectTurnedOff(page);
     expect(requests).toHaveLength(1);
 
     await keepSetting(page).check();
-    await expect.poll(async () => (await readCopy(page)).days).toBe(2);
-    expect((await readCopy(page)).holder).toMatchObject({
-        session: "tag-b",
-        active: true,
-    });
+    await expect(keepSetting(page)).toBeChecked();
+    await expectKept(page, "tag-b");
+    expect((await readCopy(page)).marks).toEqual([]);
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
     await expect(
         page.getByRole("heading", { name: "Welcome back" }),
     ).toBeVisible();
-    expect(await readCopy(page)).toMatchObject({ plants: 0, days: 0 });
+    expect(await readCopy(page)).toMatchObject({
+        plants: 0,
+        days: 0,
+        marks: [anEndedMark("tag-b")],
+    });
+    expect(await workerShows(page)).toBe(false);
 });
 
 for (const language of ["en", "tr"] as const)
@@ -364,7 +472,7 @@ for (const language of ["en", "tr"] as const)
         await expect(box).toBeFocused();
         await page.keyboard.press("Space");
         await expect(box).not.toBeChecked();
-        await expect.poll(() => readCopy(page)).toEqual(emptyCopy);
+        await expectTurnedOff(page);
         await expect(box).toBeFocused();
         await page.keyboard.press("Space");
         await expect(box).toBeChecked();
@@ -424,6 +532,7 @@ test("a turn-on in the settings that waited while another window changed the ses
     await turnedOffBefore(page);
     const other = await context.newPage();
     for (const tab of [page, other]) {
+        await recordHolderWrites(tab);
         await supplyRegistration(tab);
         await signedIn(tab, account);
         await serveDays(tab);
@@ -461,61 +570,163 @@ test("a turn-on in the settings that waited while another window changed the ses
         session: "tag-b",
         active: true,
     });
+    expect(await holderWrites(page)).toContain("tag-b");
+    expect(await holderWrites(page)).not.toContain("tag-a");
 });
 
-test("a turn-on in the settings that waits while another window signs out and finds no figures to remove keeps no figures and reads no days", async ({
+test("a window opened while another window's sign-out is in flight keeps nothing for the departing session, and the worker shows nothing afterwards", async ({
     page,
     context,
 }) => {
     const account: AccountState = { current: firstAccount };
-    await turnedOffBefore(page);
-    const other = await context.newPage();
-    const reads: DaysRequest[][] = [];
-    for (const tab of [page, other]) {
-        await supplyRegistration(tab);
-        await signedIn(tab, account);
-        reads.push(await serveDays(tab));
-        await openSettings(tab);
-        await expect(keepSetting(tab)).not.toBeChecked();
-    }
-    let reach!: () => void;
-    const reached = new Promise<void>((resolve) => (reach = resolve));
+    await signedIn(page, account);
+    await page.goto("/app/account/");
+    await expect(settingsHeading(page)).toBeVisible();
     let answer!: () => void;
     const answered = new Promise<void>((resolve) => (answer = resolve));
-    await other.route("**/api/auth/browser/v1/auth/session", async (route) => {
+    const sent = page.waitForRequest(
+        (request) => request.method() === "DELETE",
+    );
+    await page.route("**/api/auth/browser/v1/auth/session", async (route) => {
         if (route.request().method() !== "DELETE") return route.fallback();
-        reach();
         await answered;
         await route.fallback();
     });
-    const [mine, theirs] = [await lockClient(page), await lockClient(other)];
+    await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    await sent;
+    expect(await readCopy(page)).toMatchObject({
+        marks: [anEndedMark("tag-a")],
+    });
+    const other = await context.newPage();
+    await supplyRegistration(other);
+    await signedIn(other, account);
+    const reads = await serveDays(other);
+    const writes = await countWrites(other);
+    await other.goto("/app/w/1/");
+    await expect(plants(other)).toBeVisible();
+    await expect.poll(writes).toBe(1);
+    answer();
+    await expect(
+        page.getByRole("heading", { name: "Welcome back" }),
+    ).toBeVisible();
+    expect(await readCopy(other)).toMatchObject({
+        plants: 0,
+        days: 0,
+        marks: [anEndedMark("tag-a")],
+    });
+    expect((await readCopy(other)).holder).toBeUndefined();
+    expect(reads).toEqual([]);
+    expect(await workerShows(other)).toBe(false);
+});
+
+test("an off while another window holds the copy's lock past two seconds is written at once, and the worker shows nothing", async ({
+    page,
+    context,
+}) => {
+    await supplyRegistration(page);
+    await signedIn(page);
+    await serveDays(page);
+    await page.goto("/app/w/1/");
+    await expect(plants(page)).toBeVisible();
+    await expectKept(page);
+    await openSettings(page);
     const lock = await lockTaker(context);
     await lock.take();
     await expect.poll(lock.granted).toBe(1);
     await pauseClock(page);
-    await other.getByRole("button", { name: "Sign out", exact: true }).click();
-    await expect.poll(() => lock.waitingFor(theirs)).toBe(1);
-    await lock.take();
-    await expect.poll(lock.waiting).toBe(1);
-    await keepSetting(page).check();
-    await expect.poll(() => lock.waitingFor(mine)).toBe(1);
+    await keepSetting(page).uncheck();
+    await expect(keepSetting(page)).not.toBeChecked();
+    await expectTurnedOff(page);
+    await page.clock.runFor(2_000);
     await lock.release();
-    await reached;
-    await expect.poll(lock.granted).toBe(2);
+    await page.clock.resume();
+    await page.reload();
+    await expect(keepSetting(page)).not.toBeChecked();
+    await expectTurnedOff(page);
+});
+
+test("an off in one window while another window's default keeping waits for the lock ends off, without figures, in both windows", async ({
+    page,
+    context,
+}) => {
+    const account: AccountState = { current: firstAccount };
+    const other = await context.newPage();
+    const reads: DaysRequest[][] = [];
+    const registrations: Awaited<ReturnType<typeof supplyRegistration>>[] = [];
+    for (const [tab, address] of [
+        [page, "/app/account/"],
+        [other, "/app/w/1/"],
+    ] as const) {
+        registrations.push(await supplyRegistration(tab, { late: true }));
+        await signedIn(tab, account);
+        reads.push(await serveDays(tab));
+        await tab.goto(address);
+    }
+    await expect(settingsHeading(page)).toBeVisible();
+    await expect(plants(other)).toBeVisible();
+    const lock = await lockTaker(context);
+    await lock.take();
+    await expect.poll(lock.granted).toBe(1);
+    for (const registration of registrations) await registration.complete();
+    await expect(keepSetting(page)).toBeChecked();
+    const [mine, theirs] = [await lockClient(page), await lockClient(other)];
+    await expect.poll(() => lock.waitingFor(mine)).toBe(1);
+    await expect.poll(() => lock.waitingFor(theirs)).toBe(1);
+    await keepSetting(page).uncheck();
+    await expect(keepSetting(page)).not.toBeChecked();
     await lock.release();
     await expect.poll(() => lock.waitingFor(mine)).toBe(0);
-    expect((await readCopy(page)).holder).toBeUndefined();
+    await expect.poll(() => lock.waitingFor(theirs)).toBe(0);
+    await expectTurnedOff(page);
+    await expect(keepSetting(page)).not.toBeChecked();
+    await other.getByRole("button", { name: "Account", exact: true }).click();
+    await expect(keepSetting(other)).not.toBeChecked();
     expect(reads.flat()).toEqual([]);
-    answer();
-    await page.clock.resume();
-    await expect(
-        other.getByRole("heading", { name: "Welcome back" }),
-    ).toBeVisible();
-    await expect(
-        page.getByRole("heading", { name: "Welcome back" }),
-    ).toBeVisible();
+});
+
+test("a choice the device cannot store shows the stored state and says it could not be saved", async ({
+    page,
+}) => {
+    const choices = await refuseChoices(page);
+    await supplyRegistration(page);
+    await signedIn(page);
+    await serveDays(page);
+    await openSettings(page);
+    await expectKept(page);
+    await choices.refuse();
+    await keepSetting(page).click();
+    await expect(page.getByText(savingFailed, { exact: true })).toBeVisible();
+    await expect(keepSetting(page)).toBeChecked();
+    await expectKept(page);
+
+    await choices.allow();
+    await keepSetting(page).uncheck();
+    await expect(keepSetting(page)).not.toBeChecked();
+    await expect(page.getByText(savingFailed, { exact: true })).toHaveCount(0);
+    await expectTurnedOff(page);
+
+    await choices.refuse();
+    await keepSetting(page).click();
+    await expect(page.getByText(savingFailed, { exact: true })).toBeVisible();
+    await expect(keepSetting(page)).not.toBeChecked();
+    await expectTurnedOff(page);
+});
+
+test("a workspace screen whose worker registers after it showed starts keeping, and the setting appears", async ({
+    page,
+}) => {
+    const registration = await supplyRegistration(page, { late: true });
+    await signedIn(page);
+    const reads = await serveDays(page);
+    await page.goto("/app/w/1/");
+    await expect(plants(page)).toBeVisible();
+    await expect.poll(registration.lookups).toBeGreaterThan(0);
     expect((await readCopy(page)).holder).toBeUndefined();
-    expect(reads.flat()).toEqual([]);
+    await registration.complete();
+    await expectKept(page);
+    expect(reads).toHaveLength(1);
+    await page.getByRole("button", { name: "Account", exact: true }).click();
+    await expect(keepSetting(page)).toBeChecked();
 });
 
 test("a turn-on in the settings that commits after another window read the figures starts that window's refresh once it commits", async ({
@@ -539,7 +750,6 @@ test("a turn-on in the settings that commits after another window read the figur
     await expect(plants(other)).toBeVisible();
     await expect(keepSetting(page)).not.toBeChecked();
     await visibility.hide();
-    const theirs = await lockClient(other);
     await write.arm();
     await pauseClock(page);
     await keepSetting(page).check();
@@ -547,9 +757,7 @@ test("a turn-on in the settings that commits after another window read the figur
     await other.evaluate(() =>
         document.dispatchEvent(new Event("visibilitychange")),
     );
-    await expect.poll(() => waitingFor(other, theirs)).toBe(1);
     await page.clock.runFor(2_000);
-    await expect.poll(() => waitingFor(other, theirs)).toBe(0);
     expect(reads.flat()).toEqual([]);
     await write.release();
     await page.clock.resume();

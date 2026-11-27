@@ -38,7 +38,7 @@ test("a withdrawn build whose kept figures could not be removed shows neither th
     await page.addInitScript(() =>
         Object.defineProperty(navigator, "standalone", { value: true }),
     );
-    await supplyRegistration(page);
+    const registration = await supplyRegistration(page);
     const account = await mockApi(page);
     await serveSession(page, account);
     const refreshCode = await watchRefreshCode(page);
@@ -58,6 +58,7 @@ test("a withdrawn build whose kept figures could not be removed shows neither th
     await expect(
         page.getByRole("heading", { name: "Account", exact: true, level: 1 }),
     ).toBeVisible();
+    expect(await registration.lookups()).toBe(0);
     await expect(page.getByText(setting, { exact: true })).toHaveCount(0);
     expect(days).toEqual([]);
     expect(refreshCode()).toBe(false);
