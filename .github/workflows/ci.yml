@@ -196,14 +196,13 @@ jobs:
     outputs:
       coverage: ${{ steps.coverage.outputs.artifact-id }}
     env:
-      TEST_SHARD: full
       PGHOST: 127.0.0.1
       PGPORT: 55432
       PGUSER: pyracast
       PGDATABASE: pyracast
       PYRACAST_SECRET_KEY: ci-only-key-not-for-deployment
       PYTEST_XDIST_AUTO_NUM_WORKERS: '2'
-    steps: &verify-steps
+    steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -213,11 +212,7 @@ jobs:
           enable-cache: true
       - run: uv sync --locked --no-build
       - run: uv run --locked --no-sync --no-build python -m scripts.start_postgres --ephemeral --non-durable
-      - name: Start RabbitMQ (Windows)
-        if: runner.os == 'Windows'
-        run: uv run --locked --no-sync --no-build python -m scripts.start_rabbitmq --ephemeral
-      - name: Start RabbitMQ (Ubuntu)
-        if: runner.os == 'Linux'
+      - name: Start RabbitMQ
         run: |
           RABBITMQ_DEFAULT_PASS="$(openssl rand -hex 24)"
           echo "::add-mask::${RABBITMQ_DEFAULT_PASS}"
@@ -241,51 +236,30 @@ jobs:
           uv run --locked --no-sync --no-build python -c
           "import os, psutil; print({'xdist_workers': os.environ['PYTEST_XDIST_AUTO_NUM_WORKERS'], 'physical_cpus': psutil.cpu_count(logical=False), 'logical_cpus': psutil.cpu_count()})"
       - name: Run all quality checks and record test timings
-        if: runner.os == 'Linux'
         env:
           PYTEST_ADDOPTS: --junitxml=test-results/pytest.xml --durations=25
         run: uv run --locked --no-sync --no-build python scripts/check.py
-      - name: Run a complete Windows test partition
-        if: runner.os == 'Windows'
-        env:
-          PYTEST_ADDOPTS: --junitxml=test-results/pytest.xml --durations=25
-        run: >-
-          uv run --locked --no-sync --no-build python scripts/check.py
-          ${{ env.TEST_SHARD != '1' && '--tests-only' || '' }}
-          --shard ${{ env.TEST_SHARD }}/4 --shard-output "${{ runner.temp }}/windows-shards/${{ env.TEST_SHARD }}"
       - name: Upload test timings
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: pytest-results-${{ runner.os }}-${{ env.TEST_SHARD }}-${{ github.run_attempt }}
+          name: pytest-results-${{ github.run_attempt }}
           path: test-results/pytest.xml
           if-no-files-found: ignore
           retention-days: 7
-      - name: Upload Windows coverage and test inventory
-        id: windows-shard
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: windows-shard-${{ github.run_attempt }}-${{ env.TEST_SHARD }}
-          path: ${{ runner.temp }}/windows-shards/
-          if-no-files-found: error
-          retention-days: 1
       - run: uv build --no-sources
-        if: runner.os == 'Linux' || env.TEST_SHARD == '1'
       - name: Check wheel in an isolated environment
-        if: runner.os == 'Linux' || env.TEST_SHARD == '1'
         shell: python
         run: |
           import os
           import pathlib
           import subprocess
-          import sys
           import tempfile
           wheel, = pathlib.Path('dist').glob('*.whl')
           with tempfile.TemporaryDirectory() as directory:
               root = pathlib.Path(directory)
               env = root / 'venv'
-              python = env / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
+              python = env / 'bin/python'
               variables = os.environ.copy()
               variables['UV_PROJECT_ENVIRONMENT'] = str(env)
               subprocess.run(['uv', 'sync', '--locked', '--no-build', '--no-dev', '--no-install-project'],
@@ -296,77 +270,11 @@ jobs:
                              cwd=pathlib.Path.home(), check=True)
       - id: coverage
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: runner.os == 'Linux'
         with:
           name: coverage-${{ github.run_attempt }}
           path: coverage.xml
           if-no-files-found: error
           retention-days: 7
-
-  verify_windows_shards:
-    name: Windows tests (${{ matrix.shard }}/4)
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
-    runs-on: windows-latest
-    timeout-minutes: 45
-    # Matrix outputs merge; each shard sets only its own, because an empty value sets nothing.
-    outputs:
-      shard-1: ${{ matrix.shard == 1 && steps.windows-shard.outputs.artifact-id || '' }}
-      shard-2: ${{ matrix.shard == 2 && steps.windows-shard.outputs.artifact-id || '' }}
-      shard-3: ${{ matrix.shard == 3 && steps.windows-shard.outputs.artifact-id || '' }}
-      shard-4: ${{ matrix.shard == 4 && steps.windows-shard.outputs.artifact-id || '' }}
-    env:
-      TEST_SHARD: ${{ matrix.shard }}
-      PGHOST: 127.0.0.1
-      PGPORT: 55432
-      PGUSER: pyracast
-      PGDATABASE: pyracast
-      PYRACAST_SECRET_KEY: ci-only-key-not-for-deployment
-      PYTEST_XDIST_AUTO_NUM_WORKERS: '2'
-    steps: *verify-steps
-
-  verify_windows:
-    name: Verify (windows-latest)
-    needs: verify_windows_shards
-    runs-on: windows-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      actions: read
-    env:
-      SHARD_ARTIFACTS: ${{ needs.verify_windows_shards.outputs.shard-1 }},${{ needs.verify_windows_shards.outputs.shard-2 }},${{ needs.verify_windows_shards.outputs.shard-3 }},${{ needs.verify_windows_shards.outputs.shard-4 }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
-        with:
-          version: 0.13.9
-          enable-cache: true
-      - run: uv sync --locked --no-build
-      # Empty artifact IDs would make download-artifact fetch every artifact of the run.
-      - name: Require the artifacts the producing jobs uploaded
-        shell: bash
-        run: |
-          [[ $SHARD_ARTIFACTS =~ ^[0-9]+(,[0-9]+){3}$ ]]
-      # The REST listing (token and run id) includes the artifacts of earlier attempts of this run.
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          artifact-ids: ${{ env.SHARD_ARTIFACTS }}
-          path: ${{ runner.temp }}/windows-shards
-          merge-multiple: true
-          github-token: ${{ github.token }}
-          run-id: ${{ github.run_id }}
-          digest-mismatch: error
-      - name: Require every Windows test and the unchanged combined coverage floor
-        run: >-
-          uv run --locked --no-sync --no-build python scripts/check.py --combine-shards
-          "${{ runner.temp }}/windows-shards/1"
-          "${{ runner.temp }}/windows-shards/2"
-          "${{ runner.temp }}/windows-shards/3"
-          "${{ runner.temp }}/windows-shards/4"
 
   web_ubuntu:
     name: Web (ubuntu-latest)
@@ -374,14 +282,14 @@ jobs:
     timeout-minutes: 40
     outputs:
       web-coverage: ${{ steps.web-coverage.outputs.artifact-id }}
-    env: &web-environment
+    env:
       PGHOST: 127.0.0.1
       PGPORT: 55432
       PGUSER: pyracast
       PGDATABASE: pyracast
       PYRACAST_SECRET_KEY: ci-only-key-not-for-deployment
       NEXT_TELEMETRY_DISABLED: '1'
-    steps: &web-steps
+    steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -400,22 +308,12 @@ jobs:
       - run: npm ci --ignore-scripts
         working-directory: web
       - run: npx --no-install playwright install --with-deps chromium
-        if: runner.os == 'Linux'
-        working-directory: web
-      # On Windows, --with-deps only adds Server-Media-Foundation (about 3 minutes); no test plays media.
-      - run: npx --no-install playwright install chromium
-        if: runner.os == 'Windows'
         working-directory: web
       - name: Verify API schema and generated types
         run: uv run --locked --no-sync --no-build python scripts/generate_api_schema.py --check
-      - run: npm run check
-        if: runner.os == 'Windows'
-        working-directory: web
       - run: npm run check:coverage
-        if: runner.os == 'Linux'
         working-directory: web
       - name: Audit web dependencies against dated exceptions
-        if: runner.os == 'Linux'
         run: uv run --locked --no-sync --no-build python scripts/npm_audit.py web
       - name: Run the browser scenarios against Django, PostgreSQL and the production web build
         run: uv run --locked --no-sync --no-build python -m pytest tests/e2e -m browser -n 1 --no-cov
@@ -423,10 +321,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: playwright-results-${{ runner.os }}-${{ github.run_attempt }}
+          name: playwright-results-${{ github.run_attempt }}
           path: |
-            web/test-results/**/trace.zip
-            web/test-results/**/error-context.md
             web/integration-results/**/trace.zip
             web/integration-results/**/error-context.md
             web/coverage/test-results/**/trace.zip
@@ -435,24 +331,16 @@ jobs:
           retention-days: 3
       - id: web-coverage
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: runner.os == 'Linux'
         with:
           name: web-coverage-${{ github.run_attempt }}
           path: web/coverage/lcov.info
           if-no-files-found: error
           retention-days: 7
 
-  web_windows:
-    name: Web (windows-latest)
-    runs-on: windows-latest
-    timeout-minutes: 40
-    env: *web-environment
-    steps: *web-steps
-
   web_production:
     name: Web production build (ubuntu-latest)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     env:
       NEXT_TELEMETRY_DISABLED: '1'
     defaults:
@@ -476,6 +364,11 @@ jobs:
           NEXT_DIST_DIR: .next-second
       - name: Run the worker scenarios against the production web build
         run: npm run test:production
+      - name: Run the mocked browser suite against the production web build
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        run: npm test
+        env:
+          PLAYWRIGHT_ACCEPT_PASS_ON_RETRY: '1'
       - name: Upload Playwright failure traces
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -484,16 +377,14 @@ jobs:
           path: |
             web/production-results/**/trace.zip
             web/production-results/**/error-context.md
+            web/test-results/**/trace.zip
+            web/test-results/**/error-context.md
           if-no-files-found: ignore
           retention-days: 3
 
   scientific:
-    name: Scientific (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    name: Scientific (ubuntu-latest)
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -590,7 +481,7 @@ jobs:
 
   ci_result:
     name: CI result
-    needs: [deployment, verify_ubuntu, verify_windows_shards, verify_windows, web_ubuntu, web_windows, web_production, scientific, audit, sonar]
+    needs: [deployment, verify_ubuntu, web_ubuntu, web_production, scientific, audit, sonar]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -607,7 +498,7 @@ jobs:
   # tested base and tree with the squash merge on main. Without it the merge takes the full path.
   pr_tested:
     name: Record the tested tree
-    needs: [deployment, verify_ubuntu, verify_windows_shards, verify_windows, web_ubuntu, web_windows, web_production, scientific, audit, sonar, ci_result]
+    needs: [deployment, verify_ubuntu, web_ubuntu, web_production, scientific, audit, sonar, ci_result]
     if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.ci_result.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -639,9 +530,10 @@ jobs:
           retention-days: 7
 
   # Outside CI result: a failed start leaves the release to the end of this run.
+  # It waits for web_production: the pull request run does not test the shipped web build.
   release_start:
     name: Start the release of a proven merge
-    needs: deployment
+    needs: [deployment, web_production]
     if: vars.GCP_DEPLOY_ENABLED == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5

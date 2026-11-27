@@ -7,6 +7,10 @@ import yaml
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 
 
+def workflow_files(directory: Path = WORKFLOWS) -> list[Path]:
+    return sorted([*directory.glob("*.yml"), *directory.glob("*.yaml")])
+
+
 def workflow(name: str) -> dict[Any, Any]:
     document: dict[Any, Any] = yaml.safe_load((WORKFLOWS / name).read_text(encoding="utf-8"))
     return document
