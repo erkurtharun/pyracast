@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
 
 permissions:
@@ -16,6 +17,7 @@ concurrency:
 jobs:
   deployment:
     name: Deployment configuration and containers
+    if: &not-a-draft ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
@@ -192,6 +194,7 @@ jobs:
 
   verify_ubuntu:
     name: Verify (ubuntu-latest)
+    if: *not-a-draft
     runs-on: ubuntu-latest
     timeout-minutes: 75
     outputs:
@@ -279,6 +282,7 @@ jobs:
 
   web_ubuntu:
     name: Web (ubuntu-latest)
+    if: *not-a-draft
     runs-on: ubuntu-latest
     timeout-minutes: 40
     outputs:
@@ -314,8 +318,6 @@ jobs:
         run: uv run --locked --no-sync --no-build python scripts/generate_api_schema.py --check
       - run: npm run check:coverage
         working-directory: web
-      - name: Audit web dependencies against dated exceptions
-        run: uv run --locked --no-sync --no-build python scripts/npm_audit.py web
       - name: Run the browser scenarios against Django, PostgreSQL and the production web build
         run: uv run --locked --no-sync --no-build python -m pytest tests/e2e -m browser -n 1 --no-cov
       - name: Upload Playwright failure traces
@@ -340,6 +342,7 @@ jobs:
 
   web_production:
     name: Web production build (ubuntu-latest)
+    if: *not-a-draft
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -385,6 +388,7 @@ jobs:
 
   scientific:
     name: Scientific (ubuntu-latest)
+    if: *not-a-draft
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -406,6 +410,7 @@ jobs:
 
   audit:
     name: Dependency audit
+    if: *not-a-draft
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -416,9 +421,16 @@ jobs:
         with:
           version: 0.13.10
           enable-cache: true
-      - run: uv sync --locked --no-build
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.13.1
+      - id: sync
+        run: uv sync --locked --no-build
       - run: uv export --locked --all-groups --all-extras --no-emit-project --no-hashes --output-file audit-requirements.txt
       - run: uv run --locked --no-sync --no-build pip-audit --strict --no-deps --disable-pip --requirement audit-requirements.txt
+      - name: Audit web dependencies against dated exceptions
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        run: uv run --locked --no-sync --no-build python scripts/npm_audit.py web
 
   sonar:
     name: Sonar quality gate
@@ -492,6 +504,7 @@ jobs:
       - name: Require every CI job
         env:
           NEEDS: ${{ toJSON(needs) }}
+          PULL_REQUEST_DRAFT: ${{ github.event.pull_request.draft }}
         run: python3 scripts/ci_result.py
 
   # Outside CI result, and no repository code runs here: the release compares this record of the
@@ -499,7 +512,7 @@ jobs:
   pr_tested:
     name: Record the tested tree
     needs: [deployment, verify_ubuntu, web_ubuntu, web_production, scientific, audit, sonar, ci_result]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.ci_result.result == 'success' }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && !github.event.pull_request.draft && needs.ci_result.result == 'success' }}
     runs-on: ubuntu-slim
     timeout-minutes: 5
     continue-on-error: true

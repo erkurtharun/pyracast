@@ -51,6 +51,26 @@ def test_main_reports_the_aggregate(capsys: pytest.CaptureFixture[str]) -> None:
     assert capsys.readouterr().out == "These CI jobs did not pass: deployment.\n"
 
 
+def draft_needs() -> dict[str, dict[str, object]]:
+    return {name: {"result": "skipped"} for name in needs()}
+
+
+@pytest.mark.parametrize("run", [draft_needs(), needs()], ids=["jobs skipped", "jobs passed"])
+def test_a_draft_pull_request_run_is_never_a_pass(
+    run: dict[str, dict[str, object]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert ci_result.main({"PULL_REQUEST_DRAFT": "true", "NEEDS": json.dumps(run)}) == 1
+    assert capsys.readouterr().out == (
+        "A draft pull request is not verified; mark it ready for review to run CI.\n"
+    )
+
+
+@pytest.mark.parametrize("draft", ["false", ""])
+def test_a_pull_request_that_is_not_a_draft_is_judged_by_its_jobs(draft: str) -> None:
+    assert ci_result.main({"PULL_REQUEST_DRAFT": draft, "NEEDS": json.dumps(needs())}) == 0
+    assert ci_result.main({"PULL_REQUEST_DRAFT": draft, "NEEDS": json.dumps(draft_needs())}) == 1
+
+
 @pytest.mark.parametrize("value", ["", "[]", "{}", '{"a": {}}', '{"a": []}'])
 def test_main_refuses_needs_it_cannot_read(value: str) -> None:
     with pytest.raises(ValueError, match="needs"):

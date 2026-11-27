@@ -635,6 +635,24 @@ def test_the_pull_request_run_may_skip_the_release_start_and_sonar_while_sonar_i
     assert decide(early(tested_jobs=sonar_off, sonar_enabled=False)) == proven()
 
 
+def test_a_pull_request_run_that_skipped_the_dependency_audit_is_no_proof() -> None:
+    deferred(early(tested_jobs=jobs_with("Dependency audit", "skipped")), "did not pass every job")
+
+
+def draft_run_jobs(result: str) -> list[dict[str, Any]]:
+    return [
+        pull_request_job(name, result if name == "CI result" else "skipped")
+        for name in PULL_REQUEST_JOBS
+    ]
+
+
+@pytest.mark.parametrize(("result", "conclusion"), [("failure", "failure"), ("success", "success")])
+def test_the_run_of_a_draft_pull_request_is_no_proof(result: str, conclusion: str) -> None:
+    value = early(tested={"conclusion": conclusion}, tested_jobs=draft_run_jobs(result))
+
+    deferred(value, "did not pass every job")
+
+
 def test_a_pull_request_run_and_a_main_run_may_skip_their_stop_jobs() -> None:
     stops = [{"name": STOP, "conclusion": "skipped"} for _ in range(6)]
     tested = [*jobs_with(SONAR, "success"), *stops]
