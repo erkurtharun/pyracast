@@ -37,7 +37,7 @@ pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth
 
 @pytest.fixture
 def workspace() -> tuple[Tenant, User, User]:
-    tenant = Tenant.objects.create(name="Solar workspace")
+    tenant = Tenant.objects.create(name="Harbor Solar")
     administrator = User.objects.create_user(username="workspace-admin", email="admin@example.com")
     viewer = User.objects.create_user(username="viewer", email="viewer@example.com")
     Membership.objects.create(tenant=tenant, user=administrator, role=WorkspaceRole.ADMIN)
@@ -56,11 +56,11 @@ def test_database_enforces_a_nonblank_workspace_name_and_single_admin(
     assert connection.vendor == "postgresql"
     with pytest.raises(IntegrityError), transaction.atomic():
         Tenant.objects.create(name=" ")
-    namesake = Tenant.objects.create(name=" SOLAR WORKSPACE ")
+    namesake = Tenant.objects.create(name=" harbor solar ")
     renamed = Tenant.objects.create(name="Bay workspace")
     Tenant.objects.filter(pk=renamed.pk).update(name=tenant.name)
     assert Tenant.objects.filter(name=tenant.name).count() == 2
-    assert Tenant.objects.get(pk=namesake.pk).name == " SOLAR WORKSPACE "
+    assert Tenant.objects.get(pk=namesake.pk).name == " harbor solar "
     with pytest.raises(IntegrityError), transaction.atomic():
         Membership.objects.filter(tenant=tenant, user=viewer).update(role="admin")
     with pytest.raises(IntegrityError), transaction.atomic():
