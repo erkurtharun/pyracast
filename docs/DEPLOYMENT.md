@@ -389,7 +389,9 @@ Inspect the host from `/opt/pyracast/current` as root with
   request; image digests do not update themselves. The daily `Dependency audit` workflow runs
   `pip-audit` and the npm audit on `main`; a failed run means an advisory is open, an npm
   exception expired or is no longer reported, or an audit could not run. Every run of `main` runs
-  the same audits, so a release waits until they pass. The daily `Image rescan` workflow scans images rebuilt from `main`, or the deployed
+  the same audits: a release that follows the whole run waits for that run's successful audit,
+  while a release started early for a proven merge relies on the audit that passed in the pull
+  request's run, and the audit of the run of `main` may still be in progress. The daily `Image rescan` workflow scans images rebuilt from `main`, or the deployed
   `production` digests once `image_rescan_reader = true` is applied and the repository variable
   `GCP_IMAGE_RESCAN` holds `terraform -chdir=infra/terraform output -raw image_rescan_setting`; a
   failed run needs an image update. Review Ubuntu updates and the pinned Docker packages in
