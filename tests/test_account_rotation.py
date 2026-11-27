@@ -40,7 +40,8 @@ def test_account_creation_rejects_duplicate_identity_without_rotating_credential
             require_new=True,
         )
 
-    account = ProviderAccount.objects.get()
+    assert ProviderAccount.objects.get() == account
+    account.refresh_from_db()
     assert decrypt_api_key(account.encrypted_api_key) == reference
     assert account.credential_revision == 1
     assert account.daily_quota == 1

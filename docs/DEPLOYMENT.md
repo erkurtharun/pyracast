@@ -500,6 +500,7 @@ A failed watchdog step by hand, in `/opt/pyracast/current` with
 | Watchdog heartbeat missing | No heartbeat for fifteen minutes | As for `pyracast_watchdog_heartbeat` |
 | Repeated container restarts | Three watchdog runs within an hour restarted containers | As for `pyracast_runtime_restarted` |
 | Security alerts (`sign_in_lockouts`, `second_factor_lockouts`, `authorization_refusals`, `csrf_refusals`, `invitation_limits`, `proxy_headers`, `admin_factor`) | `pyracast.security` lines of that event crossed their ten-minute threshold | Read those lines in the `pyracast-security` bucket for the clients, accounts or workspaces involved; for `proxy_headers` check the gateway and the peer address; for `admin_factor` confirm that the change was planned |
+| Project access changed | The project's IAM policy (members, owners, audit configuration) or one of its custom roles changed | Expected during a reviewed Terraform apply. Otherwise read the entry in the Admin Activity audit log (method `SetIamPolicy` or `google.iam.admin.v1.*Role`) for who changed what, undo the change and take that right from whoever made it |
 
 ## Database reset and restore
 

@@ -357,3 +357,63 @@ resource "google_monitoring_alert_policy" "security" {
     content   = each.value.description
   }
 }
+
+# SetIamPolicy also carries changes of the project's owners and of its audit configuration.
+resource "google_logging_metric" "access_changes" {
+  name = "${var.name}-access-changes"
+
+  filter = join(" AND ", [
+    "logName=\"projects/${var.project_id}/logs/cloudaudit.googleapis.com%2Factivity\"",
+    "protoPayload.serviceName=~\"^(cloudresourcemanager|iam)[.]googleapis[.]com$\"",
+    "protoPayload.methodName=~\"^(SetIamPolicy|google[.]iam[.]admin[.]v1[.](Create|Update|Delete|Undelete)Role)$\"",
+  ])
+
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_monitoring_alert_policy" "access_changes" {
+  display_name          = "${var.name} project access changed"
+  combiner              = "OR"
+  enabled               = true
+  notification_channels = [google_monitoring_notification_channel.operator.name]
+  user_labels           = local.labels
+
+  # The window is the named period plus the minute the condition must hold (duration).
+  conditions {
+    display_name = "An access change within ten minutes"
+    condition_threshold {
+      filter = join(" AND ", [
+        "metric.type=\"logging.googleapis.com/user/${google_logging_metric.access_changes.name}\"",
+        "resource.type=\"global\"",
+      ])
+      comparison              = "COMPARISON_GT"
+      threshold_value         = 0
+      duration                = "60s"
+      evaluation_missing_data = "EVALUATION_MISSING_DATA_INACTIVE"
+
+      aggregations {
+        alignment_period     = "660s"
+        per_series_aligner   = "ALIGN_SUM"
+        cross_series_reducer = "REDUCE_SUM"
+      }
+
+      trigger {
+        count = 1
+      }
+    }
+  }
+
+  alert_strategy {
+    auto_close = "3660s"
+  }
+
+  documentation {
+    mime_type = "text/markdown"
+    content   = "The project's IAM policy (members, owners or audit configuration) or one of its custom roles changed. A change made by a reviewed Terraform apply is expected; look into any other. What to check first and how to recover: the Project access changed row under Other alerts in DEPLOYMENT.md."
+  }
+}
