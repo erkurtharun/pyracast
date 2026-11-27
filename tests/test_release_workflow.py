@@ -894,6 +894,11 @@ def test_ci_asks_release_to_judge_a_push_to_main_once_its_images_and_shipped_bui
     )
 
 
+def test_ci_runs_on_a_push_to_main_a_pull_request_and_a_dispatch() -> None:
+    assert set(triggers("ci.yml")) == {"push", "pull_request", "workflow_dispatch"}
+    assert "merge_group" not in (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+
+
 def test_every_repeated_job_still_runs_to_the_end_on_each_push_to_main() -> None:
     document = workflow("ci.yml")
     jobs = ci_jobs()

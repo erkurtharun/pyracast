@@ -1,6 +1,6 @@
 # Scan code, dependencies and images
 
-GitHub Actions runs the scans: CI on every push to `main`, pull request, merge group and manual dispatch, CodeQL code scanning on pushes to and pull requests for `main` and weekly, Release again for the images it publishes, and a daily rescan of the release images. Dependabot opens weekly update pull requests that go through the same CI. A red scan fails its CI run (whether that blocks a merge depends on branch protection, which is outside the repository) and keeps Release from deploying; no scan result is stored or shown anywhere in the product.
+GitHub Actions runs the scans: CI on every push to `main`, pull request and manual dispatch, CodeQL code scanning on pushes to and pull requests for `main` and weekly, Release again for the images it publishes, and a daily rescan of the release images. Dependabot opens weekly update pull requests that go through the same CI. A red scan fails its CI run (whether that blocks a merge depends on branch protection, which is outside the repository) and keeps Release from deploying; no scan result is stored or shown anywhere in the product.
 
 ## Entry points
 
@@ -20,7 +20,7 @@ GitHub Actions runs the scans: CI on every push to `main`, pull request, merge g
 
 ```mermaid
 flowchart TD
-  trig["push, pull_request, merge_group, dispatch"] --> aud["audit: pip-audit on audit-requirements.txt"]
+  trig["push, pull_request, dispatch"] --> aud["audit: pip-audit on audit-requirements.txt"]
   trig --> web["web_ubuntu: check, then npm_audit.py web"]
   trig --> ver["verify_ubuntu: check.py incl. Ruff S rules"]
   trig --> dep["deployment: build 5 images, load, scan"]
@@ -30,7 +30,7 @@ flowchart TD
   ss --> chk{"check_image_scans.py"}
   chk -->|"identity, inventory, unaccepted HIGH or CRITICAL finding, or exception problem"| red["job fails"]
   ver -->|"coverage.xml"| son
-  web -->|"web_ubuntu lcov only"| son{"sonar: enabled, not merge_group, not Dependabot, not fork"}
+  web -->|"web_ubuntu lcov only"| son{"sonar: enabled, not Dependabot, not fork"}
   son -->|"skipped"| skip["no analysis"]
   son -->|"runs"| qg["quality gate, wait up to 300 s"]
   aud --> ok["CI result green"]
@@ -58,7 +58,7 @@ No database table is read or written. Artifacts:
 
 ## Authorization
 
-- Sonar: `SONAR_TOKEN` secret plus `SONAR_PROJECT_KEY` and `SONAR_ORGANIZATION` variables, validated by the "Validate Sonar configuration" step. The job `if:` skips fork pull requests and `dependabot[bot]` runs (which get no Actions secrets) and every `merge_group` run.
+- Sonar: `SONAR_TOKEN` secret plus `SONAR_PROJECT_KEY` and `SONAR_ORGANIZATION` variables, validated by the "Validate Sonar configuration" step. The job `if:` skips fork pull requests and `dependabot[bot]` runs (which get no Actions secrets).
 - Release: `authorize` runs only with `vars.GCP_DEPLOY_ENABLED == 'true'` on `main` after a successful CI `workflow_run` or a dispatch, and accepts only the current `main` SHA with a successful `push`/`workflow_dispatch` `ci.yml` run of this repository whose `CI result` job passed, and one unexpired image artifact. `scan` holds read permissions only and no cloud credential; `deploy` runs in environment `production` with a workload-identity token.
 - Rescan: only the read-only registry identity named by `GCP_IMAGE_RESCAN`; a run without the variable has no cloud access.
 - Code scanning: the workflow token reads contents only; job `analyze` adds `security-events: write` for the upload, and the checkout keeps no credential (`persist-credentials: false`).
