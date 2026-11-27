@@ -1045,6 +1045,12 @@ UNPROVEN = (
     "${{ !cancelled() && !github.event.pull_request.draft && "
     "needs.merge_proof.outputs.proven != 'true' }}"
 )
+SONAR_CONDITION = (
+    "vars.SONAR_ENABLED == 'true' && !cancelled() && "
+    "needs.verify_ubuntu.result == 'success' && needs.web_ubuntu.result == 'success' && "
+    "github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || "
+    "github.event.pull_request.head.repo.full_name == github.repository)"
+)
 PROVE = 'python3 deploy/release_authorization.py prove "$RUNNER_TEMP/merge-proof.json"'
 COLLECT_PROOF = "Collect the pull request run that tested the tree of this commit"
 PROOF_READS = {"contents": "read", "actions": "read", "pull-requests": "read"}
@@ -1218,8 +1224,7 @@ def test_every_job_but_the_proven_suites_runs_to_the_end_on_each_push_to_main() 
             UNPROVEN if identifier in PROVEN_JOB_IDS else NOT_A_DRAFT
         ), identifier
         assert "continue-on-error" not in jobs[identifier], identifier
-    assert "push" not in jobs["sonar"]["if"]
-    assert "github.ref" not in jobs["sonar"]["if"]
+    assert jobs["sonar"]["if"] == SONAR_CONDITION
     assert jobs["ci_result"]["if"] == "${{ !cancelled() }}"
     for job in jobs.values():
         assert "pr_tested" not in str(job.get("needs", "")), job["name"]
@@ -1253,6 +1258,7 @@ def draft_rule_problems(document: dict[str, Any]) -> list[str]:
     jobs = document["jobs"]
     past_a_skip = {
         **dict.fromkeys(PROVEN_JOB_IDS, UNPROVEN),
+        "sonar": SONAR_CONDITION,
         "ci_result": RESULT_CONDITION,
         "pr_tested": RECORD_CONDITION,
         **dict.fromkeys(STOP_JOBS, STOP_CONDITION),

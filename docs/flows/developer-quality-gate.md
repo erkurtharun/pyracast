@@ -67,6 +67,8 @@ flowchart TD
 
 None for users. Privilege boundaries: workflow `permissions: contents: read` (`actions: read` only where a job downloads artifacts by id through the REST API; `actions: write` only in the stop jobs, which check out no code; `merge_proof` reads actions and pull requests) and `persist-credentials: false`; every action pinned by commit SHA; `PYRACAST_SECRET_KEY` is a CI-only constant; the Linux RabbitMQ password is random per run and masked; `sonar` runs only when `SONAR_ENABLED` is `true`, never for Dependabot or fork pull requests (they receive no token); `check_scientific.py` trusts the HDF5 download only through a pinned SHA256.
 
+Sonar runs after successful Verify and Web jobs, including on a ready pull request where the push-only proof job is skipped.
+
 ## Failure paths
 
 | Condition | Result |
