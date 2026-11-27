@@ -14,6 +14,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  plan:
+    name: Plan the checks
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    outputs:
+      audit: ${{ steps.audit.outputs.audit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Decide whether the dependency audits run
+        id: audit
+        run: python3 scripts/ci_plan.py >> "$GITHUB_OUTPUT"
+
   deployment:
     name: Deployment configuration and containers
     runs-on: ubuntu-latest
@@ -314,8 +329,6 @@ jobs:
         run: uv run --locked --no-sync --no-build python scripts/generate_api_schema.py --check
       - run: npm run check:coverage
         working-directory: web
-      - name: Audit web dependencies against dated exceptions
-        run: uv run --locked --no-sync --no-build python scripts/npm_audit.py web
       - name: Run the browser scenarios against Django, PostgreSQL and the production web build
         run: uv run --locked --no-sync --no-build python -m pytest tests/e2e -m browser -n 1 --no-cov
       - name: Upload Playwright failure traces
@@ -406,6 +419,8 @@ jobs:
 
   audit:
     name: Dependency audit
+    needs: plan
+    if: needs.plan.outputs.audit == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -416,9 +431,14 @@ jobs:
         with:
           version: 0.13.10
           enable-cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.13.1
       - run: uv sync --locked --no-build
       - run: uv export --locked --all-groups --all-extras --no-emit-project --no-hashes --output-file audit-requirements.txt
       - run: uv run --locked --no-sync --no-build pip-audit --strict --no-deps --disable-pip --requirement audit-requirements.txt
+      - name: Audit web dependencies against dated exceptions
+        run: uv run --locked --no-sync --no-build python scripts/npm_audit.py web
 
   sonar:
     name: Sonar quality gate
@@ -481,7 +501,7 @@ jobs:
 
   ci_result:
     name: CI result
-    needs: [deployment, verify_ubuntu, web_ubuntu, web_production, scientific, audit, sonar]
+    needs: [plan, deployment, verify_ubuntu, web_ubuntu, web_production, scientific, audit, sonar]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-slim
     timeout-minutes: 5
@@ -498,7 +518,7 @@ jobs:
   # tested base and tree with the squash merge on main. Without it the merge takes the full path.
   pr_tested:
     name: Record the tested tree
-    needs: [deployment, verify_ubuntu, web_ubuntu, web_production, scientific, audit, sonar, ci_result]
+    needs: [plan, deployment, verify_ubuntu, web_ubuntu, web_production, scientific, audit, sonar, ci_result]
     if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.ci_result.result == 'success' }}
     runs-on: ubuntu-slim
     timeout-minutes: 5

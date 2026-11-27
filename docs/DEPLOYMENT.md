@@ -386,7 +386,9 @@ Inspect the host from `/opt/pyracast/current` as root with
   (`rabbitmqctl change_password` and an application restart for the broker), never by deleting
   a data volume ([encryption-key-rotation](flows/encryption-key-rotation.md)).
 - **Patching:** review the monthly Dependabot pull requests and each security update pull
-  request; image digests do not update themselves. The daily `Image rescan` workflow scans images rebuilt from `main`, or the deployed
+  request; image digests do not update themselves. The daily `Dependency audit` workflow runs
+  `pip-audit` and the npm audit on `main`; a failed run names a new advisory, and every run of
+  `main` audits too, so the next release waits for the update or a dated npm exception. The daily `Image rescan` workflow scans images rebuilt from `main`, or the deployed
   `production` digests once `image_rescan_reader = true` is applied and the repository variable
   `GCP_IMAGE_RESCAN` holds `terraform -chdir=infra/terraform output -raw image_rescan_setting`; a
   failed run needs an image update. Review Ubuntu updates and the pinned Docker packages in

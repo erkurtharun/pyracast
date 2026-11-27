@@ -461,9 +461,12 @@ def test_the_shipped_path_check_sees_every_re_include(
     assert _shipped_samples(context, _ignore_rules("\n".join(lines))) != []
 
 
-WORKFLOW_FILES = frozenset({"ci.yml", "codeql.yml", "image-rescan.yml", "release.yml"})
+WORKFLOW_FILES = frozenset(
+    {"ci.yml", "codeql.yml", "dependency-audit.yml", "image-rescan.yml", "release.yml"}
+)
 JOBS_THAT_NEED_EVERY_PATH = frozenset(
     {
+        "ci.yml plan",
         "ci.yml verify_ubuntu",
         "ci.yml web_ubuntu",
         "ci.yml web_production",
@@ -473,6 +476,7 @@ JOBS_THAT_NEED_EVERY_PATH = frozenset(
         "ci.yml ci_result",
         "ci.yml pr_tested",
         "codeql.yml analyze",
+        "dependency-audit.yml audit",
     }
 )
 

@@ -635,6 +635,21 @@ def test_the_pull_request_run_may_skip_the_release_start_and_sonar_while_sonar_i
     assert decide(early(tested_jobs=sonar_off, sonar_enabled=False)) == proven()
 
 
+def test_a_pull_request_run_that_changed_no_audit_input_may_skip_the_audit() -> None:
+    assert decide(early(tested_jobs=jobs_with("Dependency audit", "skipped"))) == proven()
+
+
+def test_a_pull_request_run_that_skipped_the_audit_proves_no_squash_that_changes_its_inputs() -> (
+    None
+):
+    value = early(
+        commit={"paths": ["web/package-lock.json"]},
+        tested_jobs=jobs_with("Dependency audit", "skipped"),
+    )
+
+    deferred(value, "changes the pipeline (web/package-lock.json)")
+
+
 def test_a_pull_request_run_and_a_main_run_may_skip_their_stop_jobs() -> None:
     stops = [{"name": STOP, "conclusion": "skipped"} for _ in range(6)]
     tested = [*jobs_with(SONAR, "success"), *stops]
