@@ -63,6 +63,15 @@ def test_the_database_refuses_collection_times_of_another_shape(field: str, valu
     )
 
 
+def test_collection_times_are_stored_in_the_order_given() -> None:
+    system = make_system(approved=True)
+    CollectionSchedule.objects.create(
+        region=system.region, times=["18:00", "06:00"], effective_from=NOW
+    )
+
+    assert CollectionSchedule.objects.get(region=system.region).times == ["18:00", "06:00"]
+
+
 def duplicate_refusal(create: Callable[[], object]) -> str | None:
     with pytest.raises(IntegrityError) as raised, transaction.atomic():
         create()
