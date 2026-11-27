@@ -7,14 +7,8 @@ from pyracast.schema_catalog import SNAPSHOT, read_catalog, serialized
 
 
 def write() -> None:
-    """Build a throwaway database the way pytest builds its own, record its catalog, drop it."""
-    original = connection.settings_dict["NAME"]
-    connection.settings_dict["TEST"]["NAME"] = f"{original}_schema_catalog"
-    connection.creation.create_test_db(verbosity=0, autoclobber=True, serialize=False)
-    try:
-        SNAPSHOT.write_text(serialized(read_catalog(connection)), encoding="utf-8", newline="\n")
-    finally:
-        connection.creation.destroy_test_db(original, verbosity=0)
+    """Record the catalog of the configured database, which `migrate` built."""
+    SNAPSHOT.write_bytes(serialized(read_catalog(connection)).encode("utf-8"))
 
 
 def main() -> int:

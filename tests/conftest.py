@@ -68,6 +68,7 @@ TOOLING = frozenset(
         "test_release_scope",
         "test_release_unit",
         "test_release_workflow",
+        "test_schema_snapshot",
         "test_shutdown_process",
         "test_solcast_capture",
         "test_start_postgres",

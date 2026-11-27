@@ -1,7 +1,11 @@
+import json
+from pathlib import Path
+
 import pytest
 from django.db import connection, transaction
 
 from pyracast.schema_catalog import SNAPSHOT, differences, read_catalog, recorded, serialized
+from scripts import write_schema_catalog
 
 pytestmark = pytest.mark.django_db
 
@@ -219,3 +223,19 @@ def test_a_category_that_was_not_read_or_is_not_known_is_a_difference() -> None:
     found = {**{key: rows for key, rows in expected.items() if key != "functions"}, "views": []}
 
     assert differences(found, expected) == ["functions: not read", "views: not expected"]
+
+
+def test_the_writer_records_the_catalog_of_the_database_it_is_connected_to(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    written = tmp_path / "schema_catalog.json"
+    monkeypatch.setattr(write_schema_catalog, "SNAPSHOT", written)
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute("COMMENT ON TABLE regions_region IS 'Recorded'")
+        catalog = read_catalog(connection)
+        write_schema_catalog.write()
+        transaction.set_rollback(True)
+
+    assert written.read_bytes() == serialized(catalog).encode("utf-8")
+    assert ["table regions_region", "Recorded"] in json.loads(written.read_bytes())["comments"]
