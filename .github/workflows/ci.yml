@@ -512,7 +512,7 @@ jobs:
   pr_tested:
     name: Record the tested tree
     needs: [deployment, verify_ubuntu, web_ubuntu, web_production, scientific, audit, sonar, ci_result]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.ci_result.result == 'success' }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && !github.event.pull_request.draft && needs.ci_result.result == 'success' }}
     runs-on: ubuntu-slim
     timeout-minutes: 5
     continue-on-error: true

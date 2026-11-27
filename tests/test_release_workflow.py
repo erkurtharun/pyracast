@@ -649,26 +649,44 @@ def audit_jobs() -> list[tuple[str, str]]:
 AFTER_SETUP = "${{ !cancelled() && steps.sync.outcome == 'success' }}"
 
 
-def audit_step(job: dict[str, Any], command: str) -> dict[str, Any]:
+def steps_running(job: dict[str, Any], command: str) -> list[dict[str, Any]]:
     steps: list[dict[str, Any]] = job["steps"]
-    (found,) = [candidate for candidate in steps if command in candidate.get("run", "")]
+    return [
+        candidate
+        for candidate in steps
+        if any(
+            command in line
+            for line in candidate.get("run", "").splitlines()
+            if not line.lstrip().startswith("#")
+        )
+    ]
+
+
+def audit_step(job: dict[str, Any], command: str) -> dict[str, Any]:
+    (found,) = steps_running(job, command)
     return found
 
 
 def audit_problems(ci: dict[str, Any], scheduled: dict[str, Any]) -> list[str]:
     audit = ci["jobs"]["audit"]
     (daily,) = scheduled["jobs"].values()
-    python, web = (
-        [candidate for candidate in audit["steps"] if command in candidate.get("run", "")]
-        for command in AUDIT_COMMANDS
+    python, web = (steps_running(audit, command) for command in AUDIT_COMMANDS)
+    steps = audit["steps"]
+    sync = [candidate for candidate in steps if candidate.get("id") == "sync"]
+    sync_first = len(sync) == 1 and all(
+        steps.index(sync[0]) < steps.index(found) for found in [*python, *web]
     )
-    sync = [candidate.get("run") for candidate in audit["steps"] if candidate.get("id") == "sync"]
     problems = []
-    if daily["steps"] != audit["steps"]:
+    if daily["steps"] != steps:
         problems.append("scheduled audit drifts")
     if len(python) != 1 or "if" in python[0]:
         problems.append("Python audit disabled")
-    if len(web) != 1 or web[0].get("if") != AFTER_SETUP or sync != ["uv sync --locked --no-build"]:
+    if (
+        len(web) != 1
+        or web[0].get("if") != AFTER_SETUP
+        or not sync_first
+        or sync[0].get("run") != "uv sync --locked --no-build"
+    ):
         problems.append("web audit hidden")
     if any("continue-on-error" in candidate for candidate in [audit, daily, *python, *web]):
         problems.append("audit failure ignored")
@@ -683,6 +701,18 @@ def in_both_audits(
             change(job)
 
     return apply
+
+
+def comment_out(command: str) -> Callable[[dict[str, Any]], object]:
+    return lambda job: audit_step(job, command).update(
+        {"run": "# " + audit_step(job, command)["run"]}
+    )
+
+
+def move_to_front(command: str) -> Callable[[dict[str, Any]], object]:
+    return lambda job: job["steps"].insert(
+        0, job["steps"].pop(job["steps"].index(audit_step(job, command)))
+    )
 
 
 PYTHON_AUDIT, WEB_AUDIT = AUDIT_COMMANDS
@@ -710,6 +740,21 @@ AUDIT_BROKEN_SHAPES: list[tuple[str, Callable[[dict[str, Any], dict[str, Any]], 
     (
         "web audit after an unnamed setup in both",
         in_both_audits(lambda job: audit_step(job, "uv sync").pop("id")),
+        "web audit hidden",
+    ),
+    (
+        "Python audit commented out in both",
+        in_both_audits(comment_out(PYTHON_AUDIT)),
+        "Python audit disabled",
+    ),
+    (
+        "web audit commented out in both",
+        in_both_audits(comment_out(WEB_AUDIT)),
+        "web audit hidden",
+    ),
+    (
+        "web audit before setup in both",
+        in_both_audits(move_to_front(WEB_AUDIT)),
         "web audit hidden",
     ),
     (
@@ -1059,7 +1104,7 @@ DRAFT_FLAG = "${{ github.event.pull_request.draft }}"
 RESULT_CONDITION = "${{ !cancelled() }}"
 RECORD_CONDITION = (
     "${{ !cancelled() && github.event_name == 'pull_request' && "
-    "needs.ci_result.result == 'success' }}"
+    "!github.event.pull_request.draft && needs.ci_result.result == 'success' }}"
 )
 STATUS_FUNCTION = re.compile(r"\b(?:always|cancelled|failure)\(\)")
 
@@ -1143,6 +1188,16 @@ DRAFT_BROKEN_SHAPES: list[tuple[str, Callable[[dict[str, Any]], object], str]] =
         "pr_tested runs on a draft",
     ),
     (
+        "record on a draft",
+        lambda d: d["jobs"]["pr_tested"].update(
+            {
+                "if": "${{ !cancelled() && github.event_name == 'pull_request' && "
+                "needs.ci_result.result == 'success' }}"
+            }
+        ),
+        "pr_tested runs on a draft",
+    ),
+    (
         "result job skipped with the rest",
         lambda d: d["jobs"]["ci_result"].update({"if": NOT_A_DRAFT}),
         "result job skipped on a draft",
@@ -1207,10 +1262,7 @@ def test_a_passed_pull_request_run_records_its_tested_tree_in_a_job_without_repo
 
     assert record_job["name"] == release_authorization.TESTED_TREE_JOB
     assert set(record_job["needs"]) == {*jobs["ci_result"]["needs"], "ci_result"}
-    assert record_job["if"] == (
-        "${{ !cancelled() && github.event_name == 'pull_request' && "
-        "needs.ci_result.result == 'success' }}"
-    )
+    assert record_job["if"] == RECORD_CONDITION
     assert record_job["continue-on-error"] is True
     assert "permissions" not in record_job
     assert str(checkout["uses"]).startswith("actions/checkout@")
