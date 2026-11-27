@@ -1,3 +1,4 @@
+import uuid
 from datetime import timedelta
 
 import pytest
@@ -9,16 +10,21 @@ from pyracast.accounts.models import Membership
 from pyracast.accounts.operations import remove_workspace_member
 from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.models import (
+    DeliveryRecipient,
     NotificationDelivery,
     NotificationSettings,
     ReminderSchedule,
 )
 from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.overview import plants_at_recipient_limit
-from pyracast.notifications.recipients import effective_recipients, recipient_key
+from pyracast.notifications.recipients import (
+    delivery_addresses,
+    effective_recipients,
+    recipient_key,
+)
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.operations import submit_region
-from tests.support.domain import NOW, System
+from tests.support.domain import NOW, System, make_system
 from tests.support.notification_groups import group, member
 from tests.support.notifications import (
     SLOT,
@@ -184,3 +190,90 @@ def test_an_address_pinned_to_an_inactive_member_reaches_the_member_holding_it_n
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     assert (delivery.status, delivery.last_error) == ("sent", "")
     assert mail.outbox[0].bcc == ["shared@example.com"]
+
+
+def test_the_list_leaves_out_an_address_tied_to_a_membership_that_does_not_exist() -> None:
+    system = make_system(approved=True)
+    held = Membership.objects.get(user=member(system, "holder@example.com")).pk
+    schedule = ReminderSchedule.objects.create(
+        region=system.region,
+        effective_from=NOW,
+        times=["10:00"],
+        enabled=True,
+        include_workspace_members=True,
+    )
+    store(
+        schedule,
+        ["Holder@Example.com", "gone@example.com", "external@example.com", "beyond@example.com"],
+        {"holder@example.com": [held], "gone@example.com": [987654321], "beyond@example.com": [0]},
+    )
+
+    assert effective_recipients(schedule) == ["Holder@Example.com", "external@example.com"]
+
+
+LEASE = {"lease_token": uuid.uuid4(), "lease_expires_at": SLOT}
+PREPARED = {"format": "plain", "kind": "unavailable"}
+
+
+def recorded_delivery(
+    system: System, minute: int, status: str, stored: list[tuple[str, bool]], **values: object
+) -> NotificationDelivery:
+    slot = SLOT + timedelta(minutes=minute)
+    schedule, _ = ReminderSchedule.objects.get_or_create(
+        region=system.region, defaults={"effective_from": NOW}
+    )
+    delivery = NotificationDelivery.objects.create(
+        schedule=schedule,
+        binding=system.binding,
+        scheduled_for=slot,
+        available_at=slot,
+        preparation_deadline=slot,
+        status=status,
+        **values,
+    )
+    DeliveryRecipient.objects.bulk_create(
+        DeliveryRecipient(
+            delivery=delivery, address=address, key=recipient_key(address), revoked=gone
+        )
+        for address, gone in stored
+    )
+    return delivery
+
+
+def test_a_delivery_marked_for_transmission_lists_its_whole_envelope_whatever_its_status() -> None:
+    system = make_system(approved=True)
+    marked = [
+        recorded_delivery(
+            system,
+            minute,
+            status,
+            [("a@example.com", False), ("b@example.com", True)],
+            transmit_started_at=SLOT,
+            prepared_message=PREPARED,
+            **(LEASE if status == "uncertain" else {}),
+        )
+        for minute, status in enumerate(("sent", "failed", "uncertain", "retry"))
+    ]
+
+    assert [delivery_addresses(delivery) for delivery in marked] == [
+        ["a@example.com", "b@example.com"]
+    ] * 4
+
+
+@pytest.mark.parametrize(
+    "status", ["pending", "retry", "sending", "uncertain", "skipped", "cancelled"]
+)
+def test_a_delivery_without_a_marker_lists_its_addresses_not_revoked_whatever_its_status(
+    status: str,
+) -> None:
+    leased = status in {"sending", "uncertain"}
+    delivery = recorded_delivery(
+        make_system(approved=True),
+        0,
+        status,
+        [("a@example.com", False), ("B@example.com", True)],
+        prepared_message=PREPARED if leased else None,
+        **(LEASE if leased else {}),
+    )
+
+    assert delivery_addresses(delivery) == ["a@example.com"]

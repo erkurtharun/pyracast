@@ -73,6 +73,9 @@ def test_the_state_follows_from_stored_facts_and_never_from_a_moved_deadline() -
         return WorkspaceInvitation(**{"expires_at": ahead, **fields}).state_at(now)
 
     assert state() == "pending"
+    assert state(token_hash=None) == "pending"
+    assert state(role=WorkspaceRole.ADMIN) == "pending"
+    assert state(delivery_status="failed") == "pending"
     assert state(expires_at=now) == "expired"
     assert state(expires_at=behind) == "expired"
     assert state(accepted_at=behind) == "accepted"
@@ -83,6 +86,49 @@ def test_the_state_follows_from_stored_facts_and_never_from_a_moved_deadline() -
     assert state(revoked_at=behind, revoked_reason="superseded") == "superseded"
     assert state(revoked_at=behind, revoked_reason="superseded", expires_at=behind) == "superseded"
     assert state(revoked_at=behind) == "revoked"
+
+
+def test_each_stored_invitation_reads_the_state_of_its_stored_facts() -> None:
+    tenant = Tenant.objects.create(name="Stored workspace")
+    sender = User.objects.create_user(username="sender")
+    now = timezone.now()
+    week = timedelta(days=7)
+
+    def stored(email: str, **values: Any) -> int:
+        row = WorkspaceInvitation.objects.create(
+            **{
+                "tenant": tenant,
+                "created_by": sender,
+                "email": email,
+                "token_hash": email.ljust(64, "0")[:64],
+                "expires_at": now + week,
+                **values,
+            }
+        )
+        return int(row.pk)
+
+    rows = {
+        "pending": stored("pending@example.com"),
+        "unsent": stored("unsent@example.com", token_hash=None),
+        "administrator": stored("owner@example.com", role="admin"),
+        "accepted": stored("accepted@example.com", accepted_at=now, delivery_status="sent"),
+        "lapsed": stored("lapsed@example.com", expires_at=now - timedelta(days=1)),
+        "revoked": stored("revoked@example.com", expires_at=now, revoked_at=now),
+        "failed": stored("failed@example.com", delivery_status="failed"),
+    }
+
+    assert {
+        name: WorkspaceInvitation.objects.get(pk=pk).state_at(timezone.now())
+        for name, pk in rows.items()
+    } == {
+        "pending": "pending",
+        "unsent": "pending",
+        "administrator": "pending",
+        "accepted": "accepted",
+        "lapsed": "expired",
+        "revoked": "revoked",
+        "failed": "pending",
+    }
 
 
 def test_cancelling_keeps_the_deadline_and_stores_when_and_why(

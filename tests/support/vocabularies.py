@@ -404,13 +404,17 @@ STORED_VOCABULARIES = (
     StoredVocabulary(ChangeRequest, "status", _production_request),
     StoredVocabulary(ProductionChangeItem, "action", _production_item),
     StoredVocabulary(ProductionChangeItem, "quality", _production_item),
-    StoredVocabulary(ProductionChangeItem, "baseline_source_kind", _production_item),
+    StoredVocabulary(
+        ProductionChangeItem, "baseline_source_kind", _production_item, retired=("provider",)
+    ),
     StoredVocabulary(IncidentChange, "action", _incident_change),
     StoredVocabulary(IncidentChange, "kind", _incident_change),
     StoredVocabulary(DispatcherStatus, "phase", _dispatcher_status),
     StoredVocabulary(CollectionJob, "endpoint", _collection_job),
     StoredVocabulary(CollectionJob, "status", _collection_job),
-    StoredVocabulary(CollectionJob, "last_error", _collection_job, retired=("old_worker",)),
+    StoredVocabulary(
+        CollectionJob, "last_error", _collection_job, retired=("old_worker", "provider_timeout")
+    ),
     StoredVocabulary(RequestAttempt, "purpose", _request_attempt, retired=("operator",)),
     StoredVocabulary(RequestAttempt, "outcome", _request_attempt),
     StoredVocabulary(ForecastSnapshot, "source_kind", _forecast_snapshot),
@@ -441,6 +445,7 @@ STORED_VOCABULARIES = (
         NotificationDelivery,
         "prepared_message",
         _prepared_delivery,
+        retired=("html",),
         key="format",
         enumeration=PreparedMessageFormat,
     ),

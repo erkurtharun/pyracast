@@ -68,6 +68,7 @@ TOOLING = frozenset(
         "test_release_scope",
         "test_release_unit",
         "test_release_workflow",
+        "test_schema_snapshot",
         "test_shutdown_process",
         "test_solcast_capture",
         "test_start_postgres",
@@ -107,7 +108,7 @@ SUBPROCESS = frozenset(
 )
 MIGRATION = frozenset(
     {
-        "test_calibration_requests",
+        "test_calibration_preparation_migration",
         "test_calibration_wait_migration",
         "test_collection_outcome_migration",
         "test_collection_times_migration",

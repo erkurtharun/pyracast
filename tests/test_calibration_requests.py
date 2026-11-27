@@ -35,11 +35,9 @@ from tests.support.domain import NOW, System
 from tests.support.historical_reference_import import archive, power_file
 from tests.support.incident_calibration import incident
 from tests.support.jobs import publish
-from tests.support.migrations import forward, migrate
 from tests.support.plant_operations import half_hours, make_plant
 from tests.support.plant_training import actual_snapshot_for
 from tests.support.production_changes import edit, write
-from tests.support.trash_operations import sibling_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -373,27 +371,6 @@ def test_a_promotion_that_keeps_raising_stops_after_three_recorded_failures(
     assert calls == [run.pk] * 3
     assert automatic_decisions(plant) == [("calibration_automatic_skipped", "promotion_failed")] * 3
     assert not CalibrationActivation.objects.exists()
-
-
-@pytest.mark.usefixtures("leaf")
-def test_migration_requests_preparation_for_every_configured_plant(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    system, configured = make_plant(monkeypatch)
-    unconfigured = sibling_plant(system)
-    Plant.objects.filter(pk=unconfigured.pk).update(current_configuration=None)
-    migrate(("plants", "0004_schema_naming_convention"))
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT count(*) FROM plants_plant")
-        assert cursor.fetchone() == (2,)
-
-    forward()
-
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT id, calibration_preparation_due_at IS NOT NULL FROM plants_plant ORDER BY id"
-        )
-        assert cursor.fetchall() == [(configured.pk, True), (unconfigured.pk, False)]
 
 
 def test_a_request_is_prepared_only_while_it_is_due(monkeypatch: pytest.MonkeyPatch) -> None:

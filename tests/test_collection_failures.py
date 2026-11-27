@@ -82,6 +82,13 @@ def test_every_provider_answer_has_one_outcome_and_the_ledger_keeps_its_status(
 
 
 @pytest.mark.django_db(transaction=True)
+def test_the_database_stores_a_refused_status_on_a_passed_validation_attempt() -> None:
+    make_system(approved=True)
+    RequestAttempt.objects.update(http_status=403)
+    assert RequestAttempt.objects.get().http_status == 403
+
+
+@pytest.mark.django_db(transaction=True)
 def test_exhausted_provider_allowance_blocks_the_account_until_the_provider_day_resets() -> None:
     system = keyed_system()
     job = CollectionJob.objects.get()
