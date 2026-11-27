@@ -256,7 +256,7 @@ image artifact needs no action when that commit is already the one serving. To r
 
 The checkout action leaves those unshipped paths out of the checkout of every workflow job that
 checks out code, except those that test, analyse or report on the whole repository (patterns: output of `python3 deploy/release_scope.py sparse-patterns`). The CI of a pull request that is ready for
-review (a draft's runs only a failing `CI result`) builds, scans and smoke-tests the images from that checkout, so an image build that needs a listed path fails there;
+review (for a draft only a failing `CI result` runs) builds, scans and smoke-tests the images from that checkout, so an image build that needs a listed path fails there;
 such a path does not belong on the list. Release's own jobs use the same checkout but first run in
 the release after a merge. The images a release ships come from a CI run on `main`, which builds
 them without importing the shared build cache and is the only run that writes it; pull request
@@ -387,8 +387,9 @@ Inspect the host from `/opt/pyracast/current` as root with
   a data volume ([encryption-key-rotation](flows/encryption-key-rotation.md)).
 - **Patching:** review the monthly Dependabot pull requests and each security update pull
   request; image digests do not update themselves. The daily `Dependency audit` workflow runs
-  `pip-audit` and the npm audit on `main`; a failed run names a new advisory, and every run of
-  `main` audits too, so the next release waits for the update or a dated npm exception. The daily `Image rescan` workflow scans images rebuilt from `main`, or the deployed
+  `pip-audit` and the npm audit on `main`; a failed run means an advisory is open, an npm
+  exception expired or is no longer reported, or an audit could not run. Every run of `main` runs
+  the same audits, so a release waits until they pass. The daily `Image rescan` workflow scans images rebuilt from `main`, or the deployed
   `production` digests once `image_rescan_reader = true` is applied and the repository variable
   `GCP_IMAGE_RESCAN` holds `terraform -chdir=infra/terraform output -raw image_rescan_setting`; a
   failed run needs an image update. Review Ubuntu updates and the pinned Docker packages in
