@@ -59,7 +59,7 @@
                 "title": "Çerezler ve tarayıcı depolaması",
                 "paragraphs": [
                     "Çerezler ve tarayıcı depolaması; güvenli giriş, davetler ve dil tercihleri için kullanılır. Uygulamada reklam veya davranış analizi izleyicileri bulunmaz. Tarayıcı verilerini silebilirsiniz; bu işlemden sonra yeniden giriş yapmanız gerekebilir veya tercihleriniz sıfırlanabilir.",
-                    "Giriş yaptığınız her cihazda tarayıcı, en fazla sekiz santralinizin tahmin ve üretim değerlerini santral ve çalışma alanı adlarıyla birlikte saklar; böylece bu değerler bağlantı olmadan okunabilir. Bunu o cihazda hesap ayarlarındaki Değerleri bağlantı olmadan aç seçeneğiyle kapatabilirsiniz. O cihazda o tarayıcıyı açabilen herkes bu değerleri giriş yapmadan okuyabilir.",
+                    "Giriş yaptığınız her cihazda tarayıcı, en fazla sekiz santralinizin tahmin ve üretim değerlerini santral ve çalışma alanı adlarıyla birlikte saklar; böylece bu değerler bağlantı olmadan okunabilir. Bunu o cihazda hesap ayarlarındaki Değerleri bağlantı olmadan aç seçeneğiyle kapatabilirsiniz; kapalı olduğunu belirten bir not o cihazda kalır. O cihazda o tarayıcıyı açabilen herkes bu değerleri giriş yapmadan okuyabilir.",
                     "Seçeneği kapattığınızda, çıkış yaptığınızda, değerleri bağlantı olmadan gösterilen bir sayfada kaldırdığınızda, o tarayıcıda başka biri giriş yaptığında veya tarayıcı verilerini sildiğinizde değerler kaldırılır. O cihazda 90 gün boyunca giriş yapılmazsa değerler artık gösterilmez ve uygulama orada bağlantı olmadan açıldığında ya da orada giriş yaptığınızda silinir."
                 ]
             },

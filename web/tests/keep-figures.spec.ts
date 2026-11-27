@@ -1533,7 +1533,7 @@ for (const [path, sentences] of [
         "/privacy/",
         [
             "Anyone who can open that browser on that device can read them without signing in.",
-            "You can turn this off there in the account settings, under Open figures without a connection.",
+            "You can turn this off there in the account settings, under Open figures without a connection; a note that it is off then stays on that device.",
             "After 90 days without a sign-in on that device they are no longer shown",
         ],
     ],
@@ -1541,7 +1541,7 @@ for (const [path, sentences] of [
         "/tr/privacy/",
         [
             "O cihazda o tarayıcıyı açabilen herkes bu değerleri giriş yapmadan okuyabilir.",
-            "Bunu o cihazda hesap ayarlarındaki Değerleri bağlantı olmadan aç seçeneğiyle kapatabilirsiniz.",
+            "Bunu o cihazda hesap ayarlarındaki Değerleri bağlantı olmadan aç seçeneğiyle kapatabilirsiniz; kapalı olduğunu belirten bir not o cihazda kalır.",
             "O cihazda 90 gün boyunca giriş yapılmazsa değerler artık gösterilmez",
         ],
     ],

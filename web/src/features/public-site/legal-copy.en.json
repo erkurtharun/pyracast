@@ -59,7 +59,7 @@
                 "title": "Cookies and browser storage",
                 "paragraphs": [
                     "Cookies and browser storage support secure sign-in, invitations and language preferences. The application includes no advertising or behavioral analytics trackers. You can clear browser data; this may sign you out or reset preferences.",
-                    "On each device you sign in on, the browser keeps the forecast and production figures of up to eight of your plants, with their plant and workspace names, so they can be read without a connection. You can turn this off there in the account settings, under Open figures without a connection. Anyone who can open that browser on that device can read them without signing in.",
+                    "On each device you sign in on, the browser keeps the forecast and production figures of up to eight of your plants, with their plant and workspace names, so they can be read without a connection. You can turn this off there in the account settings, under Open figures without a connection; a note that it is off then stays on that device. Anyone who can open that browser on that device can read them without signing in.",
                     "They are removed when you turn this off, sign out, remove them on a page shown without a connection, another person signs in on that browser, or you clear browser data. After 90 days without a sign-in on that device they are no longer shown and are deleted the next time the application is opened there without a connection or you sign in there."
                 ]
             },
