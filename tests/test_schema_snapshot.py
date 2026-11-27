@@ -22,6 +22,8 @@ from scripts import write_schema_catalog
 
 pytestmark = pytest.mark.django_db
 
+BOOTSTRAP = Path(__file__).resolve().parents[1] / "deploy" / "bootstrap.sql"
+PROVISIONED = "pg_stat_statements"
 GUARD = "productionobservation_revision_guard"
 GUARD_FUNCTION = "guard_productionobservation_revision"
 INDEX = "regions_region_deleted_at_8f56ef2c"
@@ -321,6 +323,12 @@ CHANGES = [
         ["CREATE RULE extra_rule AS ON DELETE TO regions_region DO INSTEAD NOTHING"],
         "pg_rewrite rule extra_rule on table regions_region",
     ),
+    change(
+        "rule-on-a-provisioned-view",
+        [f"CREATE RULE extra_rule AS ON DELETE TO {PROVISIONED}_info DO INSTEAD NOTHING"],
+        [f"unsupported pg_rewrite rule extra_rule on view {PROVISIONED}_info: unexpected"],
+        prepared=[f"CREATE EXTENSION {PROVISIONED} WITH SCHEMA public"],
+    ),
     unsupported(
         "statistics",
         ["CREATE STATISTICS extra_statistics ON latitude, longitude FROM regions_region"],
@@ -473,6 +481,28 @@ def test_the_comparison_names_each_kind_of_change(
 
     assert found == named
     assert read_catalog(connection) == original
+
+
+def installed(extension: str) -> bool:
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT EXISTS (SELECT FROM pg_extension WHERE extname = %s)", [extension])
+        return cursor.fetchone() == (True,)
+
+
+def test_the_extension_a_release_provisions_leaves_the_catalog_unchanged() -> None:
+    provisioning = f"CREATE EXTENSION IF NOT EXISTS {PROVISIONED} WITH SCHEMA public;"
+    assert provisioning in BOOTSTRAP.read_text(encoding="utf-8")
+    before = read_catalog(connection)
+    assert not installed(PROVISIONED)
+    with transaction.atomic():
+        executed([provisioning])
+        provisioned = installed(PROVISIONED), read_catalog(connection)
+        executed([f"COMMENT ON EXTENSION {PROVISIONED} IS 'Read by the operator'"])
+        commented = read_catalog(connection)
+        transaction.set_rollback(True)
+
+    assert provisioned == (True, before)
+    assert commented == before
 
 
 @pytest.fixture

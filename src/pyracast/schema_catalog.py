@@ -51,6 +51,10 @@ def _composed(text: str) -> sql.Composed:
 
 COMMON = _composed("""member AS (
     SELECT classid::regclass AS kind, objid FROM pg_depend WHERE deptype = 'e'
+    UNION SELECT part.classid::regclass, part.objid
+    FROM pg_depend AS part JOIN member AS owner
+        ON owner.kind = part.refclassid::regclass AND owner.objid = part.refobjid
+    WHERE part.deptype = 'i'
 ),
 compared AS (
     SELECT 'pg_namespace'::regclass AS kind, n.oid AS objid FROM pg_namespace AS n WHERE {in_schema}
@@ -253,7 +257,7 @@ READ = sql.SQL(
 
 def statement(reads: Mapping[str, sql.Composable]) -> sql.Composed:
     """One statement, so every read sees one snapshot; each read yields its row even when empty."""
-    return sql.SQL("WITH {common} {reads}").format(
+    return sql.SQL("WITH RECURSIVE {common} {reads}").format(
         common=COMMON,
         reads=sql.SQL(" UNION ALL ").join(
             READ.format(name=sql.Literal(name), read=read) for name, read in reads.items()
