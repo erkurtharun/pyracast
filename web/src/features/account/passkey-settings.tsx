@@ -46,7 +46,13 @@ async function readInventory(): Promise<Extract<Inventory, { kind: "ready" }>> {
     };
 }
 
-export function PasskeySettings({ email }: { email: string }) {
+export function PasskeySettings({
+    email,
+    totpRevision,
+}: {
+    email: string;
+    totpRevision: number;
+}) {
     const t = useTranslations("Passkeys");
     const security = useTranslations("Security");
     const common = useTranslations("Common");
@@ -75,7 +81,13 @@ export function PasskeySettings({ email }: { email: string }) {
                     return;
                 }
                 const loaded = await readInventory();
-                if (active) setInventory(loaded);
+                if (active) {
+                    setInventory(loaded);
+                    if (loaded.totp)
+                        setRecovery((current) =>
+                            current?.kind === "confirm" ? undefined : current,
+                        );
+                }
             })
             .catch(() => {
                 if (active) setInventory({ kind: "failed" });
@@ -83,7 +95,7 @@ export function PasskeySettings({ email }: { email: string }) {
         return () => {
             active = false;
         };
-    }, [loadAttempt]);
+    }, [loadAttempt, totpRevision]);
 
     useEffect(() => {
         if (recovery && !stepUp.pending) codesHeading.current?.focus();
@@ -168,7 +180,9 @@ export function PasskeySettings({ email }: { email: string }) {
                     ? {
                           ...current,
                           keys: current.keys.filter((key) => key.id !== id),
-                          recovery: current.recovery && (current.totp || current.keys.length > 1),
+                          recovery:
+                              current.recovery &&
+                              (current.totp || current.keys.length > 1),
                       }
                     : current,
             );
@@ -187,7 +201,9 @@ export function PasskeySettings({ email }: { email: string }) {
             const values = result.data?.unused_codes;
             if (!values?.length) throw new ApiError(t("loadFailed"));
             setInventory((current) =>
-                current.kind === "ready" ? { ...current, recovery: true } : current,
+                current.kind === "ready"
+                    ? { ...current, recovery: true }
+                    : current,
             );
             setRecovery({ kind: "codes", values });
             setNotice(security("codesReplaced"));
@@ -202,7 +218,11 @@ export function PasskeySettings({ email }: { email: string }) {
             <h2 ref={title} id="account-passkeys" tabIndex={-1}>
                 {t("title")}
             </h2>
-            {error && <Notice error focus>{error}</Notice>}
+            {error && (
+                <Notice error focus>
+                    {error}
+                </Notice>
+            )}
             {notice && <Notice>{notice}</Notice>}
             <StepUpPrompt stepUp={stepUp} email={email} onError={setError} />
             {inventory.kind === "failed" && (
@@ -274,6 +294,11 @@ export function PasskeySettings({ email }: { email: string }) {
                     {inventory.keys.length ? (
                         <>
                             <p>{t("codeDescription")}</p>
+                            {!inventory.totp &&
+                                inventory.recovery &&
+                                inventory.keys.length === 1 && (
+                                    <p>{t("removeLast")}</p>
+                                )}
                             <ul>
                                 {inventory.keys.map(({ id, name }) => (
                                     <li key={id}>
@@ -294,9 +319,15 @@ export function PasskeySettings({ email }: { email: string }) {
                                     <button
                                         className="button secondary"
                                         type="button"
-                                        onClick={() => setRecovery({ kind: "confirm" })}
+                                        onClick={() =>
+                                            setRecovery({ kind: "confirm" })
+                                        }
                                     >
-                                        {security(inventory.recovery ? "replaceRecovery" : "generateRecovery")}
+                                        {security(
+                                            inventory.recovery
+                                                ? "replaceRecovery"
+                                                : "generateRecovery",
+                                        )}
                                     </button>
                                 </div>
                             )}
@@ -312,7 +343,9 @@ export function PasskeySettings({ email }: { email: string }) {
                             success={null}
                             onSubmit={async (data) => {
                                 const name = data.get("name");
-                                await add(typeof name === "string" ? name.trim() : "");
+                                await add(
+                                    typeof name === "string" ? name.trim() : "",
+                                );
                             }}
                         >
                             <Field

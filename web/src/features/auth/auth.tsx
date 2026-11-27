@@ -292,17 +292,20 @@ export function Auth({
                     ) : (
                         <>
                             {passkeyMfa ? (
-                                codeMfa && <p>{passkeys("verifyDescription")}</p>
+                                codeMfa && (
+                                    <p>{passkeys("verifyDescription")}</p>
+                                )
                             ) : (
                                 <StageGuide mode={mode} address={address} />
                             )}
-                            {passkeySupported && (passkeyLogin || passkeyMfa) && (
-                                <PasskeySignIn
-                                    key={mode}
-                                    secondFactor={passkeyMfa}
-                                    onResult={finish}
-                                />
-                            )}
+                            {passkeySupported &&
+                                (passkeyLogin || passkeyMfa) && (
+                                    <PasskeySignIn
+                                        key={mode}
+                                        secondFactor={passkeyMfa}
+                                        onResult={finish}
+                                    />
+                                )}
                             {!passkeySupported && passkeyMfa && !codeMfa && (
                                 <Notice>{passkeys("unsupported")}</Notice>
                             )}
@@ -317,7 +320,8 @@ export function Auth({
                                             login: t("signInFailed"),
                                             mfa: t("signInFailed"),
                                             register: t("registrationFailed"),
-                                            socialSignup: t("registrationFailed"),
+                                            socialSignup:
+                                                t("registrationFailed"),
                                             verify: t("verificationFailed"),
                                             forgot: t("resetFailed"),
                                             reset: t("resetFailed"),
@@ -335,7 +339,8 @@ export function Auth({
                                         }[mode]
                                     }
                                     onSubmit={async (data) => {
-                                        const payload = Object.fromEntries(data);
+                                        const payload =
+                                            Object.fromEntries(data);
                                         if (
                                             (mode === "register" ||
                                                 mode === "socialSignup") &&

@@ -24,13 +24,19 @@ export function stepUpMode(
 ): ReauthMode | undefined {
     if (result.status !== 401 || !result.meta?.is_authenticated)
         return undefined;
-    const flows = (result.data as {
-        flows?: { id?: unknown; types?: string[] }[];
-    } | undefined)?.flows;
+    const flows = (
+        result.data as
+            | {
+                  flows?: { id?: unknown; types?: string[] }[];
+              }
+            | undefined
+    )?.flows;
     const flow = flows?.[0];
     const id = flow?.id;
     if (id === "mfa_reauthenticate" && flow?.types?.includes("webauthn")) {
-        return flow.types.some((type) => type === "totp" || type === "recovery_codes")
+        return flow.types.some(
+            (type) => type === "totp" || type === "recovery_codes",
+        )
             ? "mfaOrPasskey"
             : "passkey";
     }

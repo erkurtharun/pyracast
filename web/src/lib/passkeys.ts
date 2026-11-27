@@ -7,7 +7,8 @@ function supported() {
     return (
         window.isSecureContext &&
         typeof PublicKeyCredential !== "undefined" &&
-        typeof PublicKeyCredential.parseCreationOptionsFromJSON === "function" &&
+        typeof PublicKeyCredential.parseCreationOptionsFromJSON ===
+            "function" &&
         typeof PublicKeyCredential.parseRequestOptionsFromJSON === "function" &&
         typeof PublicKeyCredential.prototype.toJSON === "function"
     );
@@ -33,7 +34,9 @@ export const passkeyPath = "account/authenticators/webauthn";
 
 export function passkeyCreationOptions() {
     return authRequest<{
-        creation_options?: { publicKey?: PublicKeyCredentialCreationOptionsJSON };
+        creation_options?: {
+            publicKey?: PublicKeyCredentialCreationOptionsJSON;
+        };
     }>(`${passkeyPath}?passwordless=true`, "GET");
 }
 

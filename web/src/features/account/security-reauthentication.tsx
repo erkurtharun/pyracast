@@ -13,11 +13,7 @@ import {
 } from "@/lib/passkeys";
 
 export type ReauthMode =
-    | "mfa"
-    | "password"
-    | "email"
-    | "passkey"
-    | "mfaOrPasskey";
+    "mfa" | "password" | "email" | "passkey" | "mfaOrPasskey";
 
 export async function refreshExpiredSession(
     expiredMessage: string,
@@ -225,7 +221,11 @@ export function ReauthenticationForm({
                 )}
                 <div className="button-group">
                     {mode !== "passkey" && (
-                        <button ref={submitRef} className="button" type="submit">
+                        <button
+                            ref={submitRef}
+                            className="button"
+                            type="submit"
+                        >
                             {submitting ? t("verifying") : defaultSubmit}
                         </button>
                     )}

@@ -989,7 +989,7 @@ test("a malformed authenticator list offers retry without claiming MFA is absent
     const panel = twoFactorPanel(page);
     await expect(panel.getByRole("alert")).toBeVisible();
     await expect(
-        panel.getByText("Not set up", { exact: true }),
+        panel.getByText("Authenticator app not set up", { exact: true }),
     ).not.toBeVisible();
     await expect(
         panel.getByRole("button", { name: "Set up authenticator" }),
