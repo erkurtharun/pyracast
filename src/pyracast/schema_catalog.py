@@ -71,6 +71,20 @@ compared AS (
     WHERE {in_schema} AND p.prokind IN ('f', 'p')
     UNION ALL SELECT 'pg_extension'::regclass, e.oid FROM pg_extension AS e
     WHERE e.extname <> ALL({provisioned})
+),
+key_trigger AS (
+    SELECT g.oid, g.tgenabled::text AS enabled, ARRAY[c.relname::text, k.conname::text,
+        fired.relname::text,
+        concat_ws(' OR ', CASE WHEN g.tgtype & 4 <> 0 THEN 'INSERT' END,
+            CASE WHEN g.tgtype & 8 <> 0 THEN 'DELETE' END,
+            CASE WHEN g.tgtype & 16 <> 0 THEN 'UPDATE' END,
+            CASE WHEN g.tgtype & 32 <> 0 THEN 'TRUNCATE' END),
+        enforcing.proname::text] AS identity
+    FROM pg_trigger AS g JOIN pg_constraint AS k ON k.oid = g.tgconstraint
+    JOIN pg_proc AS enforcing ON enforcing.oid = g.tgfoid
+    JOIN pg_class AS c ON c.oid = k.conrelid JOIN pg_namespace AS n ON n.oid = c.relnamespace
+    JOIN pg_class AS fired ON fired.oid = g.tgrelid
+    WHERE {in_schema} AND g.tgisinternal AND {not_member}
 )""")
 CATEGORIES = {
     "tables": """SELECT ARRAY[c.relname::text, c.relpersistence::text, {table_options},
@@ -100,17 +114,7 @@ CATEGORIES = {
     FROM pg_constraint AS k JOIN pg_class AS c ON c.oid = k.conrelid
     JOIN pg_namespace AS n ON n.oid = c.relnamespace
     WHERE {in_schema} AND {not_member}""",
-    "constraint triggers": """SELECT ARRAY[c.relname::text, k.conname::text, fired.relname::text,
-        concat_ws(' OR ', CASE WHEN g.tgtype & 4 <> 0 THEN 'INSERT' END,
-            CASE WHEN g.tgtype & 8 <> 0 THEN 'DELETE' END,
-            CASE WHEN g.tgtype & 16 <> 0 THEN 'UPDATE' END,
-            CASE WHEN g.tgtype & 32 <> 0 THEN 'TRUNCATE' END),
-        enforcing.proname::text, g.tgenabled::text]
-    FROM pg_trigger AS g JOIN pg_constraint AS k ON k.oid = g.tgconstraint
-    JOIN pg_proc AS enforcing ON enforcing.oid = g.tgfoid
-    JOIN pg_class AS c ON c.oid = k.conrelid JOIN pg_namespace AS n ON n.oid = c.relnamespace
-    JOIN pg_class AS fired ON fired.oid = g.tgrelid
-    WHERE {in_schema} AND g.tgisinternal AND {not_member}""",
+    "constraint triggers": "SELECT identity || enabled FROM key_trigger",
     "indexes": """SELECT ARRAY[c.relname::text, i.relname::text, pg_get_indexdef(i.oid),
         x.indisunique::text, x.indisprimary::text, x.indisexclusion::text,
         x.indimmediate::text, x.indisvalid::text, x.indnullsnotdistinct::text,
@@ -145,9 +149,15 @@ CATEGORIES = {
     "extensions": """SELECT ARRAY[e.extname::text, e.extversion, n.nspname::text]
     FROM pg_extension AS e JOIN pg_namespace AS n ON n.oid = e.extnamespace
     WHERE e.extname <> ALL({provisioned})""",
-    "comments": """SELECT ARRAY[pg_describe_object(d.classoid, d.objoid, d.objsubid), d.description]
+    "comments": """SELECT ARRAY[
+        coalesce('constraint trigger ' || array_to_string(keyed.identity, '.'),
+            object.type || ' ' || object.identity),
+        d.description]
     FROM pg_description AS d
     JOIN compared ON compared.kind = d.classoid::regclass AND compared.objid = d.objoid
+    CROSS JOIN LATERAL pg_identify_object(d.classoid, d.objoid, d.objsubid) AS object
+    LEFT JOIN key_trigger AS keyed
+        ON d.classoid = 'pg_trigger'::regclass AND keyed.oid = d.objoid
     WHERE (compared.kind, compared.objid) NOT IN (TABLE member)""",
 }
 UNSUPPORTED_READ = sql.SQL(

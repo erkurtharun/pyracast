@@ -30,6 +30,8 @@ INDEX = "regions_region_deleted_at_8f56ef2c"
 KEY = "region_approved_binding_fk"
 NAME_TYPE = "character varying(200)"
 FOREIGN_KEY_TRIGGERS = f"constraint triggers regions_region.{KEY}"
+CHECK = "RI_FKey_check_ins"
+KEY_INSERT_CHECK = f"regions_region.{KEY}.regions_region.INSERT.{CHECK}"
 
 type Statement = str | sql.Composable
 
@@ -47,13 +49,23 @@ def unsupported(name: str, statements: Sequence[Statement], *named: str) -> Para
     return change(name, statements, [f"unsupported {found}: unexpected" for found in named])
 
 
-def disabled_key_trigger(table: str, function: str) -> Statement:
+def on_key_trigger(command: str, table: str, function: str) -> Statement:
+    """Run `command`, formatted with the table and the generated name of the key's trigger."""
     return sql.SQL(
-        "DO $$ BEGIN EXECUTE format('ALTER TABLE %I DISABLE TRIGGER %I', {table},"
+        "DO $$ BEGIN EXECUTE format({command}, {table},"
         " (SELECT g.tgname FROM pg_trigger AS g JOIN pg_constraint AS k ON k.oid = g.tgconstraint"
         " JOIN pg_proc AS p ON p.oid = g.tgfoid WHERE k.conname = {key} AND p.proname = {function}"
         ")); END $$"
-    ).format(table=sql.Literal(table), key=sql.Literal(KEY), function=sql.Literal(function))
+    ).format(
+        command=sql.Literal(command),
+        table=sql.Literal(table),
+        key=sql.Literal(KEY),
+        function=sql.Literal(function),
+    )
+
+
+def disabled_key_trigger(table: str, function: str) -> Statement:
+    return on_key_trigger("ALTER TABLE %I DISABLE TRIGGER %I", table, function)
 
 
 CHANGES = [
@@ -130,8 +142,8 @@ CHANGES = [
     ),
     change(
         "key-insert-check",
-        [disabled_key_trigger("regions_region", "RI_FKey_check_ins")],
-        [f"{FOREIGN_KEY_TRIGGERS}.regions_region.INSERT.RI_FKey_check_ins: changed"],
+        [disabled_key_trigger("regions_region", CHECK)],
+        [f"constraint triggers {KEY_INSERT_CHECK}: changed"],
     ),
     change(
         "key-delete-check",
@@ -223,7 +235,12 @@ CHANGES = [
     change(
         "column-comment",
         ["COMMENT ON COLUMN regions_region.name IS 'Site name'"],
-        ["comments column name of table regions_region: unexpected"],
+        ["comments table column public.regions_region.name: unexpected"],
+    ),
+    change(
+        "key-trigger-comment",
+        [on_key_trigger("COMMENT ON TRIGGER %2$I ON %1$I IS 'Checked'", "regions_region", CHECK)],
+        [f"comments constraint trigger {KEY_INSERT_CHECK}: unexpected"],
     ),
     change(
         "schema-comment",
@@ -570,4 +587,6 @@ def test_the_writer_records_the_catalog_of_the_database_it_is_connected_to(
         transaction.set_rollback(True)
 
     assert written.read_bytes() == serialized(catalog).encode("utf-8")
-    assert ["table regions_region", "Recorded"] in json.loads(written.read_bytes())["comments"]
+    assert ["table public.regions_region", "Recorded"] in json.loads(written.read_bytes())[
+        "comments"
+    ]
