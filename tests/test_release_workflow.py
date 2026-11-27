@@ -53,7 +53,10 @@ def test_one_ci_result_job_judges_every_other_ci_job_but_the_release_start_and_r
     assert str(checkout["uses"]).startswith("actions/checkout@")
     assert check["name"] == "Require every CI job"
     assert check["run"] == "python3 scripts/ci_result.py"
-    assert check["env"] == {"NEEDS": "${{ toJSON(needs) }}"}
+    assert check["env"] == {
+        "NEEDS": "${{ toJSON(needs) }}",
+        "PULL_REQUEST_DRAFT": DRAFT_FLAG,
+    }
 
 
 def test_the_release_waits_for_the_ci_result_job_alone() -> None:
@@ -630,25 +633,186 @@ def test_deploy_runs_the_authorized_commit_only_after_proving_it_is_on_main() ->
     assert "refs/heads/main" not in str(deploy["steps"][2:])
 
 
-def test_the_web_dependency_audit_runs_once_per_ci_run() -> None:
-    audits = [
-        (identifier, candidate)
-        for identifier, job in ci_jobs().items()
-        for candidate in job["steps"]
-        if "scripts/npm_audit.py web" in candidate.get("run", "")
-    ]
-    web = ci_jobs()["web_ubuntu"]
+AUDIT_COMMANDS = ("pip-audit --strict", "scripts/npm_audit.py web")
+SCHEDULED_AUDIT = "dependency-audit.yml"
 
-    assert audits == [("web_ubuntu", step(web, "Audit web dependencies against dated exceptions"))]
-    assert "if" not in audits[0][1]
-    assert "if" not in web
-    assert "matrix" not in web.get("strategy", {})
+
+def audit_jobs() -> list[tuple[str, str]]:
+    return [
+        (path.name, identifier)
+        for path in workflow_files()
+        for identifier, job in workflow(path.name)["jobs"].items()
+        if any(fragment in commands(job) for fragment in AUDIT_COMMANDS)
+    ]
+
+
+AFTER_SETUP = "${{ !cancelled() && steps.sync.outcome == 'success' }}"
+
+
+def steps_running(job: dict[str, Any], command: str) -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = job["steps"]
+    return [
+        candidate
+        for candidate in steps
+        if any(
+            command in line
+            for line in candidate.get("run", "").splitlines()
+            if not line.lstrip().startswith("#")
+        )
+    ]
+
+
+def audit_step(job: dict[str, Any], command: str) -> dict[str, Any]:
+    (found,) = steps_running(job, command)
+    return found
+
+
+def audit_problems(ci: dict[str, Any], scheduled: dict[str, Any]) -> list[str]:
+    audit = ci["jobs"]["audit"]
+    (daily,) = scheduled["jobs"].values()
+    python, web = (steps_running(audit, command) for command in AUDIT_COMMANDS)
+    steps = audit["steps"]
+    sync = [candidate for candidate in steps if candidate.get("id") == "sync"]
+    sync_first = len(sync) == 1 and all(
+        steps.index(sync[0]) < steps.index(found) for found in [*python, *web]
+    )
+    problems = []
+    if daily["steps"] != steps:
+        problems.append("scheduled audit drifts")
+    if len(python) != 1 or "if" in python[0]:
+        problems.append("Python audit disabled")
+    if (
+        len(web) != 1
+        or web[0].get("if") != AFTER_SETUP
+        or not sync_first
+        or sync[0].get("run") != "uv sync --locked --no-build"
+    ):
+        problems.append("web audit hidden")
+    if any("continue-on-error" in candidate for candidate in [audit, daily, *python, *web]):
+        problems.append("audit failure ignored")
+    return problems
+
+
+def in_both_audits(
+    change: Callable[[dict[str, Any]], object],
+) -> Callable[[dict[str, Any], dict[str, Any]], object]:
+    def apply(ci: dict[str, Any], scheduled: dict[str, Any]) -> None:
+        for job in (ci["jobs"]["audit"], *scheduled["jobs"].values()):
+            change(job)
+
+    return apply
+
+
+def comment_out(command: str) -> Callable[[dict[str, Any]], object]:
+    return lambda job: audit_step(job, command).update(
+        {"run": "# " + audit_step(job, command)["run"]}
+    )
+
+
+def move_to_front(command: str) -> Callable[[dict[str, Any]], object]:
+    return lambda job: job["steps"].insert(
+        0, job["steps"].pop(job["steps"].index(audit_step(job, command)))
+    )
+
+
+PYTHON_AUDIT, WEB_AUDIT = AUDIT_COMMANDS
+AUDIT_BROKEN_SHAPES: list[tuple[str, Callable[[dict[str, Any], dict[str, Any]], object], str]] = [
+    (
+        "Python audit off in both",
+        in_both_audits(lambda job: audit_step(job, PYTHON_AUDIT).update({"if": False})),
+        "Python audit disabled",
+    ),
+    (
+        "Python audit removed from both",
+        in_both_audits(lambda job: job["steps"].remove(audit_step(job, PYTHON_AUDIT))),
+        "Python audit disabled",
+    ),
+    (
+        "web audit off in both",
+        in_both_audits(lambda job: audit_step(job, WEB_AUDIT).update({"if": False})),
+        "web audit hidden",
+    ),
+    (
+        "web audit only after a passing Python audit in both",
+        in_both_audits(lambda job: audit_step(job, WEB_AUDIT).pop("if")),
+        "web audit hidden",
+    ),
+    (
+        "web audit after an unnamed setup in both",
+        in_both_audits(lambda job: audit_step(job, "uv sync").pop("id")),
+        "web audit hidden",
+    ),
+    (
+        "Python audit commented out in both",
+        in_both_audits(comment_out(PYTHON_AUDIT)),
+        "Python audit disabled",
+    ),
+    (
+        "web audit commented out in both",
+        in_both_audits(comment_out(WEB_AUDIT)),
+        "web audit hidden",
+    ),
+    (
+        "web audit before setup in both",
+        in_both_audits(move_to_front(WEB_AUDIT)),
+        "web audit hidden",
+    ),
+    (
+        "Python audit may fail in both",
+        in_both_audits(
+            lambda job: audit_step(job, PYTHON_AUDIT).update({"continue-on-error": True})
+        ),
+        "audit failure ignored",
+    ),
+    (
+        "daily audit alone changed",
+        lambda ci, scheduled: next(iter(scheduled["jobs"].values()))["steps"].pop(),
+        "scheduled audit drifts",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("break_shape", "problem"),
+    [(shape, problem) for _, shape, problem in AUDIT_BROKEN_SHAPES],
+    ids=[name for name, _, _ in AUDIT_BROKEN_SHAPES],
+)
+def test_each_broken_shape_of_the_two_audits_is_named(
+    break_shape: Callable[[dict[str, Any], dict[str, Any]], object], problem: str
+) -> None:
+    ci, scheduled = workflow("ci.yml"), workflow(SCHEDULED_AUDIT)
+    break_shape(ci, scheduled)
+
+    assert problem in audit_problems(ci, scheduled)
+
+
+def test_one_job_runs_both_dependency_audits_in_ci_and_on_a_daily_schedule() -> None:
+    audit = ci_jobs()["audit"]
+    (scheduled,) = workflow(SCHEDULED_AUDIT)["jobs"].values()
+
+    assert audit_jobs() == [("ci.yml", "audit"), (SCHEDULED_AUDIT, "audit")]
+    assert audit_problems(workflow("ci.yml"), workflow(SCHEDULED_AUDIT)) == []
+    assert (scheduled["name"], scheduled["timeout-minutes"]) == (
+        audit["name"],
+        audit["timeout-minutes"],
+    )
+    assert "if" not in scheduled
+    assert "needs" not in scheduled
+    assert workflow(SCHEDULED_AUDIT)["permissions"] == {"contents": "read"}
+    assert set(triggers(SCHEDULED_AUDIT)) == {"schedule"}
+    (schedule,) = triggers(SCHEDULED_AUDIT)["schedule"]
+    assert re.fullmatch(r"\d+ \d+ \* \* \*", schedule["cron"])
 
 
 SLIM_RUNNER = "ubuntu-slim"
 SLIM_JOBS = {
     "ci.yml": {"ci_result", "pr_tested", "release_start", *STOP_JOBS},
     "release.yml": {"authorize", "cleanup"},
+    SCHEDULED_AUDIT: {"audit"},
+}
+# The scheduled audit brings its own uv and Node; every other slim job uses the system python3.
+SLIM_TOOL_JOBS = {
+    f"{SCHEDULED_AUDIT} audit": ["actions/checkout", "astral-sh/setup-uv", "actions/setup-node"]
 }
 SLIM_PYTHON = (3, 12)
 SLIM_JOB_MINUTES = 15
@@ -677,9 +841,18 @@ def test_every_slim_job_fits_the_slim_runner_and_its_python() -> None:
         assert job["timeout-minutes"] <= SLIM_JOB_MINUTES, name
         assert "services" not in job, name
         assert "container" not in job, name
-        for tool in ("setup-uv", "setup-node", "setup-python", "setup-buildx", "docker/"):
+        assert "docker" not in f"{steps} {commands(job)}", name
+        if name in SLIM_TOOL_JOBS:
+            actions = [
+                str(candidate["uses"]).split("@")[0]
+                for candidate in job["steps"]
+                if "uses" in candidate
+            ]
+            assert actions == SLIM_TOOL_JOBS[name], name
+            continue
+        for tool in ("setup-uv", "setup-node", "setup-python", "setup-buildx"):
             assert tool not in steps, name
-        for fragment in ("uv ", "docker ", "npm ", "npx "):
+        for fragment in ("uv ", "npm ", "npx "):
             assert fragment not in commands(job), name
         scripts |= set(SYSTEM_PYTHON_SCRIPT.findall(commands(job)))
     assert scripts == {
@@ -747,7 +920,7 @@ def shipped_build_suite_problems(document: dict[str, Any]) -> list[str]:
         problems.append("another suite environment")
     if "continue-on-error" in suite or "continue-on-error" in job:
         problems.append("failure ignored")
-    if "if" in job:
+    if job.get("if") != NOT_A_DRAFT:
         problems.append("job condition")
     if not builds or builds[0] > index:
         problems.append("suite before the ordinary build")
@@ -911,8 +1084,10 @@ def test_every_repeated_job_still_runs_to_the_end_on_each_push_to_main() -> None
     assert set(jobs) == (
         RELEASE_TESTED_JOBS | {"sonar", "ci_result", "release_start", "pr_tested"} | set(STOP_JOBS)
     )
+    assert draft_rule_problems(document) == []
     for identifier in RELEASE_TESTED_JOBS:
-        assert "if" not in jobs[identifier], identifier
+        assert jobs[identifier]["if"] == NOT_A_DRAFT, identifier
+        assert "needs" not in jobs[identifier], identifier
         assert "continue-on-error" not in jobs[identifier], identifier
     assert "push" not in jobs["sonar"]["if"]
     assert "github.ref" not in jobs["sonar"]["if"]
@@ -921,6 +1096,134 @@ def test_every_repeated_job_still_runs_to_the_end_on_each_push_to_main() -> None
         assert "release_start" not in str(job.get("needs", "")), job["name"]
         assert "pr_tested" not in str(job.get("needs", "")), job["name"]
         assert "stop_after" not in str(job.get("needs", "")), job["name"]
+
+
+NOT_A_DRAFT = "${{ !github.event.pull_request.draft }}"
+PULL_REQUEST_TYPES = ["opened", "synchronize", "reopened", "ready_for_review", "converted_to_draft"]
+DRAFT_FLAG = "${{ github.event.pull_request.draft }}"
+RESULT_CONDITION = "${{ !cancelled() }}"
+RECORD_CONDITION = (
+    "${{ !cancelled() && github.event_name == 'pull_request' && "
+    "!github.event.pull_request.draft && needs.ci_result.result == 'success' }}"
+)
+STATUS_FUNCTION = re.compile(r"\b(?:always|cancelled|failure)\(\)")
+
+
+def pull_request_trigger(document: dict[Any, Any]) -> dict[str, Any]:
+    on: dict[str, Any] = document["on"] if "on" in document else document[True]
+    return on
+
+
+def draft_rule_problems(document: dict[str, Any]) -> list[str]:
+    jobs = document["jobs"]
+    past_a_skip = {
+        "ci_result": RESULT_CONDITION,
+        "pr_tested": RECORD_CONDITION,
+        **dict.fromkeys(STOP_JOBS, STOP_CONDITION),
+    }
+    problems = []
+    if pull_request_trigger(document)["pull_request"] != {"types": PULL_REQUEST_TYPES}:
+        problems.append("draft changes start no run")
+    for identifier, job in sorted(jobs.items()):
+        condition = str(job.get("if", ""))
+        if "needs" not in job:
+            if condition != NOT_A_DRAFT:
+                problems.append(f"{identifier} runs on a draft")
+        elif STATUS_FUNCTION.search(condition) and condition != past_a_skip.get(identifier):
+            problems.append(f"{identifier} runs on a draft")
+    if jobs["ci_result"].get("if") != RESULT_CONDITION:
+        problems.append("result job skipped on a draft")
+    if (
+        step(jobs["ci_result"], "Require every CI job").get("env", {}).get("PULL_REQUEST_DRAFT")
+        != DRAFT_FLAG
+    ):
+        problems.append("result job blind to drafts")
+    return problems
+
+
+DRAFT_BROKEN_SHAPES: list[tuple[str, Callable[[dict[str, Any]], object], str]] = [
+    (
+        "default types",
+        lambda d: pull_request_trigger(d).update(pull_request=None),
+        "draft changes start no run",
+    ),
+    (
+        "no run when marked ready",
+        lambda d: pull_request_trigger(d)["pull_request"]["types"].remove("ready_for_review"),
+        "draft changes start no run",
+    ),
+    (
+        "no run when made a draft",
+        lambda d: pull_request_trigger(d)["pull_request"]["types"].remove("converted_to_draft"),
+        "draft changes start no run",
+    ),
+    ("image job always", lambda d: d["jobs"]["deployment"].pop("if"), "deployment runs on a draft"),
+    (
+        "audit on another condition",
+        lambda d: d["jobs"]["audit"].update({"if": "github.event_name != 'schedule'"}),
+        "audit runs on a draft",
+    ),
+    (
+        "new job without the rule",
+        lambda d: d["jobs"].update(lint={"runs-on": "ubuntu-latest", "steps": []}),
+        "lint runs on a draft",
+    ),
+    (
+        "analysis past a skip",
+        lambda d: d["jobs"]["sonar"].update({"if": "${{ always() }}"}),
+        "sonar runs on a draft",
+    ),
+    (
+        "stop job on any end",
+        lambda d: d["jobs"]["stop_after_audit"].update(
+            {"if": "${{ !cancelled() && github.event_name == 'pull_request' }}"}
+        ),
+        "stop_after_audit runs on a draft",
+    ),
+    (
+        "record without a passing result",
+        lambda d: d["jobs"]["pr_tested"].update(
+            {"if": "${{ !cancelled() && github.event_name == 'pull_request' }}"}
+        ),
+        "pr_tested runs on a draft",
+    ),
+    (
+        "record on a draft",
+        lambda d: d["jobs"]["pr_tested"].update(
+            {
+                "if": "${{ !cancelled() && github.event_name == 'pull_request' && "
+                "needs.ci_result.result == 'success' }}"
+            }
+        ),
+        "pr_tested runs on a draft",
+    ),
+    (
+        "result job skipped with the rest",
+        lambda d: d["jobs"]["ci_result"].update({"if": NOT_A_DRAFT}),
+        "result job skipped on a draft",
+    ),
+    (
+        "result job without the draft flag",
+        lambda d: step(d["jobs"]["ci_result"], "Require every CI job")["env"].pop(
+            "PULL_REQUEST_DRAFT"
+        ),
+        "result job blind to drafts",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("break_shape", "problem"),
+    [(shape, problem) for _, shape, problem in DRAFT_BROKEN_SHAPES],
+    ids=[name for name, _, _ in DRAFT_BROKEN_SHAPES],
+)
+def test_each_broken_shape_of_the_draft_rule_is_named(
+    break_shape: Callable[[dict[str, Any]], object], problem: str
+) -> None:
+    document = workflow("ci.yml")
+    break_shape(document)
+
+    assert problem in draft_rule_problems(document)
 
 
 def test_a_failed_job_of_a_pull_request_run_cancels_the_rest_of_the_run() -> None:
@@ -959,10 +1262,7 @@ def test_a_passed_pull_request_run_records_its_tested_tree_in_a_job_without_repo
 
     assert record_job["name"] == release_authorization.TESTED_TREE_JOB
     assert set(record_job["needs"]) == {*jobs["ci_result"]["needs"], "ci_result"}
-    assert record_job["if"] == (
-        "${{ !cancelled() && github.event_name == 'pull_request' && "
-        "needs.ci_result.result == 'success' }}"
-    )
+    assert record_job["if"] == RECORD_CONDITION
     assert record_job["continue-on-error"] is True
     assert "permissions" not in record_job
     assert str(checkout["uses"]).startswith("actions/checkout@")
