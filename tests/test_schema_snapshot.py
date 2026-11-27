@@ -338,7 +338,8 @@ CHANGES = [
             " LANGUAGE internal IMMUTABLE STRICT AS 'int4in'",
             "CREATE FUNCTION extra_base_out(extra_base) RETURNS cstring"
             " LANGUAGE internal IMMUTABLE STRICT AS 'int4out'",
-            "CREATE TYPE extra_base (INPUT = extra_base_in, OUTPUT = extra_base_out, LIKE = integer)",
+            "CREATE TYPE extra_base"
+            " (INPUT = extra_base_in, OUTPUT = extra_base_out, LIKE = integer)",
         ],
         [
             "functions extra_base_in.cstring: unexpected",
@@ -534,7 +535,8 @@ def test_the_comparison_names_each_kind_of_change(
 def installed(extension: str) -> bool:
     with connection.cursor() as cursor:
         cursor.execute("SELECT EXISTS (SELECT FROM pg_extension WHERE extname = %s)", [extension])
-        return cursor.fetchone() == (True,)
+        (found,) = cursor.fetchone()
+    return found is True
 
 
 def test_the_extension_a_release_provisions_leaves_the_catalog_unchanged() -> None:
