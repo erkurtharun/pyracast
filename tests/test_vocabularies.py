@@ -171,13 +171,14 @@ def test_operation_rejects_values_outside_the_vocabulary(
     assert_operation_rejects(case, case.operation(monkeypatch), value)
 
 
-def refusal(row: models.Model, **values: object) -> str | None:
-    try:
-        with transaction.atomic():
-            type(row)._default_manager.filter(pk=row.pk).update(**values)
-    except IntegrityError as error:
-        return violated_constraint(error)
-    return None
+def stored_rows(row: models.Model, **values: object) -> int:
+    return type(row)._default_manager.filter(pk=row.pk).update(**values)
+
+
+def refused_by(row: models.Model, **values: object) -> str | None:
+    with pytest.raises(IntegrityError) as raised, transaction.atomic():
+        stored_rows(row, **values)
+    return violated_constraint(raised.value)
 
 
 def test_the_database_stores_every_audit_action_mail_kind_and_mail_error_and_no_other() -> None:
@@ -191,22 +192,22 @@ def test_the_database_stores_every_audit_action_mail_kind_and_mail_error_and_no_
     mail = OutboundMail.objects.get()
 
     assert {
-        action: refusal(event, action=action) for action in AuditAction.values
-    } == dict.fromkeys(AuditAction.values)
+        action: stored_rows(event, action=action) for action in AuditAction.values
+    } == dict.fromkeys(AuditAction.values, 1)
     assert {
-        kind: refusal(
+        kind: stored_rows(
             mail,
             kind=kind,
             invitation=mail.invitation if kind == OutboundMailKind.WORKSPACE_INVITATION else None,
         )
         for kind in OutboundMailKind.values
-    } == dict.fromkeys(OutboundMailKind.values)
+    } == dict.fromkeys(OutboundMailKind.values, 1)
     assert {
-        error: refusal(mail, last_error=error) for error in OutboundMailError.values
-    } == dict.fromkeys(OutboundMailError.values)
-    assert refusal(event, action="xx") == "auditevent_action_chk"
-    assert refusal(mail, kind="xx", invitation=None) == "outboundmail_kind_chk"
-    assert refusal(mail, last_error="xx") == "outboundmail_last_error_chk"
+        error: stored_rows(mail, last_error=error) for error in OutboundMailError.values
+    } == dict.fromkeys(OutboundMailError.values, 1)
+    assert refused_by(event, action="xx") == "auditevent_action_chk"
+    assert refused_by(mail, kind="xx", invitation=None) == "outboundmail_kind_chk"
+    assert refused_by(mail, last_error="xx") == "outboundmail_last_error_chk"
 
 
 def test_every_mail_failure_can_be_stored_on_a_reminder_delivery() -> None:
