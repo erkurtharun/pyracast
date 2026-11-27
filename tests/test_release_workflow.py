@@ -22,6 +22,18 @@ from tests.support.workflows import (
 
 ROOT = Path(__file__).resolve().parents[1]
 TRANSFER = "Transfer the verified release and deploy through IAP"
+STOP_JOBS = {
+    "stop_after_deployment": "deployment",
+    "stop_after_verify": "verify_ubuntu",
+    "stop_after_web": "web_ubuntu",
+    "stop_after_web_production": "web_production",
+    "stop_after_scientific": "scientific",
+    "stop_after_audit": "audit",
+}
+STOP_CONDITION = "failure() && github.event_name == 'pull_request'"
+CANCEL_OWN_RUN = (
+    "await github.rest.actions.cancelWorkflowRun({ ...context.repo, run_id: context.runId });"
+)
 
 
 def release_text() -> str:
@@ -34,7 +46,9 @@ def test_one_ci_result_job_judges_every_other_ci_job_but_the_release_start_and_r
     checkout, check = result["steps"]
 
     assert result["name"] == release_authorization.REQUIRED_CI_JOB
-    assert set(result["needs"]) == set(jobs) - {"ci_result", "release_start", "pr_tested"}
+    assert set(result["needs"]) == (
+        set(jobs) - {"ci_result", "release_start", "pr_tested"} - set(STOP_JOBS)
+    )
     assert result["if"] == "${{ !cancelled() }}"
     assert str(checkout["uses"]).startswith("actions/checkout@")
     assert check["name"] == "Require every CI job"
@@ -365,12 +379,51 @@ def test_ci_builds_each_release_image_once_into_the_archive_the_release_reads() 
         assert build["provenance"] == "mode=max"
         assert build["sbom"] == builds["backend"]["sbom"]
         assert build["labels"] == "org.opencontainers.image.revision=${{ github.sha }}"
-        assert build["cache-from"] == f"type=gha,scope={name}-linux-amd64,timeout=2m"
     assert bind["env"] == {
         f"{name.upper()}_DIGEST": f"${{{{ steps.{name}.outputs.digest }}}}"
         for name in RELEASE_IMAGES
     }
     assert f"for image in {' '.join(RELEASE_IMAGES)}; do" in bind["run"]
+
+
+def builder_setups(job: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        candidate["with"]
+        for candidate in job["steps"]
+        if str(candidate.get("uses", "")).startswith("docker/setup-buildx-action@")
+    ]
+
+
+def test_a_release_build_imports_no_shared_cache_and_is_the_only_run_that_writes_it() -> None:
+    deployment = ci_jobs()["deployment"]
+    builds = {
+        candidate["id"]: candidate["with"]
+        for candidate in deployment["steps"]
+        if str(candidate.get("uses", "")).startswith("docker/build-push-action@")
+    }
+
+    assert deployment["env"]["RELEASE_BUILD"] == f"${{{{ {RELEASABLE_RUN} }}}}"
+    assert [setup.get("cache-binary") for setup in builder_setups(deployment)] == [False]
+    assert tuple(builds) == RELEASE_IMAGES
+    for name, build in builds.items():
+        scope = f"type=gha,scope={name}-linux-amd64"
+        assert build["cache-from"] == (
+            f"${{{{ env.RELEASE_BUILD != 'true' && '{scope},timeout=2m' || '' }}}}"
+        )
+        assert build["cache-to"] == (
+            f"${{{{ env.RELEASE_BUILD == 'true' && "
+            f"'{scope},mode=max,ignore-error=true,timeout=2m' || '' }}}}"
+        )
+        assert "no-cache" not in build
+
+
+def test_the_image_rescan_builds_without_the_shared_cache() -> None:
+    (job,) = workflow("image-rescan.yml")["jobs"].values()
+
+    assert [setup.get("cache-binary") for setup in builder_setups(job)] == [False]
+    for build in image_builds(job):
+        assert "cache-from" not in build
+        assert "cache-to" not in build
 
 
 def triggers(name: str) -> dict[str, Any]:
@@ -592,10 +645,51 @@ def test_the_web_dependency_audit_runs_once_per_ci_run() -> None:
     assert "matrix" not in web.get("strategy", {})
 
 
-def test_every_workflow_job_runs_on_ubuntu() -> None:
+SLIM_RUNNER = "ubuntu-slim"
+SLIM_JOBS = {
+    "ci.yml": {"ci_result", "pr_tested", "release_start", *STOP_JOBS},
+    "release.yml": {"authorize", "cleanup"},
+}
+SLIM_PYTHON = (3, 12)
+SLIM_JOB_MINUTES = 15
+SYSTEM_PYTHON_SCRIPT = re.compile(r"\bpython3 ([\w./-]+\.py)\b")
+
+
+def slim_jobs() -> Iterator[tuple[str, dict[str, Any]]]:
     for path in workflow_files():
         for identifier, job in workflow(path.name)["jobs"].items():
-            assert job["runs-on"] == "ubuntu-latest", f"{path.name} {identifier}"
+            if job["runs-on"] == SLIM_RUNNER:
+                yield f"{path.name} {identifier}", job
+
+
+def test_the_small_jobs_run_on_the_slim_runner_and_every_other_job_on_ubuntu_latest() -> None:
+    for path in workflow_files():
+        for identifier, job in workflow(path.name)["jobs"].items():
+            small = identifier in SLIM_JOBS.get(path.name, set())
+            expected = SLIM_RUNNER if small else "ubuntu-latest"
+            assert job["runs-on"] == expected, f"{path.name} {identifier}"
+
+
+def test_every_slim_job_fits_the_slim_runner_and_its_python() -> None:
+    scripts = set()
+    for name, job in slim_jobs():
+        steps = " ".join(str(candidate.get("uses", "")) for candidate in job["steps"])
+        assert job["timeout-minutes"] <= SLIM_JOB_MINUTES, name
+        assert "services" not in job, name
+        assert "container" not in job, name
+        for tool in ("setup-uv", "setup-node", "setup-python", "setup-buildx", "docker/"):
+            assert tool not in steps, name
+        for fragment in ("uv ", "docker ", "npm ", "npx "):
+            assert fragment not in commands(job), name
+        scripts |= set(SYSTEM_PYTHON_SCRIPT.findall(commands(job)))
+    assert scripts == {
+        "scripts/ci_result.py",
+        "deploy/release_authorization.py",
+        "deploy/release_scope.py",
+    }
+    for script in scripts:
+        source = ROOT / script
+        ast.parse(source.read_text(encoding="utf-8"), str(source), feature_version=SLIM_PYTHON)
 
 
 SHIPPED_BUILD_SUITE = "Run the mocked browser suite against the production web build"
@@ -670,9 +764,10 @@ def test_the_mocked_browser_suite_runs_against_the_shipped_web_build_in_releasab
     config = (ROOT / "web" / "playwright.config.ts").read_text(encoding="utf-8")
 
     assert shipped_build_suite_problems(document) == []
+    assert document["jobs"]["deployment"]["env"]["RELEASE_BUILD"] == f"${{{{ {RELEASABLE_RUN} }}}}"
     assert (
         step(document["jobs"]["deployment"], "Retain tested main images for the release")["if"]
-        == RELEASABLE_RUN
+        == "env.RELEASE_BUILD == 'true'"
     )
     assert f"process.env.{next(iter(PASS_ON_RETRY))}" in config
     assert traces["if"] == "always()"
@@ -799,6 +894,11 @@ def test_ci_asks_release_to_judge_a_push_to_main_once_its_images_and_shipped_bui
     )
 
 
+def test_ci_runs_on_a_push_to_main_a_pull_request_and_a_dispatch() -> None:
+    assert set(triggers("ci.yml")) == {"push", "pull_request", "workflow_dispatch"}
+    assert "merge_group" not in (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+
+
 def test_every_repeated_job_still_runs_to_the_end_on_each_push_to_main() -> None:
     document = workflow("ci.yml")
     jobs = ci_jobs()
@@ -808,7 +908,9 @@ def test_every_repeated_job_still_runs_to_the_end_on_each_push_to_main() -> None
         "group": "ci-${{ github.workflow }}-${{ github.ref }}",
         "cancel-in-progress": True,
     }
-    assert set(jobs) == RELEASE_TESTED_JOBS | {"sonar", "ci_result", "release_start", "pr_tested"}
+    assert set(jobs) == (
+        RELEASE_TESTED_JOBS | {"sonar", "ci_result", "release_start", "pr_tested"} | set(STOP_JOBS)
+    )
     for identifier in RELEASE_TESTED_JOBS:
         assert "if" not in jobs[identifier], identifier
         assert "continue-on-error" not in jobs[identifier], identifier
@@ -818,6 +920,26 @@ def test_every_repeated_job_still_runs_to_the_end_on_each_push_to_main() -> None
     for job in jobs.values():
         assert "release_start" not in str(job.get("needs", "")), job["name"]
         assert "pr_tested" not in str(job.get("needs", "")), job["name"]
+        assert "stop_after" not in str(job.get("needs", "")), job["name"]
+
+
+def test_a_failed_job_of_a_pull_request_run_cancels_the_rest_of_the_run() -> None:
+    jobs = ci_jobs()
+
+    assert set(STOP_JOBS.values()) == RELEASE_TESTED_JOBS
+    for identifier, watched in STOP_JOBS.items():
+        stop = jobs[identifier]
+        (cancel,) = stop["steps"]
+        assert stop["name"] == release_authorization.STOP_JOB, identifier
+        assert stop["needs"] == watched, identifier
+        assert stop["if"] == STOP_CONDITION, identifier
+        assert "continue-on-error" not in stop, identifier
+        assert "if" not in cancel, identifier
+        assert "continue-on-error" not in cancel, identifier
+        assert str(cancel["uses"]).startswith("actions/github-script@"), identifier
+        assert cancel["with"] == {"script": CANCEL_OWN_RUN}, identifier
+    assert "fail-fast" not in str(workflow("ci.yml"))
+    assert all("strategy" not in job for job in jobs.values())
 
 
 def test_a_passed_pull_request_run_records_its_tested_tree_in_a_job_without_repository_code() -> (
@@ -899,6 +1021,19 @@ def test_the_release_judges_a_ci_run_its_dispatch_names_through_the_same_gate() 
         "head_sha: artifact.workflow_run?.head_sha ?? null, created_at: artifact.created_at,"
         in (script)
     )
+    assert (
+        "for (let attempt = 1; attempt < candidate.run_attempt; attempt += 1) { const { data } = "
+        "await github.rest.actions.getWorkflowRunAttempt({ ...repository, run_id: candidate.id, "
+        "attempt_number: attempt, }); attempts.push({ attempt, run_started_at: "
+        "data.run_started_at }); }"
+    ) in script
+    assert script.count("getWorkflowRunAttempt(") == 2
+    assert (
+        "jobs = await jobsOf(run); artifacts = await artifactsOf(run); "
+        "earlierAttempts = await earlierAttemptsOf(run);"
+    ) in script
+    assert "artifacts, earlier_attempts: earlierAttempts, deployments," in script
+    assert "run_started_at: candidate.run_started_at," in script
     assert "if (requested) {" in script
     assert collect["env"] == {"SONAR_ENABLED": "${{ vars.SONAR_ENABLED }}"}
     assert "sonar_enabled: process.env.SONAR_ENABLED === 'true'," in script
@@ -1339,7 +1474,7 @@ def test_no_workflow_runs_for_pull_request_targets_and_every_action_is_pinned_by
                     assert PINNED_ACTION.fullmatch(str(candidate["uses"])), candidate["uses"]
 
 
-def test_in_ci_only_the_release_start_may_write_and_only_to_actions() -> None:
+def test_in_ci_only_jobs_of_one_api_call_may_write_and_only_to_actions() -> None:
     writers = {
         identifier: job["permissions"]
         for identifier, job in ci_jobs().items()
@@ -1347,4 +1482,10 @@ def test_in_ci_only_the_release_start_may_write_and_only_to_actions() -> None:
     }
 
     assert workflow("ci.yml")["permissions"] == {"contents": "read"}
-    assert writers == {"release_start": {"actions": "write"}}
+    assert writers == {
+        "release_start": {"actions": "write"},
+        **{identifier: {"actions": "write"} for identifier in STOP_JOBS},
+    }
+    for identifier in writers:
+        (call,) = ci_jobs()[identifier]["steps"]
+        assert str(call["uses"]).startswith("actions/github-script@"), identifier

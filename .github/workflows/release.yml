@@ -25,7 +25,7 @@ jobs:
       vars.GCP_DEPLOY_ENABLED == 'true' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 10
     permissions:
       contents: read
@@ -113,10 +113,21 @@ jobs:
               id: artifact.id, name: artifact.name, expired: artifact.expired,
               head_sha: artifact.workflow_run?.head_sha ?? null, created_at: artifact.created_at,
             }));
+            const earlierAttemptsOf = async candidate => {
+              const attempts = [];
+              for (let attempt = 1; attempt < candidate.run_attempt; attempt += 1) {
+                const { data } = await github.rest.actions.getWorkflowRunAttempt({
+                  ...repository, run_id: candidate.id, attempt_number: attempt,
+                });
+                attempts.push({ attempt, run_started_at: data.run_started_at });
+              }
+              return attempts;
+            };
             // A failed lookup for an early start leaves it unproven; the release after the whole run decides.
             let run = null;
             let jobs = [];
             let artifacts = [];
+            let earlierAttempts = [];
             let runError = null;
             try {
               if (source) {
@@ -133,6 +144,7 @@ jobs:
               if (run) {
                 jobs = await jobsOf(run);
                 artifacts = await artifactsOf(run);
+                earlierAttempts = await earlierAttemptsOf(run);
               }
             } catch (error) {
               if (!requested) throw error;
@@ -198,6 +210,7 @@ jobs:
               run_error: runError,
               jobs,
               artifacts,
+              earlier_attempts: earlierAttempts,
               deployments,
               proof,
               sonar_enabled: process.env.SONAR_ENABLED === 'true',
@@ -309,7 +322,7 @@ jobs:
             !/web/.prettierignore
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
-          version: 0.13.9
+          version: 0.13.10
           enable-cache: false
       # An automatic release starts early and again after the whole CI run; the later one ends
       # here without failing once the other has deployed and its cleanup may remove the images.
@@ -483,7 +496,7 @@ jobs:
           git checkout --detach "$RELEASE_SHA"
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
-          version: 0.13.9
+          version: 0.13.10
           enable-cache: false
       # The other release of this commit held this serialized job until it ended; its success
       # is recorded before this job starts, while its cleanup may already remove the images.
@@ -641,7 +654,7 @@ jobs:
 
   cleanup:
     needs: [authorize, deploy]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 5
     permissions:
       actions: write

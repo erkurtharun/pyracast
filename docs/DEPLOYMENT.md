@@ -258,7 +258,9 @@ The checkout action leaves those unshipped paths out of the checkout of every wo
 checks out code, except those that test, analyse or report on the whole repository (patterns: output of `python3 deploy/release_scope.py sparse-patterns`). A pull request's CI builds, scans and
 smoke-tests the images from that checkout, so an image build that needs a listed path fails there;
 such a path does not belong on the list. Release's own jobs use the same checkout but first run in
-the release after a merge.
+the release after a merge. The images a release ships come from a CI run on `main`, which builds
+them without importing the shared build cache and is the only run that writes it; pull request
+runs import it and write nothing.
 
 The deploy account can administer the VM; protect repository administration and the production
 environment as a production trust boundary.

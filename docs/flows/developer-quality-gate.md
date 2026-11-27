@@ -1,6 +1,6 @@
 # Run the backend and frontend quality gate locally and in CI
 
-A developer runs `scripts/check.py`, the `web` npm scripts or `scripts/check_scientific.py`; GitHub Actions runs the same commands on push to `main`, pull requests, merge groups and manual dispatch. The outcome is a pass or a nonzero exit, a 100% Python branch-coverage floor, a frontend coverage floor, and the coverage artifacts that Sonar consumes. No production data or tenant is involved; tests build their own fixtures in a throwaway test database.
+A developer runs `scripts/check.py`, the `web` npm scripts or `scripts/check_scientific.py`; GitHub Actions runs the same commands on push to `main`, pull requests and manual dispatch. The outcome is a pass or a nonzero exit, a 100% Python branch-coverage floor, a frontend coverage floor, and the coverage artifacts that Sonar consumes. No production data or tenant is involved; tests build their own fixtures in a throwaway test database.
 
 ## Entry points
 
@@ -65,7 +65,7 @@ flowchart TD
 
 ## Authorization
 
-None for users. Privilege boundaries: workflow `permissions: contents: read` (`actions: read` only where a job downloads artifacts by id through the REST API) and `persist-credentials: false`; every action pinned by commit SHA; `PYRACAST_SECRET_KEY` is a CI-only constant; the Linux RabbitMQ password is random per run and masked; `sonar` runs only when `SONAR_ENABLED` is `true`, never for merge groups, Dependabot or fork pull requests (they receive no token); `check_scientific.py` trusts the HDF5 download only through a pinned SHA256.
+None for users. Privilege boundaries: workflow `permissions: contents: read` (`actions: read` only where a job downloads artifacts by id through the REST API; `actions: write` only in `release_start` and the stop jobs, which check out no code) and `persist-credentials: false`; every action pinned by commit SHA; `PYRACAST_SECRET_KEY` is a CI-only constant; the Linux RabbitMQ password is random per run and masked; `sonar` runs only when `SONAR_ENABLED` is `true`, never for Dependabot or fork pull requests (they receive no token); `check_scientific.py` trusts the HDF5 download only through a pinned SHA256.
 
 ## Failure paths
 
@@ -105,6 +105,7 @@ None for users. Privilege boundaries: workflow `permissions: contents: read` (`a
 | `check_scientific.py` on another OS, failed download, bad checksum, missing `uv`, failed sync or smoke assertion | `RuntimeError`, `URLError` or `CalledProcessError` (smoke assertions fail inside the child interpreter). |
 | Sonar enabled but token, project key or organization missing | "Missing Sonar configuration: ..." and the job fails. |
 | A CI job other than Sonar failed, was cancelled or skipped | `CI result` fails and names the jobs. |
+| A job of a pull request run fails | Its stop job cancels the run: the jobs still running, `CI result` and `Record the tested tree` end cancelled, so the run has no passing result and records no tested tree. A fork's read-only token cannot cancel; its stop job fails and the run goes to the end. |
 
 ## Rules and invariants
 
@@ -123,13 +124,13 @@ None for users. Privilege boundaries: workflow `permissions: contents: read` (`a
 - Normal mode starts `npm start` in CI (the `.next` that `web_production` built) and `npm run dev` locally; coverage mode always builds and starts; the real-backend suite always starts `npm start` on a free port. Ports 3100 and 3102 keep the mocked suites apart.
 - The web stages of `check.py` run only when `web/node_modules` exists; otherwise it prints one `SKIPPED web` line, and with it but without `npm` it fails and proves nothing about the web. They run `check:static`, not the Playwright suites. The real-backend suite is deselected by the default `-m "not browser"`; only `web_ubuntu` selects it.
 - `tests/settings.py` fixes every settings-derived `PYRACAST_*` value in `os.environ` before importing `pyracast.settings`, so neither the shell nor a local `.env` changes test settings or the environment subprocess tests inherit; `PG*`, `PYRACAST_RABBITMQ_URL`, the live-test gates and the shard variables stay external.
-- CI cancels superseded runs per ref (`concurrency`); Sonar needs `verify_ubuntu` and `web_ubuntu`. Every job that installs locked dependencies enables the uv cache (`scientific` under its own key); `deployment` disables it.
+- CI cancels superseded runs per ref (`concurrency`), and a pull request run as soon as `deployment`, `verify_ubuntu`, `web_ubuntu`, `web_production`, `scientific` or `audit` fails: each has a stop job that needs only it (a job waits for every job it needs) and calls `cancelWorkflowRun` with `actions: write` and no checkout. Runs of `main` go to the end. No CI job has a matrix, so `fail-fast` plays no part. Sonar needs `verify_ubuntu` and `web_ubuntu`. Every job that installs locked dependencies enables the uv cache (`scientific` under its own key); `deployment` disables it. `ci_result` runs on `ubuntu-slim`; the jobs that test, build or scan run on `ubuntu-latest`.
 
 ## Tests
 
 - `tests/test_pytest_shard.py`: shard parsing, partition, six aggregate rejections (missing, duplicate, overlap, inventory, identity, missing coverage), shards of different attempts, worker mismatch, the `--help` entrypoint, and a real two-shard xdist run merged through `check.main` (shards run by direct pytest calls, not `check.py --shard`).
 - `tests/test_quality_gate.py`: the worker count passed to every gate command (capped, fallback, explicit value kept) and its printed line; the gate covers every static `ci.yml` command except `migrate`; every pytest run compiles the catalogs first; the web skip line and the failure when `npm` is missing beside `web/node_modules`; `--static-only`, `--tests-only`, pytest arguments after `--` (also in shard mode), contradictory modes, per-stage timing and the stop at the first failing stage.
-- `tests/test_release_workflow.py`: the jobs `ci_result` needs, the web dependency audit runs once, every workflow job runs on Ubuntu, and the suite against the shipped build (its command, condition, environment and build, that a failure fails the job, that `ci_result` and `release_start` need its job), with a synthetic workflow for each broken shape.
+- `tests/test_release_workflow.py`: the jobs `ci_result` needs, the stop job of each job of a pull request run, the web dependency audit runs once, the small jobs run on `ubuntu-slim` within its limits and Python 3.12 and every other job on `ubuntu-latest`, and the suite against the shipped build (its command, condition, environment and build, that a failure fails the job, that `ci_result` and `release_start` need its job), with a synthetic workflow for each broken shape.
 - `tests/test_operations_contracts.py`: CI job names, uv caches. `tests/test_ci_result.py`, `tests/test_ci_artifacts.py`, `tests/test_npm_audit.py`, `tests/test_version_pins.py` (one version, digest and action commit everywhere; CI clusters run production's PostgreSQL).
 - `tests/test_api_schema_generation.py`: generation ignores local configuration, the runtime cookie name; `--check` reports a semantically or only formatting-wise stale `openapi.json` and stale `schema.d.ts` without writing them, reports a missing or unparsable committed file as stale, accepts current files, and returns the exit code of a missing `npx` or a failing Node tool.
 - `tests/test_browser_gateway.py`: the test gateway routes as production does and answers 502 while an upstream is down.

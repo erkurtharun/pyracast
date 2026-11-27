@@ -51,6 +51,8 @@ updates:
         update-types: ['version-update:semver-major', 'version-update:semver-minor']
       - dependency-name: node
         update-types: ['version-update:semver-major']
+      # uv is pinned in several places that only a coordinated change can move together.
+      - dependency-name: astral-sh/uv
   - package-ecosystem: gomod
     directory: /deploy/gateway
     schedule:
