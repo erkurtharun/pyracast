@@ -15,6 +15,7 @@ type State = "waiting" | "running" | "committing" | "finished";
 
 export type SavedRecords = {
     holder?: unknown;
+    marks?: Key[];
     plants?: object[];
     days?: object[];
 };
@@ -92,6 +93,8 @@ function filled(records: SavedRecords): Stores {
     };
     if (records.holder !== undefined)
         putInto(stores, "holder", records.holder, "holder");
+    for (const mark of records.marks ?? [])
+        putInto(stores, "holder", true, mark);
     for (const plant of records.plants ?? []) putInto(stores, "plants", plant);
     for (const day of records.days ?? []) putInto(stores, "days", day);
     return stores;

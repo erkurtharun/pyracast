@@ -4,6 +4,7 @@ import { useSessionState } from "@/lib/session-client";
 import { usePageTitle } from "@/ui/page-title";
 import { AccountSecurity } from "./account-security";
 import { EmailChange } from "./email-change";
+import { KeptFiguresSetting } from "./kept-figures-setting";
 
 export function AccountSettings() {
     const t = useTranslations("Dashboard");
@@ -28,6 +29,7 @@ export function AccountSettings() {
                 hasPassword={user.has_usable_password}
                 email={user.email}
             />
+            <KeptFiguresSetting />
         </>
     );
 }

@@ -309,18 +309,20 @@ export function ControlField(props: PlainControl | DescribedControl) {
 export function CheckboxField({
     label,
     name,
+    hint,
     onChange,
     ...input
 }: {
     label: string;
     name?: string;
+    hint?: string;
     checked?: boolean;
     defaultChecked?: boolean;
     required?: boolean;
     disabled?: boolean;
     onChange?: (checked: boolean) => void;
 }) {
-    const control = useControl(name);
+    const control = useControl(name, hint);
     return (
         <>
             <label className="check-field">
@@ -334,7 +336,7 @@ export function CheckboxField({
                 />{" "}
                 {label}
             </label>
-            <Messages id={control.id} error={control.error} />
+            <Messages id={control.id} hint={hint} error={control.error} />
         </>
     );
 }

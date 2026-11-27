@@ -22,7 +22,7 @@ const NOTICE_POLICY =
 const FORECAST = "/app/w/1/plants/11/forecast/";
 const DAYS = /\/api\/tenants\/1\/regions\/11\/plants\/21\/days\/$/;
 const MINUTE = 60_000;
-const TITLE = "Keep figures on this device";
+const SETTING = "Open figures without a connection";
 
 type Served = { answer: object };
 
@@ -101,8 +101,6 @@ if (workerState === "figures")
         const account: AccountState = { current: null };
         const served: Served = { answer: daysAnswer(1.5) };
         await signedInWithWorker(page, account, served);
-        await page.getByText(TITLE, { exact: true }).click();
-        await page.getByRole("button", { name: "Turn on" }).click();
         await expect
             .poll(() => totals(page))
             .toEqual(["forecast 2026-11-11 1.5", "production 2026-11-09 1.2"]);
@@ -206,7 +204,7 @@ if (workerState === "figures")
     });
 
 if (workerState === "figuresWithdrawn")
-    test("a build whose saved figures are withdrawn offers no switch and reads no figures, also over a copy it could not remove", async ({
+    test("a build whose saved figures are withdrawn shows no setting and reads no figures, also over a copy it could not remove", async ({
         page,
     }) => {
         const account: AccountState = { current: null };
@@ -228,6 +226,16 @@ if (workerState === "figuresWithdrawn")
         expect(await readCopy(page)).toMatchObject({ plants: 1 });
         for (let step = 0; step < 12; step += 1)
             await page.clock.fastForward(5 * MINUTE);
-        await expect(page.getByText(TITLE, { exact: true })).toHaveCount(0);
+        await page
+            .getByRole("button", { name: "Account", exact: true })
+            .click();
+        await expect(
+            page.getByRole("heading", {
+                name: "Account",
+                exact: true,
+                level: 1,
+            }),
+        ).toBeVisible();
+        await expect(page.getByText(SETTING, { exact: true })).toHaveCount(0);
         expect(reads).toEqual([]);
     });

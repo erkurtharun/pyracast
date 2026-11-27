@@ -3,6 +3,8 @@ import { mockApi } from "./support/workspace";
 import { serveSession } from "./support/session";
 import {
     daysAnswer,
+    endedMark,
+    offMark,
     readCopy,
     refuseClears,
     seedCopy,
@@ -15,7 +17,7 @@ test.skip(
     "Runs against a build whose saved figures are withdrawn.",
 );
 
-const title = "Keep figures on this device";
+const setting = "Open figures without a connection";
 const minute = 60_000;
 const daysPath = /\/api\/tenants\/\d+\/regions\/\d+\/plants\/\d+\/days\/$/;
 
@@ -30,7 +32,27 @@ async function watchRefreshCode(page: Page) {
     return () => requested;
 }
 
-test("a withdrawn build whose kept figures could not be removed offers neither the switch nor the figures and reads nothing for them", async ({
+test("a withdrawn build deletes a database that holds only the device's marks", async ({
+    page,
+}) => {
+    await seedCopy(page, {
+        holder: null,
+        plants: [],
+        days: [],
+        marks: [offMark(), endedMark("tag-old")],
+    });
+    const account = await mockApi(page);
+    await serveSession(page, account);
+    await page.goto("/app/w/1/");
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
+    await expect
+        .poll(async () => (await readCopy(page)).version)
+        .toBeUndefined();
+});
+
+test("a withdrawn build whose kept figures could not be removed shows neither the setting nor the figures and reads nothing for them", async ({
     page,
 }) => {
     await seedCopy(page);
@@ -38,7 +60,7 @@ test("a withdrawn build whose kept figures could not be removed offers neither t
     await page.addInitScript(() =>
         Object.defineProperty(navigator, "standalone", { value: true }),
     );
-    await supplyRegistration(page);
+    const registration = await supplyRegistration(page);
     const account = await mockApi(page);
     await serveSession(page, account);
     const refreshCode = await watchRefreshCode(page);
@@ -51,11 +73,15 @@ test("a withdrawn build whose kept figures could not be removed offers neither t
     await expect(
         page.getByRole("heading", { name: "Plants", exact: true }),
     ).toBeVisible();
-    expect(await readCopy(page)).toMatchObject({ plants: 1, flag: "1" });
+    expect(await readCopy(page)).toMatchObject({ plants: 1 });
     for (let step = 0; step < 12; step += 1)
         await page.clock.fastForward(5 * minute);
-    await expect(page.getByText(title, { exact: true })).toHaveCount(0);
-    await expect(page.getByRole("region", { name: title })).toHaveCount(0);
+    await page.getByRole("button", { name: "Account", exact: true }).click();
+    await expect(
+        page.getByRole("heading", { name: "Account", exact: true, level: 1 }),
+    ).toBeVisible();
+    expect(await registration.lookups()).toBe(0);
+    await expect(page.getByText(setting, { exact: true })).toHaveCount(0);
     expect(days).toEqual([]);
     expect(refreshCode()).toBe(false);
 

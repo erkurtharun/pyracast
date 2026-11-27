@@ -413,6 +413,7 @@ function readCopy(database, limit, address, removal) {
     limit.transaction = transaction;
     const copy = {
         holder: undefined,
+        marks: [],
         held: 0,
         plants: [],
         plant: undefined,
@@ -420,9 +421,14 @@ function readCopy(database, limit, address, removal) {
         outcome: undefined,
         readAt: undefined,
     };
-    const holder = transaction.objectStore("holder").get("holder");
+    const holders = transaction.objectStore("holder");
+    const holder = holders.get("holder");
     holder.onsuccess = () => {
         copy.holder = holderOf(holder.result);
+    };
+    const marks = holders.getAllKeys();
+    marks.onsuccess = () => {
+        copy.marks = marks.result;
     };
     const plants = transaction.objectStore("plants");
     const keys = plants.getAllKeys();
@@ -493,6 +499,16 @@ function removed(transaction, copy, removal) {
             .objectStore("holder")
             .put({ ...copy.holder, active: false }, "holder");
     return "removed";
+}
+
+// The application's rule (store.ts `refuses`): nothing is shown for a person who turned keeping off here or for a session that is ending or ended.
+function refused(holder, marks) {
+    return marks.some(
+        (mark) =>
+            Array.isArray(mark) &&
+            ((mark[0] === "off" && mark[1] === holder.user) ||
+                (mark[0] === "ended" && mark[2] === holder.session)),
+    );
 }
 
 function expired(holder, now) {
@@ -733,7 +749,7 @@ function buildPage(copy, address, { now, zone, outcome }) {
     const languages = [holder.language];
     const sentence = (key) => (text) => `<p>${escape(text[key])}</p>\n`;
     if (outcome) return noticePage({ languages, body: sentence(outcome) });
-    if (!holder.active || expired(holder, now))
+    if (!holder.active || expired(holder, now) || refused(holder, copy.marks))
         return noticePage({ languages });
     const plants = [...copy.plants].sort(
         (first, second) =>

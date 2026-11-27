@@ -1,15 +1,20 @@
 "use client";
 import type { QueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { SAVED_FIGURES } from "@/lib/saved/feature";
+import type { CopyView } from "@/lib/saved/store";
 import {
-    savedCopyState,
+    boundedStore,
+    commitToStore,
     sessionOwner,
     sessionStill,
     subscribeSavedFigures,
+    turnOnSavedFigures,
+    useSessionState,
     type Session,
 } from "@/lib/session-client";
 
-export type ShownPlant = {
+type ShownPlant = {
     tenant: number;
     site: number;
     plant: number;
@@ -28,6 +33,9 @@ let plant: ShownPlant | undefined;
 let workspace: number | undefined;
 const opened = new Set<() => void>();
 let mounted: { owner: string; stop?: () => void } | undefined;
+// The owner whose copy this device refused to create.
+let unkept: string | undefined;
+const unkeptListeners = new Set<() => void>();
 
 export function shownPlant() {
     return plant;
@@ -65,13 +73,59 @@ export function useShownWorkspace(tenant: number | undefined) {
     }, [tenant]);
 }
 
-// Only the worker reads the copy, so without its registration the copy is neither offered nor refreshed.
-export async function registered() {
+// Only the worker reads the copy, so without its registration the copy is neither kept nor refreshed.
+async function registered() {
     try {
         return Boolean(await navigator.serviceWorker?.getRegistration("/app/"));
     } catch {
-        return false;
+        return undefined;
     }
+}
+
+// "none" where nothing can be kept, "unread" when the device did not answer.
+async function deviceCopy(
+    user: number,
+    session: string,
+): Promise<CopyView | "none" | "unread"> {
+    const worker = await registered();
+    if (worker === false) return "none";
+    if (worker === undefined) return "unread";
+    const copy = await boundedStore(
+        (store, limit) => store.copyState({ user, session }, limit),
+        undefined,
+        false,
+    );
+    return !copy || copy.state === "unavailable" ? "unread" : copy;
+}
+
+function noteUnkept(owner: string | undefined) {
+    if (unkept === owner) return;
+    unkept = owner;
+    for (const listener of unkeptListeners) listener();
+}
+
+function subscribeUnkept(listener: () => void) {
+    unkeptListeners.add(listener);
+    return () => {
+        unkeptListeners.delete(listener);
+    };
+}
+
+function unkeptOwner() {
+    return unkept;
+}
+
+// The worker's registration can complete after the screen mounted.
+function subscribeKeeping(listener: () => void) {
+    let subscribed = true;
+    void navigator.serviceWorker?.ready.then(() => {
+        if (subscribed) listener();
+    });
+    const unsubscribe = subscribeSavedFigures(listener);
+    return () => {
+        subscribed = false;
+        unsubscribe();
+    };
 }
 
 function startRefresh(context: RefreshContext) {
@@ -96,7 +150,8 @@ function stopRefresh() {
     mounted = undefined;
 }
 
-export function useSavedFiguresRefresh(
+// Figures are kept by default; only this person's own "off" on this device, read in the store, stops it.
+export function useSavedFigures(
     client: QueryClient,
     session: Session | undefined,
 ) {
@@ -104,7 +159,8 @@ export function useSavedFiguresRefresh(
     const user = session?.user?.id;
     const tag = session?.session_tag;
     useEffect(() => {
-        if (owner === undefined || user === undefined || !tag) return;
+        if (!SAVED_FIGURES || owner === undefined || user === undefined || !tag)
+            return;
         const shown: RefreshContext = {
             client,
             owner,
@@ -114,18 +170,106 @@ export function useSavedFiguresRefresh(
         };
         let active = true;
         const check = async () => {
-            const on =
-                (await registered()) && (await savedCopyState()).state === "on";
+            const copy = await deviceCopy(user, tag);
             if (!active) return;
-            if (on) startRefresh(shown);
-            else stopRefresh();
+            if (typeof copy === "object" && copy.state === "on") {
+                noteUnkept(undefined);
+                startRefresh(shown);
+                return;
+            }
+            stopRefresh();
+            if (typeof copy !== "object") return;
+            if (copy.state !== "off" || copy.off) {
+                noteUnkept(undefined);
+                return;
+            }
+            const accepted = await turnOnSavedFigures();
+            if (active) noteUnkept(accepted ? undefined : owner);
         };
         void check();
-        const unsubscribe = subscribeSavedFigures(() => void check());
+        const unsubscribe = subscribeKeeping(() => void check());
         return () => {
             active = false;
             unsubscribe();
             stopRefresh();
         };
     }, [client, owner, user, tag]);
+}
+
+// `copy` is the last state the store confirmed; a read that fails keeps it.
+type Preference = {
+    user: number;
+    copy: CopyView;
+    choice: "confirmed" | "saving" | "failed";
+};
+
+// A failure stays only beside the state it was shown with; a state stored since by another window replaces it.
+function choiceAfterRead(
+    known: Preference | undefined,
+    user: number,
+    copy: CopyView,
+): Preference["choice"] {
+    if (known?.user !== user) return "confirmed";
+    return known.choice === "failed" && known.copy.off !== copy.off
+        ? "confirmed"
+        : known.choice;
+}
+
+export function useKeptFiguresPreference() {
+    const { session } = useSessionState();
+    const user = session?.user?.id;
+    const tag = session?.session_tag;
+    const refused =
+        useSyncExternalStore(subscribeUnkept, unkeptOwner, () => undefined) ===
+        sessionOwner(session);
+    const [preference, setPreference] = useState<Preference>();
+    useEffect(() => {
+        if (!SAVED_FIGURES || user === undefined || !tag) return;
+        let active = true;
+        const read = () =>
+            void deviceCopy(user, tag).then((copy) => {
+                if (!active || copy === "unread") return;
+                setPreference((known) =>
+                    copy === "none"
+                        ? undefined
+                        : {
+                              user,
+                              copy,
+                              choice: choiceAfterRead(known, user, copy),
+                          },
+                );
+            });
+        read();
+        const unsubscribe = subscribeKeeping(read);
+        return () => {
+            active = false;
+            unsubscribe();
+        };
+    }, [user, tag]);
+    if (!tag || !preference || preference.user !== user) return undefined;
+    const { user: person, copy, choice } = preference;
+    const change = async (kept: boolean) => {
+        if (choice === "saving") return;
+        setPreference({ ...preference, choice: "saving" });
+        const committed = await commitToStore((store, limit) =>
+            store.setKept(person, kept, limit),
+        );
+        setPreference((known) =>
+            known?.user !== person
+                ? known
+                : committed
+                  ? {
+                        user: person,
+                        copy: { ...known.copy, off: !kept },
+                        choice: "confirmed",
+                    }
+                  : { ...known, choice: "failed" },
+        );
+    };
+    return {
+        kept: !copy.off && !refused,
+        saving: choice === "saving",
+        failed: choice === "failed" || refused,
+        change: (kept: boolean) => void change(kept),
+    };
 }

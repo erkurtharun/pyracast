@@ -89,19 +89,6 @@ export async function holdReload(page: Page) {
     return { reached, release };
 }
 
-// The document shown now records in the tab's session storage when it starts to leave, before any request is sent.
-export async function recordLeaving(page: Page) {
-    await page.evaluate(() =>
-        window.addEventListener("beforeunload", () =>
-            window.sessionStorage.setItem("documentLeaving", "1"),
-        ),
-    );
-    return () =>
-        page.evaluate(
-            () => window.sessionStorage.getItem("documentLeaving") !== null,
-        );
-}
-
 // Refuses the next document load of the address shown now, so the document that asked for it
 // stays and ends the test.
 export async function refuseReload(page: Page) {

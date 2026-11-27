@@ -296,7 +296,7 @@ function useCurrentSession(
     return current;
 }
 
-// The reload runs after the ending document's screens and their leave listeners are gone and the copy answered: a deletion's success reaches only its document.
+// The reload runs after the ending document's screens and their leave listeners are gone and the copy answered: an answer reaches only its document.
 function useDocumentReload(ending: boolean, signedIn: boolean) {
     useEffect(() => {
         if (!ending) return;

@@ -7,6 +7,7 @@ import {
     type SavedDatabase,
     type SavedRecords,
 } from "./support/worker-database";
+import { refusalCases } from "./support/saved-copy";
 import { loadScript, SCOPE, type ScriptOptions } from "./support/worker-script";
 import { workerState } from "./support/worker-state";
 
@@ -1456,6 +1457,23 @@ if (workerState === "figures")
                     "readonly holder,plants,days",
                 ]);
             });
+
+            for (const { name, marks, shown } of refusalCases(7, "tag-1"))
+                test(`${shown ? "does not appear" : "appears"} for an active copy ${name}, and the copy stays`, async () => {
+                    const database = copy({
+                        marks,
+                        days: [forecastDay("2026-11-11")],
+                    });
+                    const body = await savedPage(
+                        plantAddress("forecast", "2026-11-11"),
+                        database,
+                    );
+                    expect(
+                        body.includes("North field, Solar Co: Forecast"),
+                    ).toBe(shown);
+                    expect(database.plants()).toHaveLength(1);
+                    expect(database.days()).toHaveLength(1);
+                });
         });
 
         test.describe("a copy outside its 90 days", () => {

@@ -13,6 +13,7 @@ import {
 } from "../tests/support/plant-screens";
 import { firstAccount, mockApi } from "../tests/support/workspace";
 import { serveSession } from "../tests/support/session";
+import { daysAnswer } from "../tests/support/saved-copy";
 import { API_PORTS, BUILD_DIRECTORIES } from "../testing/builds";
 
 type Build = keyof typeof BUILD_DIRECTORIES;
@@ -98,6 +99,9 @@ async function release(request: APIRequestContext) {
 
 async function signInWithSession(page: Page) {
     await signIn(page);
+    await page.route(/\/plants\/21\/days\/$/, (route) =>
+        route.fulfill({ json: daysAnswer() }),
+    );
     await serveSession(
         page,
         { current: firstAccount },
@@ -309,6 +313,9 @@ test("a sign-in completed on a sign-in screen of the old build at a deep address
 }) => {
     await page.clock.setFixedTime(now);
     await serveSession(page, await mockApi(page, { anonymous: true }));
+    await page.route(/\/plants\/21\/days\/$/, (route) =>
+        route.fulfill({ json: daysAnswer() }),
+    );
     await page.goto(DEEP_ADDRESS);
     await expect(
         page.getByRole("heading", { name: "Welcome back" }),
