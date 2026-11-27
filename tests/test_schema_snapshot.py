@@ -285,6 +285,15 @@ CHANGES = [
         ["CREATE TABLE extra_parted (id integer) PARTITION BY RANGE (id)"],
         ["unsupported pg_class table extra_parted: unexpected"],
     ),
+    unsupported(
+        "partitioned-index",
+        [
+            "CREATE TABLE extra_parted (id integer) PARTITION BY RANGE (id)",
+            "CREATE INDEX extra_parted_id ON extra_parted (id)",
+        ],
+        "pg_class index extra_parted_id",
+        "pg_class table extra_parted",
+    ),
     change(
         "inheritance",
         [
@@ -320,6 +329,22 @@ CHANGES = [
         ],
     ),
     unsupported("shell-type", ["CREATE TYPE extra_shell"], "pg_type type extra_shell"),
+    change(
+        "base-type",
+        [
+            "CREATE TYPE extra_base",
+            "CREATE FUNCTION extra_base_in(cstring) RETURNS extra_base"
+            " LANGUAGE internal IMMUTABLE STRICT AS 'int4in'",
+            "CREATE FUNCTION extra_base_out(extra_base) RETURNS cstring"
+            " LANGUAGE internal IMMUTABLE STRICT AS 'int4out'",
+            "CREATE TYPE extra_base (INPUT = extra_base_in, OUTPUT = extra_base_out, LIKE = integer)",
+        ],
+        [
+            "functions extra_base_in.cstring: unexpected",
+            "functions extra_base_out.extra_base: unexpected",
+            "unsupported pg_type type extra_base: unexpected",
+        ],
+    ),
     unsupported("schema", ["CREATE SCHEMA extra_schema"], "pg_namespace schema extra_schema"),
     change(
         "object-in-another-schema",
@@ -355,6 +380,11 @@ CHANGES = [
         "aggregate",
         ["CREATE AGGREGATE extra_sum (integer) (SFUNC = int4pl, STYPE = integer)"],
         "pg_proc function extra_sum(integer)",
+    ),
+    unsupported(
+        "window-function",
+        ["CREATE FUNCTION extra_rank() RETURNS bigint LANGUAGE internal WINDOW AS 'window_rank'"],
+        "pg_proc function extra_rank()",
     ),
     unsupported(
         "operator",
