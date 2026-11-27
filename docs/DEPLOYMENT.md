@@ -244,9 +244,10 @@ dump and waits for its upload, migrates and promotes `/opt/pyracast/current` onl
 HTTPS readiness check. It keeps the serving and the previous release and prunes the others.
 
 Image artifacts expire after one day. To retry, re-run the failed Release while its artifact
-exists ("Re-run all jobs" for an early start, which refuses a partial re-run), otherwise run
-**Actions → CI → Run workflow → main**. A Release run refused because its commit has no unexpired
-image artifact needs no action when that commit is already the one serving. To redeploy `main`
+exists, otherwise run **Actions → CI → Run workflow → main**. A dispatched CI run runs every job,
+so it also serves a Release refused because its run of `main` skipped suites it could not prove
+again. A Release run refused because its commit has no unexpired image artifact needs no action
+when that commit is already the one serving. To redeploy `main`
 (for example after a key rotation):
 
 1. Run CI on `main`; its automatic Release deploys.
@@ -389,9 +390,7 @@ Inspect the host from `/opt/pyracast/current` as root with
   request; image digests do not update themselves. The daily `Dependency audit` workflow runs
   `pip-audit` and the npm audit on `main`; a failed run means an advisory is open, an npm
   exception expired or is no longer reported, or an audit could not run. Every run of `main` runs
-  the same audits: a release that follows the whole run waits for that run's successful audit,
-  while a release started early for a proven merge relies on the audit that passed in the pull
-  request's run, and the audit of the run of `main` may still be in progress. The daily `Image rescan` workflow scans images rebuilt from `main`, or the deployed
+  the same audits, and its release waits for that run's successful audit. The daily `Image rescan` workflow scans images rebuilt from `main`, or the deployed
   `production` digests once `image_rescan_reader = true` is applied and the repository variable
   `GCP_IMAGE_RESCAN` holds `terraform -chdir=infra/terraform output -raw image_rescan_setting`; a
   failed run needs an image update. Review Ubuntu updates and the pinned Docker packages in

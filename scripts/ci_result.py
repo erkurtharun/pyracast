@@ -3,16 +3,38 @@ import os
 from collections.abc import Mapping
 from typing import Any
 
-# Sonar is skipped when its condition is false or a job it needs did not pass; such a job fails
-# the aggregate on its own.
+# Sonar is skipped when its condition is false or a job it needs did not run; such a job is judged
+# on its own.
 SKIPPABLE = frozenset({"sonar"})
+PROOF_JOB = "merge_proof"
+# The jobs a push skips when its first job found the merged pull request's run of the same tree.
+PROVEN_JOBS = frozenset({"verify_ubuntu", "web_ubuntu", "scientific"})
 
 
-def failures(needs: Mapping[str, Mapping[str, Any]]) -> list[str]:
+def proven(needs: Mapping[str, Mapping[str, Any]]) -> bool:
+    proof = needs.get(PROOF_JOB, {})
+    outputs = proof.get("outputs")
+    return (
+        proof.get("result") == "success"
+        and isinstance(outputs, Mapping)
+        and outputs.get("proven") == "true"
+    )
+
+
+def skippable(needs: Mapping[str, Mapping[str, Any]], event: str) -> frozenset[str]:
+    if event != "push":
+        return SKIPPABLE | {PROOF_JOB}
+    if proven(needs):
+        return SKIPPABLE | PROVEN_JOBS
+    return SKIPPABLE
+
+
+def failures(needs: Mapping[str, Mapping[str, Any]], event: str) -> list[str]:
+    allowed = skippable(needs, event)
     return sorted(
         name
         for name, need in needs.items()
-        if need["result"] != "success" and not (need["result"] == "skipped" and name in SKIPPABLE)
+        if need["result"] != "success" and not (need["result"] == "skipped" and name in allowed)
     )
 
 
@@ -39,10 +61,14 @@ def main(environ: Mapping[str, str] = os.environ) -> int:
     if environ.get("PULL_REQUEST_DRAFT") == "true":
         print("A draft pull request is not verified; mark it ready for review to run CI.")
         return 1
-    failed = failures(needs)
+    event = environ.get("GITHUB_EVENT_NAME", "")
+    failed = failures(needs, event)
     if failed:
         print(f"These CI jobs did not pass: {', '.join(failed)}.")
         return 1
+    if any(needs.get(name, {}).get("result") == "skipped" for name in PROVEN_JOBS):
+        print(f"All {len(needs)} CI jobs passed or were passed on this tree by the pull request.")
+        return 0
     print(f"All {len(needs)} CI jobs passed.")
     return 0
 

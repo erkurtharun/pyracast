@@ -15,6 +15,108 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  merge_proof:
+    name: Find the pull request run that passed on this tree
+    if: github.event_name == 'push'
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      proven: ${{ steps.decision.outputs.proven }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          # The output of: python3 deploy/release_scope.py sparse-patterns
+          sparse-checkout: |
+            /*
+            !/docs/
+            !/tests/
+            !/scripts/
+            !/web/tests/
+            !/web/integration/
+            !/web/production-tests/
+            !/.agents/
+            !/AGENTS.md
+            !/CLAUDE.md
+            !/.claude/settings.json
+            !/.codex/hooks.json
+            !/.github/dependabot.yml
+            !/qodana.yaml
+            !/qodana-js.yaml
+            !/sonar-project.properties
+            !/.gitignore
+            !/web/.gitignore
+            !/web/.prettierignore
+      - name: Collect the pull request run that tested the tree of this commit
+        continue-on-error: true
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          SONAR_ENABLED: ${{ vars.SONAR_ENABLED }}
+        with:
+          script: |
+            const fs = require('fs');
+            const repository = context.repo;
+            let proof;
+            try {
+              const { data: workflow } = await github.rest.actions.getWorkflow({
+                ...repository, workflow_id: 'ci.yml',
+              });
+              const pulls = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {
+                ...repository, commit_sha: context.sha, per_page: 100,
+              });
+              const merged = pulls.filter(pull => pull.merged_at && pull.merge_commit_sha === context.sha);
+              proof = {
+                sha: context.sha, repository: `${repository.owner}/${repository.repo}`,
+                workflow_id: workflow.id, sonar_enabled: process.env.SONAR_ENABLED === 'true',
+                pull_requests: merged.map(pull => ({
+                  number: pull.number, merge_commit_sha: pull.merge_commit_sha, merged_at: pull.merged_at,
+                  base_ref: pull.base.ref, base_repository: pull.base.repo.full_name,
+                  head_repository: pull.head.repo?.full_name ?? null, head_sha: pull.head.sha,
+                })),
+                run: null, jobs: [], artifacts: [],
+              };
+              if (merged.length === 1) {
+                const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+                  ...repository, workflow_id: workflow.id, event: 'pull_request', head_sha: merged[0].head.sha, per_page: 100,
+                });
+                const tested = runs.reduce((newest, candidate) =>
+                  newest && newest.id > candidate.id ? newest : candidate, null);
+                if (tested) {
+                  proof.run = {
+                    id: tested.id, run_attempt: tested.run_attempt, workflow_id: tested.workflow_id,
+                    path: tested.path, repository: tested.repository.full_name,
+                    head_repository: tested.head_repository?.full_name ?? null, event: tested.event,
+                    head_branch: tested.head_branch, head_sha: tested.head_sha, status: tested.status,
+                    conclusion: tested.conclusion, created_at: tested.created_at,
+                    run_started_at: tested.run_started_at,
+                  };
+                  proof.jobs = (await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, {
+                    ...repository, run_id: tested.id, attempt_number: tested.run_attempt, per_page: 100,
+                  })).map(job => ({
+                    name: job.name, conclusion: job.conclusion, started_at: job.started_at, completed_at: job.completed_at,
+                  }));
+                  proof.artifacts = (await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+                    ...repository, run_id: tested.id, per_page: 100,
+                  })).map(artifact => ({
+                    id: artifact.id, name: artifact.name, expired: artifact.expired,
+                    head_sha: artifact.workflow_run?.head_sha ?? null, created_at: artifact.created_at,
+                  }));
+                }
+              }
+            } catch (error) {
+              proof = { error: error.message };
+            }
+            fs.writeFileSync(`${process.env.RUNNER_TEMP}/merge-proof.json`, JSON.stringify(proof));
+      - name: Decide whether that run passed every job on this tree
+        id: decision
+        run: python3 deploy/release_authorization.py prove "$RUNNER_TEMP/merge-proof.json"
+
   deployment:
     name: Deployment configuration and containers
     if: &not-a-draft ${{ !github.event.pull_request.draft }}
@@ -194,7 +296,8 @@ jobs:
 
   verify_ubuntu:
     name: Verify (ubuntu-latest)
-    if: *not-a-draft
+    needs: merge_proof
+    if: &unproven ${{ !cancelled() && !github.event.pull_request.draft && needs.merge_proof.outputs.proven != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 75
     outputs:
@@ -282,7 +385,8 @@ jobs:
 
   web_ubuntu:
     name: Web (ubuntu-latest)
-    if: *not-a-draft
+    needs: merge_proof
+    if: *unproven
     runs-on: ubuntu-latest
     timeout-minutes: 40
     outputs:
@@ -388,7 +492,8 @@ jobs:
 
   scientific:
     name: Scientific (ubuntu-latest)
-    if: *not-a-draft
+    needs: merge_proof
+    if: *unproven
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -493,7 +598,7 @@ jobs:
 
   ci_result:
     name: CI result
-    needs: [deployment, verify_ubuntu, web_ubuntu, web_production, scientific, audit, sonar]
+    needs: [merge_proof, deployment, verify_ubuntu, web_ubuntu, web_production, scientific, audit, sonar]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-slim
     timeout-minutes: 5
@@ -507,11 +612,11 @@ jobs:
           PULL_REQUEST_DRAFT: ${{ github.event.pull_request.draft }}
         run: python3 scripts/ci_result.py
 
-  # Outside CI result, and no repository code runs here: the release compares this record of the
-  # tested base and tree with the squash merge on main. Without it the merge takes the full path.
+  # Outside CI result, and no repository code runs here: the push of the squash merge compares this
+  # record of the tested base and tree with its own commit. Without it that push runs every job.
   pr_tested:
     name: Record the tested tree
-    needs: [deployment, verify_ubuntu, web_ubuntu, web_production, scientific, audit, sonar, ci_result]
+    needs: [merge_proof, deployment, verify_ubuntu, web_ubuntu, web_production, scientific, audit, sonar, ci_result]
     if: ${{ !cancelled() && github.event_name == 'pull_request' && !github.event.pull_request.draft && needs.ci_result.result == 'success' }}
     runs-on: ubuntu-slim
     timeout-minutes: 5
@@ -533,7 +638,7 @@ jobs:
           else
             echo '::warning::HEAD is not the merge of this pull request; no tested tree is recorded.'
           fi
-      - name: Record the tested tree for an early release of its squash merge
+      - name: Record the tested tree for the push of its squash merge
         if: steps.tested.outputs.tree != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -541,27 +646,6 @@ jobs:
           path: ${{ runner.temp }}/pr-tested.txt
           if-no-files-found: error
           retention-days: 7
-
-  # Outside CI result: a failed start leaves the release to the end of this run.
-  # It waits for web_production: the pull request run does not test the shipped web build.
-  release_start:
-    name: Start the release of a proven merge
-    needs: [deployment, web_production]
-    if: vars.GCP_DEPLOY_ENABLED == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-slim
-    timeout-minutes: 5
-    continue-on-error: true
-    permissions:
-      actions: write
-    steps:
-      - name: Ask Release to judge these images before the repeated jobs end
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            await github.rest.actions.createWorkflowDispatch({
-              ...context.repo, workflow_id: 'release.yml', ref: 'main',
-              inputs: { ci_run_id: String(context.runId), ci_run_attempt: process.env.GITHUB_RUN_ATTEMPT },
-            });
 
   # A job waits for every job it needs, so each stop job needs exactly one.
   stop_after_deployment:
