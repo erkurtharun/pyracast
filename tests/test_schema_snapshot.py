@@ -1,3 +1,4 @@
+import errno
 import json
 import os
 from collections.abc import Iterator, Sequence
@@ -620,3 +621,23 @@ def test_the_writer_records_the_catalog_of_the_database_it_is_connected_to(
     assert ["table public.regions_region", "Recorded"] in json.loads(written.read_bytes())[
         "comments"
     ]
+
+
+def test_an_interrupted_write_leaves_the_written_snapshot_as_it_was(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    written = tmp_path / "schema_catalog.json"
+    written.write_bytes(b"previous")
+    monkeypatch.setattr(write_schema_catalog, "SNAPSHOT", written)
+
+    def interrupted(path: Path, data: bytes) -> int:
+        with path.open("wb") as file:
+            file.write(data[: len(data) // 2])
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(Path, "write_bytes", interrupted)
+    with pytest.raises(OSError, match="No space left"):
+        write_schema_catalog.write()
+
+    assert written.read_bytes() == b"previous"
+    assert list(tmp_path.iterdir()) == [written]

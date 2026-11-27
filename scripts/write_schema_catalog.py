@@ -8,7 +8,13 @@ from pyracast.schema_catalog import SNAPSHOT, read_catalog, serialized
 
 def write() -> None:
     """Record the catalog of the configured database, which `migrate` built."""
-    SNAPSHOT.write_bytes(serialized(read_catalog(connection)).encode("utf-8"))
+    recorded = serialized(read_catalog(connection)).encode("utf-8")
+    partial = SNAPSHOT.with_name(f"{SNAPSHOT.name}.partial")
+    try:
+        partial.write_bytes(recorded)
+        partial.replace(SNAPSHOT)
+    finally:
+        partial.unlink(missing_ok=True)
 
 
 def main() -> int:
