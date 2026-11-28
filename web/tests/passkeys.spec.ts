@@ -42,6 +42,13 @@ function loginFlows(page: Page, flows: object[]) {
 function browserCredentials(page: Page, decline = false) {
     return page.addInitScript(
         ({ decline, value }) => {
+            Object.defineProperty(
+                PublicKeyCredential,
+                "isConditionalMediationAvailable",
+                {
+                    value: () => Promise.resolve(false),
+                },
+            );
             const credential = Object.create(PublicKeyCredential.prototype, {
                 toJSON: { value: () => value },
             });
