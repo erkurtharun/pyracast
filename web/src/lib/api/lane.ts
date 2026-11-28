@@ -7,7 +7,12 @@ import {
 } from "./errors";
 
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-export type LaneRequest = { method: Method; url: string; body?: unknown };
+export type LaneRequest = {
+    method: Method;
+    url: string;
+    body?: unknown;
+    untilSent?: AbortSignal;
+};
 export type Exchange = { status: number; ok: boolean; data: unknown };
 
 // Above the 90 s Gunicorn worker timeout, so the server answers or fails first.
@@ -137,6 +142,8 @@ function upstreamLost(status: number, data: unknown) {
 }
 
 async function deliver(request: LaneRequest, tag: Tag): Promise<Exchange> {
+    // A queued or refused attempt can be cancelled. A dispatched write still needs its answer.
+    request.untilSent?.throwIfAborted();
     refuse(request, tag);
     const { method, url, body } = request;
     const t = browserErrors();

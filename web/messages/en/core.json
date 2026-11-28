@@ -92,6 +92,7 @@
         "unsupported": "This browser cannot use passkeys. Use another supported browser.",
         "cancelled": "No passkey was used. Try again or choose another available method.",
         "failed": "Could not use the passkey.",
+        "autofillFailed": "Passkey sign-in did not finish. Try the passkey button or another sign-in method.",
         "loadFailed": "Could not load passkeys.",
         "name": "Passkey name (optional)"
     },

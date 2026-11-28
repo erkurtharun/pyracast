@@ -31,7 +31,26 @@ test("a customer enrolls, signs in, verifies and removes a passkey", async ({
         },
     );
 
+    const suggestions: number[] = [];
+    page.on("response", (response) => {
+        const url = new URL(response.url());
+        if (
+            url.pathname.endsWith("/auth/webauthn/login") &&
+            url.searchParams.has("autofill")
+        )
+            suggestions.push(response.status());
+    });
     await page.goto("/app/");
+    await expect(page.getByLabel("Email", { exact: true })).toHaveAttribute(
+        "autocomplete",
+        "username webauthn",
+    );
+    if (
+        await page.evaluate(() =>
+            PublicKeyCredential.isConditionalMediationAvailable(),
+        )
+    )
+        await expect.poll(() => suggestions).toContain(200);
     await signInWithPassword(page, email, password);
     await page.getByRole("button", { name: "Account", exact: true }).click();
 
@@ -53,6 +72,17 @@ test("a customer enrolls, signs in, verifies and removes a passkey", async ({
     });
     const signOut = page.getByRole("button", { name: "Sign out" });
     await expect(remove).toBeVisible();
+    // The virtual authenticator auto-approves assertions. Exercise the explicit picker
+    // in the next document independently of Chromium's native autofill selection.
+    await page.addInitScript(() => {
+        Object.defineProperty(
+            PublicKeyCredential,
+            "isConditionalMediationAvailable",
+            {
+                value: () => Promise.resolve(false),
+            },
+        );
+    });
     await signOut.click();
     await page.getByRole("button", { name: "Sign in with a passkey" }).click();
     await expect(signOut).toBeVisible();
