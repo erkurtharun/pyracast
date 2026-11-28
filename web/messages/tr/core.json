@@ -75,6 +75,8 @@
     },
     "Passkeys": {
         "title": "Geçiş anahtarları",
+        "loading": "Geçiş anahtarları yükleniyor…",
+        "staffPolicy": "Geçiş anahtarları müşteri hesapları içindir. Bu platform personeli hesabında operatörünüzün kurduğu doğrulama uygulamasını kullanın.",
         "signIn": "Geçiş anahtarıyla giriş yap",
         "verify": "Geçiş anahtarıyla doğrula",
         "verifyOptions": "Geçiş anahtarıyla veya doğrulama koduyla onaylayın",

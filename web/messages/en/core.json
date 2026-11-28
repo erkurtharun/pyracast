@@ -75,6 +75,8 @@
     },
     "Passkeys": {
         "title": "Passkeys",
+        "loading": "Loading passkeys…",
+        "staffPolicy": "Passkeys are available for customer accounts. For this platform staff account, use the authenticator app set up by your operator.",
         "signIn": "Sign in with a passkey",
         "verify": "Confirm with a passkey",
         "verifyOptions": "Confirm with a passkey or a verification code",
