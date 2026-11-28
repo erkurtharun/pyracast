@@ -51,6 +51,7 @@ export function usePasskeyAutofill(
                 signal.throwIfAborted();
                 const result = await assertPasskey("login", signal, () => {
                     selected = true;
+                    window.clearTimeout(timer);
                     setFailed(false);
                 });
                 if (result.meta?.is_authenticated || !signal.aborted)

@@ -159,7 +159,11 @@ class LoginCeremony(PasskeyCeremony):
                 request.session[AUTOFILL_STATE] = request.session[auth.STATE_SESSION_KEY]
             return response
         finally:
-            if saved and not request.user.is_authenticated:
+            if (
+                saved
+                and not request.user.is_authenticated
+                and LOGIN_SESSION_KEY not in request.session
+            ):
                 auth.set_state(saved)
             else:
                 auth.clear_state()

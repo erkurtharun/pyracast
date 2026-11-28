@@ -158,6 +158,45 @@ test("choosing a suggested passkey signs in without typing an email or password"
     ).toBeVisible();
 });
 
+test("a passkey selected just before expiry continues to its pending stage", async ({
+    page,
+}) => {
+    await mockApi(page, { anonymous: true });
+    await loginFlows(page, [{ id: "mfa_login_webauthn" }]);
+    await conditionalPicker(page);
+    await assertion(page, "login?autofill", () => {
+        throw new Error("Verification must identify the selected challenge");
+    });
+    const sent = Promise.withResolvers<void>();
+    const complete = Promise.withResolvers<void>();
+    await page.route(
+        `${base}/auth/webauthn/login?autofill=AQI`,
+        async (route) => {
+            sent.resolve();
+            await complete.promise;
+            await route.fulfill({
+                status: 401,
+                json: {
+                    status: 401,
+                    meta: { is_authenticated: null },
+                    data: { flows: [{ id: "verify_email", is_pending: true }] },
+                },
+            });
+        },
+    );
+    await page.goto("/app/");
+    const email = page.getByLabel("Email", { exact: true });
+    await expect(email).toHaveAttribute("data-picker", "waiting");
+    await page.clock.fastForward("04:44");
+    await email.dispatchEvent("pick-passkey");
+    await sent.promise;
+    await page.clock.fastForward(2_000);
+    complete.resolve();
+    await expect(
+        page.getByRole("button", { name: "Verify email" }),
+    ).toBeVisible();
+});
+
 test("an expired autofill request waits for interaction and hands off to the explicit button", async ({
     page,
 }) => {
