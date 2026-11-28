@@ -7604,6 +7604,13 @@
                             }
                         ]
                     },
+                    "daylight_windows": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DaylightWindowOutput"
+                        },
+                        "nullable": true
+                    },
                     "collected_at": {
                         "type": "string",
                         "format": "date-time",
@@ -11454,6 +11461,13 @@
                     },
                     "timezone": {
                         "type": "string"
+                    },
+                    "daylight_windows": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DaylightWindowOutput"
+                        },
+                        "nullable": true
                     },
                     "total_mwh": {
                         "type": "number",

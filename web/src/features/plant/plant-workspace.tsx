@@ -1,7 +1,7 @@
 "use client";
 import { useTranslations } from "next-intl";
 import dynamic from "next/dynamic";
-import { Suspense, useState } from "react";
+import { Suspense, useState, useSyncExternalStore } from "react";
 import type { Plant, PlantScope, Site } from "@/lib/api";
 import { useRefresh } from "@/lib/api/query";
 import { plantDay, type PlantDays } from "@/lib/format/time";
@@ -49,6 +49,33 @@ const ProductionSection = dynamic(() =>
         sectionUnavailable,
     ),
 );
+
+function subscribeConnection(change: () => void) {
+    window.addEventListener("online", change);
+    window.addEventListener("offline", change);
+    return () => {
+        window.removeEventListener("online", change);
+        window.removeEventListener("offline", change);
+    };
+}
+
+function PlantConnectionNotice() {
+    const t = useTranslations("PlantWorkspace");
+    const offline = useSyncExternalStore(
+        subscribeConnection,
+        () => navigator.onLine === false,
+        () => false,
+    );
+    return (
+        <div
+            className={offline ? "notice" : "sr-only"}
+            aria-live="polite"
+            role={offline ? "status" : undefined}
+        >
+            {offline && t("offline")}
+        </div>
+    );
+}
 
 export function PlantWorkspace({
     plant,
@@ -139,6 +166,7 @@ export function PlantWorkspace({
             <p className="fine plant-time">
                 {t("plantTime", { zone: format.zone(timezone, shownDays) })}
             </p>
+            <PlantConnectionNotice />
             <ReviewNotice region={region} scope={scope} />
             <ViewNav
                 tabs

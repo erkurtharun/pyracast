@@ -104,6 +104,7 @@
         "calibrationUnavailable": "Calibration is available after Pyracast approves the plant.",
         "actuals": "Actual production",
         "plantTime": "Plant time: {zone}",
+        "offline": "This device is offline. Figures may be out of date.",
         "deletion": "Delete plant",
         "serverChanges": "Someone else changed these while you were editing:",
         "editKept": "(your entry {value} is kept)",

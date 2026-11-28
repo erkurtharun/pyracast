@@ -44,9 +44,16 @@ class Affected:
 
 
 @dataclass(frozen=True)
+class DaylightWindow:
+    starts_at: datetime
+    ends_at: datetime
+
+
+@dataclass(frozen=True)
 class ForecastDay:
     date: date
     timezone: str
+    daylight_windows: tuple[DaylightWindow, ...] | None
     source_kind: str
     freshness: str
     stale_reason: str | None
@@ -72,6 +79,7 @@ class ProductionRow:
 class ProductionDay:
     date: date
     timezone: str
+    daylight_windows: tuple[DaylightWindow, ...] | None
     total_mwh: float | None
     complete: bool
     rows: tuple[ProductionRow, ...]
@@ -124,6 +132,7 @@ def _projected(day: date, outlook: dict[str, Any]) -> ForecastDay:
     return ForecastDay(
         date=day,
         timezone=outlook["timezone"],
+        daylight_windows=_forecast_windows(result),
         source_kind=outlook["source_kind"],
         freshness=outlook["freshness"],
         stale_reason=outlook["stale_reason"],
@@ -140,6 +149,7 @@ def _refused_day(plant: Plant, day: date) -> ForecastDay:
     return ForecastDay(
         date=day,
         timezone=plant.region.timezone,
+        daylight_windows=None,
         source_kind="forecast",
         freshness="missing",
         stale_reason=None,
@@ -150,6 +160,25 @@ def _refused_day(plant: Plant, day: date) -> ForecastDay:
         affected=None,
         rows=(),
     )
+
+
+def _forecast_windows(result: dict[str, Any] | None) -> tuple[DaylightWindow, ...] | None:
+    windows = ((result or {}).get("daylight") or {}).get("windows")
+    if not isinstance(windows, list):
+        return None
+
+    def boundary(stamp: str) -> datetime:
+        value = datetime.fromisoformat(stamp)
+        if value.tzinfo is None:
+            raise ValueError("A daylight window needs a UTC offset.")
+        return value.astimezone(UTC)
+
+    try:
+        return tuple(
+            DaylightWindow(boundary(row["start"]), boundary(row["end"])) for row in windows
+        )
+    except KeyError, TypeError, ValueError, OverflowError:
+        return None
 
 
 def _energy(result: dict[str, Any] | None) -> tuple[float | None, bool]:
@@ -237,7 +266,7 @@ def _production_day(plant: Plant, day: date, now: datetime, zone: str) -> Produc
         [answered] = _answered(native_production_days(plant, day, day, now))
     except DamagedStoredDataError as damage:
         log_fault("plant", plant.pk, day, "days", damage)
-        return ProductionDay(day, zone, None, False, ())
+        return ProductionDay(day, zone, None, None, False, ())
     return answered
 
 
@@ -246,6 +275,9 @@ def _answered(production: NativeProduction) -> tuple[ProductionDay, ...]:
         ProductionDay(
             date=day.date,
             timezone=production.timezone,
+            daylight_windows=tuple(
+                DaylightWindow(start, end) for start, end in day.daylight_windows
+            ),
             total_mwh=day.total_mwh,
             complete=day.complete,
             rows=_with_figures(tuple(_production_row(slot) for slot in day.slots)),

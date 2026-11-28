@@ -90,7 +90,7 @@ No database table, Cache Storage entry, stored document, script or API answer is
 
 | Condition | Result |
 | --- | --- |
-| The navigation request fails (no connection, edge or host down) | The worker answers 503 with `no-store` and the CSP `default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`: a saved page where the copy holds the plant of the address, otherwise the notice in both languages (in the holder's language where a copy exists) with "Try again", a link to the same address without its fragment. The notice says the server cannot be reached, lists saved plants, tells a person who came from an invitation link to open it again from the email, and carries no script and no reload |
+| The navigation request fails (no connection, edge or host down) | The worker answers 503 with `no-store` and the CSP `default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`. A saved plant address shows its figures. The installed app's `/app/` entry lists available saved plants in the holder's language. Other addresses show the connection notice with any saved links and instructions for an invitation. Without a usable holder the notice is bilingual. "Try again" requests the same address. These documents carry no script or automatic reload |
 | The server answers with an error page, the gateway's maintenance 503 included | Passed on as served |
 | The worker cannot read the copy within 3 s, or the copy is of another format | The notice without saved figures |
 | The first visit ever is without a connection | The browser's own page; nothing is registered yet |

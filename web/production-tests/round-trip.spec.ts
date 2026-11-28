@@ -26,6 +26,38 @@ const SETTING = "Open figures without a connection";
 
 type Served = { answer: object };
 
+function daysWithDaylight() {
+    const answer = daysAnswer();
+    const hour = 3_600_000;
+    const start = Date.parse("2026-11-11T00:00:00+03:00");
+    const energy: (number | null)[] = Array.from({ length: 24 }, () => 0);
+    energy.splice(7, 3, 0.5, null, 1);
+    return {
+        ...answer,
+        forecast: answer.forecast.map((day) => ({
+            ...day,
+            partial: true,
+            daylight_windows: [
+                {
+                    starts_at: "2026-11-11T06:45:00.125+03:00",
+                    ends_at: "2026-11-11T10:00:00+03:00",
+                },
+            ],
+            rows: energy.map((mwh, index) => ({
+                start: new Date(start + index * hour)
+                    .toISOString()
+                    .replace(".000Z", "Z"),
+                end: new Date(start + (index + 1) * hour)
+                    .toISOString()
+                    .replace(".000Z", "Z"),
+                mwh,
+                affected_mwh: null,
+                sources: null,
+            })),
+        })),
+    };
+}
+
 async function application(page: Page, account: AccountState, served: Served) {
     await mockApi(page, { account });
     await serveSession(page, account);
@@ -48,10 +80,13 @@ async function expectFromWorker(page: Page, answer: Response | null) {
 async function expectSaved(
     page: Page,
     answer: Response | null,
-    heading: string,
+    kind: "Forecast" | "Production",
 ) {
     await expectFromWorker(page, answer);
-    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+    await expect(
+        page.getByRole("heading", { name: "East array", level: 1 }),
+    ).toBeVisible();
+    await expect(page.locator("[aria-current=page]")).toHaveText(kind);
     await expect(page.getByText(/^Read from the server on /)).toBeVisible();
 }
 
@@ -99,7 +134,7 @@ if (workerState === "figures")
         context,
     }) => {
         const account: AccountState = { current: null };
-        const served: Served = { answer: daysAnswer(1.5) };
+        const served: Served = { answer: daysWithDaylight() };
         await signedInWithWorker(page, account, served);
         await expect
             .poll(() => totals(page))
@@ -108,19 +143,54 @@ if (workerState === "figures")
         await context.setOffline(true);
         const offline = await context.newPage();
         await application(offline, account, served);
-        const forecast = "East array, Sunfield Energy: Forecast";
+        const forecast = "Forecast";
+        await expectFromWorker(offline, await offline.goto("/app/"));
+        await expect(
+            offline.getByRole("heading", { name: "Saved plants", level: 1 }),
+        ).toBeVisible();
         await expectSaved(
             offline,
-            await offline.goto(`${FORECAST}?date=2026-11-11`),
+            await follow(offline, "East array"),
             forecast,
         );
-        await expect(offline.getByText("Day total: 1.5 MWh")).toBeVisible();
+        await expect(
+            offline.getByText("1.5 MWh", { exact: true }),
+        ).toBeVisible();
+        const focusedChart = offline.getByRole("img", {
+            name: /^Energy per interval of East array/,
+        });
+        await expect(focusedChart).toBeVisible();
+        const axis = offline.locator(".chart-time:visible");
+        await expect(axis).toContainText("06:00");
+        await expect(axis).toContainText("10:00");
+        await expect(axis).not.toContainText("00:00");
         await expectSaved(offline, await offline.reload(), forecast);
-        await expect(offline.getByText("Day total: 1.5 MWh")).toBeVisible();
+        await expect(axis).toContainText("06:00");
+        await expect(
+            offline.getByText("1.5 MWh", { exact: true }),
+        ).toBeVisible();
+
+        await offline.getByText("Full-day chart", { exact: true }).click();
+        await expect(axis).toContainText("00:00");
+        await offline.getByText("Interval values", { exact: true }).click();
+        const intervals = offline.getByRole("table", {
+            name: "Energy per interval",
+        });
+        await expect(intervals.getByRole("row")).toHaveCount(25);
+        await expect(
+            intervals
+                .getByRole("row", { name: /06:00–07:00/ })
+                .getByRole("cell", { name: "0", exact: true }),
+        ).toBeVisible();
+        await expect(
+            intervals
+                .getByRole("row", { name: /08:00–09:00/ })
+                .getByRole("cell", { name: "—", exact: true }),
+        ).toBeVisible();
         await expectSaved(
             offline,
             await follow(offline, "Production"),
-            "East array, Sunfield Energy: Production",
+            "Production",
         );
 
         const renewed = daysAnswer(2.5);
@@ -159,7 +229,7 @@ if (workerState === "figures")
             await follow(offline, "Next saved day"),
             forecast,
         );
-        await expect(offline.getByText("Day total: 3 MWh")).toBeVisible();
+        await expect(offline.getByText("3 MWh", { exact: true })).toBeVisible();
         await offline
             .getByRole("link", {
                 name: "Remove saved figures from this device",

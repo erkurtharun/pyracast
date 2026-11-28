@@ -104,6 +104,7 @@
         "calibrationUnavailable": "Kalibrasyon, Pyracast santrali onayladıktan sonra kullanılabilir.",
         "actuals": "Gerçekleşen üretim",
         "plantTime": "Santral saati: {zone}",
+        "offline": "Bu cihaz çevrimdışı. Veriler güncel olmayabilir.",
         "deletion": "Santrali sil",
         "serverChanges": "Siz düzenlerken başka biri şunları değiştirdi:",
         "editKept": "(girdiğiniz {value} değeri korunuyor)",
