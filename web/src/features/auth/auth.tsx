@@ -308,7 +308,7 @@ export function Auth({
                             {passkeySupported &&
                                 (passkeyLogin || passkeyMfa) && (
                                     <PasskeySignIn
-                                        key={mode}
+                                        key={`passkey-${mode}`}
                                         secondFactor={passkeyMfa}
                                         onResult={finish}
                                         onStart={autofill.pause}
