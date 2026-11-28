@@ -69,6 +69,19 @@ sequenceDiagram
 
 ## What the device holds
 
+An open plant page keeps its current view when the browser reports that the device went offline.
+It shows a status message until the browser reports a connection again. Failed reads and unconfirmed
+sessions continue to use the application's usual notices and access checks.
+
+When a document request fails, the worker builds a read-only plant page from the saved copy. The page
+identifies the plant, workspace, selected date and when the figures were saved. Its default time range
+includes the intervals that overlap the plant's astronomical daylight windows and the span between
+the first and last positive energy value, including any affected estimate. The days API carries the
+windows already calculated for that forecast or production day. With an older copy or no usable windows
+metadata, the page uses the positive span, or the span of known readings if there are no positive ones.
+The full plant-local day remains available. The chart uses elapsed time, and missing intervals carry
+no measured or forecast value. The display range never changes a saved total.
+
 | Storage                                          | Written by                                                        | Content                                                                                                                                                                                                                                                                                                                                        |
 | ------------------------------------------------ | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pyracast.savedChange` (`localStorage`)     | A committed creation, choice or sign-out record             | A random value; other windows read the setting, the cover and the refresh's state again. It never decides anything                                                                                                   |

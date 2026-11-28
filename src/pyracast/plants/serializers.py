@@ -696,6 +696,7 @@ class DayUnavailableReason(models.TextChoices):
 
 
 class ForecastDayOutput(ForecastEnvelope):
+    daylight_windows = DaylightWindowOutput(many=True, allow_null=True, required=False)
     unavailable_reason = serializers.ChoiceField(
         choices=DayUnavailableReason.choices, allow_null=True
     )
@@ -730,6 +731,7 @@ class ProductionDayRowOutput(serializers.Serializer[Any]):
 class SavedProductionDayOutput(serializers.Serializer[Any]):
     date = serializers.DateField()
     timezone = serializers.CharField()
+    daylight_windows = DaylightWindowOutput(many=True, allow_null=True, required=False)
     total_mwh = serializers.FloatField(allow_null=True)
     complete = serializers.BooleanField()
     rows = serializers.ListField(child=ProductionDayRowOutput(), max_length=ROWS_PER_DAY_LIMIT)

@@ -1773,6 +1773,8 @@ export interface components {
                       | components["schemas"]["NullEnum"]
                   )
                 | null;
+            daylight_windows?:
+                components["schemas"]["DaylightWindowOutput"][] | null;
             /** Format: date-time */
             collected_at: string | null;
             /** Format: double */
@@ -3212,6 +3214,8 @@ export interface components {
             /** Format: date */
             date: string;
             timezone: string;
+            daylight_windows?:
+                components["schemas"]["DaylightWindowOutput"][] | null;
             /** Format: double */
             total_mwh: number | null;
             complete: boolean;

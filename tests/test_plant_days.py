@@ -60,6 +60,7 @@ ANSWER = {"plant_id", "name", "today", "forecast", "production"}
 FORECAST_DAY = {
     "date",
     "timezone",
+    "daylight_windows",
     "source_kind",
     "freshness",
     "stale_reason",
@@ -71,7 +72,7 @@ FORECAST_DAY = {
     "rows",
 }
 FORECAST_ROW = {"start", "end", "mwh", "affected_mwh", "sources"}
-PRODUCTION_DAY = {"date", "timezone", "total_mwh", "complete", "rows"}
+PRODUCTION_DAY = {"date", "timezone", "daylight_windows", "total_mwh", "complete", "rows"}
 PRODUCTION_ROW = {"start", "end", "mwh", "quality", "source", "provisional"}
 
 
@@ -125,6 +126,7 @@ def screen_energy(result: dict[str, Any]) -> tuple[float | None, bool]:
 
 def reduced_forecast(read: dict[str, Any]) -> dict[str, Any]:
     result, scenario = read["result"], read["outage_scenario"]
+    windows = ((result or {}).get("daylight") or {}).get("windows")
     total, partial = screen_energy(result) if result else (None, False)
     affected_rows = {
         row["start"]: row["energy_mwh"]
@@ -144,6 +146,11 @@ def reduced_forecast(read: dict[str, Any]) -> dict[str, Any]:
     return {
         "date": read["date"],
         "timezone": read["timezone"],
+        "daylight_windows": [
+            {"starts_at": window["start"], "ends_at": window["end"]} for window in windows
+        ]
+        if windows is not None
+        else None,
         "source_kind": read["source_kind"],
         "freshness": read["freshness"],
         "stale_reason": read["stale_reason"],
@@ -166,6 +173,7 @@ def reduced_forecast(read: dict[str, Any]) -> dict[str, Any]:
 def same_instants(answer: dict[str, Any]) -> dict[str, Any]:
     return {
         **answer,
+        "daylight_windows": window_instants(answer["daylight_windows"]),
         "collected_at": _instant(answer["collected_at"]),
         "rows": [
             {**row, "start": _instant(row["start"]), "end": _instant(row["end"])}
@@ -176,6 +184,12 @@ def same_instants(answer: dict[str, Any]) -> dict[str, Any]:
 
 def _instant(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value) if value is not None else None
+
+
+def window_instants(windows: list[dict[str, str]] | None) -> list[dict[str, datetime]] | None:
+    if windows is None:
+        return None
+    return [{key: datetime.fromisoformat(value) for key, value in row.items()} for row in windows]
 
 
 def forecast_window(system: System) -> None:
@@ -332,6 +346,14 @@ def test_a_daylight_saving_day_has_one_row_per_local_hour(
         assert datetime.fromisoformat(rows[0]["start"]) == start
         assert datetime.fromisoformat(rows[-1]["end"]) == end
     assert forecast["timezone"] == production["timezone"] == "Europe/Berlin"
+    [light] = forecast["daylight_windows"]
+    assert (
+        start
+        < datetime.fromisoformat(light["starts_at"])
+        < datetime.fromisoformat(light["ends_at"])
+        < end
+    )
+    assert forecast["daylight_windows"] == production["daylight_windows"]
     assert production["complete"] is True
     assert production["total_mwh"] == pytest.approx(hours * 10)
     client = client_for(system.member)
@@ -517,6 +539,7 @@ def test_a_refused_or_empty_day_carries_its_reason_without_rows(
         "freshness": "missing",
         "stale_reason": None,
         "unavailable_reason": "calculation_out_of_range",
+        "daylight_windows": None,
         "collected_at": None,
         "total_mwh": None,
         "partial": False,
@@ -565,6 +588,7 @@ def test_a_damaged_past_day_is_refused_while_every_other_day_is_answered(
         "freshness": "missing",
         "stale_reason": None,
         "unavailable_reason": "calculation_out_of_range",
+        "daylight_windows": None,
         "collected_at": None,
         "total_mwh": None,
         "partial": False,
@@ -708,6 +732,28 @@ def test_an_archived_result_not_shaped_as_written_is_refused_by_both_reads(
     archive_refused_by_both_reads(system, plant, before, issuance, caplog, fault)
 
 
+@pytest.mark.parametrize(
+    "windows",
+    [
+        [{"start": "invalid", "end": "2026-11-09T15:00:00Z"}],
+        [{"start": "2026-11-09T08:00:00", "end": "2026-11-09T15:00:00Z"}],
+    ],
+    ids=["invalid-instant", "missing-offset"],
+)
+def test_unusable_archived_daylight_bounds_keep_the_saved_figures(
+    monkeypatch: pytest.MonkeyPatch, windows: list[dict[str, str]]
+) -> None:
+    system, plant, old_id = reference_transition(monkeypatch)
+    issuance = ForecastIssuance.objects.get(snapshot_id=old_id)
+    before = by_date(days_of(system, plant)["forecast"])[REFERENCE_DAY]
+    assert before["rows"] and before["daylight_windows"]
+    payloads = deepcopy(issuance.payloads)
+    payloads["60"]["daylight"]["windows"] = windows
+    stored_again(issuance, payloads=payloads)
+    after = by_date(days_of(system, plant)["forecast"])[REFERENCE_DAY]
+    assert after == {**before, "daylight_windows": None}
+
+
 def test_a_programming_error_projecting_an_archived_day_fails_the_read(
     monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
 ) -> None:
@@ -817,6 +863,7 @@ def only_the_reference_day_refused(
         "freshness": "missing",
         "stale_reason": None,
         "unavailable_reason": "calculation_out_of_range",
+        "daylight_windows": None,
         "collected_at": None,
         "total_mwh": None,
         "partial": False,
@@ -871,6 +918,7 @@ def test_a_live_snapshot_row_that_is_not_an_object_refuses_only_its_day(
         "freshness": "missing",
         "stale_reason": None,
         "unavailable_reason": "calculation_out_of_range",
+        "daylight_windows": None,
         "collected_at": None,
         "total_mwh": None,
         "partial": False,
@@ -1005,6 +1053,7 @@ def test_an_outage_revision_without_a_start_refuses_only_the_days_it_can_reach(
             assert answered == {
                 "date": answered["date"],
                 "timezone": "Europe/Istanbul",
+                "daylight_windows": None,
                 "total_mwh": None,
                 "complete": False,
                 "rows": [],
@@ -1115,6 +1164,7 @@ def reduced_production(read: dict[str, Any]) -> list[dict[str, Any]]:
             {
                 "date": day["date"],
                 "timezone": read["timezone"],
+                "daylight_windows": window_instants(day["daylight_windows"]),
                 "total_mwh": day["total_mwh"],
                 "complete": day["complete"],
                 "rows": rows if any(row["mwh"] is not None for row in rows) else [],
@@ -1126,6 +1176,7 @@ def reduced_production(read: dict[str, Any]) -> list[dict[str, Any]]:
 def production_with_instants(day: dict[str, Any]) -> dict[str, Any]:
     return {
         **day,
+        "daylight_windows": window_instants(day["daylight_windows"]),
         "rows": [
             {**row, "start": _instant(row["start"]), "end": _instant(row["end"])}
             for row in day["rows"]
@@ -1220,13 +1271,10 @@ def test_production_days_are_the_reduced_native_production_read(
     assert {
         (row["quality"], row["source"], row["provisional"]) for row in days[partial]["rows"][16:]
     } == {(None, None, None)}
-    assert days[empty] == {
-        "date": empty.isoformat(),
-        "timezone": "Europe/Istanbul",
-        "total_mwh": None,
-        "complete": False,
-        "rows": [],
-    }
+    assert days[empty]["rows"] == []
+    assert days[empty]["total_mwh"] is None
+    assert days[empty]["complete"] is False
+    assert days[empty]["daylight_windows"]
     provisional = days[PROVISIONAL_DAY]
     assert provisional["complete"] is True
     assert len(provisional["rows"]) == 24
@@ -1247,7 +1295,9 @@ def test_members_get_one_answer_without_configuration_calibration_or_snapshot_id
     assert admin.json() == viewer.json()
     body = admin.json()
     assert keys(body) == ANSWER | FORECAST_DAY | FORECAST_ROW | PRODUCTION_DAY | PRODUCTION_ROW | {
-        "status"
+        "status",
+        "starts_at",
+        "ends_at",
     }
     assert all(len(day["rows"]) <= 52 for day in body["forecast"] + body["production"])
 

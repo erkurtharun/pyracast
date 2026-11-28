@@ -26,7 +26,7 @@ from pyracast.plants.measurements import (
 from pyracast.plants.models import Plant, PlantConfiguration, ProductionObservation
 from pyracast.plants.operations import configuration_is_current
 from pyracast.plants.serializers import ObservationOutput
-from pyracast.solar import DAYLIGHT_POLICY, daylight_window
+from pyracast.solar import DAYLIGHT_POLICY, TimeWindows, daylight_window
 
 
 def _coverage(rows: list[Measurement], start: datetime, end: datetime) -> bool:
@@ -136,6 +136,7 @@ class NativeSlot:
 @dataclass(frozen=True)
 class NativeProductionDay:
     date: date
+    daylight_windows: TimeWindows
     total_mwh: float | None
     complete: bool
     slots: tuple[NativeSlot, ...]
@@ -188,6 +189,7 @@ def native_production_days(
         days.append(
             NativeProductionDay(
                 date=day,
+                daylight_windows=daylight.windows,
                 total_mwh=_total(rows, daylight.windows or ((start, end),)),
                 complete=_coverage(rows, start, end),
                 slots=tuple(
