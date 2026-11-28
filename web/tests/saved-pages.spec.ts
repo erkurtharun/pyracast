@@ -198,7 +198,7 @@ const plantAddress = (
 ) => routes.plant(KEY.tenant, KEY.site, kind, { date });
 
 const links = (body: string) =>
-    [...body.matchAll(/<a href="([^"]*)">([^<]*)<\/a>/g)].map(
+    [...body.matchAll(/<a href="([^"]*)"[^>]*>([^<]*)<\/a>/g)].map(
         ([, href = "", text = ""]) => [href.replaceAll("&amp;", "&"), text],
     );
 
@@ -207,10 +207,38 @@ const tableRows = (body: string) =>
         [...row.matchAll(/<td[^>]*>([^<]*)<\/td>/g)].map(([, cell]) => cell),
     );
 
-const bars = (body: string, kind: string) =>
-    body.match(new RegExp(`<rect class="${kind}"`, "g"))?.length ?? 0;
+function bars(body: string, kind: string, full = false) {
+    const charts = body.split('<div class="focused-chart">');
+    const chart = full ? charts[0] : charts.at(-1);
+    return (
+        chart?.match(
+            new RegExp(
+                '<rect class="' +
+                    kind +
+                    '"|<line class="zero zero-' +
+                    kind +
+                    '"',
+                "g",
+            ),
+        )?.length ?? 0
+    );
+}
 
-const shownDay = (body: string) => body.match(/Plant day (\S+),/)?.[1];
+function chartEdges(body: string) {
+    const chart = body.split('<div class="focused-chart">').at(-1);
+    const axis =
+        chart?.match(/<div class="chart-time">(.*?)<\/div>/)?.[1] ?? "";
+    const ticks = [...axis.matchAll(/>([^<>]+)<\/span>/g)];
+    return [ticks[0]?.[1], ticks.at(-1)?.[1]];
+}
+
+function totalText(label: string, value: string, detail?: string) {
+    return `<p class="total"><span>${label}</span>
+<strong>${value} <span>MWh</span></strong>
+${detail ? `<small>${detail}</small>` : ""}`;
+}
+
+const shownDay = (body: string) => body.match(/<time datetime="([^"]+)">/)?.[1];
 
 const bothLanguages = (body: string) =>
     body.includes('<section lang="en">') &&
@@ -231,27 +259,27 @@ const heldDates = (body: string) =>
 
 const LABELS: Record<Language, Record<string, string>> = {
     en: {
-        title: "<h1>Pyracast cannot be reached</h1>",
+        title: "Pyracast cannot be reached · Saved on this device",
         read: "Read from the server on Nov 10, 2026, 12:00 GMT+3, 3 hours ago.",
-        day: "Plant day 2026-11-11, time zone UTC.",
+        day: "Plant local time · UTC",
         source: "Source: Estimated actuals.",
         collected: "Source data collected on Nov 10, 2026, 09:00 GMT+3.",
         stale: "The newest provider collection is more than a day old.",
-        total: "Day total: 1.735 MWh (partial estimate)",
-        affected: "With outages: 1.2 MWh",
-        heading: "<h2>North field, Solar Co: Forecast</h2>",
+        total: totalText("Day total", "1.735", "partial estimate"),
+        affected: totalText("With outages", "1.2"),
+        heading: "<h1>North field</h1>",
         caption: "<caption>Energy per interval</caption>",
     },
     tr: {
-        title: "<h1>Pyracast'e ulaşılamıyor</h1>",
+        title: "Bu cihazda kayıtlı",
         read: "Sunucudan okunma: 10 Kas 2026 12:00 GMT+3, 3 saat önce.",
-        day: "Santral günü 2026-11-11, saat dilimi UTC.",
+        day: "Santral saati · UTC",
         source: "Kaynak: Gerçekleşen tahmini.",
         collected: "Kaynak verinin alınma zamanı: 10 Kas 2026 09:00 GMT+3.",
         stale: "Sağlayıcıdan alınan en yeni veri bir günden eski.",
-        total: "Gün toplamı: 1,735 MWh (kısmi tahmin)",
-        affected: "Kesintiler dahil: 1,2 MWh",
-        heading: "<h2>North field, Solar Co: Tahmin</h2>",
+        total: totalText("Gün toplamı", "1,735", "kısmi tahmin"),
+        affected: totalText("Kesintiler dahil", "1,2"),
+        heading: "<h1>North field</h1>",
         caption: "<caption>Aralık başına enerji</caption>",
     },
 };
@@ -291,7 +319,10 @@ if (workerState === "figures")
                     const labels = LABELS[language];
                     for (const label of Object.values(labels))
                         expect(body).toContain(label);
-                    expect(body).toContain('<a href="">');
+                    expect(links(body)).toContainEqual([
+                        "",
+                        language === "en" ? "Try again" : "Tekrar dene",
+                    ]);
                     expect(body).toMatch(/<svg role="img" aria-label="[^"]+"/);
                     expect(bars(body, "energy")).toBe(2);
                     expect(bars(body, "affected")).toBe(0);
@@ -342,6 +373,92 @@ if (workerState === "figures")
                 ]);
             });
 
+            test("focus follows local daylight and keeps a recorded value outside it", async () => {
+                const date = "2026-11-11";
+                const rows = energyRows("2026-11-11T06:00:00Z", [
+                    0,
+                    0,
+                    0,
+                    1,
+                    null,
+                    0,
+                    2,
+                    0,
+                ]);
+                const render = (overrides: Row = {}) =>
+                    savedPage(
+                        plantAddress("forecast", date),
+                        copy({
+                            days: [forecastDay(date, { rows, ...overrides })],
+                        }),
+                    );
+                const window = {
+                    starts_at: "2026-11-11T08:30:00.125Z",
+                    ends_at: "2026-11-11T11:00:00Z",
+                };
+                const body = await render({ daylight_windows: [window] });
+                expect(chartEdges(body)).toEqual(["08:00", "13:00"]);
+                expect(bars(body, "energy")).toBe(4);
+                expect(tableRows(body)).toHaveLength(rows.length);
+
+                const boundary = await render({
+                    rows: rows.slice(0, 6),
+                    daylight_windows: [
+                        { ...window, ends_at: "2026-11-11T11:00:00.000001Z" },
+                    ],
+                });
+                expect(chartEdges(boundary)).toEqual(["08:00", "12:00"]);
+
+                const legacy = await render();
+                expect(chartEdges(legacy)).toEqual(["09:00", "13:00"]);
+                const malformed = await render({
+                    daylight_windows: [
+                        { ...window, ends_at: "2026-11-12T11:00:00Z" },
+                    ],
+                });
+                expect(malformed).toBe(legacy);
+            });
+
+            test("polar night has no focused chart and keeps the known zeroes in the full day", async () => {
+                const date = "2026-12-21";
+                const rows = energyRows(
+                    "2026-12-20T23:00:00Z",
+                    Array.from({ length: 24 }, () => 0),
+                );
+                const render = (overrides: Row) =>
+                    savedPage(
+                        plantAddress("forecast", date),
+                        copy({
+                            days: [
+                                forecastDay(date, {
+                                    timezone: "Europe/Oslo",
+                                    total_mwh: null,
+                                    rows,
+                                    ...overrides,
+                                }),
+                            ],
+                        }),
+                    );
+                const polar = await render({ daylight_windows: [] });
+                expect(polar).toContain("No daylight on this plant day.");
+                expect(polar).toContain(
+                    "All plotted interval values are zero.",
+                );
+                expect(polar).not.toContain('<div class="focused-chart">');
+                expect(polar).toContain(
+                    '<details class="full-day">\n<summary>Full-day chart</summary>',
+                );
+                expect(bars(polar, "energy", true)).toBe(24);
+                expect(tableRows(polar)).toHaveLength(24);
+
+                const missing = await render({ rows: [] });
+                expect(missing).toContain(
+                    "No interval data is saved for this day.",
+                );
+                expect(missing).not.toContain("No daylight on this plant day.");
+                expect(missing).not.toContain("<svg");
+            });
+
             test("marks a day of mixed sources and an outage of unknown impact", async () => {
                 const rows = hours("2026-11-11", 2).map((interval, index) => ({
                     ...interval,
@@ -373,7 +490,7 @@ if (workerState === "figures")
                     "Estimates for completed intervals where available; forecast elsewhere.",
                 );
                 expect(body).toContain("Outage impact is unknown.");
-                expect(body).toContain("With outages: — MWh");
+                expect(body).toContain(totalText("With outages", "—"));
                 expect(tableRows(body).map((row) => row.at(-1))).toEqual([
                     "Estimated actuals",
                     "Forecast, Estimated actuals",
@@ -452,7 +569,7 @@ if (workerState === "figures")
                 expect(body).toContain('<p class="mark">provider_paused</p>');
                 expect(body).toContain('<p class="mark">assumed</p>');
                 expect(body).toContain(
-                    "With outages: 1 MWh (partial estimate)",
+                    totalText("With outages", "1", "partial estimate"),
                 );
             });
 
@@ -478,13 +595,13 @@ if (workerState === "figures")
                     }),
                 );
                 expect(tableRows(short)).toHaveLength(23);
-                expect(bars(short, "energy")).toBe(23);
+                expect(bars(short, "energy", true)).toBe(23);
                 expect(tableRows(short)[2]?.[0]).toBe(
                     "03:00 GMT+2–04:00 GMT+2",
                 );
                 const labels = tableRows(long).map(([interval]) => interval);
                 expect(labels).toHaveLength(25);
-                expect(bars(long, "energy")).toBe(25);
+                expect(bars(long, "energy", true)).toBe(25);
                 expect(new Set(labels).size).toBe(25);
                 expect(labels.slice(2, 4)).toEqual([
                     "02:00 GMT+2–02:00 GMT+1",
@@ -515,17 +632,28 @@ if (workerState === "figures")
         });
 
         test.describe("a saved production page", () => {
-            test("shows the day's marks, total and table", async () => {
+            test("shows the day's marks and total and keeps invalid readings in the table", async () => {
+                const date = "2026-11-09";
+                const day = productionDay(date);
+                const rows = [
+                    ...day.rows,
+                    {
+                        start: "2026-11-09T12:00:00Z",
+                        end: "2026-11-09T13:00:00Z",
+                        mwh: 9,
+                        quality: "invalid",
+                        source: "manual",
+                        provisional: false,
+                    },
+                ];
                 const body = await savedPage(
-                    plantAddress("production", "2026-11-09"),
-                    copy({ days: [productionDay("2026-11-09")] }),
+                    plantAddress("production", date),
+                    copy({ days: [productionDay(date, { rows })] }),
                 );
-                expect(body).toContain(
-                    "<h2>North field, Solar Co: Production</h2>",
-                );
-                expect(body).toContain("Plant day 2026-11-09, time zone UTC.");
+                expect(body).toContain("<h1>North field</h1>");
+                expect(body).toContain("Plant local time · UTC");
                 expect(body).toContain('<p class="mark">Incomplete day</p>');
-                expect(body).toContain("Day total: 0.75 MWh");
+                expect(body).toContain(totalText("Day total", "0.75"));
                 expect(tableRows(body)).toEqual([
                     ["09:00–10:00", "0.25", "Valid", "epias", "—"],
                     [
@@ -536,8 +664,14 @@ if (workerState === "figures")
                         "Provisional",
                     ],
                     ["11:00–12:00", "—", "—", "—", "—"],
+                    ["12:00–13:00", "9", "Invalid", "manual", "—"],
                 ]);
-                expect(body).not.toContain("<svg");
+                expect(body).toContain('aria-current="page">Production');
+                expect(body).toContain(
+                    "Invalid readings are available in the interval table.",
+                );
+                expect(bars(body, "energy", true)).toBe(2);
+                expect(bars(body, "energy")).toBe(2);
             });
 
             test("shows a complete day in Turkish", async () => {
@@ -549,7 +683,7 @@ if (workerState === "figures")
                     }),
                 );
                 expect(body).toContain('<p class="mark">Tam gün</p>');
-                expect(body).toContain("Gün toplamı: 0,75 MWh");
+                expect(body).toContain(totalText("Gün toplamı", "0,75"));
                 expect(tableRows(body)[1]).toEqual([
                     "10:00–11:00",
                     "0,5",
@@ -700,14 +834,14 @@ if (workerState === "figures")
                     }),
                 );
                 expect(links(body)).toEqual([
+                    [routes.entry(), "Saved plants"],
                     ["", "Try again"],
+                    [plantAddress("production"), "Production"],
                     [
                         plantAddress("forecast", "2026-11-09"),
                         "Previous saved day",
                     ],
                     [plantAddress("forecast", "2026-11-12"), "Next saved day"],
-                    [plantAddress("production"), "Production"],
-                    [routes.entry(), "Saved plants"],
                     [
                         "/app/?saved=remove",
                         "Remove saved figures from this device",
@@ -721,12 +855,12 @@ if (workerState === "figures")
                     copy({ days: [productionDay("2026-11-09")] }),
                 );
                 expect(links(body).map(([, text]) => text)).toEqual([
+                    "Saved plants",
                     "Try again",
                     "Forecast",
-                    "Saved plants",
                     "Remove saved figures from this device",
                 ]);
-                expect(links(body)[1]?.[0]).toBe(plantAddress("forecast"));
+                expect(links(body)[2]?.[0]).toBe(plantAddress("forecast"));
             });
         });
 
@@ -766,8 +900,9 @@ if (workerState === "figures")
                     copy({ plants: [plant({ name, workspace })] }),
                 );
                 expect(list).not.toContain(name);
+                expect(list).toContain(`>${escaped(name)}</a>`);
                 expect(list).toContain(
-                    `>${escaped(name)}</a>, ${escaped(workspace)}.`,
+                    `<p class="workspace">${escaped(workspace)}</p>`,
                 );
             });
         });
@@ -792,7 +927,11 @@ if (workerState === "figures")
                 );
                 expect(body).toContain('<html lang="tr">');
                 expect(body).not.toContain('<section lang="en">');
-                expect(body).toContain("<h2>Bu cihazda kayıtlı rakamlar</h2>");
+                expect(body).toContain("<h1>Kayıtlı santraller</h1>");
+                expect(body).toContain(
+                    "Pyracast'e ulaşılamıyor · Bu cihazda kayıtlı",
+                );
+                expect(body).not.toContain("davet bağlantısıyla");
                 expect(links(body)).toEqual([
                     ["", "Tekrar dene"],
                     [routes.plant(3, 6), "Alpha"],
@@ -820,7 +959,7 @@ if (workerState === "figures")
                         routes.plant(3, 5),
                         "North field",
                     ]);
-                    expect(body, address).not.toContain("Plant day");
+                    expect(shownDay(body), address).toBeUndefined();
                 }
             });
 
@@ -1468,9 +1607,7 @@ if (workerState === "figures")
                         plantAddress("forecast", "2026-11-11"),
                         database,
                     );
-                    expect(
-                        body.includes("North field, Solar Co: Forecast"),
-                    ).toBe(shown);
+                    expect(body.includes("<h1>North field</h1>")).toBe(shown);
                     expect(database.plants()).toHaveLength(1);
                     expect(database.days()).toHaveLength(1);
                 });
@@ -1634,8 +1771,8 @@ if (workerState === "figures")
                 const body = await (await answer).text();
                 expect(body).not.toContain(EXPIRED);
                 expect(shownDay(body)).toBe("2026-11-11");
-                expect(body).toContain("Day total: 4.2 MWh");
-                expect(body).not.toContain("Day total: 1.735 MWh");
+                expect(body).toContain(totalText("Day total", "4.2"));
+                expect(body).not.toContain(totalText("Day total", "1.735"));
                 expect(database.plants()).toHaveLength(1);
                 expect(database.days()).toHaveLength(1);
             });

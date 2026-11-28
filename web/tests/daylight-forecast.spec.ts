@@ -456,3 +456,31 @@ for (const language of ["en", "tr"] as const) {
         );
     });
 }
+
+test("an open forecast stays readable while the device is offline", async ({
+    page,
+    context,
+}) => {
+    await openForecast(page, true, forecastResult(true));
+    const plant = page.getByRole("heading", { name: "East array", level: 1 });
+    const chart = page.getByRole("img", { name: "Average power (MW)" });
+    const offlineStatus = page
+        .getByRole("status")
+        .filter({ hasText: "This device is offline." });
+    await expect(chart).toBeVisible();
+    await expect(offlineStatus).toHaveCount(0);
+    const address = page.url();
+
+    await context.setOffline(true);
+    await expect(offlineStatus).toContainText(
+        "This device is offline. Figures may be out of date.",
+    );
+    await expect(page).toHaveURL(address);
+    await expect(plant).toBeVisible();
+    await expect(chart).toBeVisible();
+
+    await context.setOffline(false);
+    await expect(offlineStatus).toHaveCount(0);
+    await expect(page).toHaveURL(address);
+    await expect(chart).toBeVisible();
+});

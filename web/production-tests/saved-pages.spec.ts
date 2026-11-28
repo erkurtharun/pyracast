@@ -206,7 +206,8 @@ if (workerState === "figures")
             expect(answer?.headers()["cache-control"]).toBe("no-store");
             await expect(
                 page.getByRole("heading", {
-                    name: "North field, Solar Co: Forecast",
+                    name: "North field",
+                    level: 1,
                 }),
             ).toBeVisible();
             await expect(
@@ -220,6 +221,11 @@ if (workerState === "figures")
                     name: /^Energy per interval of North field/,
                 }),
             ).toBeVisible();
+            await expect(page.locator("[aria-current=page]")).toHaveText(
+                "Forecast",
+            );
+            await expect(page.getByRole("row")).toHaveCount(0);
+            await page.getByText("Interval values", { exact: true }).click();
             await expect(page.getByRole("row")).toHaveCount(3);
             await expectSavedPage(page);
 
@@ -233,10 +239,20 @@ if (workerState === "figures")
             await expect(page).toHaveURL(PRODUCTION);
             await expect(
                 page.getByRole("heading", {
-                    name: "North field, Solar Co: Production",
+                    name: "North field",
+                    level: 1,
                 }),
             ).toBeVisible();
+            await expect(page.locator("[aria-current=page]")).toHaveText(
+                "Production",
+            );
             await expect(page.getByText("Complete day")).toBeVisible();
+            await expect(
+                page.getByRole("img", {
+                    name: /^Energy per interval of North field/,
+                }),
+            ).toBeVisible();
+            await page.getByText("Interval values", { exact: true }).click();
             await expect(
                 page.getByRole("cell", { name: "Provisional" }),
             ).toHaveCount(2);
@@ -251,14 +267,19 @@ if (workerState === "figures")
             expect(answer?.status()).toBe(503);
             await expect(
                 page.getByRole("heading", {
-                    name: "Figures saved on this device",
+                    name: "Saved plants",
+                    level: 1,
                 }),
             ).toBeVisible();
+            await expect(
+                page.getByText(/If you came here from an invitation link/),
+            ).toHaveCount(0);
             await page.getByRole("link", { name: "North field" }).click();
             await expect(page).toHaveURL(FORECAST);
             await expect(
                 page.getByRole("heading", {
-                    name: "North field, Solar Co: Forecast",
+                    name: "North field",
+                    level: 1,
                 }),
             ).toBeVisible();
         });
@@ -278,13 +299,15 @@ if (workerState === "figures")
                 [
                     `${FORECAST}?date=2026-11-11`,
                     page.getByRole("heading", {
-                        name: `${name}, Solar Co: Forecast`,
+                        name,
+                        level: 1,
                     }),
                 ],
                 [
                     PRODUCTION,
                     page.getByRole("heading", {
-                        name: `${name}, Solar Co: Production`,
+                        name,
+                        level: 1,
                     }),
                 ],
             ] as const) {
@@ -293,6 +316,7 @@ if (workerState === "figures")
                 const width = await pageWidth(page);
                 expect(width.scroll, address).toBeLessThanOrEqual(width.view);
             }
+            await page.getByText("Interval values", { exact: true }).click();
             const table = page.getByRole("region", {
                 name: "Energy per interval",
             });

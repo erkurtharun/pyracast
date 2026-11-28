@@ -746,7 +746,8 @@ def test_unusable_archived_daylight_bounds_keep_the_saved_figures(
     system, plant, old_id = reference_transition(monkeypatch)
     issuance = ForecastIssuance.objects.get(snapshot_id=old_id)
     before = by_date(days_of(system, plant)["forecast"])[REFERENCE_DAY]
-    assert before["rows"] and before["daylight_windows"]
+    assert before["rows"]
+    assert before["daylight_windows"]
     payloads = deepcopy(issuance.payloads)
     payloads["60"]["daylight"]["windows"] = windows
     stored_again(issuance, payloads=payloads)
