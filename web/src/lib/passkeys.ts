@@ -57,21 +57,35 @@ export type PasskeyAssertion = "login" | "authenticate" | "reauthenticate";
 export async function assertPasskey(
     action: PasskeyAssertion,
     signal: AbortSignal,
+    onAutofillSelection?: () => void,
 ): Promise<AuthResult> {
     const path = `auth/webauthn/${action}`;
     const options = await authRequest<{
         request_options?: { publicKey?: PublicKeyCredentialRequestOptionsJSON };
-    }>(path, "GET");
+    }>(
+        onAutofillSelection ? `${path}?autofill` : path,
+        "GET",
+        undefined,
+        signal,
+    );
     signal.throwIfAborted();
     if (options.status === 401) return options;
     const json = options.data?.request_options?.publicKey;
     if (!json) throw new ApiError(browserErrors()("invalidResponse"));
     const publicKey = PublicKeyCredential.parseRequestOptionsFromJSON(json);
     const credential = serializeCredential(
-        await navigator.credentials.get({ publicKey, signal }),
+        await navigator.credentials.get({
+            publicKey,
+            signal,
+            ...(onAutofillSelection && { mediation: "conditional" }),
+        }),
         signal,
     );
-    return authRequest(path, "POST", { credential });
+    onAutofillSelection?.();
+    const verify = onAutofillSelection
+        ? `${path}?autofill=${encodeURIComponent(json.challenge)}`
+        : path;
+    return authRequest(verify, "POST", { credential }, signal);
 }
 
 function serializeCredential(

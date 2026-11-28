@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "./support/test";
+import { errorBody } from "./support/errors";
 import { firstAccount, mockApi } from "./support/workspace";
 
 const base = "**/api/auth/browser/v1";
@@ -41,6 +42,13 @@ function loginFlows(page: Page, flows: object[]) {
 function browserCredentials(page: Page, decline = false) {
     return page.addInitScript(
         ({ decline, value }) => {
+            Object.defineProperty(
+                PublicKeyCredential,
+                "isConditionalMediationAvailable",
+                {
+                    value: () => Promise.resolve(false),
+                },
+            );
             const credential = Object.create(PublicKeyCredential.prototype, {
                 toJSON: { value: () => value },
             });
@@ -77,10 +85,202 @@ function assertion(page: Page, method: string, complete: () => void) {
             return;
         }
         expect(route.request().postDataJSON()).toEqual({ credential: value });
+        if (method.includes("autofill"))
+            expect(
+                new URL(route.request().url()).searchParams.get("autofill"),
+            ).toBe("AQI");
         complete();
         await route.fulfill({ json: success });
     });
 }
+
+function conditionalPicker(page: Page) {
+    return page.addInitScript((value) => {
+        Object.defineProperty(
+            PublicKeyCredential,
+            "isConditionalMediationAvailable",
+            {
+                value: () => Promise.resolve(true),
+            },
+        );
+        Object.defineProperty(CredentialsContainer.prototype, "get", {
+            value: ({ mediation, signal }: CredentialRequestOptions) => {
+                const field = document.querySelector<HTMLInputElement>(
+                    'input[name="email"]',
+                )!;
+                if (mediation !== "conditional")
+                    return Promise.reject(
+                        new DOMException("Dismissed", "NotAllowedError"),
+                    );
+                field.dataset.picker = "waiting";
+                return new Promise<Credential>((resolve, reject) => {
+                    signal?.addEventListener(
+                        "abort",
+                        () => {
+                            field.dataset.picker = "aborted";
+                            reject(new DOMException("Cancelled", "AbortError"));
+                        },
+                        { once: true },
+                    );
+                    field.addEventListener(
+                        "pick-passkey",
+                        () => {
+                            resolve(
+                                Object.create(PublicKeyCredential.prototype, {
+                                    toJSON: { value: () => value },
+                                }),
+                            );
+                        },
+                        { once: true, signal },
+                    );
+                });
+            },
+        });
+    }, value);
+}
+
+test("choosing a suggested passkey signs in without typing an email or password", async ({
+    page,
+}) => {
+    const account = await mockApi(page, { anonymous: true });
+    await loginFlows(page, [{ id: "mfa_login_webauthn" }]);
+    await conditionalPicker(page);
+    await assertion(page, "login?autofill*", () => {
+        account.current = firstAccount;
+    });
+    await page.goto("/app/");
+    const email = page.getByLabel("Email", { exact: true });
+    await expect(email).toHaveAttribute("autocomplete", "username webauthn");
+    await expect(email).toHaveAttribute("data-picker", "waiting");
+    await email.dispatchEvent("pick-passkey");
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
+});
+
+test("a passkey selected just before expiry continues to its pending stage", async ({
+    page,
+}) => {
+    await mockApi(page, { anonymous: true });
+    await loginFlows(page, [{ id: "mfa_login_webauthn" }]);
+    await conditionalPicker(page);
+    await assertion(page, "login?autofill", () => {
+        throw new Error("Verification must identify the selected challenge");
+    });
+    const sent = Promise.withResolvers<void>();
+    const complete = Promise.withResolvers<void>();
+    await page.route(
+        `${base}/auth/webauthn/login?autofill=AQI`,
+        async (route) => {
+            sent.resolve();
+            await complete.promise;
+            await route.fulfill({
+                status: 401,
+                json: {
+                    status: 401,
+                    meta: { is_authenticated: null },
+                    data: { flows: [{ id: "verify_email", is_pending: true }] },
+                },
+            });
+        },
+    );
+    await page.goto("/app/");
+    const email = page.getByLabel("Email", { exact: true });
+    await expect(email).toHaveAttribute("data-picker", "waiting");
+    await page.clock.fastForward("04:44");
+    await email.dispatchEvent("pick-passkey");
+    await sent.promise;
+    await page.clock.fastForward(2_000);
+    complete.resolve();
+    await expect(
+        page.getByRole("button", { name: "Verify email" }),
+    ).toBeVisible();
+});
+
+test("an expired autofill request waits for interaction and hands off to the explicit button", async ({
+    page,
+}) => {
+    await mockApi(page, { anonymous: true });
+    await loginFlows(page, [{ id: "mfa_login_webauthn" }]);
+    await conditionalPicker(page);
+    let autofillRequests = 0;
+    await page.route(`${base}/auth/webauthn/login?autofill*`, async (route) => {
+        expect(route.request().method()).toBe("GET");
+        autofillRequests++;
+        await route.fulfill({
+            json: {
+                status: 200,
+                data: { request_options: { publicKey: { challenge: "AQI" } } },
+            },
+        });
+    });
+    await assertion(page, "login", () => {
+        throw new Error("A dismissed prompt cannot submit a credential");
+    });
+    await page.goto("/app/");
+    const email = page.getByLabel("Email", { exact: true });
+    await expect(email).toHaveAttribute("data-picker", "waiting");
+    await page.clock.fastForward("05:01");
+    await expect(email).toHaveAttribute("data-picker", "aborted");
+    expect(autofillRequests).toBe(1);
+    await email.focus();
+    await expect(email).toHaveAttribute("data-picker", "waiting");
+    expect(autofillRequests).toBe(2);
+    await page.getByRole("button", { name: "Sign in with a passkey" }).click();
+    await expect(page.getByText(/No passkey was used/)).toBeVisible();
+    await expect(email).toHaveAttribute("data-picker", "waiting");
+    expect(autofillRequests).toBe(3);
+});
+
+test("submitting a password cancels a pending passkey verification retry", async ({
+    page,
+}) => {
+    const account = await mockApi(page, { anonymous: true });
+    await loginFlows(page, [{ id: "mfa_login_webauthn" }]);
+    await conditionalPicker(page);
+    await assertion(page, "login?autofill", () => {
+        throw new Error("Verification must identify the selected challenge");
+    });
+    const received = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let sent = 0;
+    await page.route(
+        `${base}/auth/webauthn/login?autofill=AQI`,
+        async (route) => {
+            sent++;
+            received.resolve();
+            await release.promise;
+            await route.fulfill({
+                status: 429,
+                json: errorBody("session_busy", "Busy.", { retry_after: 0 }),
+            });
+        },
+    );
+    await page.route(`${base}/auth/login`, async (route) => {
+        expect(route.request().postDataJSON()).toEqual({
+            email: "owner@example.com",
+            password: "password",
+        });
+        account.current = firstAccount;
+        await route.fulfill({ json: success });
+    });
+    await page.goto("/app/");
+    const email = page.getByLabel("Email", { exact: true });
+    await email.fill("owner@example.com");
+    await page.getByLabel("Password", { exact: true }).fill("password");
+    await expect(email).toHaveAttribute("data-picker", "waiting");
+    await email.dispatchEvent("pick-passkey");
+    await received.promise;
+    await page
+        .locator("form")
+        .getByRole("button", { name: "Sign in", exact: true })
+        .click();
+    release.resolve();
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
+    expect(sent).toBe(1);
+});
 
 test("dismissing a passkey leaves password sign-in available", async ({
     page,

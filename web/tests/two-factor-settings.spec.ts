@@ -547,7 +547,9 @@ test("a failed authenticator list offers an explicit retry without guessing acco
         page.getByRole("button", { name: "Set up authenticator" }),
     ).not.toBeVisible();
     unavailable = false;
-    await page.getByRole("button", { name: "Try again", exact: true }).click();
+    await twoFactorPanel(page)
+        .getByRole("button", { name: "Try again", exact: true })
+        .click();
     await expect(
         page.getByRole("button", { name: "Replace recovery codes" }),
     ).toBeVisible();

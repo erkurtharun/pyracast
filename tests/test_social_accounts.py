@@ -153,6 +153,7 @@ def test_provider_signup_creates_workspace_atomically(
     )
     session = client.get(AUTH + "auth/session").json()
     assert any(flow["id"] == "provider_signup" for flow in session["data"]["flows"])
+    assert client.get(AUTH + "auth/webauthn/login?autofill").status_code == 409
     pending = client.session["socialaccount_sociallogin"]
     assert "token" not in pending
     assert pending["account"]["extra_data"] == {

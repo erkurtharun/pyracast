@@ -53,12 +53,14 @@ export async function authRequest<TData = AuthData>(
     path: string,
     method: Method,
     body?: unknown,
+    untilSent?: AbortSignal,
 ): Promise<AuthResult<TData>> {
     const t = browserErrors();
     const { status, ok, data } = await prepared({
         method,
         url: authUrl(path),
         body,
+        untilSent,
     });
     if (!data || typeof data !== "object" || Array.isArray(data))
         throw new ApiError(

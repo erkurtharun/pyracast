@@ -126,15 +126,17 @@ export function AccountSecurity({
     const [totpRevision, setTotpRevision] = useState(0);
     return (
         <>
+            <PasskeySettings
+                email={email}
+                totpRevision={totpRevision}
+                mfaRequired={mfaRequired}
+            />
             <PasswordChange hasPassword={hasPassword} email={email} />
             <TwoFactorSettings
                 mfaRequired={mfaRequired}
                 email={email}
                 onTotpChange={() => setTotpRevision((revision) => revision + 1)}
             />
-            {!mfaRequired && (
-                <PasskeySettings email={email} totpRevision={totpRevision} />
-            )}
             <LinkedAccounts email={email} hasPassword={hasPassword} />
             <SignedInDevices />
         </>

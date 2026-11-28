@@ -22,7 +22,7 @@ import { ConfirmStep } from "./two-factor/confirm-step";
 
 type Passkey = { id: number; name: string };
 type Inventory =
-    | { kind: "loading" | "unavailable" | "failed" }
+    | { kind: "loading" | "failed" }
     | { kind: "ready"; keys: Passkey[]; totp: boolean; recovery: boolean };
 type Recovery = { kind: "confirm" } | { kind: "codes"; values: string[] };
 
@@ -46,13 +46,39 @@ async function readInventory(): Promise<Extract<Inventory, { kind: "ready" }>> {
     };
 }
 
-export function PasskeySettings({
-    email,
-    totpRevision,
-}: {
+type CustomerSettings = {
     email: string;
     totpRevision: number;
-}) {
+};
+
+export function PasskeySettings({
+    mfaRequired,
+    ...customer
+}: CustomerSettings & { mfaRequired: boolean }) {
+    const t = useTranslations("Passkeys");
+    const title = useRef<HTMLHeadingElement>(null);
+    return (
+        <section className="panel narrow" aria-labelledby="account-passkeys">
+            <h2 ref={title} id="account-passkeys" tabIndex={-1}>
+                {t("title")}
+            </h2>
+            {mfaRequired ? (
+                <p>{t("staffPolicy")}</p>
+            ) : (
+                <CustomerPasskeys
+                    {...customer}
+                    focusTitle={() => title.current?.focus()}
+                />
+            )}
+        </section>
+    );
+}
+
+function CustomerPasskeys({
+    email,
+    totpRevision,
+    focusTitle,
+}: CustomerSettings & { focusTitle: () => void }) {
     const t = useTranslations("Passkeys");
     const security = useTranslations("Security");
     const common = useTranslations("Common");
@@ -66,21 +92,11 @@ export function PasskeySettings({
     const [notice, setNotice] = useState<string>();
     const [error, setError] = useState<string>();
     const codesHeading = useRef<HTMLHeadingElement>(null);
-    const title = useRef<HTMLHeadingElement>(null);
 
     useEffect(() => {
         let active = true;
-        authRequest<{ mfa?: { passkey_login_enabled?: boolean } }>(
-            "config",
-            "GET",
-        )
-            .then(async ({ data }) => {
-                if (!active) return;
-                if (!data?.mfa?.passkey_login_enabled) {
-                    setInventory({ kind: "unavailable" });
-                    return;
-                }
-                const loaded = await readInventory();
+        readInventory()
+            .then((loaded) => {
                 if (active) {
                     setInventory(loaded);
                     if (loaded.totp)
@@ -211,13 +227,11 @@ export function PasskeySettings({
     }
 
     const codes = recovery?.kind === "codes" ? recovery.values : undefined;
-    if (inventory.kind === "loading" || inventory.kind === "unavailable")
-        return null;
     return (
-        <section className="panel narrow" aria-labelledby="account-passkeys">
-            <h2 ref={title} id="account-passkeys" tabIndex={-1}>
-                {t("title")}
-            </h2>
+        <>
+            {inventory.kind === "loading" && (
+                <p role="status">{t("loading")}</p>
+            )}
             {error && (
                 <Notice error focus>
                     {error}
@@ -232,6 +246,7 @@ export function PasskeySettings({
                         permitted
                         variant="secondary"
                         onClick={() => {
+                            setInventory({ kind: "loading" });
                             setLoadAttempt((attempt) => attempt + 1);
                             return Promise.resolve();
                         }}
@@ -249,7 +264,7 @@ export function PasskeySettings({
                     onConfirm={() => void replaceCodes()}
                     onCancel={() => {
                         setRecovery(undefined);
-                        title.current?.focus();
+                        focusTitle();
                     }}
                 />
             )}
@@ -285,7 +300,7 @@ export function PasskeySettings({
                     }}
                     onAcknowledge={() => {
                         setRecovery(undefined);
-                        title.current?.focus();
+                        focusTitle();
                     }}
                 />
             )}
@@ -359,6 +374,6 @@ export function PasskeySettings({
                     )}
                 </fieldset>
             )}
-        </section>
+        </>
     );
 }

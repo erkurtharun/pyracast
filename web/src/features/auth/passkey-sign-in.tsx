@@ -13,9 +13,13 @@ import { AsyncButton } from "@/ui/form";
 export function PasskeySignIn({
     secondFactor,
     onResult,
+    onStart,
+    onFailure,
 }: {
     secondFactor: boolean;
     onResult: (result: AuthResult) => Promise<void>;
+    onStart: () => void;
+    onFailure: () => void;
 }) {
     const t = useTranslations("Passkeys");
     const signalForPasskey = usePasskeySignal();
@@ -25,6 +29,7 @@ export function PasskeySignIn({
             variant="secondary"
             errorTitle={t("failed")}
             onClick={async () => {
+                onStart();
                 const signal = signalForPasskey();
                 try {
                     await onResult(
@@ -35,6 +40,7 @@ export function PasskeySignIn({
                     );
                 } catch (error) {
                     if (signal.aborted) return;
+                    onFailure();
                     if (cancelledPasskey(error))
                         throw new ApiError(t("cancelled"));
                     throw error;

@@ -1,6 +1,7 @@
 import time
 from typing import Any, cast
 
+from allauth.account.internal.flows.password_reset_by_code import PasswordResetVerificationProcess
 from allauth.account.internal.flows.reauthentication import raise_if_reauthentication_required
 from allauth.account.internal.stagekit import LOGIN_SESSION_KEY
 from allauth.account.models import EmailAddress
@@ -28,6 +29,7 @@ from pyracast.accounts.adapters import acting_on_judged_confirmation
 from pyracast.accounts.authorization import requires_admin_mfa
 from pyracast.accounts.mfa_views import PendingFactorView, shown_once
 from pyracast.accounts.processes import (
+    PROVIDER_SIGNUP_SESSION_KEY,
     StartingView,
     confirmation,
     credential_write,
@@ -128,13 +130,47 @@ class PasskeyCeremony(APIView):
         return response
 
 
-class LoginView(StartingView, PasskeyCeremony, views.LoginWebAuthnView):
-    answer_input = LoginPasskeyInput
+AUTOFILL_STATE = "pyracast.passkey_autofill"
 
+
+class LoginCeremony(PasskeyCeremony):
     def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         if request.user.is_authenticated or LOGIN_SESSION_KEY in request.session:
             return ConflictResponse(request)
-        return super().handle(request, *args, **kwargs)
+        if "autofill" not in request.GET:
+            return super().handle(request, *args, **kwargs)
+        if (
+            PROVIDER_SIGNUP_SESSION_KEY in request.session
+            or PasswordResetVerificationProcess.resume(request)
+        ):
+            return ConflictResponse(request)
+
+        # A passive tab can replace another passive request, but cannot disturb a modal
+        # ceremony. Only the newest passive answer may consume the passive slot.
+        saved = auth.get_state()
+        if request.method == "POST":
+            state = request.session.get(AUTOFILL_STATE)
+            if state is None or state["challenge"] != request.GET["autofill"]:
+                return ConflictResponse(request)
+            auth.set_state(request.session.pop(AUTOFILL_STATE))
+        try:
+            response = super().handle(request, *args, **kwargs)
+            if request.method == "GET" and response.status_code == 200:
+                request.session[AUTOFILL_STATE] = request.session[auth.STATE_SESSION_KEY]
+            return response
+        finally:
+            if (
+                saved
+                and not request.user.is_authenticated
+                and LOGIN_SESSION_KEY not in request.session
+            ):
+                auth.set_state(saved)
+            else:
+                auth.clear_state()
+
+
+class LoginView(StartingView, LoginCeremony, views.LoginWebAuthnView):
+    answer_input = LoginPasskeyInput
 
 
 class AuthenticateView(PendingFactorView, views.AuthenticateWebAuthnView, PasskeyCeremony):

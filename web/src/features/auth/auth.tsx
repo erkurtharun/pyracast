@@ -24,6 +24,7 @@ import {
 } from "./provider-return";
 import { SocialProviderButtons } from "./social-provider-buttons";
 import { PasskeySignIn } from "./passkey-sign-in";
+import { usePasskeyAutofill } from "./passkey-autofill";
 import { LanguageSelect } from "@/ui/language-select";
 import { clearWorkspaceInvitation } from "@/features/workspace/workspace-invitation";
 import { LaunchCard } from "@/features/session/app-root";
@@ -123,12 +124,17 @@ export function Auth({
     const passkeyLogin =
         mode === "login" &&
         flows?.some((flow) => flow.id === "mfa_login_webauthn");
+    const autofill = usePasskeyAutofill(
+        Boolean(passkeySupported && passkeyLogin && !completing),
+        finish,
+    );
 
     useEffect(() => {
         if (refusal) headingRef.current?.focus();
     }, [refusal]);
 
     function enter(next: Mode, notice: AuthMessage = "") {
+        if (next !== mode) autofill.pause();
         if (!continuesProviderReturn(next)) forgetProviderLanding();
         setMode(next);
         setMessage(notice);
@@ -241,6 +247,7 @@ export function Auth({
                 <section
                     className="auth-form-panel"
                     aria-labelledby="auth-title"
+                    onSubmitCapture={autofill.pause}
                 >
                     <LanguageSelect />
                     {!pending && (
@@ -301,11 +308,18 @@ export function Auth({
                             {passkeySupported &&
                                 (passkeyLogin || passkeyMfa) && (
                                     <PasskeySignIn
-                                        key={mode}
+                                        key={`passkey-${mode}`}
                                         secondFactor={passkeyMfa}
                                         onResult={finish}
+                                        onStart={autofill.pause}
+                                        onFailure={autofill.resume}
                                     />
                                 )}
+                            {autofill.failed && (
+                                <Notice error>
+                                    {passkeys("autofillFailed")}
+                                </Notice>
+                            )}
                             {!passkeySupported && passkeyMfa && !codeMfa && (
                                 <Notice>{passkeys("unsupported")}</Notice>
                             )}
@@ -354,7 +368,11 @@ export function Auth({
                                             mode,
                                             payload,
                                             t,
-                                        );
+                                        ).catch((error: unknown) => {
+                                            if (mode === "login")
+                                                autofill.resume();
+                                            throw error;
+                                        });
                                         if ("refusal" in step) {
                                             setMessage("");
                                             setRefusal(step.refusal);

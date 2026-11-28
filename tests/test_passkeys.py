@@ -25,6 +25,7 @@ from fido2.webauthn import (
 
 from pyracast.accounts.mfa import MFAAdapter
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
+from pyracast.accounts.passkey_views import AUTOFILL_STATE
 from tests.support.account_sessions import account, browser, session_user, signed_in, with_totp
 from tests.support.auth_lifecycle import AUTH, PASSWORD, submit
 
@@ -69,6 +70,9 @@ class PasskeyDevice:
 
     def verify(self, client: Client, path: str) -> Any:
         options = client.get(AUTH + path).json()["data"]["request_options"]["publicKey"]
+        return submit(client, path, {"credential": self.assertion(options)})
+
+    def assertion(self, options: dict[str, Any]) -> dict[str, Any]:
         assert options["userVerification"] == "required"
         client_data = CollectedClientData.create("webauthn.get", options["challenge"], ORIGIN)
         data = AuthenticatorData.create(
@@ -85,7 +89,7 @@ class PasskeyDevice:
                 signature=self.key.sign(data + client_data.hash, ec.ECDSA(hashes.SHA256())),
             ),
         )
-        return submit(client, path, {"credential": dict(credential)})
+        return dict(credential)
 
 
 def remove(client: Client, key_id: int) -> Any:
@@ -175,6 +179,61 @@ def test_passkeys_require_fresh_proof_and_verified_customer_and_never_open_conso
     client.force_login(unverified)
     assert client.get(AUTH + MANAGE).status_code == 403
     assert not Authenticator.objects.filter(user=unverified).exists()
+
+
+def test_autofill_and_explicit_login_challenges_are_independent_and_single_use() -> None:
+    user = account("autofill")
+    device = PasskeyDevice()
+    assert device.enroll(signed_in(user, reauthenticated=True)).status_code == 200
+    client = browser()
+
+    def options(path: str) -> Any:
+        return client.get(AUTH + path).json()["data"]["request_options"]["publicKey"]
+
+    def answer(options: dict[str, Any]) -> Any:
+        return submit(
+            client,
+            f"{LOGIN}?autofill={options['challenge']}",
+            {"credential": device.assertion(options)},
+        )
+
+    explicit = options(LOGIN)
+    previous = options(f"{LOGIN}?autofill")
+    current = options(f"{LOGIN}?autofill")
+    assert answer(previous).status_code == 409
+    assert submit(client, f"{LOGIN}?autofill={current['challenge']}", {}).status_code == 400
+    assert answer(current).status_code == 409
+    assert submit(client, LOGIN, {"credential": device.assertion(explicit)}).status_code == 200
+    assert session_user(client) == user.pk
+
+    client = browser()
+    expired = options(f"{LOGIN}?autofill")
+    state = client.session
+    state[AUTOFILL_STATE]["expires"] = 0
+    state.save()
+    assert answer(expired).status_code == 409
+    current = options(f"{LOGIN}?autofill")
+    options(LOGIN)
+    assert answer(current).status_code == 200
+    assert session_user(client) == user.pk
+    assert answer(current).status_code == 409
+
+    client = browser()
+    stale = options(f"{LOGIN}?autofill")
+    assert (
+        submit(client, "auth/login", {"email": user.email, "password": PASSWORD}).status_code == 401
+    )
+    second = options(SECOND)
+    assert client.get(AUTH + LOGIN + "?autofill").status_code == 409
+    assert answer(stale).status_code == 409
+    assert submit(client, SECOND, {"credential": device.assertion(second)}).status_code == 200
+
+
+def test_pending_password_reset_blocks_passkey_autofill() -> None:
+    user = account("reset")
+    client = browser()
+    assert submit(client, "auth/password/request", {"email": user.email}).status_code == 401
+    assert client.get(AUTH + LOGIN + "?autofill").status_code == 409
 
 
 def test_anonymous_options_are_scoped_to_the_public_origin_and_attempt() -> None:

@@ -33,6 +33,61 @@ function emailChange(page: Page) {
     });
 }
 
+test("a workspace administrator can find saved passkeys while loading and on a browser without WebAuthn", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.addInitScript(() => {
+        Object.defineProperty(window, "PublicKeyCredential", {
+            value: undefined,
+        });
+    });
+    const inventory = Promise.withResolvers<void>();
+    await page.route(
+        "**/api/auth/browser/v1/account/authenticators",
+        async (route) => {
+            await inventory.promise;
+            await route.fulfill({
+                json: {
+                    status: 200,
+                    data: [{ type: "webauthn", id: 8, name: "Travel key" }],
+                },
+            });
+        },
+    );
+    await page.goto("/app/w/");
+    await page.getByRole("button", { name: "Account", exact: true }).click();
+    const panel = page.getByRole("region", { name: "Passkeys", exact: true });
+    try {
+        await expect(panel.getByRole("status")).toHaveText("Loading passkeys…");
+    } finally {
+        inventory.resolve();
+    }
+    await expect(
+        panel.getByRole("button", { name: "Remove passkey Travel key" }),
+    ).toBeVisible();
+    await expect(
+        panel.getByText(/This browser cannot use passkeys/),
+    ).toBeVisible();
+    await expect(
+        panel.getByRole("button", { name: "Add a passkey" }),
+    ).toHaveCount(0);
+});
+
+test("platform staff see why their account uses the provisioned authenticator", async ({
+    page,
+}) => {
+    await mockApi(page, { admin: true });
+    await page.goto("/app/account/");
+    const panel = page.getByRole("region", { name: "Passkeys", exact: true });
+    await expect(
+        panel.getByText(
+            "Passkeys are available for customer accounts. For this platform staff account, use the authenticator app set up by your operator.",
+        ),
+    ).toBeVisible();
+    await expect(panel.getByRole("button")).toHaveCount(0);
+});
+
 test("an expired account session returns to sign in instead of asking for reauthentication", async ({
     page,
 }) => {

@@ -75,6 +75,8 @@
     },
     "Passkeys": {
         "title": "Geçiş anahtarları",
+        "loading": "Geçiş anahtarları yükleniyor…",
+        "staffPolicy": "Geçiş anahtarları müşteri hesapları içindir. Bu platform personeli hesabında operatörünüzün kurduğu doğrulama uygulamasını kullanın.",
         "signIn": "Geçiş anahtarıyla giriş yap",
         "verify": "Geçiş anahtarıyla doğrula",
         "verifyOptions": "Geçiş anahtarıyla veya doğrulama koduyla onaylayın",
@@ -90,6 +92,7 @@
         "unsupported": "Bu tarayıcı geçiş anahtarlarını desteklemiyor. Destekleyen başka bir tarayıcı kullanın.",
         "cancelled": "Geçiş anahtarı kullanılmadı. Tekrar deneyin veya başka bir doğrulama yöntemi seçin.",
         "failed": "Geçiş anahtarı kullanılamadı.",
+        "autofillFailed": "Geçiş anahtarıyla giriş tamamlanamadı. Geçiş anahtarı düğmesini veya başka bir giriş yöntemini deneyin.",
         "loadFailed": "Geçiş anahtarları yüklenemedi.",
         "name": "Geçiş anahtarı adı (isteğe bağlı)"
     },

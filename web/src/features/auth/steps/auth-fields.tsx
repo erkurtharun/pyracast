@@ -49,7 +49,9 @@ export function AuthFields({
                     }
                     key={mode === "socialSignup" ? socialEmail : "email"}
                     type="email"
-                    autoComplete={mode === "login" ? "username" : "email"}
+                    autoComplete={
+                        mode === "login" ? "username webauthn" : "email"
+                    }
                     maxLength={254}
                     required
                 />
